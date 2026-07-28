@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.venv/
+.env
+.env.local
+.env.production
+*.log
+dist/
+build/
+tmp/
+*.tsbuildinfo
+.claude/
+*.db
