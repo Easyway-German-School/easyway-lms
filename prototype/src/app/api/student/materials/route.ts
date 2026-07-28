@@ -52,7 +52,7 @@ export async function GET() {
       );
     }
 
-    const materials = await prisma.material.findMany({
+    const records = await prisma.material.findMany({
       where: {
         course: {
           level: student.level,
@@ -65,6 +65,13 @@ export async function GET() {
       },
       orderBy: { createdAt: "desc" },
     });
+
+    // The client reads `fileUrl`; the column is `filePath`. Expose both so the
+    // download link resolves instead of rendering as undefined.
+    const materials = records.map((material) => ({
+      ...material,
+      fileUrl: material.filePath.startsWith("/") ? material.filePath : `/${material.filePath}`,
+    }));
 
     return NextResponse.json({ materials, locked: false, totalPaid, tuitionFee });
   } catch (error) {

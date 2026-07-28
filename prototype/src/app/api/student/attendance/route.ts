@@ -15,6 +15,11 @@ export async function GET() {
       include: {
         attendances: {
           orderBy: { date: "desc" },
+          include: {
+            class: {
+              include: { course: { select: { title: true, level: true } } },
+            },
+          },
         },
       },
     });
@@ -37,6 +42,9 @@ export async function GET() {
       date: a.date.toISOString(),
       status: a.status,
       notes: a.notes,
+      className: a.class?.name ?? null,
+      // The client renders `course.title`; without it every row read "Course".
+      course: a.class?.course ? { title: a.class.course.title, level: a.class.course.level } : null,
     }));
 
     return NextResponse.json({ records, stats });
