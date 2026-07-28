@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Explicit source scanning: automatic detection was not picking up src/,
+   which silently emitted a utility-free stylesheet. */
+@source "../../";
+
 :root {
   --background: linear-gradient(135deg, #f5f5f5 0%, #fffbf8 100%);
   --foreground: #1a1a1a;
