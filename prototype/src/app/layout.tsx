@@ -1,16 +1,24 @@
 import type { Metadata } from "next";
+import "./globals.css";
 import { Providers } from "./providers";
+import PageContainer from "@/components/PageContainer";
 
 export const metadata: Metadata = {
-  title: "EasyWay LMS",
-  description: "EasyWay LMS community and learning platform",
+  title: "Easyway German Language School",
+  description: "Web-based learner portal for Easyway German Language School",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html lang="en">
-      <body>
-        <Providers>{children}</Providers>
+    <html lang="en" className="h-full antialiased">
+      <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--foreground)] transition-colors duration-300">
+        <Providers>
+          <PageContainer>{children}</PageContainer>
+        </Providers>
       </body>
     </html>
   );

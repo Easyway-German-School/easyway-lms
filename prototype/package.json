@@ -1,29 +1,39 @@
 {
-  "name": "easyway-lms",
+  "name": "prototype",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "dev": "next dev --webpack --hostname 0.0.0.0",
+    "build": "next build --webpack",
+    "start": "next start --hostname 0.0.0.0",
+    "lint": "eslint"
   },
   "dependencies": {
-    "@prisma/client": "6.19.3",
-    "@tanstack/react-query": "5.101.4",
-    "bcryptjs": "3.0.3",
+    "@prisma/client": "^6.19.3",
+    "@tldraw/tldraw": "^5.1.1",
+    "bcryptjs": "^3.0.3",
+    "docx": "^9.7.1",
+    "framer-motion": "^12.42.2",
+    "mammoth": "^1.12.0",
     "next": "16.2.9",
-    "next-auth": "4.24.14",
+    "next-auth": "^4.24.14",
+    "pdf-parse": "^2.4.5",
+    "pdf2json": "^4.0.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "stripe": "22.3.0"
+    "stripe": "^22.3.0"
   },
   "devDependencies": {
-    "@types/next-auth": "3.13.0",
-    "@types/node": "20.19.43",
-    "@types/react": "19.2.17",
-    "@types/react-dom": "19.2.3",
-    "prisma": "6.19.3",
-    "typescript": "5.9.3"
+    "@tailwindcss/postcss": "^4",
+    "@types/next-auth": "^3.13.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.9",
+    "playwright": "^1.61.1",
+    "prisma": "^6.19.3",
+    "tailwindcss": "^4",
+    "typescript": "^5"
   }
 }

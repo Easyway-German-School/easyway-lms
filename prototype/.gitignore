@@ -11,3 +11,15 @@ tmp/
 *.tsbuildinfo
 .claude/
 *.db
+
+# Scratch files from the July 2026 data-loss recovery
+tmp_*
+*_search_results.txt
+found_auth*.txt
+patch_*.py
+update_auth_imports.py
+test-*.js
+verify-*.js
+tmp-*.mjs
+prisma/schema.prisma.recovered-backup
+prisma/schema.updates.prisma

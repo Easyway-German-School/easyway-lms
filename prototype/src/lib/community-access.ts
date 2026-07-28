@@ -1,50 +1,43 @@
 import { prisma } from "@/lib/prisma";
 
-export type CommunityRole = "student" | "lecturer" | "admin";
+type CommunityRole = "admin" | "lecturer" | "student";
 
-export function normalizeCommunityRole(role: unknown): CommunityRole | null {
-  if (!role || typeof role !== "string") return null;
-
-  const normalized = role.toLowerCase();
-  if (normalized === "student" || normalized === "learner") return "student";
-  if (normalized === "lecturer" || normalized === "teacher") return "lecturer";
-  if (normalized === "admin" || normalized === "administrator") return "admin";
-
-  return null;
-}
-
-export async function getCommunityCourseIds(userId: string, role: CommunityRole): Promise<string[] | null> {
+export async function getCommunityCourseIds(userId: string, role: CommunityRole) {
   if (role === "admin") {
     return null;
   }
 
   if (role === "lecturer") {
-    const courses = await prisma.course.findMany({
-      where: {
-        published: true,
-        pathway: { name: "Lecturer Uploaded Courses" },
-      },
-      select: { id: true },
+    const lecturer = await prisma.lecturer.findUnique({
+      where: { userId },
+      select: { classes: { select: { courseId: true } } },
     });
-    return courses.map((course) => course.id);
+    return [...new Set(lecturer?.classes.map((item) => item.courseId) || [])];
   }
 
   const student = await prisma.student.findUnique({
     where: { userId },
-    select: { pathway: true },
-  });
-
-  if (!student?.pathway) {
-    return [];
-  }
-
-  const pathwayCourses = await prisma.course.findMany({
-    where: {
-      published: true,
-      pathway: { name: student.pathway },
+    select: {
+      enrollments: {
+        select: {
+          pathway: {
+            select: { courses: { select: { id: true } } },
+          },
+        },
+      },
     },
-    select: { id: true },
   });
 
-  return pathwayCourses.map((course) => course.id);
+  return [...new Set(
+    student?.enrollments.flatMap((enrollment) =>
+      enrollment.pathway.courses.map((course) => course.id),
+    ) || [],
+  )];
+}
+
+export function normalizeCommunityRole(role: unknown): CommunityRole | null {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "admin" || normalized === "lecturer" || normalized === "student"
+    ? normalized
+    : null;
 }

@@ -1,0 +1,500 @@
+// This is your Prisma schema file.
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  role      Role     @default(STUDENT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student         Student?
+  lecturer        Lecturer?
+  sessions        Session[]
+  missionProgress MissionProgress[]
+  discussions     Discussion[]
+  replies         Reply[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Student {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  tutorId String?
+  tutor   Lecturer? @relation(fields: [tutorId], references: [id], onDelete: SetNull)
+
+  status        String @default("active")
+  level         String @default("A1") // A1, A2, B1, B2, C1, C2
+  pathway       String @default("Goethe exam mastery")
+  examReadiness Int    @default(0)
+  outcome       String @default("Goethe C1 readiness + German work placement support")
+  nextLive      String @default("No live session scheduled")
+  // Arbitrary admission form payload saved as JSON
+  admission     Json?
+  
+  // Graduation tracking
+  graduationDate DateTime?
+  
+  // Email tracking for scheduled reminders
+  feeRemindersScheduled Json? // tracks which reminders (7d, 14d, 30d) have been sent
+  emailPreferences Json? // user preferences for notification types
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  enrollments       Enrollment[]
+  progress          Progress[]
+  grades            Grade[]
+  completions       Completion[]
+  personalizedPlan  PersonalizedPlan?
+  examRegistrations ExamRegistration[]
+  attendances       Attendance[]
+  notifications     Notification[]
+  invoices          Invoice[]
+  payments          Payment[]
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  location  String?
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  students      Student[]
+  notifications Notification[]
+}
+
+model ExamRegistration {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  examId    String?
+  exam      Exam?    @relation(fields: [examId], references: [id], onDelete: SetNull)
+  
+  examName  String
+  examDate  DateTime
+  status    String   @default("registered")
+  notes     String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Pathway {
+  id          String @id @default(cuid())
+  name        String @unique // "Goethe exam mastery", "Nursing career path", etc
+  headline    String
+  description String
+  duration    String // "12 weeks", "6 months"
+  level       String // "B1-C1", "A1-B2"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  courses     Course[]
+  enrollments Enrollment[]
+}
+
+model Course {
+  id        String  @id @default(cuid())
+  pathwayId String
+  pathway   Pathway @relation(fields: [pathwayId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String
+  order       Int // sequence in pathway
+  duration    Int // minutes
+  level       String // "A1", "B1", "C1"
+  published   Boolean @default(true)
+
+  // Integration mirroring: where this record came from and its id in that system.
+  // source = "local" for records created in EasyWay; "moodle"/"canvas"/etc for mirrored ones.
+  source     String  @default("local")
+  externalId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  modules      Module[]
+  progress     Progress[]
+  materials    Material[]
+  discussions  Discussion[]
+  classes      Class[]
+  exams        Exam[]
+
+  @@unique([source, externalId])
+}
+
+model Module {
+  id       String @id @default(cuid())
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String
+  order       Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lessons Lesson[]
+}
+
+model Lesson {
+  id       String @id @default(cuid())
+  moduleId String
+  module   Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String
+  content     String // HTML/markdown
+  type        String @default("lesson") // "lesson", "quiz", "assignment", "discussion"
+  order       Int
+  duration    Int // minutes
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  completions Completion[]
+}
+
+model Material {
+  id        String   @id @default(cuid())
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  title       String
+  description String?
+  filePath    String // relative path to file
+  fileName    String
+  fileType    String // pdf, doc, video, image, etc
+  fileSize    Int // bytes
+  uploadedBy  String? // admin user id who uploaded
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Completion {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  lessonId String
+  lesson   Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  status   String  @default("started") // "started", "in_progress", "completed"
+  score    Int?
+  feedback String?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@unique([studentId, lessonId])
+}
+
+model Progress {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  percentComplete Int       @default(0)
+  started         DateTime  @default(now())
+  completed       DateTime?
+
+  @@unique([studentId, courseId])
+}
+
+model Enrollment {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  pathwayId String
+  pathway   Pathway @relation(fields: [pathwayId], references: [id], onDelete: Cascade)
+
+  classId String?
+  class   Class?  @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  status          String  @default("active") // "active", "completed", "paused"
+  stripeSessionId String? // for payment tracking
+
+  enrolledAt  DateTime  @default(now())
+  completedAt DateTime?
+
+  @@unique([studentId, pathwayId])
+}
+
+model Grade {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  examId    String?
+  exam      Exam?   @relation(fields: [examId], references: [id], onDelete: SetNull)
+
+  type     String // "essay", "quiz", "speaking", "pronunciation", "exam"
+  content  String? // the essay text, quiz answers, etc
+  score    Int // 0-100
+  grade    String? // A, B, C, D, F
+  feedback String? // grading feedback
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, examId])
+}
+
+model MissionProgress {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  missionId String
+  done      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, missionId])
+}
+
+model PersonalizedPlan {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  plan      String // JSON stringified plan
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId])
+}
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  channel   String   @default("email")
+  studentId String?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  level     String?
+  status    String   @default("pending")
+  sentAt    DateTime?
+  readAt    DateTime? // for in-app notifications
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Invoice {
+  id          String    @id @default(cuid())
+  studentId   String
+  student     Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status      String    @default("draft")
+  dueDate     DateTime?
+  totalAmount Int
+  currency    String    @default("usd")
+  lineItems   Json?
+  payments    Payment[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  invoiceId       String?
+  invoice         Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  amount          Int
+  currency        String   @default("usd")
+  status          String   @default("pending")
+  method          String
+  description     String?
+  stripeSessionId String?
+  paymentIntentId String?
+  welcomeEmailSentAt DateTime? // tracks when welcome email was sent
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model EmailLog {
+  id            String   @id @default(cuid())
+  studentId     String?
+  recipientEmail String
+  type          String   // "welcome", "fee_reminder_7d", "fee_reminder_14d", "fee_reminder_30d", "exam_reminder", "graduation"
+  subject       String
+  status        String   @default("sent") // "sent", "failed", "bounced"
+  sentAt        DateTime @default(now())
+  errorMessage  String?
+  retries       Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([studentId])
+  @@index([type])
+  @@index([sentAt])
+}
+model Attendance {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  classId   String?
+  class     Class?   @relation(fields: [classId], references: [id], onDelete: SetNull)
+  
+  date      DateTime
+  present   Boolean  @default(true)
+  status    String   @default("present") // present, absent, late, excused
+  notes     String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, date])
+}
+
+model Discussion {
+  id        String   @id @default(cuid())
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  title     String
+  content   String
+  pinned    Boolean  @default(false)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  replies   Reply[]
+}
+
+model Reply {
+  id            String      @id @default(cuid())
+  discussionId  String
+  discussion    Discussion  @relation(fields: [discussionId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  content   String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Persisted state for each external LMS/community connector.
+// Replaces the old in-memory scheduler so sync status survives restarts and
+// is shared across every server instance (single source of truth for "always-on").
+model IntegrationConnector {
+  id              String    @id // "moodle", "canvas", "discourse", "open-edx"
+  name            String
+  enabled         Boolean   @default(true)
+  autoSync        Boolean   @default(true)
+  intervalMinutes Int       @default(30)
+
+  status          String    @default("idle") // idle, syncing, connected, degraded, error
+  lastSyncAt      DateTime?
+  nextSyncAt      DateTime?
+  lastError       String?
+  itemsSynced     Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Lecturer {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  specialization String?
+  bio            String?
+  phone          String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  classes   Class[]
+  exams     Exam[]
+  materials Material[]
+  students  Student[]
+}
+
+model Class {
+  id          String   @id @default(cuid())
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  lecturerId  String
+  lecturer    Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+  
+  name        String
+  description String?
+  schedule    String? // JSON formatted schedule
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  enrollments Enrollment[]
+  attendance  Attendance[]
+}
+
+model Exam {
+  id          String   @id @default(cuid())
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  lecturerId  String
+  lecturer    Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+  
+  name        String
+  description String?
+  examDate    DateTime
+  totalScore  Int @default(100)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  grades            Grade[]
+  registrations     ExamRegistration[]
+}
+
+enum Role {
+  STUDENT
+  LECTURER
+  ADMIN
+}

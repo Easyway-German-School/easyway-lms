@@ -1,58 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { normalizeCommunityRole, getCommunityCourseIds } from "@/lib/community-access";
-
-export async function GET(req: NextRequest) {
-  try {
-    const session = await getServerSession(authOptions as any) as any;
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const role = normalizeCommunityRole(session.user.role);
-    if (!role) {
-      return NextResponse.json({ error: "Unsupported account role" }, { status: 403 });
-    }
-
-    const courseIds = await getCommunityCourseIds(session.user.id, role);
-    const { searchParams } = new URL(req.url);
-    const discussionId = searchParams.get("discussionId");
-
-    if (!discussionId) {
-      return NextResponse.json({ error: "discussionId is required" }, { status: 400 });
-    }
-
-    const discussion = await prisma.discussion.findUnique({
-      where: { id: discussionId },
-      include: {
-        replies: {
-          include: {
-            user: { select: { id: true, name: true } },
-          },
-          orderBy: { createdAt: "asc" },
-        },
-      },
-    });
-
-    if (!discussion) {
-      return NextResponse.json({ error: "Discussion not found" }, { status: 404 });
-    }
-
-    if (courseIds !== null && !courseIds.includes(discussion.courseId)) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-    }
-
-    return NextResponse.json(discussion.replies);
-  } catch (error) {
-    console.error("Error fetching replies:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch replies" },
-      { status: 500 }
-    );
-  }
-}
+import { getCommunityCourseIds, normalizeCommunityRole } from "@/lib/community-access";
+import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
@@ -62,30 +12,50 @@ export async function POST(req: NextRequest) {
     }
 
     const { discussionId, content } = await req.json();
-    if (!discussionId || typeof content !== "string" || !content.trim()) {
-      return NextResponse.json({ error: "discussionId and content are required" }, { status: 400 });
+    const normalizedContent = typeof content === "string" ? content.trim() : "";
+
+    if (typeof discussionId !== "string" || !discussionId || !normalizedContent) {
+      return NextResponse.json(
+        { error: "discussionId and content are required" },
+        { status: 400 }
+      );
     }
 
-    const discussion = await prisma.discussion.findUnique({ where: { id: discussionId } });
+    // Verify discussion exists
+    const discussion = await prisma.discussion.findUnique({
+      where: { id: discussionId },
+      include: {
+        course: true
+      }
+    });
+
     if (!discussion) {
-      return NextResponse.json({ error: "Discussion not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Discussion not found" },
+        { status: 404 }
+      );
     }
 
     const role = normalizeCommunityRole(session.user.role);
     const courseIds = role ? await getCommunityCourseIds(session.user.id, role) : [];
     if (!role || (courseIds !== null && !courseIds.includes(discussion.courseId))) {
-      return NextResponse.json({ error: "You are not authorized to reply to this discussion" }, { status: 403 });
+      return NextResponse.json(
+        { error: "You are not authorized to use this course community" },
+        { status: 403 }
+      );
     }
 
     const reply = await prisma.reply.create({
       data: {
         discussionId,
         userId: session.user.id,
-        content: content.trim(),
+        content: normalizedContent
       },
       include: {
-        user: { select: { id: true, name: true } },
-      },
+        user: {
+          select: { id: true, name: true }
+        }
+      }
     });
 
     return NextResponse.json(reply);
@@ -106,25 +76,48 @@ export async function DELETE(req: NextRequest) {
     }
 
     const { id } = await req.json();
+
     if (!id) {
-      return NextResponse.json({ error: "id is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "id is required" },
+        { status: 400 }
+      );
     }
 
-    const reply = await prisma.reply.findUnique({ where: { id } });
+    // Verify the reply belongs to the user (they can delete their own replies)
+    const reply = await prisma.reply.findUnique({
+      where: { id }
+    });
+
     if (!reply) {
-      return NextResponse.json({ error: "Reply not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Reply not found" },
+        { status: 404 }
+      );
     }
 
-    const user = await prisma.user.findUnique({ where: { id: session.user.id } });
-    const isModerator = user?.role?.toLowerCase() === "admin" || reply.userId === session.user.id;
-    if (!isModerator) {
-      return NextResponse.json({ error: "Only admins or the author can remove this reply" }, { status: 403 });
+    // Check if user is admin or owns the reply
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id }
+    });
+
+    if (reply.userId !== session.user.id && user?.role?.toLowerCase() !== "admin") {
+      return NextResponse.json(
+        { error: "You can only delete your own replies" },
+        { status: 403 }
+      );
     }
 
-    await prisma.reply.delete({ where: { id } });
+    await prisma.reply.delete({
+      where: { id }
+    });
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error deleting reply:", error);
-    return NextResponse.json({ error: "Failed to delete reply" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to delete reply" },
+      { status: 500 }
+    );
   }
 }

@@ -1,0 +1,79 @@
+export type PaymentStatus = "Pending" | "Partial" | "Completed";
+
+export function derivePaymentStatus({
+  totalPaid,
+  tuitionFee,
+  requiredDeposit,
+}: {
+  totalPaid: number;
+  tuitionFee: number;
+  requiredDeposit: number;
+}): {
+  status: PaymentStatus;
+  fullPaid: boolean;
+  depositPaid: boolean;
+  paymentProgressPercent: number;
+  requiredDeposit: number;
+  tuitionFee: number;
+  totalPaid: number;
+} {
+  const normalizedTuitionFee = Math.max(0, Math.round(Number(tuitionFee) || 0));
+  const normalizedRequiredDeposit = Math.max(0, Math.round(Number(requiredDeposit) || 0));
+  const normalizedTotalPaid = Math.max(0, Math.round(Number(totalPaid) || 0));
+  const fullPaid = normalizedTotalPaid >= normalizedTuitionFee;
+  const depositPaid = normalizedTotalPaid >= normalizedRequiredDeposit;
+  const paymentStatus: PaymentStatus = fullPaid ? "Completed" : depositPaid ? "Partial" : "Pending";
+  const paymentProgressPercent = normalizedTuitionFee > 0
+    ? Math.min(100, Math.round((normalizedTotalPaid / normalizedTuitionFee) * 100))
+    : 0;
+
+  return {
+    status: paymentStatus,
+    fullPaid,
+    depositPaid,
+    paymentProgressPercent,
+    requiredDeposit: normalizedRequiredDeposit,
+    tuitionFee: normalizedTuitionFee,
+    totalPaid: normalizedTotalPaid,
+  };
+}
+
+export function classifyPaymentTransaction({
+  paymentAmount,
+  totalAmount,
+  tuitionFee,
+  depositPercent,
+  paymentStage,
+  paymentType,
+}: {
+  paymentAmount: number;
+  totalAmount: number;
+  tuitionFee?: number;
+  depositPercent?: number;
+  paymentStage?: string;
+  paymentType?: string;
+}) {
+  const normalizedPaymentAmount = Math.max(0, Math.round(Number(paymentAmount) || 0));
+  const normalizedTotalAmount = Math.max(0, Math.round(Number(totalAmount) || 0));
+  const normalizedTuitionFee = Math.max(0, Math.round(Number(tuitionFee) || 0));
+  const normalizedDepositPercent = Math.min(100, Math.max(0, Number(depositPercent) || 100));
+  const explicitStage = String(paymentStage || paymentType || "").toLowerCase();
+  const fullThreshold = normalizedTuitionFee > 0 ? normalizedTuitionFee : Math.max(normalizedTotalAmount, normalizedPaymentAmount);
+  const isFullPayment = explicitStage === "full" || normalizedPaymentAmount >= fullThreshold;
+  const effectivePaymentType = explicitStage === "registration"
+    ? "registration"
+    : isFullPayment
+    ? "full"
+    : explicitStage === "deposit" || normalizedDepositPercent < 100
+    ? "deposit"
+    : "full";
+  const invoiceStatus = isFullPayment ? "paid" : "partial";
+
+  return {
+    paymentType: effectivePaymentType,
+    invoiceStatus,
+    depositPercent: normalizedDepositPercent,
+    isFullPayment,
+    fullThreshold,
+  };
+}
