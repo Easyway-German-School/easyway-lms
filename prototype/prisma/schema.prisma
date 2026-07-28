@@ -25,6 +25,8 @@ model User {
   missionProgress MissionProgress[]
   discussions     Discussion[]
   replies         Reply[]
+  threads         Thread[]
+  comments        Comment[]
 }
 
 model Session {
@@ -87,6 +89,7 @@ model Branch {
 
   students      Student[]
   notifications Notification[]
+  spaces        Space[]
 }
 
 model ExamRegistration {
@@ -497,4 +500,76 @@ enum Role {
   STUDENT
   LECTURER
   ADMIN
+}
+
+// ---------------------------------------------------------------------------
+// Community hub (Discord-style channels + Reddit-style threads).
+// A Space is scoped to one branch AND one level, so "Lagos · A1" and
+// "Abuja · A1" are separate communities even though the syllabus matches.
+// ---------------------------------------------------------------------------
+
+model Space {
+  id          String   @id @default(cuid())
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  level       String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  channels    Channel[]
+
+  @@unique([branchId, level])
+}
+
+model Channel {
+  id          String   @id @default(cuid())
+  spaceId     String
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  slug        String
+  name        String
+  description String?
+  kind        String   @default("topic")
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  threads     Thread[]
+
+  @@unique([spaceId, slug])
+}
+
+model Thread {
+  id             String   @id @default(cuid())
+  channelId      String
+  channel        Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  title          String
+  body           String
+  pinned         Boolean  @default(false)
+  lastActivityAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  comments       Comment[]
+
+  @@index([channelId, lastActivityAt])
+}
+
+model Comment {
+  id        String    @id @default(cuid())
+  threadId  String
+  thread    Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    Comment?  @relation("CommentChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Comment[] @relation("CommentChildren")
+  body      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([threadId, createdAt])
 }
