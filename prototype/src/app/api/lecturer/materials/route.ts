@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { resolveLecturerId } from '@/lib/lecturer';
 import { writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -13,8 +14,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const lecturerId = await resolveLecturerId(session.user.id);
+    if (!lecturerId) {
+      return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
+    }
+
     const materials = await prisma.material.findMany({
-      where: { lecturerId: session.user.id },
+      where: { lecturerId },
       include: { course: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -44,6 +50,11 @@ export async function POST(req: NextRequest) {
 
     if (!session || session.user.role !== 'lecturer') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const lecturerId = await resolveLecturerId(session.user.id);
+    if (!lecturerId) {
+      return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
     }
 
     const formData = await req.formData();
@@ -77,7 +88,7 @@ export async function POST(req: NextRequest) {
         title,
         description,
         courseId,
-        lecturerId: session.user.id,
+        lecturerId,
         fileName: file.name,
         filePath: `/uploads/materials/${filename}`,
         fileType: file.type || 'application/octet-stream',

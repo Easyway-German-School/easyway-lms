@@ -11,9 +11,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Fetch lecturer's data
+    // session.user.id is a User id; Lecturer has its own id, so look up by userId.
     const lecturer = await prisma.lecturer.findUnique({
-      where: { id: session.user.id },
+      where: { userId: session.user.id },
       include: {
         _count: {
           select: {
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
       by: ['classId'],
       where: {
         class: {
-          lecturerId: session.user.id,
+          lecturerId: lecturer.id,
         },
       },
       _count: {
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
     const attendanceRecords = await prisma.attendance.findMany({
       where: {
         class: {
-          lecturerId: session.user.id,
+          lecturerId: lecturer.id,
         },
       },
       select: { present: true },

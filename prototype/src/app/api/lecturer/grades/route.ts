@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { resolveLecturerId } from '@/lib/lecturer';
 
 function calculateGrade(score: number): string {
   if (score >= 90) return 'A';
@@ -19,9 +20,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const lecturerId = await resolveLecturerId(session.user.id);
+    if (!lecturerId) {
+      return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
+    }
+
     // Get lecturer's exams
     const exams = await prisma.exam.findMany({
-      where: { lecturerId: session.user.id },
+      where: { lecturerId },
       include: {
         course: true,
         _count: {
@@ -65,6 +71,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const lecturerId = await resolveLecturerId(session.user.id);
+    if (!lecturerId) {
+      return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
+    }
+
     const body = await req.json();
     const { studentId, examId, score } = body;
 
@@ -80,7 +91,7 @@ export async function POST(req: NextRequest) {
     const exam = await prisma.exam.findFirst({
       where: {
         id: examId,
-        lecturerId: session.user.id,
+        lecturerId,
       },
     });
 

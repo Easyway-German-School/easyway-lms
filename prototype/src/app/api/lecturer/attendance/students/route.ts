@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { resolveLecturerId } from '@/lib/lecturer';
 
 export async function GET(req: NextRequest) {
   try {
@@ -9,6 +10,11 @@ export async function GET(req: NextRequest) {
 
     if (!session || session.user.role !== 'lecturer') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const lecturerId = await resolveLecturerId(session.user.id);
+    if (!lecturerId) {
+      return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -23,7 +29,7 @@ export async function GET(req: NextRequest) {
     const cls = await prisma.class.findFirst({
       where: {
         courseId,
-        lecturerId: session.user.id,
+        lecturerId,
       },
     });
 

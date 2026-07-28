@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { resolveLecturerId } from '@/lib/lecturer';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,9 +12,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const lecturerId = await resolveLecturerId(session.user.id);
+    if (!lecturerId) {
+      return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
+    }
+
     // Get lecturer's classes with attendance sessions
     const classes = await prisma.class.findMany({
-      where: { lecturerId: session.user.id },
+      where: { lecturerId },
       include: {
         course: true,
         _count: {
@@ -60,6 +66,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const lecturerId = await resolveLecturerId(session.user.id);
+    if (!lecturerId) {
+      return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
+    }
+
     const body = await req.json();
     const { courseId, date, attendance } = body;
 
@@ -71,7 +82,7 @@ export async function POST(req: NextRequest) {
     const cls = await prisma.class.findFirst({
       where: {
         courseId,
-        lecturerId: session.user.id,
+        lecturerId,
       },
     });
 
