@@ -1,7 +1,26 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { classifyPaymentTransaction } from "@/lib/payment";
+
+// Paystack signs every webhook with HMAC SHA512 of the raw body, keyed by the
+// secret key, in the x-paystack-signature header. Without this check anyone who
+// knows the URL can POST a charge.success and unlock paid content for free.
+function isValidPaystackSignature(rawBody: string, signature: string | null) {
+  const secretKey = process.env.PAYSTACK_SECRET_KEY;
+  if (!secretKey || !signature) return false;
+
+  const expected = crypto
+    .createHmac("sha512", secretKey)
+    .update(rawBody, "utf8")
+    .digest("hex");
+
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(signature, "utf8");
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
 
 function getPaymentDescription(paymentType: string, pathwayName: string) {
   if (paymentType === "registration") {
@@ -18,6 +37,12 @@ function getPaymentDescription(paymentType: string, pathwayName: string) {
 export async function POST(request: Request) {
   try {
     const body = await request.text();
+
+    if (!isValidPaystackSignature(body, request.headers.get("x-paystack-signature"))) {
+      console.error("Paystack webhook rejected: invalid or missing signature");
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
+
     const payload = JSON.parse(body);
     const event = payload.event;
 

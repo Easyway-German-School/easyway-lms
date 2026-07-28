@@ -500,6 +500,11 @@ function DashboardContent() {
   const paymentUnlocked = Boolean(
     paymentSummary ? paymentSummary.depositPaid : paymentUnlock && paymentUnlock.totalPaid >= paymentUnlock.requiredDeposit
   );
+  const paymentFullyPaid = Boolean(
+    paymentSummary
+      ? paymentSummary.fullPaid
+      : tuitionFee > 0 && effectiveTotalPaid >= tuitionFee
+  );
   const effectivePayment = paymentSummary ?? (paymentUnlock
     ? {
         totalPaid: paymentUnlock.totalPaid,
@@ -575,7 +580,13 @@ function DashboardContent() {
                 <motion.div whileHover={{ y: -4, scale: 1.01 }} className="rounded-[28px] border border-white/20 bg-white/10 p-5 backdrop-blur-sm">
                   <p className="text-xs uppercase tracking-[0.3em] text-white/80">Unlock progress</p>
                   <p className="mt-3 text-3xl font-semibold">{paymentProgressPercent}%</p>
-                  <p className="mt-2 text-sm text-slate-100">Premium library access is moving closer.</p>
+                  <p className="mt-2 text-sm text-slate-100">
+                    {paymentFullyPaid
+                      ? 'Premium library access is fully unlocked.'
+                      : paymentUnlocked
+                      ? 'Premium library access is unlocked.'
+                      : 'Premium library access is moving closer.'}
+                  </p>
                 </motion.div>
               </div>
             </div>
@@ -608,9 +619,19 @@ function DashboardContent() {
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Path progress</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-slate-900">Pay the tuition fee to start your classes</h2>
+                    <h2 className="mt-3 text-2xl font-semibold text-slate-900">
+                      {paymentFullyPaid
+                        ? 'Your tuition is fully paid — enjoy your classes'
+                        : paymentUnlocked
+                        ? 'Deposit received — balance still outstanding'
+                        : 'Pay the tuition fee to start your classes'}
+                    </h2>
                   </div>
-                  <Link href="/programs" className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]">Pay deposit</Link>
+                  {paymentFullyPaid ? null : (
+                    <Link href="/programs" className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]">
+                      {paymentUnlocked ? 'Pay balance' : 'Pay deposit'}
+                    </Link>
+                  )}
                 </div>
                 <div className="mt-6 rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-6 shadow-inner shadow-slate-100">
                   <p className="text-sm text-slate-500">{paymentUnlocked ? 'Your premium learning library is unlocked.' : `You’ve paid ${Math.max(effectivePayment?.totalPaid ?? 0, effectiveTotalPaid).toLocaleString()} of ${tuitionFee.toLocaleString()} NGN tuition.`}</p>
