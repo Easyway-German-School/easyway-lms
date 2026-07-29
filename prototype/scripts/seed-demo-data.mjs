@@ -1,7 +1,8 @@
 /**
  * Populates the operational layer of the LMS: course materials, exams,
- * registrations, grades, attendance, community threads, lesson progress and
- * announcements.
+ * registrations, grades, attendance, lesson progress and announcements.
+ *
+ * Community content is seeded separately by scripts/seed-community-spaces.mjs.
  *
  * SAFETY: this script is strictly additive and idempotent. It never deletes or
  * overwrites existing rows — every section is guarded by an existence check or
@@ -241,64 +242,6 @@ async function seedAttendance() {
   log("Attendance records", made, "5 weeks, Mon/Wed/Fri");
 }
 
-const THREADS = [
-  ["Wann benutzt man 'der', 'die' oder 'das'?",
-   "I keep mixing up noun genders. Is there a reliable rule, or is memorisation the only way?",
-   ["There are patterns worth learning: -ung, -heit, -keit, -schaft and -tion are almost always feminine.",
-    "Learn every noun together with its article from day one — say 'die Tür', never just 'Tür'.",
-    "Colour-coding my vocabulary notes by gender helped me more than any rule list."]],
-  ["Tips for the Goethe B1 speaking section?",
-   "My written German is fine but I freeze in the speaking exam. How did you prepare?",
-   ["Record yourself answering a prompt for two minutes, then listen back. Painful but it works.",
-    "Practise the connectors — 'einerseits… andererseits', 'meiner Meinung nach'. Examiners listen for structure.",
-    "Book a conversation partner from the community. Twenty minutes twice a week made the difference for me."]],
-  ["Akkusativ vs Dativ — how do you keep them straight?",
-   "I understand the theory but freeze when speaking. Any practical trick?",
-   ["Memorise the Dativ prepositions as a chant: aus, bei, mit, nach, seit, von, zu.",
-    "Ask 'wen oder was?' for Akkusativ and 'wem?' for Dativ. Drilling that question fixed it for me."]],
-  ["Which documents do I need for the visa appointment?",
-   "Has anyone recently been through the student visa process? What did you actually need on the day?",
-   ["Bring the blocked account confirmation, your admission letter, insurance proof and passport photos.",
-    "Take two printed copies of everything. They kept originals of some documents at my appointment."]],
-];
-
-async function seedCommunity() {
-  if ((await prisma.discussion.count()) > 0) return log("Discussions", 0, "skipped — already present");
-
-  const courses = await prisma.course.findMany({ take: 6 });
-  const users = await prisma.user.findMany({ where: { role: { in: ["STUDENT", "LECTURER"] } } });
-  if (!courses.length || users.length < 2) return log("Discussions", 0, "skipped — not enough data");
-
-  let threads = 0, replies = 0;
-  for (let i = 0; i < THREADS.length; i++) {
-    const [title, content, answers] = THREADS[i];
-    const author = users[i % users.length];
-    const discussion = await prisma.discussion.create({
-      data: {
-        courseId: courses[i % courses.length].id,
-        userId: author.id,
-        title,
-        content,
-        pinned: i === 0,
-      },
-    });
-    threads++;
-
-    for (let r = 0; r < answers.length; r++) {
-      await prisma.reply.create({
-        data: {
-          discussionId: discussion.id,
-          userId: users[(i + r + 1) % users.length].id,
-          content: answers[r],
-        },
-      });
-      replies++;
-    }
-  }
-  log("Discussion threads", threads);
-  log("Replies", replies);
-}
-
 async function seedProgress() {
   if ((await prisma.completion.count()) > 0) return log("Progress", 0, "skipped — already present");
 
@@ -375,7 +318,8 @@ async function main() {
   await seedMaterials();
   await seedExamsAndGrades();
   await seedAttendance();
-  await seedCommunity();
+  // Community seeding moved to scripts/seed-community-spaces.mjs when the
+  // course-based Discussion model was retired for branch+level Spaces.
   await seedProgress();
   await seedNotifications();
 

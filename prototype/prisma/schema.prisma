@@ -23,8 +23,6 @@ model User {
   lecturer        Lecturer?
   sessions        Session[]
   missionProgress MissionProgress[]
-  discussions     Discussion[]
-  replies         Reply[]
   threads         Thread[]
   comments        Comment[]
   channelReads    ChannelRead[]
@@ -149,7 +147,6 @@ model Course {
   modules      Module[]
   progress     Progress[]
   materials    Material[]
-  discussions  Discussion[]
   classes      Class[]
   exams        Exam[]
 
@@ -389,37 +386,7 @@ model Attendance {
   @@unique([studentId, date])
 }
 
-model Discussion {
-  id        String   @id @default(cuid())
-  courseId  String
-  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  title     String
-  content   String
-  pinned    Boolean  @default(false)
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  replies   Reply[]
-}
 
-model Reply {
-  id            String      @id @default(cuid())
-  discussionId  String
-  discussion    Discussion  @relation(fields: [discussionId], references: [id], onDelete: Cascade)
-  
-  userId    String
-  user      User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  content   String
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
 
 // Persisted state for each external LMS/community connector.
 // Replaces the old in-memory scheduler so sync status survives restarts and
