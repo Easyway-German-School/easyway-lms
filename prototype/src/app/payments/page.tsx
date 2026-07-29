@@ -18,6 +18,14 @@ export default function PaymentsPage() {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Tuition varies by level (A1 150k … C2 220k), so the figures have to come
+  // from the server rather than a constant on this page.
+  const [summary, setSummary] = useState<{
+    totalPaid: number;
+    tuitionFee: number;
+    fullPaid: boolean;
+    paymentProgressPercent: number;
+  } | null>(null);
 
   useEffect(() => {
     async function loadPayments() {
@@ -31,6 +39,12 @@ export default function PaymentsPage() {
         }
         const data = await response.json();
         setPayments(Array.isArray(data.payments) ? data.payments : []);
+
+        const summaryRes = await fetch("/api/student", { cache: "no-store", credentials: "include" });
+        if (summaryRes.ok) {
+          const student = await summaryRes.json();
+          if (student?.paymentSummary) setSummary(student.paymentSummary);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unable to load payments");
       } finally {
@@ -64,10 +78,13 @@ export default function PaymentsPage() {
     void syncPendingPayment();
   }, []);
 
-  const totalPaid = payments
+  // Prefer the server's figures; fall back to summing the visible rows only
+  // while the summary is still loading.
+  const totalPaid = summary?.totalPaid ?? payments
     .filter((payment) => payment.status.toLowerCase() === "completed")
     .reduce((sum, payment) => sum + payment.amount, 0);
-  const tuitionFee = 150000;
+  const tuitionFee = summary?.tuitionFee ?? 150000;
+  const fullPaid = summary?.fullPaid ?? false;
   const amountDue = Math.max(0, tuitionFee - totalPaid);
   const paymentProgress = Math.min(100, Math.round((totalPaid / tuitionFee) * 100));
 
@@ -84,9 +101,23 @@ export default function PaymentsPage() {
                   Track your payment history, upcoming balance, and complete secure checkout from the program payment page.
                 </p>
               </div>
-              <Link href="/programs" className="inline-flex items-center justify-center rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-110">
-                Make a payment
-              </Link>
+              {/*
+                Once tuition is settled there is nothing left to charge, and a
+                live Pay button invites a duplicate payment that then has to be
+                refunded by hand.
+              */}
+              {fullPaid ? (
+                <span
+                  aria-disabled="true"
+                  className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-6 py-3 text-sm font-semibold text-emerald-700"
+                >
+                  ✓ Tuition fully paid
+                </span>
+              ) : (
+                <Link href="/programs" className="inline-flex items-center justify-center rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-110">
+                  Make a payment
+                </Link>
+              )}
             </div>
 
             <div className="mt-10 grid gap-6 lg:grid-cols-3">
