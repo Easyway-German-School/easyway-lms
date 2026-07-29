@@ -12,6 +12,9 @@ import { prisma } from "@/lib/prisma";
  * every page in the portal, so it must not drag the whole sidebar payload
  * along with it.
  */
+// Always reflect current read state; never serve a cached badge count.
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {

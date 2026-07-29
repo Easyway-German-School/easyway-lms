@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { authorizeChannel } from "@/lib/community-spaces";
+import { authorizeChannel, isStaffRole } from "@/lib/community-spaces";
 import { markChannelRead } from "@/lib/community-unread";
 import { sendPushToUsers, spaceMemberIds } from "@/lib/push";
 
@@ -76,6 +76,16 @@ export async function POST(request: Request) {
     const channel = await authorizeChannel(viewer, channelId);
     if (!channel) {
       return NextResponse.json({ error: "Channel not found in your community" }, { status: 403 });
+    }
+
+    // Announcement channels are presented to students as coming from their
+    // tutors, and a new thread there pushes a notification to the whole space.
+    // Only staff may broadcast; replies stay open to everyone.
+    if (channel.kind === "announcement" && !isStaffRole(viewer.role)) {
+      return NextResponse.json(
+        { error: "Only tutors and staff can post in this channel." },
+        { status: 403 },
+      );
     }
 
     const thread = await prisma.thread.create({

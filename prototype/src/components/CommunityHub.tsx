@@ -240,7 +240,7 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/community/spaces");
+        const res = await fetch("/api/community/spaces", { cache: "no-store" });
         if (!res.ok) throw new Error("Unable to load your community");
         const data = await res.json();
         if (cancelled) return;
@@ -278,7 +278,9 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
     setThreadsLoading(true);
     setOpenThreadId(null);
     try {
-      const res = await fetch(`/api/community/threads?channelId=${encodeURIComponent(id)}`);
+      const res = await fetch(`/api/community/threads?channelId=${encodeURIComponent(id)}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
       setThreads(res.ok ? data.threads ?? [] : []);
       if (!res.ok) setError(data.error ?? "Unable to load this channel");
@@ -292,11 +294,24 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
 
   useEffect(() => { if (channelId) loadThreads(channelId); }, [channelId, loadThreads]);
 
+  // Mirror of `spaces` for effects that need to read it without depending on
+  // it — depending on it directly would re-run them on every badge update.
+  const spacesRef = useRef(spaces);
+  useEffect(() => { spacesRef.current = spaces; }, [spaces]);
+
   // Opening a channel clears its badge. Zeroed locally first so the red dot
   // vanishes on tap rather than after a round-trip; the server call just makes
   // it stick. The event tells the floating launcher to refresh its own count.
   useEffect(() => {
     if (!channelId) return;
+
+    // Nothing unread means nothing to clear. Skipping the write matters: every
+    // POST here touches the SQLite file, and simply viewing a channel should
+    // not be a database write.
+    const current = spacesRef.current
+      .flatMap((space) => space.channels)
+      .find((c) => c.id === channelId);
+    if (!current || current.unreadCount === 0) return;
 
     setSpaces((prev) =>
       prev.map((space) => ({
@@ -425,6 +440,10 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
 
   const openThreadData = threads.find((t) => t.id === openThreadId) ?? null;
 
+  // Mirrors the server rule in /api/community/threads: announcement channels
+  // are broadcast-only, so students get no composer there.
+  const canPost = !(activeChannel?.kind === "announcement" && !isStaff);
+
   return (
     // In compact mode the hub floats over a page, so it has to stay inside the
     // viewport on a laptop or a phone rather than running off the top.
@@ -500,10 +519,14 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
             <button onClick={() => setOpenThreadId(null)} className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--surface-alt)]">
               ← Back
             </button>
-          ) : (
+          ) : canPost ? (
             <button onClick={() => setComposerOpen((v) => !v)} className="shrink-0 rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white">
               {composerOpen ? "Cancel" : "New post"}
             </button>
+          ) : (
+            <span className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)]">
+              Tutors only
+            </span>
           )}
         </header>
 
@@ -592,7 +615,11 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
             <div className="py-14 text-center">
               <div className="text-3xl">💬</div>
               <p className="mt-3 text-sm font-semibold">Nothing here yet</p>
-              <p className="mt-1 text-sm text-[var(--muted)]">Start the first conversation in #{activeChannel?.name}.</p>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                {canPost
+                  ? `Start the first conversation in #${activeChannel?.name}.`
+                  : "Your tutors will post class news here."}
+              </p>
             </div>
           ) : (
             <div className="space-y-2">

@@ -39,7 +39,9 @@ export default function CommunityLauncher() {
 
     const refresh = async () => {
       try {
-        const res = await fetch("/api/community/unread");
+        // no-store: this same URL is polled over and over, and a memory-cache
+        // hit would freeze the badge on a stale number.
+        const res = await fetch("/api/community/unread", { cache: "no-store" });
         const data = await res.json();
         if (!cancelled) setUnread(Number(data.total) || 0);
       } catch {

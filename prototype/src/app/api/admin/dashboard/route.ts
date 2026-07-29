@@ -28,7 +28,8 @@ export async function GET() {
   const exams = await prisma.examRegistration.count();
   const attendances = await prisma.attendance.count();
   const materials = await prisma.material.count();
-  const discussions = await prisma.discussion.count();
+  // Community posts now live in Thread, not the retired Discussion model.
+  const discussions = await prisma.thread.count();
 
   return NextResponse.json({ branches, students, enrollments, cachedPlans, exams, attendances, materials, discussions });
 }
