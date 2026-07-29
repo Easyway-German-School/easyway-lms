@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { prisma } from "@/lib/prisma";
+import { mailersendToken, sendViaMailerSend } from "@/lib/mailerlite";
 
 /**
  * Outbound email.
@@ -55,8 +56,27 @@ function buildTransport() {
 
 const transporter = buildTransport();
 
+/**
+ * MailerSend is preferred when configured: it is an HTTP API, so it needs no
+ * SMTP port open and survives hosts that block outbound 587. SMTP remains the
+ * fallback.
+ */
 export function isEmailConfigured() {
-  return transporter !== null;
+  return Boolean(mailersendToken()) || transporter !== null;
+}
+
+export function activeTransport(): "mailersend" | "smtp" | "none" {
+  if (mailersendToken()) return "mailersend";
+  return transporter ? "smtp" : "none";
+}
+
+function fromAddress() {
+  const raw = process.env.SMTP_FROM || "Easyway LMS <no-reply@easyway.test>";
+  // Accept both "Name <a@b.c>" and a bare address.
+  const match = raw.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  return match
+    ? { name: match[1] || undefined, email: match[2] }
+    : { name: undefined, email: raw.trim() };
 }
 
 export type SendEmailResult = {
@@ -79,6 +99,26 @@ export async function sendEmail({
   type?: string;
   studentId?: string | null;
 }): Promise<SendEmailResult> {
+  // Preferred path: MailerSend's HTTP API.
+  if (mailersendToken()) {
+    const from = fromAddress();
+    const result = await sendViaMailerSend({
+      to,
+      subject,
+      html,
+      fromEmail: from.email,
+      fromName: from.name,
+    });
+
+    await logEmail({
+      to, subject, type, studentId,
+      status: result.ok ? "sent" : "failed",
+      error: result.ok ? undefined : result.error,
+    });
+
+    return result.ok ? { ok: true } : { ok: false, error: result.error };
+  }
+
   if (!transporter) {
     console.warn("Email is not configured; skipping delivery to", to);
     // Recorded as failed rather than silently dropped, so an unconfigured
