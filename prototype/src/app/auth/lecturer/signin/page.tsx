@@ -5,6 +5,7 @@ import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Interactive3DCharacterLoader from "@/components/Interactive3DCharacterLoader";
+import PasswordInput from "@/components/PasswordInput";
 
 function LecturerSignInContent() {
   const [email, setEmail] = useState("");
@@ -84,10 +85,9 @@ function LecturerSignInContent() {
             <label htmlFor="password" className="block text-sm font-medium text-[var(--muted)]">
               Password
             </label>
-            <input
+            <PasswordInput
               id="password"
-              type="password"
-              value={password}
+                            value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               className="mt-2 w-full px-4 py-2 bg-[var(--surface-alt)] border border-[var(--border)] rounded-lg text-[var(--foreground)] focus:outline-none focus:border-[var(--accent)]"

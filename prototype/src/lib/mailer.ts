@@ -29,7 +29,7 @@ export async function sendEmail({
   }
 
   return transporter.sendMail({
-    from: process.env.SMTP_FROM || "EasyWay LMS <no-reply@easyway.test>",
+    from: process.env.SMTP_FROM || "Easyway LMS <no-reply@easyway.test>",
     to,
     subject,
     html,

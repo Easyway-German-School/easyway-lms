@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
+import { assignStudentCode } from "@/lib/student-code";
 
 async function branchTableExists() {
   try {
@@ -230,10 +231,32 @@ export async function POST(request: NextRequest) {
       throw prismaError;
     }
 
+    // Issue the official student code. Deliberately after the user exists and
+    // outside the create call: a failure here must not cost someone their
+    // account, and the backfill script can repair a missing code later.
+    let studentCode: string | null = null;
+    if (normalizedRole === "STUDENT") {
+      try {
+        const created = await prisma.student.findUnique({
+          where: { userId: user.id },
+          select: { id: true },
+        });
+        if (created) {
+          studentCode = await assignStudentCode(created.id, {
+            level: normalizedLevel,
+            batch: (normalizedAdmission as any)?.batch,
+          });
+        }
+      } catch (codeError) {
+        console.error("Student code assignment failed:", codeError);
+      }
+    }
+
     return NextResponse.json(
       {
         message: "User created successfully",
         user: { id: user.id, email: user.email, name: user.name },
+        studentCode,
       },
       { status: 201, headers: buildCorsHeaders(request) }
     );

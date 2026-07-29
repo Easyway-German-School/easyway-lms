@@ -10,10 +10,10 @@ interface EmailTemplate {
 export function welcomeEmailTemplate(studentName: string, pathwayName: string): EmailTemplate {
   const name = studentName || "there";
   return {
-    subject: "Welcome to EasyWay LMS! 🎉",
+    subject: "Welcome to Easyway LMS! 🎉",
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
-        <h1 style="color: #4CAF50; margin-bottom: 20px;">Welcome to EasyWay LMS!</h1>
+        <h1 style="color: #4CAF50; margin-bottom: 20px;">Welcome to Easyway LMS!</h1>
         
         <p>Hello ${name},</p>
         
@@ -40,7 +40,7 @@ export function welcomeEmailTemplate(studentName: string, pathwayName: string): 
         
         <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
           Best regards,<br/>
-          The EasyWay LMS Team
+          The Easyway LMS Team
         </p>
       </div>
     `,
@@ -84,7 +84,7 @@ export function feeReminderEmailTemplate(
         
         <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
           Best regards,<br/>
-          The EasyWay LMS Team
+          The Easyway LMS Team
         </p>
       </div>
     `,
@@ -141,7 +141,7 @@ export function examReminderEmailTemplate(
         
         <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
           Best of luck!<br/>
-          The EasyWay LMS Team
+          The Easyway LMS Team
         </p>
       </div>
     `,
@@ -188,12 +188,12 @@ export function graduationEmailTemplate(
         </p>
         
         <p style="margin-top: 20px; font-size: 14px; color: #666;">
-          Thank you for choosing EasyWay LMS. We look forward to supporting your continued learning journey!
+          Thank you for choosing Easyway LMS. We look forward to supporting your continued learning journey!
         </p>
         
         <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
           Best regards,<br/>
-          The EasyWay LMS Team
+          The Easyway LMS Team
         </p>
       </div>
     `,
@@ -236,7 +236,7 @@ export function newMaterialNotificationTemplate(
         
         <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
           Best regards,<br/>
-          The EasyWay LMS Team
+          The Easyway LMS Team
         </p>
       </div>
     `,
@@ -286,7 +286,7 @@ export function examResultsEmailTemplate(
         
         <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
           Best regards,<br/>
-          The EasyWay LMS Team
+          The Easyway LMS Team
         </p>
       </div>
     `,

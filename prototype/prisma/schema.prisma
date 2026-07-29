@@ -48,6 +48,11 @@ model Student {
   tutorId String?
   tutor   Lecturer? @relation(fields: [tutorId], references: [id], onDelete: SetNull)
 
+  // Official school identifier, e.g. EW/2026/A1/JUL/0007. Nullable because
+  // students created before the scheme existed are backfilled by
+  // scripts/backfill-student-codes.mjs rather than blocked at read time.
+  studentCode String? @unique
+
   status        String @default("active")
   level         String @default("A1") // A1, A2, B1, B2, C1, C2
   pathway       String @default("Goethe exam mastery")

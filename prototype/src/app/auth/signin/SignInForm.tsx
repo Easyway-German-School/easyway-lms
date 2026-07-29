@@ -5,6 +5,7 @@ import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Interactive3DCharacterLoader from "@/components/Interactive3DCharacterLoader";
+import PasswordInput from "@/components/PasswordInput";
 
 export default function SignInForm() {
   const router = useRouter();
@@ -95,9 +96,8 @@ export default function SignInForm() {
 
               <div>
                 <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Password</label>
-                <input
+                <PasswordInput
                   id="password"
-                  type="password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   required

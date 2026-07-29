@@ -84,6 +84,7 @@ export async function GET() {
       },
       student: {
         id: student.id,
+        studentCode: student.studentCode,
         level: student.level,
         status: student.status,
         pathway: student.pathway,

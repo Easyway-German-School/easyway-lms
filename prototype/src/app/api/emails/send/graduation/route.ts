@@ -97,7 +97,7 @@ export async function POST(request: Request) {
                 
                 <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
                   Best regards,<br/>
-                  The EasyWay LMS Team
+                  The Easyway LMS Team
                 </p>
               </div>
             `,

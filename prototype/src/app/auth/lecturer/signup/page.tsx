@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import PasswordInput from "@/components/PasswordInput";
 
 export default function LecturerSignUp() {
   const [name, setName] = useState("");
@@ -60,7 +61,7 @@ export default function LecturerSignUp() {
           </div>
           <div>
             <label className="text-sm text-[var(--muted)]">Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
+            <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
           </div>
           <div className="flex items-center justify-between">
             <button type="submit" disabled={loading} className="rounded-xl bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white">

@@ -5,6 +5,7 @@ import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Interactive3DCharacterLoader from "@/components/Interactive3DCharacterLoader";
+import PasswordInput from "@/components/PasswordInput";
 
 export default function AdminSignInForm() {
   const router = useRouter();
@@ -95,10 +96,9 @@ export default function AdminSignInForm() {
 
               <div>
                 <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Password</label>
-                <input
+                <PasswordInput
                   id="password"
-                  type="password"
-                  value={password}
+                                    value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   required
                   className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-sm text-[var(--foreground)] shadow-sm outline-none transition focus:border-[#FF6600] focus:bg-[var(--surface)] focus:ring-4 focus:ring-[#FF6600]/20"

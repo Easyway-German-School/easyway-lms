@@ -85,25 +85,6 @@ export default function AdminBranchesPage() {
     setShowForm(false);
   }
 
-  async function handleDeleteBranch(branchId: string) {
-    if (!confirm("Delete this branch? This will keep students but remove the branch association.")) {
-      return;
-    }
-
-    const res = await fetch("/api/admin/branches", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ branchId }),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setBranchError(data?.error || "Unable to delete branch.");
-      return;
-    }
-
-    loadBranches();
-  }
 
   return (
     <AdminShell>
@@ -209,13 +190,13 @@ export default function AdminBranchesPage() {
                       >
                         Edit
                       </button>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-red-500 text-red-600 px-3 py-2 text-sm"
-                        onClick={() => handleDeleteBranch(branch.id)}
-                      >
-                        Delete
-                      </button>
+                      {/*
+                        No delete button by design. A branch is referenced by
+                        students, classes, payments and community spaces; removing
+                        one orphans all of it, and there is no undo. Branches are
+                        closed rarely enough that it is not worth a self-service
+                        button next to "Edit".
+                      */}
                     </td>
                   </tr>
                 ))

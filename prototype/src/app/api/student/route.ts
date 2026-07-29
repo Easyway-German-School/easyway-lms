@@ -101,6 +101,7 @@ export async function GET() {
 
     return NextResponse.json({
       name: student.user?.name || "Learner",
+      studentCode: student.studentCode,
       level: student.level,
       pathway: student.pathway,
       nextLive: student.nextLive,

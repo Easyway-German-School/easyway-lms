@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import { type StudentWithUser } from "@/types/admin";
+import PasswordInput from "@/components/PasswordInput";
 
 type BranchOption = {
   id: string;
@@ -542,9 +543,8 @@ export default function AdminStudentsPage() {
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Password</span>
-                <input
-                  type="password"
-                  value={newPassword}
+                <PasswordInput
+                                    value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 />

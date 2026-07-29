@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { buildApiUrl } from "@/lib/api";
 import Interactive3DCharacterLoader from "@/components/Interactive3DCharacterLoader";
 import { countries, nigerianStates, packageOptions, professionOptions } from "@/app/auth/signup/options";
+import PasswordInput from "@/components/PasswordInput";
 
 type BranchOption = { id: string; name: string; location?: string | null };
 
@@ -364,7 +365,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 </div>
                 <div>
                   <label htmlFor="password" className="block text-sm font-semibold text-[var(--muted)]">Create password</label>
-                  <input id="password" name="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
+                  <PasswordInput id="password" name="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
                 </div>
               </div>
             </div>

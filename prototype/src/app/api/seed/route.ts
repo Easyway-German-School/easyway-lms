@@ -34,7 +34,7 @@ const courseStructure: Record<string, Array<{
       ]
     },
     {
-      title: "Goethe Essay Prep",
+      title: "German Essay Prep",
       description: "Structure paragraphs, improve linking phrases, and write clearer exam essays.",
       modules: [
         {

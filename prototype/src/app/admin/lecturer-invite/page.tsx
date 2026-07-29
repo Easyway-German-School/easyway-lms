@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import AdminShell from "@/components/AdminShell";
+import PasswordInput from "@/components/PasswordInput";
 
 type LecturerRecord = {
   id: string;
@@ -306,7 +307,7 @@ export default function LecturerInvitePage() {
             </label>
             <label className="block text-sm font-medium">
               Temporary password
-              <input type="password" value={lecturerForm.password} onChange={(e) => setLecturerForm((current) => ({ ...current, password: e.target.value }))} className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm" placeholder="Minimum 8 characters" />
+              <PasswordInput value={lecturerForm.password} onChange={(e) => setLecturerForm((current) => ({ ...current, password: e.target.value }))} className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm" placeholder="Minimum 8 characters" />
             </label>
             <label className="block text-sm font-medium">
               Phone

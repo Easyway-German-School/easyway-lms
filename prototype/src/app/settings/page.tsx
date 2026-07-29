@@ -87,17 +87,24 @@ export default function SettingsPage() {
             <div className="mt-10 grid gap-6 lg:grid-cols-2">
               <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-6 shadow-sm">
                 <h2 className="text-xl font-semibold text-[var(--foreground)]">Profile settings</h2>
-                <p className="mt-2 text-sm text-[var(--muted)]">Update your email, name, and contact details.</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">Update your email and contact details.</p>
 
                 <div className="mt-6 space-y-4">
-                  <label className="block">
+                  {/*
+                    Name is deliberately read-only. It appears on certificates and
+                    exam registrations, so it has to match the student's official
+                    documents — a self-service edit here would quietly invalidate
+                    those. Corrections go through the branch office.
+                  */}
+                  <div className="block">
                     <span className="text-sm font-medium text-[var(--foreground)]">Full name</span>
-                    <input
-                      value={formState.fullName}
-                      onChange={(e) => setFormState((prev) => ({ ...prev, fullName: e.target.value }))}
-                      className="mt-2 w-full rounded-3xl border border-slate-300 bg-white px-4 py-3 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/10"
-                    />
-                  </label>
+                    <div className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-[var(--muted)]">
+                      {formState.fullName || "—"}
+                    </div>
+                    <p className="mt-1.5 px-1 text-xs text-[var(--muted)]">
+                      Your name appears on certificates and exam entries. Contact your branch office to correct it.
+                    </p>
+                  </div>
                   <label className="block">
                     <span className="text-sm font-medium text-[var(--foreground)]">Email address</span>
                     <input

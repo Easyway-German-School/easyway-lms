@@ -120,8 +120,8 @@ export async function POST(request: NextRequest) {
           if (student?.user?.email) {
             await sendEmail({
               to: student.user.email,
-              subject: "Remaining balance due for your EasyWay program",
-              html: `<p>Hello ${student.user.name || "there"},</p><p>${reminder.message}</p><p>Thank you,<br/>EasyWay LMS</p>`,
+              subject: "Remaining balance due for your Easyway program",
+              html: `<p>Hello ${student.user.name || "there"},</p><p>${reminder.message}</p><p>Thank you,<br/>Easyway LMS</p>`,
             });
           }
         }
@@ -144,8 +144,8 @@ export async function POST(request: NextRequest) {
         if (student?.user?.email) {
           await sendEmail({
             to: student.user.email,
-            subject: paymentType === "deposit" ? "Your deposit payment was received" : "Your EasyWay payment was received",
-            html: `<p>Hello ${student.user.name || "there"},</p><p>${confirmation.message}</p><p>Thank you,<br/>EasyWay LMS</p>`,
+            subject: paymentType === "deposit" ? "Your deposit payment was received" : "Your Easyway payment was received",
+            html: `<p>Hello ${student.user.name || "there"},</p><p>${confirmation.message}</p><p>Thank you,<br/>Easyway LMS</p>`,
           });
         }
       }

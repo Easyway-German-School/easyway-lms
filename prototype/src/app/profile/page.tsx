@@ -32,7 +32,9 @@ export default function ProfilePage() {
       const user = data?.user || {};
 
       const loaded = {
-        id: student?.id || "EW-2026-0001",
+        // The official code, not the internal cuid — this is what appears on
+        // certificates and exam entries.
+        id: student?.studentCode || "Not yet issued",
         fullName: user?.name || student?.name || "Learner",
         gender: student?.admission?.gender || "Female",
         dateOfBirth: student?.admission?.dob || "1998-05-14",
@@ -169,7 +171,7 @@ export default function ProfilePage() {
                 </div>
                 <div>
                   <p className="text-sm uppercase tracking-[0.35em] text-slate-300">Student ID</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{profile.id}</p>
+                  <p className="mt-2 font-mono text-xl font-semibold tracking-tight text-white">{profile.id}</p>
                   <p className="mt-2 text-sm text-slate-300">Registered on {profile.registrationDate}</p>
                 </div>
               </div>

@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
           price_data: {
             currency: "usd",
             product_data: {
-              name: pathwayName || "EasyWay program",
+              name: pathwayName || "Easyway program",
               description:
                 paymentMode === "deposit"
                   ? `Deposit payment for ${pathwayName || "program"}`

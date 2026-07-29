@@ -32,7 +32,7 @@ export default function AdminHomePage() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Administrator</p>
-            <h1 className="text-3xl font-bold">EasyWay LMS Admin</h1>
+            <h1 className="text-3xl font-bold">Easyway LMS Admin</h1>
             <p className="mt-2 text-sm text-[var(--muted)]">Manage branches, students, exams, and reports from one place.</p>
           </div>
           <button type="button" onClick={() => router.push("/dashboard")} className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold">View student portal</button>

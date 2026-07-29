@@ -187,7 +187,7 @@ export async function POST(request: Request) {
         await sendEmail({
           to: student.user.email,
           subject: "Registration fee received — next deposit due",
-          html: `<p>Hello ${student.user.name || "there"},</p><p>${reminder.message}</p><p>Thank you,<br/>EasyWay LMS</p>`,
+          html: `<p>Hello ${student.user.name || "there"},</p><p>${reminder.message}</p><p>Thank you,<br/>Easyway LMS</p>`,
         });
       }
     }
@@ -206,8 +206,8 @@ export async function POST(request: Request) {
       if (student.user?.email) {
         await sendEmail({
           to: student.user.email,
-          subject: "Remaining balance due for your EasyWay program",
-          html: `<p>Hello ${student.user.name || "there"},</p><p>${reminder.message}</p><p>Thank you,<br/>EasyWay LMS</p>`,
+          subject: "Remaining balance due for your Easyway program",
+          html: `<p>Hello ${student.user.name || "there"},</p><p>${reminder.message}</p><p>Thank you,<br/>Easyway LMS</p>`,
         });
       }
     }
@@ -230,8 +230,8 @@ export async function POST(request: Request) {
     if (student.user?.email) {
       await sendEmail({
         to: student.user.email,
-        subject: effectivePaymentType === "deposit" ? "Your deposit payment was received" : "Your EasyWay payment was received",
-        html: `<p>Hello ${student.user.name || "there"},</p><p>${confirmation.message}</p><p>Thank you,<br/>EasyWay LMS</p>`,
+        subject: effectivePaymentType === "deposit" ? "Your deposit payment was received" : "Your Easyway payment was received",
+        html: `<p>Hello ${student.user.name || "there"},</p><p>${confirmation.message}</p><p>Thank you,<br/>Easyway LMS</p>`,
       });
     }
 

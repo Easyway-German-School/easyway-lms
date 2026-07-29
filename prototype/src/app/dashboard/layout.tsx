@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Dashboard — EasyWay LMS",
+  title: "Dashboard — Easyway LMS",
 };
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
