@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 
 type NavItem = {
+  capability?: string;
   label: string;
   href: string;
   icon: ReactNode;
@@ -139,21 +140,22 @@ function SettingsIcon({ className }: { className?: string }) {
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: <DashboardIcon className="h-4 w-4" />, group: 'Main' },
   
-  { label: 'Students', href: '/admin/students', icon: <StudentsIcon className="h-4 w-4" />, group: 'Academics' },
-  { label: 'Branches', href: '/admin/branches', icon: <BranchIcon className="h-4 w-4" />, group: 'Academics' },
-  { label: 'Lecturers', href: '/admin/lecturer-invite', icon: <LecturerIcon className="h-4 w-4" />, group: 'Academics' },
-  { label: 'Attendance', href: '/admin/attendance', icon: <AttendanceIcon className="h-4 w-4" />, group: 'Academics' },
+  { label: 'Students', href: '/admin/students', capability: 'students' as const, icon: <StudentsIcon className="h-4 w-4" />, group: 'Academics' },
+  { label: 'Branches', href: '/admin/branches', capability: 'branches' as const, icon: <BranchIcon className="h-4 w-4" />, group: 'Academics' },
+  { label: 'Lecturers', href: '/admin/lecturer-invite', capability: 'staff' as const, icon: <LecturerIcon className="h-4 w-4" />, group: 'Academics' },
+  { label: 'Attendance', href: '/admin/attendance', capability: 'attendance' as const, icon: <AttendanceIcon className="h-4 w-4" />, group: 'Academics' },
   
-  { label: 'Exams', href: '/admin/exams', icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
-  { label: 'Exam Registrations', href: '/admin/exam-registrations', icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
+  { label: 'Exams', href: '/admin/exams', capability: 'exams' as const, icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
+  { label: 'Exam Registrations', href: '/admin/exam-registrations', capability: 'exams' as const, icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
   
-  { label: 'Materials', href: '/admin/materials', icon: <MaterialIcon className="h-4 w-4" />, group: 'Content' },
-  { label: 'Community', href: '/admin/community', icon: <CommunityIcon className="h-4 w-4" />, group: 'Content' },
+  { label: 'Materials', href: '/admin/materials', capability: 'materials' as const, icon: <MaterialIcon className="h-4 w-4" />, group: 'Content' },
+  { label: 'Community', href: '/admin/community', capability: 'community' as const, icon: <CommunityIcon className="h-4 w-4" />, group: 'Content' },
   
-  { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon className="h-4 w-4" />, group: 'Billing' },
+  { label: 'Payments', href: '/admin/payments', capability: 'payments' as const, icon: <PaymentIcon className="h-4 w-4" />, group: 'Billing' },
   
-  { label: 'Notifications', href: '/admin/notifications', icon: <NotificationIcon className="h-4 w-4" />, group: 'Settings' },
-  { label: 'Integrations', href: '/admin/integrations', icon: <IntegrationIcon className="h-4 w-4" />, group: 'Settings' },
+  { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <NotificationIcon className="h-4 w-4" />, group: 'Settings' },
+  { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <SettingsIcon className="h-4 w-4" />, group: 'Settings' },
+  { label: 'Integrations', href: '/admin/integrations', capability: 'integrations' as const, icon: <IntegrationIcon className="h-4 w-4" />, group: 'Settings' },
   { label: 'Personalization', href: '/admin/personalization', icon: <SettingsIcon className="h-4 w-4" />, group: 'Settings' },
 ];
 
@@ -162,6 +164,26 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const pathname = usePathname();
   const { data: session, status } = useSession();
   const [collapsed, setCollapsed] = useState(false);
+  // null while unknown — everything stays visible rather than flickering
+  // items away on first paint.
+  const [capabilities, setCapabilities] = useState<string[] | null>(null);
+  const [adminRoleLabel, setAdminRoleLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/me', { cache: 'no-store' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        setCapabilities(data.capabilities ?? null);
+        setAdminRoleLabel(data.label ?? null);
+      } catch {
+        /* Leave the sidebar fully visible; the routes still enforce access. */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Settings'];
 
@@ -193,6 +215,9 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">Admin</p>
                 <h1 className="text-sm font-bold text-slate-900">Easyway Admin</h1>
+                {adminRoleLabel && (
+                  <p className="text-[11px] font-medium text-[var(--accent)]">{adminRoleLabel}</p>
+                )}
               </div>
             </div>
             <button
@@ -207,7 +232,14 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto p-3">
           {groups.map((group) => {
-            const groupItems = navItems.filter((item) => item.group === group);
+            // Hide areas this admin's sub-role does not cover. The routes
+            // enforce it too — this only avoids showing doors that 403.
+            const groupItems = navItems.filter(
+              (item) =>
+                item.group === group &&
+                (!item.capability || capabilities === null || capabilities.includes(item.capability)),
+            );
+            if (groupItems.length === 0) return null;
             return (
               <div key={group} className="mb-6">
                 {!collapsed && (
