@@ -1,3 +1,6 @@
+"use client";
+
+import { Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
@@ -32,7 +35,7 @@ const programs: Record<string, { title: string; headline: string; details: strin
   },
 };
 
-export default function PathwayPage() {
+function PathwayContent() {
   const searchParams = useSearchParams();
   const pathway = searchParams.get("pathway") || "Goethe exam mastery";
   const program = programs[pathway] || programs["Goethe exam mastery"];
@@ -86,5 +89,17 @@ export default function PathwayPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * useSearchParams opts the tree out of prerendering unless it sits inside a
+ * Suspense boundary, so the page shell can still be generated at build time.
+ */
+export default function PathwayPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50 py-10" />}>
+      <PathwayContent />
+    </Suspense>
   );
 }
