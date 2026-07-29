@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
+import BrandLogo from "@/components/BrandLogo";
 
 type NavItem = {
   label: string;
@@ -89,6 +90,7 @@ const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/lecturer/dashboard', icon: <DashboardIcon className="h-4 w-4" /> },
   { label: 'My Classes', href: '/lecturer/classes', icon: <ClassIcon className="h-4 w-4" /> },
   { label: 'Timetable', href: '/lecturer/timetable', icon: <ClassIcon className="h-4 w-4" /> },
+  { label: 'Assignments', href: '/lecturer/assignments', icon: <GradeIcon className="h-4 w-4" /> },
   { label: 'Materials', href: '/lecturer/materials', icon: <MaterialIcon className="h-4 w-4" /> },
   { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon className="h-4 w-4" /> },
   { label: 'Grades', href: '/lecturer/grades', icon: <GradeIcon className="h-4 w-4" /> },
@@ -107,9 +109,7 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
         <div className="border-b border-slate-200/70 p-4">
           <div className="flex items-center justify-between gap-3">
             <div className={`flex items-center gap-3 ${collapsed ? 'hidden' : ''}`}>
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-strong)] text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20">
-                EW
-              </div>
+              <BrandLogo />
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">Lecturer</p>
                 <h1 className="text-sm font-bold text-slate-900">Easyway portal</h1>

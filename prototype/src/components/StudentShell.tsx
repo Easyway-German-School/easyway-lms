@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
+import BrandLogo from "@/components/BrandLogo";
 
 type NavItem = {
   label: string;
@@ -64,9 +65,7 @@ export default function StudentShell({ children }: { children: React.ReactNode }
         <div className="border-b border-slate-200/70 p-4">
           <div className="flex items-center justify-between gap-3">
             <div className={`flex items-center gap-3 ${collapsed ? "hidden" : ""}`}>
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-strong)] text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20">
-                EW
-              </div>
+              <BrandLogo />
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">Easyway German Language School</p>
                 <h1 className="text-sm font-bold text-slate-900">Student portal</h1>
