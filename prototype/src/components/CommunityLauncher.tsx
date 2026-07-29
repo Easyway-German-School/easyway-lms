@@ -30,6 +30,35 @@ function CloseIcon({ className }: { className?: string }) {
 
 export default function CommunityLauncher() {
   const [open, setOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
+
+  // Keep the badge current: poll while the panel is shut, and re-check on tab
+  // focus so someone coming back to the browser sees the truth immediately.
+  useEffect(() => {
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const res = await fetch("/api/community/unread");
+        const data = await res.json();
+        if (!cancelled) setUnread(Number(data.total) || 0);
+      } catch {
+        /* Offline or signed out — leave the last known count alone. */
+      }
+    };
+
+    refresh();
+    const timer = setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("easyway:unread-changed", refresh);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("easyway:unread-changed", refresh);
+    };
+  }, []);
 
   // Escape closes the panel.
   useEffect(() => {
@@ -42,7 +71,9 @@ export default function CommunityLauncher() {
   }, [open]);
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+    // Sits above the fixed theme switcher, which owns the very bottom-right
+    // corner on every student page.
+    <div className="fixed bottom-24 right-6 z-50 flex flex-col items-end gap-3">
       {open && (
         <div className="w-[min(92vw,46rem)] overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-[0_28px_80px_rgba(15,23,42,0.24)]">
           <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
@@ -75,15 +106,29 @@ export default function CommunityLauncher() {
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        aria-expanded={open}
-        aria-label={open ? "Close community" : "Open community"}
-        className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow-[0_12px_34px_rgba(255,102,0,0.42)] transition hover:scale-105 active:scale-95"
-      >
-        {open ? <CloseIcon className="h-6 w-6" /> : <SmileyIcon className="h-7 w-7" />}
-      </button>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          aria-expanded={open}
+          aria-label={
+            open
+              ? "Close community"
+              : unread > 0
+                ? `Open community, ${unread} unread`
+                : "Open community"
+          }
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow-[0_12px_34px_rgba(255,102,0,0.42)] transition hover:scale-105 active:scale-95"
+        >
+          {open ? <CloseIcon className="h-6 w-6" /> : <SmileyIcon className="h-7 w-7" />}
+        </button>
+
+        {!open && unread > 0 && (
+          <span className="pointer-events-none absolute -right-1 -top-1 flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-white bg-red-500 px-1.5 text-[11px] font-bold text-white shadow-sm">
+            {unread > 99 ? "99+" : unread}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import CommunityLauncher from "@/components/CommunityLauncher";
 
 type NavItem = {
   label: string;
@@ -107,6 +108,10 @@ export default function StudentShell({ children }: { children: React.ReactNode }
       <main className={`flex-1 transition-all duration-300 ${collapsed ? "ml-20" : "ml-72"}`}>
         {children}
       </main>
+
+      {/* Lives in the shell, not on one page, so the community (and its unread
+          badge) is one tap away from anywhere in the portal. */}
+      {pathname !== "/community" && <CommunityLauncher />}
     </div>
   );
 }

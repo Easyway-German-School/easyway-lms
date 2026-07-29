@@ -27,6 +27,8 @@ model User {
   replies         Reply[]
   threads         Thread[]
   comments        Comment[]
+  channelReads    ChannelRead[]
+  pushSubs        PushSubscription[]
 }
 
 model Session {
@@ -536,8 +538,43 @@ model Channel {
   updatedAt   DateTime @updatedAt
 
   threads     Thread[]
+  reads       ChannelRead[]
 
   @@unique([spaceId, slug])
+}
+
+/**
+ * Per-member read marker. Unread = threads in the channel whose lastActivityAt
+ * is newer than lastReadAt. One row per (user, channel); absence means the
+ * member has never opened the channel, so everything in it counts as unread.
+ */
+model ChannelRead {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channelId  String
+  channel    Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  lastReadAt DateTime @default(now())
+
+  @@unique([userId, channelId])
+  @@index([userId])
+}
+
+/**
+ * A browser push endpoint (Web Push / VAPID). A member may have several — one
+ * per device or browser — so the key is the endpoint, not the user.
+ */
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Thread {

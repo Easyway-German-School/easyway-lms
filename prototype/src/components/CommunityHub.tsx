@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePushNotifications } from "@/lib/use-push";
 
 /**
  * Discord-style channel rail + Reddit-style threads.
@@ -15,6 +16,7 @@ type Channel = {
   name: string;
   description: string | null;
   kind: string;
+  unreadCount: number;
   _count: { threads: number };
 };
 
@@ -179,6 +181,35 @@ function CommentThread({
   );
 }
 
+/**
+ * Opt-in for lock-screen notifications. Sits at the foot of the channel rail
+ * rather than interrupting on load — permission is only ever asked for on a
+ * deliberate tap, because a reflexive "Block" cannot be undone from the app.
+ */
+function NotifyToggle({ compact }: { compact: boolean }) {
+  const { supported, enabled, busy, enable, disable, error } = usePushNotifications();
+  if (!supported) return null;
+
+  return (
+    <div className="mt-3 border-t border-[var(--border)] px-2 pt-3">
+      <button
+        type="button"
+        onClick={enabled ? disable : enable}
+        disabled={busy}
+        className={`flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold transition disabled:opacity-50 ${
+          enabled ? "text-[var(--accent)]" : "text-[var(--muted)] hover:bg-[var(--surface)]"
+        }`}
+      >
+        <span aria-hidden="true">{enabled ? "🔔" : "🔕"}</span>
+        <span className="truncate">
+          {busy ? "One moment…" : enabled ? "Notifications on" : compact ? "Notify me" : "Turn on notifications"}
+        </span>
+      </button>
+      {error && <p className="px-2 pb-1 text-[10px] leading-4 text-red-500">{error}</p>}
+    </div>
+  );
+}
+
 export default function CommunityHub({ compact = false }: { compact?: boolean }) {
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [isStaff, setIsStaff] = useState(false);
@@ -260,6 +291,30 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
   }, []);
 
   useEffect(() => { if (channelId) loadThreads(channelId); }, [channelId, loadThreads]);
+
+  // Opening a channel clears its badge. Zeroed locally first so the red dot
+  // vanishes on tap rather than after a round-trip; the server call just makes
+  // it stick. The event tells the floating launcher to refresh its own count.
+  useEffect(() => {
+    if (!channelId) return;
+
+    setSpaces((prev) =>
+      prev.map((space) => ({
+        ...space,
+        channels: space.channels.map((c) => (c.id === channelId ? { ...c, unreadCount: 0 } : c)),
+      })),
+    );
+
+    fetch("/api/community/read", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channelId }),
+    })
+      .then(() => window.dispatchEvent(new Event("easyway:unread-changed")))
+      .catch(() => {
+        /* Badge state is not worth surfacing an error for. */
+      });
+  }, [channelId]);
 
   async function openThread(id: string) {
     setOpenThreadId(id);
@@ -371,7 +426,9 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
   const openThreadData = threads.find((t) => t.id === openThreadId) ?? null;
 
   return (
-    <div className={`flex ${compact ? "h-[32rem]" : "h-[calc(100vh-13rem)] min-h-[34rem]"} overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]`}>
+    // In compact mode the hub floats over a page, so it has to stay inside the
+    // viewport on a laptop or a phone rather than running off the top.
+    <div className={`flex ${compact ? "h-[min(32rem,60vh)]" : "h-[calc(100vh-13rem)] min-h-[34rem]"} overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]`}>
       {/* Channel rail */}
       <aside className={`${compact ? "w-40" : "w-64"} shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-alt)] p-3`}>
         {isStaff && spaces.length > 1 && (
@@ -406,18 +463,26 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
                   active ? "bg-[var(--accent)] font-semibold text-white" : "hover:bg-[var(--surface)]"
                 }`}
               >
-                <span className="truncate">
+                <span className={`truncate ${!active && c.unreadCount > 0 ? "font-bold" : ""}`}>
                   <span className={active ? "text-white/70" : "text-[var(--muted)]"}>#</span> {c.name}
                 </span>
-                {c._count.threads > 0 && (
+                {/* Unread wins the slot: a red count is the thing that pulls
+                    someone back in, the plain thread total is just context. */}
+                {c.unreadCount > 0 && !active ? (
+                  <span className="shrink-0 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {c.unreadCount > 99 ? "99+" : c.unreadCount}
+                  </span>
+                ) : c._count.threads > 0 ? (
                   <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${active ? "bg-white/25 text-white" : "bg-[var(--surface)] text-[var(--muted)]"}`}>
                     {c._count.threads}
                   </span>
-                )}
+                ) : null}
               </button>
             );
           })}
         </nav>
+
+        <NotifyToggle compact={compact} />
       </aside>
 
       {/* Content */}

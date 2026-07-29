@@ -3,6 +3,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { authorizeChannel } from "@/lib/community-spaces";
+import { markChannelRead } from "@/lib/community-unread";
+import { sendPushToUsers, spaceMemberIds } from "@/lib/push";
 
 /** GET /api/community/threads?channelId=... — thread list for one channel. */
 export async function GET(request: Request) {
@@ -89,6 +91,25 @@ export async function POST(request: Request) {
         _count: { select: { comments: true } },
       },
     });
+
+    // Your own post should never leave an unread badge on your own sidebar.
+    await markChannelRead(viewer.userId, channelId);
+
+    // Notify the rest of the space. Deliberately not awaited: a slow or failing
+    // push service must not make the student's post appear to fail.
+    void (async () => {
+      try {
+        const recipients = await spaceMemberIds(channel.spaceId, viewer.userId);
+        await sendPushToUsers(recipients, {
+          title: `${channel.space.name} · #${channel.slug}`,
+          body: `${thread.author.name ?? "Someone"}: ${cleanTitle}`,
+          url: "/community",
+          tag: `thread-${thread.id}`,
+        });
+      } catch (e) {
+        console.error("Thread push failed:", e);
+      }
+    })();
 
     return NextResponse.json({ thread }, { status: 201 });
   } catch (error) {

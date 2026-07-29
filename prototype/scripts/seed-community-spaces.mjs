@@ -12,27 +12,29 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 
+/**
+ * Deliberately only three. Empty rooms are what kill a young community — a
+ * student who opens the hub and sees six dead channels does not come back.
+ * Add more (speaking practice, exam prep, visa & life) once these get noisy;
+ * scripts/prune-community-channels.mjs is the tool that trimmed the original
+ * six down to this set.
+ */
 const CHANNELS = [
-  ["general", "General", "Say hallo, share wins, ask anything.", "topic", 0],
-  ["grammar", "Grammar help", "Cases, word order, verbs — post your questions.", "topic", 1],
-  ["speaking", "Speaking practice", "Find a partner and practise out loud.", "topic", 2],
-  ["exam-prep", "Exam prep", "Goethe, telc and ÖSD preparation.", "topic", 3],
-  ["visa-life", "Visa & life in Germany", "Paperwork, housing, relocation questions.", "topic", 4],
-  ["office-hours", "Tutor office hours", "Your tutors answer here.", "office-hours", 5],
+  ["announcements", "Announcements", "Class news from your tutors and the branch office.", "announcement", 0],
+  ["general", "General", "Say hallo, share wins, ask anything.", "topic", 1],
+  ["grammar", "Homework & help", "Stuck on an exercise, a case or a verb? Post it here.", "topic", 2],
 ];
 
 const STARTERS = {
   general: [
     ["Willkommen! Introduce yourself here 👋",
      "New to this group? Tell us your name, why you're learning German, and what you're aiming for. We'll keep this thread going all term."],
+    ["What actually shows up in the speaking exam?",
+     "For anyone who has already sat the exam at this level — what surprised you on the day? Trying to prepare properly rather than just guessing."],
   ],
   grammar: [
     ["Why is it 'mit dem Bus' and not 'mit den Bus'?",
      "I know 'mit' takes Dativ but I keep slipping in conversation. Does anyone have a trick that made it automatic for them?"],
-  ],
-  "exam-prep": [
-    ["What actually shows up in the speaking exam?",
-     "For anyone who has already sat the exam at this level — what surprised you on the day? Trying to prepare properly rather than just guessing."],
   ],
 };
 

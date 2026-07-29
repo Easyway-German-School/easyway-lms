@@ -3,6 +3,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { authorizeThread } from "@/lib/community-spaces";
+import { markChannelRead } from "@/lib/community-unread";
+import { sendPushToUsers, threadParticipantIds } from "@/lib/push";
 
 /** POST /api/community/comments — reply to a thread, or to another comment. */
 export async function POST(request: Request) {
@@ -51,6 +53,24 @@ export async function POST(request: Request) {
       where: { id: threadId },
       data: { lastActivityAt: new Date() },
     });
+
+    await markChannelRead(viewer.userId, thread.channelId);
+
+    // Replies reach the people already in the conversation — author plus prior
+    // repliers — rather than the whole space. Not awaited, same as threads.
+    void (async () => {
+      try {
+        const recipients = await threadParticipantIds(threadId, viewer.userId);
+        await sendPushToUsers(recipients, {
+          title: `Reply in "${thread.title}"`,
+          body: `${comment.author.name ?? "Someone"}: ${cleanBody.slice(0, 140)}`,
+          url: "/community",
+          tag: `thread-${threadId}`,
+        });
+      } catch (e) {
+        console.error("Comment push failed:", e);
+      }
+    })();
 
     return NextResponse.json({ comment }, { status: 201 });
   } catch (error) {
