@@ -85,8 +85,9 @@ export async function POST(request: Request) {
       try {
         const student = registration.student;
         const exam = registration.exam;
-        const studentEmail = student.user?.email;
-        const studentName = student.user?.name;
+        // External candidates sit exams here too and have no Student row.
+        const studentEmail = student?.user?.email ?? registration.candidateEmail;
+        const studentName = student?.user?.name ?? registration.candidateName;
         const tutorName = exam?.lecturer?.user?.name;
 
         if (!studentEmail) continue;
@@ -101,7 +102,7 @@ export async function POST(request: Request) {
 
         await prisma.emailLog.create({
           data: {
-            studentId: student.id,
+            studentId: student?.id ?? null,
             recipientEmail: studentEmail,
             type: "exam_reminder",
             subject: template.subject,

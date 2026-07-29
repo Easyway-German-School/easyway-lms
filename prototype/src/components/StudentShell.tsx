@@ -46,6 +46,7 @@ const navItems: NavItem[] = [
   { label: "Materials", href: "/materials", icon: "▦" },
   { label: "Community", href: "/community", icon: "◍" },
   { label: "Results", href: "/results", icon: "◈" },
+  { label: "Exam centre", href: "/exam-centre", icon: "◆" },
   { label: "Attendance", href: "/attendance", icon: "◫" },
   { label: "Certificates", href: "/certificates", icon: <CertificateIcon className="h-4 w-4" /> },
   { label: "Notifications", href: "/notifications", icon: <BellIcon className="h-4 w-4" /> },

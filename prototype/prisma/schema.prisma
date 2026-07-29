@@ -105,23 +105,45 @@ model Branch {
   spaces        Space[]
   classSessions ClassSession[]
   assignments   Assignment[]
+  exams         Exam[]
 }
 
 model ExamRegistration {
-  id        String   @id @default(cuid())
-  studentId String
-  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  
-  examId    String?
-  exam      Exam?    @relation(fields: [examId], references: [id], onDelete: SetNull)
-  
-  examName  String
-  examDate  DateTime
-  status    String   @default("registered")
-  notes     String?
-  
+  id String @id @default(cuid())
+
+  /**
+   * Null for an external candidate. The centre sits members of the public for
+   * ÖSD, not only enrolled students, and requiring a Student row made that
+   * impossible.
+   */
+  studentId String?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /** Details captured for candidates who are not students. */
+  candidateName  String?
+  candidateEmail String?
+  candidatePhone String?
+
+  examId String?
+  exam   Exam?   @relation(fields: [examId], references: [id], onDelete: SetNull)
+
+  examName String
+  examDate DateTime
+  /** registered | confirmed | cancelled | completed | no_show */
+  status   String   @default("registered")
+  notes    String?
+
+  /** unpaid | paid | waived — a seat is only held once the fee is settled. */
+  paymentStatus    String  @default("unpaid")
+  paymentReference String?
+  amountPaid       Int?
+
+  seatNumber String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([examId, status])
 }
 
 model Pathway {
@@ -465,23 +487,45 @@ model Class {
 }
 
 model Exam {
-  id          String   @id @default(cuid())
-  courseId    String
-  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  
-  lecturerId  String
-  lecturer    Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
-  
+  id       String  @id @default(cuid())
+  // Optional: an ÖSD sitting the centre hosts belongs to no course and has no
+  // assigned lecturer, while an internal course test has both.
+  courseId String?
+  course   Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
   name        String
   description String?
   examDate    DateTime
-  totalScore  Int @default(100)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  grades            Grade[]
-  registrations     ExamRegistration[]
+  totalScore  Int      @default(100)
+
+  /** ÖSD | Goethe | telc | internal — who awards the certificate. */
+  examBody String @default("internal")
+  /** CEFR level the sitting is for. */
+  level    String?
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  /** Fee in kobo-free naira. Null means no fee (internal tests). */
+  fee Int?
+
+  /** Seats available. Null means uncapped. */
+  capacity              Int?
+  registrationDeadline  DateTime?
+
+  /** Only published sittings are bookable by candidates. */
+  published Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  grades        Grade[]
+  registrations ExamRegistration[]
+
+  @@index([published, examDate])
 }
 
 enum Role {
@@ -716,4 +760,53 @@ model AssignmentSubmission {
   updatedAt DateTime @updatedAt
 
   @@unique([assignmentId, studentId])
+}
+
+// ---------------------------------------------------------------------------
+// Outbound email pipeline.
+//
+// Mail is queued rather than sent inline: a bulk send to every unpaid student
+// cannot block a request, and a provider hiccup must not lose the message.
+// A worker drains the queue with backoff, and Suppression records addresses
+// that must never be written to again.
+// ---------------------------------------------------------------------------
+
+model EmailMessage {
+  id String @id @default(cuid())
+
+  to      String
+  subject String
+  html    String
+  /** welcome | fee_reminder | exam_reminder | bulk | ... */
+  type    String @default("general")
+
+  studentId String?
+
+  /** queued | sending | sent | failed | suppressed | cancelled */
+  status   String @default("queued")
+  attempts Int    @default(0)
+  lastError String?
+
+  /** Not sent before this time; drives reminders and scheduled campaigns. */
+  scheduledFor DateTime @default(now())
+  sentAt       DateTime?
+
+  /** Groups the messages produced by one bulk send. */
+  campaignId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, scheduledFor])
+  @@index([campaignId])
+}
+
+model EmailSuppression {
+  id     String @id @default(cuid())
+  email  String @unique
+  /** bounced | complained | unsubscribed | manual */
+  reason String
+  note   String?
+
+  createdAt DateTime @default(now())
 }

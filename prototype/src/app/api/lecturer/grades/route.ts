@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
           examId: exam.id,
           examName: exam.name,
           courseId: exam.courseId,
-          courseName: exam.course.title,
+          courseName: exam.course?.title ?? exam.examBody ?? "Exam centre",
           totalStudents: exam._count.registrations,
           gradedStudents: gradedCount,
         };

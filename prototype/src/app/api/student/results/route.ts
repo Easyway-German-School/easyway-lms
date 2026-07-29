@@ -51,6 +51,8 @@ export async function GET() {
             name: true,
             examDate: true,
             totalScore: true,
+            examBody: true,
+            level: true,
             course: { select: { id: true, title: true, level: true } },
           },
         },
@@ -79,11 +81,16 @@ export async function GET() {
     }>();
 
     for (const g of exams) {
+      // A centre sitting (ÖSD, Goethe) belongs to no course, so group those
+      // under the awarding body instead of dropping them from the results.
       const course = g.exam!.course;
-      const entry = byCourse.get(course.id) ?? {
-        courseId: course.id,
-        courseTitle: course.title,
-        level: course.level ?? null,
+      const groupId = course?.id ?? `body:${g.exam!.examBody ?? "external"}`;
+      const groupTitle = course?.title ?? `${g.exam!.examBody ?? "External"} examinations`;
+
+      const entry = byCourse.get(groupId) ?? {
+        courseId: groupId,
+        courseTitle: groupTitle,
+        level: course?.level ?? g.exam!.level ?? null,
         results: [],
         average: 0,
       };
@@ -99,7 +106,7 @@ export async function GET() {
         passed: g.score >= PASS_MARK,
         feedback: g.feedback,
       });
-      byCourse.set(course.id, entry);
+      byCourse.set(groupId, entry);
     }
 
     for (const entry of byCourse.values()) {

@@ -146,6 +146,7 @@ const navItems: NavItem[] = [
   { label: 'Attendance', href: '/admin/attendance', capability: 'attendance' as const, icon: <AttendanceIcon className="h-4 w-4" />, group: 'Academics' },
   
   { label: 'Exams', href: '/admin/exams', capability: 'exams' as const, icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
+  { label: 'Exam centre', href: '/admin/exam-centre', capability: 'exams' as const, icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
   { label: 'Exam Registrations', href: '/admin/exam-registrations', capability: 'exams' as const, icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
   
   { label: 'Materials', href: '/admin/materials', capability: 'materials' as const, icon: <MaterialIcon className="h-4 w-4" />, group: 'Content' },
@@ -153,6 +154,7 @@ const navItems: NavItem[] = [
   
   { label: 'Payments', href: '/admin/payments', capability: 'payments' as const, icon: <PaymentIcon className="h-4 w-4" />, group: 'Billing' },
   
+  { label: 'Compose email', href: '/admin/emails/compose', capability: 'emails' as const, icon: <NotificationIcon className="h-4 w-4" />, group: 'Settings' },
   { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <NotificationIcon className="h-4 w-4" />, group: 'Settings' },
   { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <SettingsIcon className="h-4 w-4" />, group: 'Settings' },
   { label: 'Integrations', href: '/admin/integrations', capability: 'integrations' as const, icon: <IntegrationIcon className="h-4 w-4" />, group: 'Settings' },

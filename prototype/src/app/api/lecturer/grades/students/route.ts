@@ -56,15 +56,18 @@ export async function GET(req: NextRequest) {
 
     const gradesMap = new Map(grades.map((g) => [g.studentId, g]));
 
-    const students = registrations.map((reg) => {
-      const grade = gradesMap.get(reg.studentId);
+    const students = registrations
+      // External candidates have no Student row, so no grade can hang off them.
+      .filter((reg) => reg.student !== null)
+      .map((reg) => {
+      const grade = gradesMap.get(reg.studentId!);
       const score = grade?.score ?? 0;
       return {
         id: grade?.id || `${reg.studentId}-${examId}`,
-        studentId: reg.studentId,
-        studentName: reg.student.user.name || 'Unknown',
-        studentCode: reg.student.studentCode,
-        email: reg.student.user.email,
+        studentId: reg.studentId!,
+        studentName: reg.student!.user.name || 'Unknown',
+        studentCode: reg.student!.studentCode,
+        email: reg.student!.user.email,
         examName: exam.name,
         score,
         totalScore: 100,
