@@ -95,6 +95,7 @@ model Branch {
   students      Student[]
   notifications Notification[]
   spaces        Space[]
+  classSessions ClassSession[]
 }
 
 model ExamRegistration {
@@ -209,6 +210,8 @@ model Material {
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  classSessions ClassSession[]
 }
 
 model Completion {
@@ -425,10 +428,11 @@ model Lecturer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
-  classes   Class[]
-  exams     Exam[]
-  materials Material[]
-  students  Student[]
+  classes       Class[]
+  exams         Exam[]
+  materials     Material[]
+  students      Student[]
+  classSessions ClassSession[]
 }
 
 model Class {
@@ -581,4 +585,53 @@ model Comment {
   updatedAt DateTime  @updatedAt
 
   @@index([threadId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Timetable overlay.
+//
+// src/lib/schedule.ts generates the SKELETON of a term from the batch/level
+// rotation — which days a cohort meets. That skeleton is deterministic and has
+// no database behind it. This model is the human layer on top: the real topic
+// a tutor is teaching that day, the actual clock times, whether the class got
+// postponed, and which material to bring.
+//
+// A row is created only when someone edits a day, so an untouched timetable
+// costs nothing and the generator stays the source of truth for WHICH days a
+// cohort meets.
+// ---------------------------------------------------------------------------
+
+model ClassSession {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  level    String
+
+  /** Midnight UTC on the day of the class — the join key back to the skeleton. */
+  date     DateTime
+  /** morning | afternoon | evening — the branch runs all three. */
+  timeSlot String @default("morning")
+
+  startTime String? // "09:00"
+  endTime   String? // "11:00"
+
+  /** The day's topic, editable by the tutor and visible to students. */
+  topic String?
+  notes String?
+
+  /** scheduled | postponed | cancelled | held */
+  status      String    @default("scheduled")
+  postponedTo DateTime?
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  materialId String?
+  material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([branchId, level, date, timeSlot])
+  @@index([branchId, level, date])
 }

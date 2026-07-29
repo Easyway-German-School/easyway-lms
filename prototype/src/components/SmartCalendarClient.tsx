@@ -1,101 +1,135 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-type Student = {
-  name?: string;
-  level?: string; // A1, A2, B1, B2
-  pathway?: string;
-  admission?: {
-    batchStartMonth?: number;
-    classApplied?: string;
-    preferredExam?: string;
-    branch?: string;
-  };
+/**
+ * The student's class calendar.
+ *
+ * Reads the merged timetable from /api/schedule: the generated rotation for
+ * which days the cohort meets, overlaid with whatever the tutor has set for
+ * each day — real topic, clock times, postponements, and the material to
+ * bring. Postponed and cancelled classes are shown in red so a student
+ * scanning the month sees them without reading.
+ */
+
+type Material = { id: string; title: string; filePath: string; fileType: string };
+
+type Session = {
+  date: string;
+  weekday: string;
+  title: string;
+  defaultFocus: string;
+  timeSlot: string;
+  startTime: string;
+  endTime: string;
+  topic: string | null;
+  notes: string | null;
+  status: string;
+  postponedTo: string | null;
+  lecturerName: string | null;
+  material: Material | null;
 };
 
-function weekdayName(n: number) {
-  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][n];
+type Month = { label: string; patternLabel: string; sessions: Session[] };
+
+type Payload = {
+  level: string;
+  months: Month[];
+  currentLevel?: string;
+  nextLevel?: string | null;
+  viewingNextLevel?: boolean;
+};
+
+const SLOT_LABELS: Record<string, string> = {
+  morning: "Morning",
+  afternoon: "Afternoon",
+  evening: "Evening",
+};
+
+function isOff(status: string) {
+  return status === "postponed" || status === "cancelled";
 }
 
-function buildA1Schedule(seedMonth: number, year: number) {
-  const out: Array<{ label: string; events: string[] }> = [];
-  const monthCount = 2;
+function SessionRow({ session }: { session: Session }) {
+  const off = isOff(session.status);
+  const date = new Date(session.date);
 
-  for (let offset = 0; offset < monthCount; offset += 1) {
-    const monthIndex = (seedMonth + offset) % 12;
-    const currentYear = year + Math.floor((seedMonth + offset) / 12);
-    const label = new Date(currentYear, monthIndex, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-    const daysInMonth = new Date(currentYear, monthIndex + 1, 0).getDate();
-    const events: string[] = [];
+  return (
+    <div
+      className={`rounded-2xl border p-3 transition ${
+        off
+          ? "border-red-200 bg-red-50"
+          : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)]/40"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className={`text-sm font-semibold ${off ? "text-red-700 line-through" : ""}`}>
+            {session.weekday} {date.toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+          </p>
+          <p className={`mt-0.5 text-sm ${off ? "text-red-600" : "text-[var(--muted)]"}`}>
+            {session.topic || session.defaultFocus}
+          </p>
+        </div>
 
-    for (let day = 1; day <= daysInMonth; day += 1) {
-      const date = new Date(currentYear, monthIndex, day);
-      const dayName = weekdayName(date.getDay());
-      const isClassDay = dayName === 'Mon' || dayName === 'Wed' || dayName === 'Fri';
+        <div className="shrink-0 text-right">
+          <p className={`text-xs font-semibold ${off ? "text-red-600" : "text-[var(--foreground)]"}`}>
+            {session.startTime}–{session.endTime}
+          </p>
+          <p className="text-[11px] text-[var(--muted)]">
+            {SLOT_LABELS[session.timeSlot] ?? session.timeSlot}
+          </p>
+        </div>
+      </div>
 
-      if (isClassDay) {
-        const slot = dayName === 'Mon' ? 'Speaking Lab' : dayName === 'Wed' ? 'Grammar Lab' : 'Conversation Lab';
-        events.push(`${dayName} · ${slot} · ${date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`);
-      }
-    }
+      {off && (
+        <p className="mt-2 rounded-lg bg-red-100 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-red-700">
+          {session.status}
+          {session.postponedTo &&
+            ` — moved to ${new Date(session.postponedTo).toLocaleDateString()}`}
+        </p>
+      )}
 
-    out.push({ label, events });
-  }
+      {session.material && (
+        <a
+          href={session.material.filePath}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-2 py-1 text-xs font-semibold text-[var(--accent)] hover:brightness-95"
+        >
+          📎 {session.material.title}
+        </a>
+      )}
 
-  return out;
+      {session.lecturerName && (
+        <p className="mt-2 text-[11px] text-[var(--muted)]">with {session.lecturerName}</p>
+      )}
+    </div>
+  );
 }
 
 export default function SmartCalendarClient() {
-  const [student, setStudent] = useState<Student | null>(null);
-  const [months, setMonths] = useState<Array<{ label: string; events: string[] }>>([]);
+  const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [previewLevel, setPreviewLevel] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
-    void (async () => {
-      try {
-        // Try server-generated personalized plan first
-        const res = await fetch('/api/schedule', { cache: 'no-store', credentials: 'include' });
-        if (res.ok) {
-          const data = await res.json();
-          if (!mounted) return;
-          if (data?.months) {
-            setMonths(data.months.map((m: any) => ({ label: m.label, events: m.events.map((e: any) => e.title) }))); 
-            setLoading(false);
-            return;
-          }
-        }
-
-        // Fallback: compute locally from /api/student
-        const res2 = await fetch('/api/student', { cache: 'no-store', credentials: 'include' });
-        if (!res2.ok) {
-          if (mounted) setLoading(false);
-          return;
-        }
-
-        const data = await res2.json();
-        if (!mounted) return;
-        setStudent(data);
-
-        const now = new Date();
-        const startMonth = typeof data?.admission?.batchStartMonth === 'number' ? data.admission.batchStartMonth : now.getMonth();
-        const levelLabel = String(data?.level || data?.pathway || 'A1').toUpperCase();
-        const out = buildA1Schedule(startMonth, now.getFullYear()).map((month) => ({
-          ...month,
-          events: month.events.map((event) => `${levelLabel} class · ${event}`),
-        }));
-
-        setMonths(out);
-      } catch (err) {
-        // ignore
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-
-    return () => { mounted = false; };
+  const load = useCallback(async (level?: string | null) => {
+    setLoading(true);
+    try {
+      const url = level ? `/api/schedule?level=${encodeURIComponent(level)}` : "/api/schedule";
+      const res = await fetch(url, { cache: "no-store", credentials: "include" });
+      if (!res.ok) throw new Error("Unable to load your schedule");
+      setData(await res.json());
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { load(previewLevel); }, [load, previewLevel]);
 
   if (loading) {
     return (
@@ -105,18 +139,69 @@ export default function SmartCalendarClient() {
     );
   }
 
+  if (error || !data) {
+    return (
+      <div className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-6">
+        <p className="text-sm text-red-600">{error || "No schedule available."}</p>
+      </div>
+    );
+  }
+
+  const totalSessions = data.months.reduce((n, m) => n + m.sessions.length, 0);
+
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
-      {months.map((m) => (
-        <div key={m.label} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-6">
-          <h2 className="text-xl font-semibold text-[var(--foreground)]">{m.label}</h2>
-          <ul className="mt-4 space-y-2 text-sm text-[var(--muted)]">
-            {m.events.map((ev) => (
-              <li key={ev} className="rounded-2xl bg-white/80 p-3 text-[var(--foreground)] shadow-sm">{ev}</li>
-            ))}
-          </ul>
+    <div className="space-y-5">
+      {data.nextLevel && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setPreviewLevel(null)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+              !data.viewingNextLevel
+                ? "bg-[var(--accent)] text-white"
+                : "border border-[var(--border)] hover:bg-[var(--surface-alt)]"
+            }`}
+          >
+            {data.currentLevel} · current
+          </button>
+          <button
+            onClick={() => setPreviewLevel(data.nextLevel!)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+              data.viewingNextLevel
+                ? "bg-[var(--accent)] text-white"
+                : "border border-[var(--border)] hover:bg-[var(--surface-alt)]"
+            }`}
+          >
+            {data.nextLevel} · next level
+          </button>
+          {data.viewingNextLevel && (
+            <span className="text-xs text-[var(--muted)]">
+              Preview of the timetable you move onto after {data.currentLevel}.
+            </span>
+          )}
         </div>
-      ))}
+      )}
+
+      {totalSessions === 0 ? (
+        <div className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-6 text-sm text-[var(--muted)]">
+          No classes scheduled for this level yet.
+        </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-2">
+          {data.months.map((month) => (
+            <div key={month.label} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+              <div className="mb-4 flex items-baseline justify-between gap-2">
+                <h3 className="text-lg font-bold">{month.label}</h3>
+                <span className="text-xs text-[var(--muted)]">{month.patternLabel}</span>
+              </div>
+              <div className="space-y-2">
+                {month.sessions.map((s) => (
+                  <SessionRow key={s.date} session={s} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

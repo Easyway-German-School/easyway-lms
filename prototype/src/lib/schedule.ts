@@ -114,13 +114,26 @@ export function generatePersonalizedSchedule({
   const currentYear = now.getFullYear();
   const batchMonthIndex = monthNameToIndex(batch) ?? currentMonth;
 
-  // Choose the batch year so the cohort starts on/after the current month
-  // (a batch earlier in the calendar than "now" belongs to next year).
-  const batchYear = batchMonthIndex < currentMonth ? currentYear + 1 : currentYear;
+  // The batch month is the most recent occurrence at or before now. A student
+  // whose batch is "May", looking in July, started this May — not next May.
+  const batchYear = batchMonthIndex <= currentMonth ? currentYear : currentYear - 1;
+
+  // Absolute month index (months since year 0) makes the arithmetic below
+  // wrap across year boundaries without special cases.
+  const batchAbsolute = batchYear * 12 + batchMonthIndex;
+  const currentAbsolute = currentYear * 12 + currentMonth;
+
+  // Show the months the student is actually in: start at the current month
+  // once the batch is under way, but never before the batch begins. The
+  // weekday rotation still counts from the true batch start, so a cohort
+  // three months in keeps the correct pattern.
+  const firstAbsolute = Math.max(batchAbsolute, currentAbsolute);
+  const startOffset = firstAbsolute - batchAbsolute;
 
   const out: ScheduleMonth[] = [];
 
-  for (let offset = 0; offset < months; offset += 1) {
+  for (let i = 0; i < months; i += 1) {
+    const offset = startOffset + i;
     const absoluteMonth = batchMonthIndex + offset;
     const monthIndex = ((absoluteMonth % 12) + 12) % 12;
     const year = batchYear + Math.floor(absoluteMonth / 12);
