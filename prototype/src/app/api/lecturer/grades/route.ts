@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { studentId, examId, score } = body;
+    const { studentId, examId, score, feedback } = body;
 
     if (!studentId || !examId || score === undefined) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
@@ -110,16 +110,21 @@ export async function POST(req: NextRequest) {
         type: 'exam',
         score,
         grade: calculateGrade(score),
+        // A bare number tells a student nothing about what to fix next.
+        feedback: typeof feedback === 'string' ? feedback.trim() || null : null,
       },
       update: {
         score,
         grade: calculateGrade(score),
+        // undefined leaves existing feedback alone when only the score changes.
+        feedback: typeof feedback === 'string' ? feedback.trim() || null : undefined,
       },
     });
 
     return NextResponse.json({
       score: grade.score,
       grade: grade.grade,
+      feedback: grade.feedback,
     });
   } catch (error) {
     console.error('Grades POST error:', error);

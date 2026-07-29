@@ -63,11 +63,15 @@ export async function GET(req: NextRequest) {
         id: grade?.id || `${reg.studentId}-${examId}`,
         studentId: reg.studentId,
         studentName: reg.student.user.name || 'Unknown',
+        studentCode: reg.student.studentCode,
         email: reg.student.user.email,
         examName: exam.name,
         score,
         totalScore: 100,
         grade: calculateGrade(score),
+        feedback: grade?.feedback ?? '',
+        // Distinguishes "scored zero" from "not marked yet" — both show 0.
+        graded: Boolean(grade),
       };
     });
 

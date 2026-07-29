@@ -93,7 +93,9 @@ export async function GET() {
         examDate: g.exam!.examDate,
         score: g.score,
         total: g.exam!.totalScore ?? 100,
-        grade: g.grade ?? letterFor(g.score),
+        // Derived from the score, never read from Grade.grade: that column is
+        // denormalised and drifts whenever a score is corrected without it.
+        grade: letterFor(g.score),
         passed: g.score >= PASS_MARK,
         feedback: g.feedback,
       });
@@ -124,7 +126,7 @@ export async function GET() {
         id: g.id,
         type: g.type,
         score: g.score,
-        grade: g.grade ?? letterFor(g.score),
+        grade: letterFor(g.score),
         feedback: g.feedback,
         createdAt: g.createdAt,
       })),

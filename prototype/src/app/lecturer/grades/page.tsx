@@ -14,6 +14,9 @@ interface StudentGrade {
   score: number;
   totalScore: number;
   grade: string;
+  studentCode?: string | null;
+  feedback?: string;
+  graded?: boolean;
 }
 
 interface GradeSession {
@@ -83,7 +86,7 @@ export default function LecturerGrades() {
     }
   }
 
-  async function updateGrade(studentId: string, newScore: number) {
+  async function updateGrade(studentId: string, newScore: number, newFeedback?: string) {
     if (newScore < 0 || newScore > 100) {
       setError('Score must be between 0 and 100');
       return;
@@ -98,6 +101,7 @@ export default function LecturerGrades() {
           studentId,
           examId: selectedExam,
           score: newScore,
+          feedback: newFeedback,
         }),
       });
 
@@ -106,7 +110,9 @@ export default function LecturerGrades() {
       const updated = await res.json();
       setStudents(
         students.map((s) =>
-          s.studentId === studentId ? { ...s, score: updated.score, grade: updated.grade } : s
+          s.studentId === studentId
+            ? { ...s, score: updated.score, grade: updated.grade, feedback: updated.feedback ?? '', graded: true }
+            : s
         )
       );
       setEditingId(null);
@@ -244,7 +250,27 @@ export default function LecturerGrades() {
                       key={student.studentId}
                       className="border-b border-[var(--border)] hover:bg-[var(--surface-alt)] transition-colors"
                     >
-                      <td className="px-4 py-3 text-sm text-[var(--foreground)]">{student.studentName}</td>
+                      <td className="px-4 py-3 text-sm text-[var(--foreground)]">
+                        {student.studentName}
+                        {student.studentCode && (
+                          <span className="ml-2 font-mono text-xs text-[var(--muted)]">{student.studentCode}</span>
+                        )}
+                        {/*
+                          The feedback the student actually reads on their
+                          results page — a bare number says nothing about what
+                          to work on next.
+                        */}
+                        {editingId === student.studentId ? (
+                          <input
+                            id={`feedback-${student.studentId}`}
+                            defaultValue={student.feedback ?? ''}
+                            placeholder="Feedback for this student (optional)"
+                            className="mt-2 w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
+                          />
+                        ) : student.feedback ? (
+                          <p className="mt-1 text-xs italic text-[var(--muted)]">{student.feedback}</p>
+                        ) : null}
+                      </td>
                       <td className="px-4 py-3 text-sm text-[var(--muted)]">{student.email}</td>
                       <td className="px-4 py-3 text-center">
                         {editingId === student.studentId ? (
@@ -253,19 +279,19 @@ export default function LecturerGrades() {
                             min="0"
                             max="100"
                             defaultValue={student.score}
-                            onBlur={(e) => {
-                              updateGrade(student.studentId, parseInt(e.target.value));
-                            }}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
-                                updateGrade(student.studentId, parseInt(e.currentTarget.value));
+                                const fb = (document.getElementById(`feedback-${student.studentId}`) as HTMLInputElement | null)?.value;
+                                updateGrade(student.studentId, parseInt(e.currentTarget.value), fb);
                               }
                             }}
                             autoFocus
                             className="w-16 px-2 py-1 border border-[var(--border)] rounded bg-[var(--background)] text-[var(--foreground)] text-center"
                           />
                         ) : (
-                          <span className="font-semibold text-[var(--foreground)]">{student.score}</span>
+                          <span className={`font-semibold ${student.graded === false ? "text-[var(--muted)]" : "text-[var(--foreground)]"}`}>
+                            {student.graded === false ? "—" : student.score}
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -286,13 +312,39 @@ export default function LecturerGrades() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => setEditingId(editingId === student.studentId ? null : student.studentId)}
-                          disabled={saving}
-                          className="text-sm px-3 py-1 bg-[var(--accent)] text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50"
-                        >
-                          {editingId === student.studentId ? 'Cancel' : 'Edit'}
-                        </button>
+                        {editingId === student.studentId ? (
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => {
+                                const feedbackEl = document.getElementById(`feedback-${student.studentId}`) as HTMLInputElement | null;
+                                const scoreEl = feedbackEl?.closest('tr')?.querySelector<HTMLInputElement>('input[type=number]');
+                                updateGrade(
+                                  student.studentId,
+                                  parseInt(scoreEl?.value ?? String(student.score)),
+                                  feedbackEl?.value,
+                                );
+                              }}
+                              disabled={saving}
+                              className="text-sm px-3 py-1 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50"
+                            >
+                              {saving ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              onClick={() => setEditingId(null)}
+                              className="text-sm px-3 py-1 border border-[var(--border)] rounded"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setEditingId(student.studentId)}
+                            disabled={saving}
+                            className="text-sm px-3 py-1 bg-[var(--accent)] text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+                          >
+                            Edit
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
