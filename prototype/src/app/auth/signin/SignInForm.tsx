@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Interactive3DCharacterLoader from "@/components/Interactive3DCharacterLoader";
 import PasswordInput from "@/components/PasswordInput";
+import BrandLogo from "@/components/BrandLogo";
 
 export default function SignInForm() {
   const router = useRouter();
@@ -47,8 +48,10 @@ export default function SignInForm() {
         <div className="relative hidden flex-1 flex-col justify-between bg-gradient-to-br from-[var(--accent-strong)] via-[var(--accent)] to-[#FF8533] p-8 text-white lg:flex">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.2),_transparent_35%)]" />
           <div className="relative z-10">
-            <div className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-sm font-medium text-white/90">
-              Easyway German Language School
+            {/* The artwork has a white background, so it needs a white chip
+                to sit on rather than the orange gradient. */}
+            <div className="inline-flex items-center rounded-2xl bg-white px-4 py-3 shadow-lg shadow-black/10">
+              <BrandLogo variant="wordmark" className="h-10" />
             </div>
             <h1 className="mt-8 text-4xl font-semibold leading-tight">Continue your German learning journey with confidence.</h1>
             <p className="mt-4 max-w-md text-sm leading-6 text-slate-100">
@@ -68,6 +71,11 @@ export default function SignInForm() {
         <div className="flex-1 p-6 sm:p-8 lg:p-10">
           <div className="mx-auto max-w-md">
             <div className="mb-8">
+              {/* The branded panel is hidden below lg, so the logo appears
+                  here too — otherwise mobile sign-in has no identity at all. */}
+              <div className="mb-6 lg:hidden">
+                <BrandLogo variant="wordmark" className="h-10" />
+              </div>
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">Welcome back</p>
               <h2 className="mt-2 text-3xl font-semibold text-[var(--foreground)]">Sign in to your account</h2>
               <p className="mt-2 text-sm leading-6 text-[var(--muted)]">Continue your academic plan with a secure and modern experience.</p>

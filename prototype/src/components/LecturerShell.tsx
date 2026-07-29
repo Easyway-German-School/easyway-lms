@@ -108,13 +108,16 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
       <aside className={`fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-white/60 bg-white/80 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-all duration-300 ${collapsed ? 'w-20' : 'w-72'}`}>
         <div className="border-b border-slate-200/70 p-4">
           <div className="flex items-center justify-between gap-3">
-            <div className={`flex items-center gap-3 ${collapsed ? 'hidden' : ''}`}>
-              <BrandLogo />
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">Lecturer</p>
-                <h1 className="text-sm font-bold text-slate-900">Easyway portal</h1>
+            {collapsed ? (
+              <BrandLogo variant="mark" className="h-10 w-10" />
+            ) : (
+              <div className="min-w-0">
+                <BrandLogo variant="wordmark" className="h-9" />
+                <h1 className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
+                  Lecturer portal
+                </h1>
               </div>
-            </div>
+            )}
             <button onClick={() => setCollapsed(!collapsed)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)]">
               {collapsed ? '→' : '←'}
             </button>

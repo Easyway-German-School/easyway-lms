@@ -6,6 +6,15 @@ import PageContainer from "@/components/PageContainer";
 export const metadata: Metadata = {
   title: "Easyway German Language School",
   description: "Web-based learner portal for Easyway German Language School",
+  // Uses public/logo-mark.png when present (the square emblem reads far better
+  // at 16px than the full lockup), otherwise the wordmark.
+  icons: {
+    icon: [
+      { url: "/logo-mark.png", type: "image/png" },
+      { url: "/logo.png", type: "image/png" },
+    ],
+    apple: "/logo-mark.png",
+  },
 };
 
 export default function RootLayout({
