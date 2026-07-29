@@ -2,92 +2,40 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import ClassGridView from "@/components/ClassGridView";
+import {
+  type ClassNode,
+  type SchedulePayload,
+  buildNodes,
+  daysBetween,
+  longDate,
+  nodeSummary,
+  shortDate,
+  SLOT_LABEL,
+} from "@/lib/class-path";
 
 /**
- * The class calendar, as a game map.
+ * The student's class schedule, in whichever shape they prefer.
  *
- * A winding path of class nodes rather than a list. Classes already held are
- * complete and open; the very next class is LOCKED — you can see it is there
- * and when it unlocks, but not what is in it. That is the whole point: the
- * next step is a sealed door, not a spoiler.
+ *   path      a Duolingo-style winding map of class nodes
+ *   calendar  a month grid with class days highlighted
  *
- * Unlock rule: a class opens at the start of its own day. So today's class is
- * readable, tomorrow's is a padlock with a countdown.
+ * Both read the same data and obey the same rule: a class unlocks at the start
+ * of its own day, so the very next class is a sealed door. The exact TIME is
+ * always visible — a student must be able to plan around when they are
+ * expected — it is the topic that stays behind the lock.
+ *
+ * This view is read-only by design. Only lecturers and admins set what a class
+ * contains, at /lecturer/timetable; students choose how to look at it, nothing
+ * more.
  */
 
-type Material = { id: string; title: string; filePath: string; fileType: string };
-
-type Session = {
-  date: string;
-  weekday: string;
-  title: string;
-  defaultFocus: string;
-  timeSlot: string;
-  startTime: string;
-  endTime: string;
-  topic: string | null;
-  notes: string | null;
-  status: string;
-  postponedTo: string | null;
-  lecturerName: string | null;
-  material: Material | null;
-};
-
-type Month = { label: string; patternLabel: string; sessions: Session[] };
-
-type Payload = {
-  level: string;
-  months: Month[];
-  currentLevel?: string;
-  nextLevel?: string | null;
-  viewingNextLevel?: boolean;
-};
-
-type NodeState = "done" | "today" | "locked" | "off";
-
-type MapNode = Session & {
-  index: number;
-  state: NodeState;
-  isNext: boolean;
-};
-
-const SLOT_LABEL: Record<string, string> = {
-  morning: "Morning",
-  afternoon: "Afternoon",
-  evening: "Evening",
-};
-
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
-/**
- * Dates are formatted explicitly rather than with toLocaleDateString, whose
- * output depends on the runtime's locale — the server and the browser can
- * disagree ("Friday, July 31" vs "Friday 31 July") and React then discards the
- * whole tree as a hydration mismatch.
- */
-function longDate(d: Date) {
-  return `${WEEKDAY_NAMES[d.getDay()]} ${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`;
-}
-function shortDate(d: Date) {
-  return `${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`;
-}
+const VIEW_KEY = "easyway:schedule-view";
+type View = "path" | "calendar";
 
 /** The path's horizontal sway, in pixels, cycling as it descends. */
 const LEAN = [0, 38, 54, 38, 0, -38, -54, -38];
 
-function startOfDay(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
-function daysBetween(a: Date, b: Date) {
-  return Math.round((startOfDay(a).getTime() - startOfDay(b).getTime()) / 86_400_000);
-}
-
-/** Icons kept inline so the path has no image dependencies. */
 function CheckIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
@@ -119,17 +67,30 @@ function BoltIcon() {
 }
 
 export default function SmartCalendarClient() {
-  const [data, setData] = useState<Payload | null>(null);
+  const [data, setData] = useState<SchedulePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [previewLevel, setPreviewLevel] = useState<string | null>(null);
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [shake, setShake] = useState<number | null>(null);
-  // Which node is "today" depends on the reader's clock, so the map is built
-  // after mount only. Rendering it on the server would bake in the server's
-  // idea of today and mismatch on hydration.
+  const [view, setView] = useState<View>("path");
+
+  // Which class counts as "today" depends on the reader's clock, so the map is
+  // built after mount only. Rendering it on the server would bake in the
+  // server's idea of today and mismatch on hydration.
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    // Their chosen view sticks between visits.
+    const saved = window.localStorage.getItem(VIEW_KEY);
+    if (saved === "path" || saved === "calendar") setView(saved);
+  }, []);
+
+  function chooseView(next: View) {
+    setView(next);
+    setOpenIndex(null);
+    window.localStorage.setItem(VIEW_KEY, next);
+  }
 
   const load = useCallback(async (level?: string | null) => {
     setLoading(true);
@@ -148,38 +109,14 @@ export default function SmartCalendarClient() {
 
   useEffect(() => { load(previewLevel); }, [load, previewLevel]);
 
-  /** Flatten the months into one ordered path and work out each node's state. */
-  const { nodes, done, total, nextNode } = useMemo(() => {
-    const now = new Date();
-    const flat: Session[] = (data?.months ?? []).flatMap((m) => m.sessions);
+  const { nodes, done, total, nextNode } = useMemo(() => buildNodes(data?.months), [data]);
 
-    let firstFuture = -1;
-    const built: MapNode[] = flat.map((s, index) => {
-      const date = new Date(s.date);
-      const off = s.status === "postponed" || s.status === "cancelled";
-      const isPast = startOfDay(date) < startOfDay(now);
-      const isToday = daysBetween(date, now) === 0;
-
-      if (!off && !isPast && !isToday && firstFuture === -1) firstFuture = index;
-
-      const state: NodeState = off ? "off" : isPast ? "done" : isToday ? "today" : "locked";
-      return { ...s, index, state, isNext: false };
-    });
-
-    if (firstFuture >= 0) built[firstFuture].isNext = true;
-
-    return {
-      nodes: built,
-      done: built.filter((n) => n.state === "done").length,
-      total: built.length,
-      nextNode: firstFuture >= 0 ? built[firstFuture] : null,
-    };
-  }, [data]);
-
-  function tapNode(node: MapNode) {
+  function tapNode(node: ClassNode) {
     if (node.state === "locked") {
-      // Locked nodes push back rather than silently doing nothing.
+      // A locked door that pushes back reads as a rule; one that ignores you
+      // reads as a bug. Shake, then show when it opens.
       setShake(node.index);
+      setOpenIndex(node.index);
       setTimeout(() => setShake((s) => (s === node.index ? null : s)), 500);
       return;
     }
@@ -189,7 +126,7 @@ export default function SmartCalendarClient() {
   if (loading || !mounted) {
     return (
       <div className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-8 text-center">
-        <p className="text-sm text-[var(--muted)]">Loading your path…</p>
+        <p className="text-sm text-[var(--muted)]">Loading your schedule…</p>
       </div>
     );
   }
@@ -206,7 +143,7 @@ export default function SmartCalendarClient() {
 
   return (
     <div className="space-y-6">
-      {/* ---- Player bar -------------------------------------------------- */}
+      {/* ---- Progress header --------------------------------------------- */}
       <div className="overflow-hidden rounded-[28px] bg-gradient-to-br from-[var(--accent-strong)] via-[var(--accent)] to-[#FF9A4D] p-6 text-white shadow-lg">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -235,7 +172,7 @@ export default function SmartCalendarClient() {
 
         {nextNode && (
           <p className="mt-3 text-sm text-white/90">
-            Next up · {longDate(new Date(nextNode.date))}
+            Next up · {longDate(new Date(nextNode.date))} · {nextNode.startTime}–{nextNode.endTime}
             {" · "}
             {daysBetween(new Date(nextNode.date), new Date()) === 1
               ? "tomorrow"
@@ -244,177 +181,217 @@ export default function SmartCalendarClient() {
         )}
       </div>
 
-      {/* ---- Level switch ------------------------------------------------ */}
-      {data.nextLevel && (
-        <div className="flex flex-wrap items-center gap-2">
+      {/* ---- Controls ----------------------------------------------------- */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* View switch — the only thing on this page a student can change. */}
+        <div className="inline-flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-1">
           <button
-            onClick={() => { setPreviewLevel(null); setOpenIndex(null); }}
+            onClick={() => chooseView("path")}
+            aria-pressed={view === "path"}
             className={`rounded-full px-4 py-2 text-sm font-bold transition ${
-              !data.viewingNextLevel ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] hover:bg-[var(--surface-alt)]"
+              view === "path" ? "bg-[var(--accent)] text-white shadow" : "text-[var(--muted)] hover:text-[var(--foreground)]"
             }`}
           >
-            {data.currentLevel} · current
+            🗺️ Journey map
           </button>
           <button
-            onClick={() => { setPreviewLevel(data.nextLevel!); setOpenIndex(null); }}
+            onClick={() => chooseView("calendar")}
+            aria-pressed={view === "calendar"}
             className={`rounded-full px-4 py-2 text-sm font-bold transition ${
-              data.viewingNextLevel ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] hover:bg-[var(--surface-alt)]"
+              view === "calendar" ? "bg-[var(--accent)] text-white shadow" : "text-[var(--muted)] hover:text-[var(--foreground)]"
             }`}
           >
-            🔮 {data.nextLevel} · peek ahead
+            🗓️ Calendar
           </button>
         </div>
-      )}
 
-      {/* ---- The path ---------------------------------------------------- */}
-      {data.months.map((month) => {
-        const monthNodes = nodes.filter((n) =>
-          month.sessions.some((s) => s.date === n.date),
-        );
-        if (monthNodes.length === 0) return null;
+        {data.nextLevel && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => { setPreviewLevel(null); setOpenIndex(null); }}
+              className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+                !data.viewingNextLevel ? "bg-slate-900 text-white" : "border border-[var(--border)] hover:bg-[var(--surface-alt)]"
+              }`}
+            >
+              {data.currentLevel} · current
+            </button>
+            <button
+              onClick={() => { setPreviewLevel(data.nextLevel!); setOpenIndex(null); }}
+              className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+                data.viewingNextLevel ? "bg-slate-900 text-white" : "border border-[var(--border)] hover:bg-[var(--surface-alt)]"
+              }`}
+            >
+              🔮 {data.nextLevel} · peek ahead
+            </button>
+          </div>
+        )}
+      </div>
 
-        return (
-          <div key={month.label} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-6">
-            <div className="mb-6 flex items-baseline justify-between gap-3">
-              <h3 className="text-xl font-extrabold">{month.label}</h3>
-              <span className="text-xs font-semibold text-[var(--muted)]">{month.patternLabel}</span>
-            </div>
-
-            <div className="relative pt-4">
-              {monthNodes.map((node, i) => {
-                // Gentle S-curve: the path leans left and right as it descends.
-                const lean = LEAN[i % LEAN.length];
-                const prevLean = i > 0 ? LEAN[(i - 1) % LEAN.length] : lean;
-                const date = new Date(node.date);
-                const open = openIndex === node.index;
+      {/* ---- The schedule ------------------------------------------------- */}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={view}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.2 }}
+        >
+          {view === "calendar" ? (
+            <ClassGridView months={data.months} nodes={nodes} />
+          ) : (
+            <div className="space-y-6">
+              {data.months.map((month) => {
+                const monthNodes = nodes.filter((n) =>
+                  month.sessions.some((s) => s.date === n.date),
+                );
+                if (monthNodes.length === 0) return null;
 
                 return (
-                  <div key={node.date} className="relative flex flex-col items-center">
-                    {/* Stepping stones between nodes, tracking the sway so the
-                        path stays visually connected as it leans. */}
-                    {i > 0 && (
-                      <div className="flex h-8 flex-col items-center justify-center gap-1.5">
-                        {[0.25, 0.5, 0.75].map((t) => (
-                          <span
-                            key={t}
-                            style={{ marginLeft: prevLean + (lean - prevLean) * t }}
-                            className="h-1.5 w-1.5 rounded-full bg-[var(--border)]"
-                          />
-                        ))}
-                      </div>
-                    )}
+                  <div key={month.label} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-6">
+                    <div className="mb-6 flex items-baseline justify-between gap-3">
+                      <h3 className="text-xl font-extrabold">{month.label}</h3>
+                      <span className="text-xs font-semibold text-[var(--muted)]">{month.patternLabel}</span>
+                    </div>
 
-                    <motion.button
-                      onClick={() => tapNode(node)}
-                      style={{ marginLeft: lean }}
-                      animate={
-                        shake === node.index
-                          ? { x: [0, -8, 8, -6, 6, 0] }
-                          : node.isNext
-                            ? { y: [0, -5, 0] }
-                            : {}
-                      }
-                      transition={
-                        shake === node.index
-                          ? { duration: 0.45 }
-                          : { duration: 1.8, repeat: Infinity, ease: "easeInOut" }
-                      }
-                      whileTap={{ scale: 0.92 }}
-                      aria-label={`${node.weekday} ${shortDate(date)} — ${
-                        node.state === "locked" ? "locked" : node.state === "off" ? node.status : "open"
-                      }`}
-                      className={`relative flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-full border-[5px] shadow-lg transition ${
-                        node.state === "done"
-                          ? "border-emerald-600 bg-emerald-500 text-white"
-                          : node.state === "today"
-                            ? "border-amber-500 bg-amber-400 text-white"
-                            : node.state === "off"
-                              ? "border-red-300 bg-red-100 text-red-600"
-                              : "border-slate-300 bg-slate-200 text-slate-500"
-                      }`}
-                    >
-                      {node.state === "done" ? (
-                        <CheckIcon />
-                      ) : node.state === "today" ? (
-                        <StarIcon />
-                      ) : node.state === "off" ? (
-                        <span className="text-2xl">✕</span>
-                      ) : (
-                        <LockIcon className="h-7 w-7" />
-                      )}
+                    <div className="relative pt-4">
+                      {monthNodes.map((node, i) => {
+                        const lean = LEAN[i % LEAN.length];
+                        const prevLean = i > 0 ? LEAN[(i - 1) % LEAN.length] : lean;
+                        const date = new Date(node.date);
+                        const open = openIndex === node.index;
+                        const summary = nodeSummary(node);
 
-                      {/* The next class gets the "sealed door" ribbon. */}
-                      {node.isNext && (
-                        <span className="absolute -top-8 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1 text-[10px] font-extrabold uppercase tracking-wide text-white shadow-lg">
-                          Up next
-                        </span>
-                      )}
+                        return (
+                          <div key={node.date} className="relative flex flex-col items-center">
+                            {/* Stepping stones between nodes, tracking the sway
+                                so the path stays visually connected. */}
+                            {i > 0 && (
+                              <div className="flex h-8 flex-col items-center justify-center gap-1.5">
+                                {[0.25, 0.5, 0.75].map((t) => (
+                                  <span
+                                    key={t}
+                                    style={{ marginLeft: prevLean + (lean - prevLean) * t }}
+                                    className="h-1.5 w-1.5 rounded-full bg-[var(--border)]"
+                                  />
+                                ))}
+                              </div>
+                            )}
 
-                      <span className="absolute -bottom-6 whitespace-nowrap text-[11px] font-bold text-[var(--muted)]">
-                        {node.weekday} {date.getDate()}
-                      </span>
-                    </motion.button>
-
-                    <div className="h-8" />
-
-                    <AnimatePresence>
-                      {open && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -8, height: 0 }}
-                          animate={{ opacity: 1, y: 0, height: "auto" }}
-                          exit={{ opacity: 0, y: -8, height: 0 }}
-                          className="mb-4 w-full max-w-md overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm"
-                        >
-                          <p className="text-sm font-bold">
-                            {node.topic || node.defaultFocus}
-                          </p>
-                          <p className="mt-1 text-xs text-[var(--muted)]">
-                            {node.startTime}–{node.endTime} · {SLOT_LABEL[node.timeSlot] ?? node.timeSlot}
-                            {node.lecturerName && ` · ${node.lecturerName}`}
-                          </p>
-                          {node.status === "postponed" && (
-                            <p className="mt-2 rounded-lg bg-red-100 px-2 py-1 text-xs font-bold uppercase text-red-700">
-                              Postponed
-                              {node.postponedTo && ` — moved to ${shortDate(new Date(node.postponedTo))}`}
-                            </p>
-                          )}
-                          {node.material && (
-                            <a
-                              href={node.material.filePath}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-bold text-[var(--accent)]"
+                            <motion.button
+                              onClick={() => tapNode(node)}
+                              style={{ marginLeft: lean }}
+                              animate={
+                                shake === node.index
+                                  ? { x: [0, -8, 8, -6, 6, 0] }
+                                  : node.isNext
+                                    ? { y: [0, -5, 0] }
+                                    : {}
+                              }
+                              transition={
+                                shake === node.index
+                                  ? { duration: 0.45 }
+                                  : { duration: 1.8, repeat: Infinity, ease: "easeInOut" }
+                              }
+                              whileTap={{ scale: 0.92 }}
+                              aria-label={`${node.weekday} ${shortDate(date)}, ${node.startTime} to ${node.endTime}${
+                                node.state === "locked" ? ", topic locked" : ""
+                              }`}
+                              className={`relative flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-full border-[5px] shadow-lg transition ${
+                                node.state === "done"
+                                  ? "border-emerald-600 bg-emerald-500 text-white"
+                                  : node.state === "today"
+                                    ? "border-amber-500 bg-amber-400 text-white"
+                                    : node.state === "off"
+                                      ? "border-red-300 bg-red-100 text-red-600"
+                                      : "border-slate-300 bg-slate-200 text-slate-500"
+                              }`}
                             >
-                              📎 {node.material.title}
-                            </a>
-                          )}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                              {node.state === "done" ? (
+                                <CheckIcon />
+                              ) : node.state === "today" ? (
+                                <StarIcon />
+                              ) : node.state === "off" ? (
+                                <span className="text-2xl">✕</span>
+                              ) : (
+                                <LockIcon className="h-7 w-7" />
+                              )}
 
-                    {/* Locked taps explain themselves instead of doing nothing. */}
-                    <AnimatePresence>
-                      {shake === node.index && (
-                        <motion.p
-                          initial={{ opacity: 0, y: -6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
-                          className="mb-4 rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-bold text-white"
-                        >
-                          🔒 Unlocks on {shortDate(date)}
-                        </motion.p>
-                      )}
-                    </AnimatePresence>
+                              {node.isNext && (
+                                <span className="absolute -top-8 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1 text-[10px] font-extrabold uppercase tracking-wide text-white shadow-lg">
+                                  Up next
+                                </span>
+                              )}
+
+                              <span className="absolute -bottom-6 whitespace-nowrap text-[11px] font-bold text-[var(--muted)]">
+                                {node.weekday} {date.getDate()}
+                              </span>
+                            </motion.button>
+
+                            <div className="h-8" />
+
+                            <AnimatePresence>
+                              {open && (
+                                <motion.div
+                                  initial={{ opacity: 0, y: -8, height: 0 }}
+                                  animate={{ opacity: 1, y: 0, height: "auto" }}
+                                  exit={{ opacity: 0, y: -8, height: 0 }}
+                                  className="mb-4 w-full max-w-md overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm"
+                                >
+                                  {/* The time is shown whatever the state —
+                                      only the topic is withheld. */}
+                                  <p className="text-sm font-extrabold">
+                                    {summary.when}
+                                    <span className="ml-2 text-xs font-semibold text-[var(--muted)]">
+                                      {summary.slot} session
+                                    </span>
+                                  </p>
+
+                                  {summary.topic ? (
+                                    <p className="mt-1.5 text-sm">{summary.topic}</p>
+                                  ) : (
+                                    <p className="mt-1.5 text-sm font-semibold text-slate-500">
+                                      🔒 Topic unlocks on {summary.lockedUntil}
+                                    </p>
+                                  )}
+
+                                  {node.status === "postponed" && (
+                                    <p className="mt-2 rounded-lg bg-red-100 px-2 py-1 text-xs font-bold uppercase text-red-700">
+                                      Postponed
+                                      {node.postponedTo && ` — moved to ${shortDate(new Date(node.postponedTo))}`}
+                                    </p>
+                                  )}
+
+                                  {summary.tutor && (
+                                    <p className="mt-2 text-xs text-[var(--muted)]">with {summary.tutor}</p>
+                                  )}
+
+                                  {summary.material && (
+                                    <a
+                                      href={summary.material.filePath}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-bold text-[var(--accent)]"
+                                    >
+                                      📎 {summary.material.title}
+                                    </a>
+                                  )}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
             </div>
-          </div>
-        );
-      })}
+          )}
+        </motion.div>
+      </AnimatePresence>
 
       <p className="text-center text-xs text-[var(--muted)]">
-        Each class unlocks on the day it runs — no peeking ahead.
+        Times are always visible · each class topic unlocks on the day it runs
       </p>
     </div>
   );
