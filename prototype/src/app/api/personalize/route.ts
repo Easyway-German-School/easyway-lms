@@ -3,6 +3,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse, NextRequest } from "next/server";
 import { generatePersonalizedPlan } from "@/lib/ai";
+import { mayAutoCreateStudent } from "@/lib/candidates";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions as any) as any;
@@ -20,6 +21,10 @@ export async function GET(request: NextRequest) {
   try {
     let student = await prisma.student.findUnique({ where: { userId: session.user.id as string } });
     if (!student) {
+      // Candidates have no Student record by design.
+      if (!(await mayAutoCreateStudent(session.user.id as string))) {
+        return NextResponse.json({ error: 'Not a student account' }, { status: 403 });
+      }
       student = await prisma.student.create({ data: { userId: session.user.id as string, level: 'A1', pathway: 'Goethe exam mastery' } });
     }
 

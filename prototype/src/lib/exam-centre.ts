@@ -53,6 +53,8 @@ export async function seatState(examId: string, now = new Date()): Promise<SeatS
 export type RegisterInput = {
   examId: string;
   studentId?: string | null;
+  /** Account that owns the booking — set for students and candidates alike. */
+  userId?: string | null;
   candidateName?: string | null;
   candidateEmail?: string | null;
   candidatePhone?: string | null;
@@ -117,6 +119,7 @@ export async function registerForExam(input: RegisterInput, now = new Date()): P
         data: {
           examId: exam.id,
           studentId: input.studentId ?? null,
+          userId: input.userId ?? null,
           candidateName: input.candidateName ?? null,
           candidateEmail: input.candidateEmail?.toLowerCase() ?? null,
           candidatePhone: input.candidatePhone ?? null,

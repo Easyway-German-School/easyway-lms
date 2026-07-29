@@ -35,7 +35,10 @@ export default function SignInForm() {
       return;
     }
 
-    router.push("/dashboard");
+    // Candidates have no student portal to land in.
+    const me = await fetch("/api/auth/session", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+    const role = String(me?.user?.role ?? "").toLowerCase();
+    router.push(role === "candidate" ? "/candidate" : "/dashboard");
   };
 
   if (loading) {

@@ -3,6 +3,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { derivePaymentStatus } from "@/lib/payment";
 import { NextResponse } from "next/server";
+import { mayAutoCreateStudent } from "@/lib/candidates";
 
 export async function GET() {
   try {
@@ -39,6 +40,12 @@ export async function GET() {
           activePrograms: [],
           outcome: null,
         });
+      }
+
+      // An exam candidate has no Student record on purpose; creating one here
+      // would quietly promote them into the full student portal.
+      if (!(await mayAutoCreateStudent(session.user.id as string))) {
+        return NextResponse.json({ error: "Not a student account", candidate: true }, { status: 403 });
       }
 
       student = await prisma.student.create({

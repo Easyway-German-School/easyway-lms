@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOpenExams, registerForExam } from "@/lib/exam-centre";
 import { queueEmail } from "@/lib/email-queue";
+import { ensureCandidateAccount } from "@/lib/candidates";
 
 /**
  * Public exam centre: browse open sittings and book a seat.
@@ -79,9 +80,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // An external candidate gets a real account, so they can come back and
+    // see their seat, result and certificate rather than relying on one email.
+    // An existing account of any role is reused — a former student booking an
+    // ÖSD sitting is the same person and must not end up with two logins.
+    let ownerUserId: string | null = session?.user?.id ?? null;
+    let claimLink: string | undefined;
+
+    if (!studentId && candidateEmail) {
+      const account = await ensureCandidateAccount({ email: candidateEmail, name: candidateName });
+      ownerUserId = account.userId;
+      claimLink = account.claimUrl;
+    }
+
     const result = await registerForExam({
       examId,
       studentId,
+      userId: ownerUserId,
       candidateName: studentId ? null : candidateName,
       candidateEmail: studentId ? null : candidateEmail,
       candidatePhone: studentId ? null : candidatePhone,
@@ -104,6 +119,11 @@ export async function POST(req: NextRequest) {
       const feeLine = result.fee
         ? `<p><strong>Fee:</strong> ₦${result.fee.toLocaleString()} — your seat is held once payment is received.</p>`
         : "";
+      // Only new accounts get a claim link; existing ones already have a password.
+      const claimBlock = claimLink
+        ? `<p>We have created an account so you can check your booking, seat and result at any time.
+             <a href="${claimLink}">Set your password</a> to sign in.</p>`
+        : "";
       await queueEmail({
         to: notifyEmail,
         subject: `Registration confirmed — ${exam.name}`,
@@ -117,6 +137,7 @@ export async function POST(req: NextRequest) {
              ${exam.branch?.name ? `<strong>Centre:</strong> ${exam.branch.name}<br/>` : ""}
              <strong>Awarding body:</strong> ${exam.examBody}</p>
           ${feeLine}
+          ${claimBlock}
           <p>Please arrive 30 minutes early with a valid photo ID.</p>
         `,
       });
@@ -126,6 +147,9 @@ export async function POST(req: NextRequest) {
       registrationId: result.registrationId,
       seatNumber: result.seatNumber,
       fee: result.fee,
+      // Returned only to the browser that just registered with this address,
+      // so a new candidate can set a password without waiting for the email.
+      claimUrl: claimLink ?? null,
     });
   } catch (error) {
     console.error("Exam registration POST failed:", error);

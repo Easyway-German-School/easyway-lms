@@ -23,6 +23,12 @@ model User {
    * existing admins keep full access by defaulting to super.
    */
   adminRole String?
+  /**
+   * False on an account created by an exam booking, which starts with a
+   * password nobody knows. The claim link works only while this is false, so
+   * a forwarded confirmation email cannot be used to take the account later.
+   */
+  passwordClaimed Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -34,6 +40,7 @@ model User {
   comments        Comment[]
   channelReads    ChannelRead[]
   pushSubs        PushSubscription[]
+  examRegistrations ExamRegistration[]
 }
 
 model Session {
@@ -118,6 +125,13 @@ model ExamRegistration {
    */
   studentId String?
   student   Student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /**
+   * The account that owns this booking — set for students AND candidates, so
+   * "my exams" is a single query rather than two paths that can disagree.
+   */
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   /** Details captured for candidates who are not students. */
   candidateName  String?
@@ -532,6 +546,8 @@ enum Role {
   STUDENT
   LECTURER
   ADMIN
+  /** Registered for an exam only — no classes, materials or community. */
+  CANDIDATE
 }
 
 // ---------------------------------------------------------------------------

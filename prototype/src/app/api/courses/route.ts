@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse, NextRequest } from "next/server";
+import { mayAutoCreateStudent } from "@/lib/candidates";
 
 const defaultCoursesByPathway: Record<string, Array<{ title: string; description: string; duration: number; level: string; content: string }>> = {
   "Goethe exam mastery": [
@@ -261,6 +262,10 @@ export async function GET(request: NextRequest) {
       const userRole = (session.user as any)?.role;
       if (userRole === "LECTURER" || userRole === "ADMIN") {
         return NextResponse.json({ pathway: "Goethe exam mastery", courses: [] });
+      }
+      // Candidates see no courses, and must not be given a Student record.
+      if (!(await mayAutoCreateStudent(session.user.id as string))) {
+        return NextResponse.json({ pathway: null, courses: [] });
       }
 
       student = await prisma.student.create({

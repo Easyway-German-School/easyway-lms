@@ -32,7 +32,14 @@ export const authOptions: AuthOptions = {
         // Only check role mismatch if a specific role was requested
         if (credentials.role) {
           const requestedRole = normalizeRole(credentials.role);
-          if (requestedRole !== storedRole) {
+          // Exam candidates sign in through the student form — they have no
+          // portal of their own to be sent to — and are routed to /candidate
+          // afterwards based on their real role.
+          const acceptable = requestedRole === "student"
+            ? ["student", "candidate"]
+            : [requestedRole];
+
+          if (!acceptable.includes(storedRole)) {
             const portalName = storedRole === "lecturer" ? "lecturer" : "student";
             throw new Error(`This account is registered as a ${portalName} account. Please use the correct portal.`);
           }
