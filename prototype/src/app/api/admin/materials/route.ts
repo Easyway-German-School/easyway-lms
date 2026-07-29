@@ -5,10 +5,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
+import { adminHasCapability } from "@/lib/admin-roles";
 
 async function isAdmin(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  return user?.role?.toLowerCase() === "admin";
+  // Admin AND cleared for this area — see src/lib/admin-roles.ts.
+  return adminHasCapability(userId, "materials");
 }
 
 export async function GET(req: NextRequest) {

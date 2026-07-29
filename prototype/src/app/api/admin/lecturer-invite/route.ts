@@ -3,10 +3,11 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getLecturerInviteCode, setLecturerInviteCode, clearLecturerInviteCode } from "@/lib/lecturer-invite";
+import { adminHasCapability } from "@/lib/admin-roles";
 
 async function isAdmin(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  return user?.role?.toLowerCase() === "admin";
+  // Admin AND cleared for this area — see src/lib/admin-roles.ts.
+  return adminHasCapability(userId, "staff");
 }
 
 export async function GET(request: NextRequest) {

@@ -16,6 +16,13 @@ model User {
   name      String?
   password  String
   role      Role     @default(STUDENT)
+  /**
+   * Which kind of admin, when role is ADMIN: super | secretary | data_comm.
+   * Null for everyone else. Deliberately a separate field rather than more
+   * Role values, so every existing auth check on ADMIN keeps working and
+   * existing admins keep full access by defaulting to super.
+   */
+  adminRole String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
