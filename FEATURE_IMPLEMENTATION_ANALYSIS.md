@@ -24,7 +24,6 @@ The EASYWAY LMS has **solid AI/personalization foundations** with mixed gamifica
 ### Components & Pages
 - [LessonPackagePreview.tsx](src/components/LessonPackagePreview.tsx) - UI preview for generated packages
 - [lesson-builder/page.tsx](src/app/lecturer/lesson-builder/page.tsx) - Full AI generation workflow
-- [DashboardClient.tsx](src/components/DashboardClient.tsx) - Displays lesson cards
 
 ### AI Generation Details
 **File: [src/lib/ai.ts](src/lib/ai.ts) (Lines 76-146)**
