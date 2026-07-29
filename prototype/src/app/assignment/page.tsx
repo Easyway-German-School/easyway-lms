@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import StudentShell from "@/components/StudentShell";
 import StudentAccessGate from "@/components/StudentAccessGate";
+import AssignmentsPanel from "@/components/AssignmentsPanel";
 
 function AssignmentContent() {
   const { status } = useSession();
@@ -106,6 +107,28 @@ function AssignmentContent() {
       setIsSubmitting(false);
     }
   };
+
+  // No lessonId means the student came from the sidebar rather than from a
+  // specific lesson, so show everything set for their level. Without this the
+  // page waited forever for a lesson that was never going to load.
+  if (!lessonId) {
+    return (
+      <StudentShell>
+        <StudentAccessGate hasAccess={paymentReady} loading={paymentLoading}>
+          <div className="px-6 py-8">
+            <div className="mb-6">
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Your work</p>
+              <h1 className="mt-2 text-3xl font-bold">Assignments</h1>
+              <p className="mt-2 text-sm text-[var(--muted)]">
+                Documents to hand in and timed quizzes set by your tutor.
+              </p>
+            </div>
+            <AssignmentsPanel />
+          </div>
+        </StudentAccessGate>
+      </StudentShell>
+    );
+  }
 
   if (status === "loading" || !lesson) {
     return (

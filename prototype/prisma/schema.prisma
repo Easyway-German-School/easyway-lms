@@ -89,6 +89,7 @@ model Student {
   notifications     Notification[]
   invoices          Invoice[]
   payments          Payment[]
+  assignmentSubmissions AssignmentSubmission[]
 }
 
 model Branch {
@@ -103,6 +104,7 @@ model Branch {
   notifications Notification[]
   spaces        Space[]
   classSessions ClassSession[]
+  assignments   Assignment[]
 }
 
 model ExamRegistration {
@@ -440,6 +442,7 @@ model Lecturer {
   materials     Material[]
   students      Student[]
   classSessions ClassSession[]
+  assignments   Assignment[]
 }
 
 model Class {
@@ -641,4 +644,76 @@ model ClassSession {
 
   @@unique([branchId, level, date, timeSlot])
   @@index([branchId, level, date])
+}
+
+// ---------------------------------------------------------------------------
+// Assignments: documents to hand in, and timed quizzes.
+//
+// Quiz questions and answers live in JSON rather than their own tables. The
+// shape is small, always read as a whole, and never queried across rows — a
+// question has no meaning outside its quiz — so tables would buy nothing.
+// ---------------------------------------------------------------------------
+
+model Assignment {
+  id       String  @id @default(cuid())
+  level    String
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  title       String
+  description String?
+
+  /** document | quiz */
+  type String @default("document")
+
+  /** Quizzes only. Null means untimed. */
+  timeLimitMinutes Int?
+
+  /** Quizzes only: [{ prompt, options: string[], answerIndex }] */
+  questions Json?
+
+  dueAt     DateTime?
+  published Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submissions AssignmentSubmission[]
+
+  @@index([level, branchId])
+}
+
+model AssignmentSubmission {
+  id           String     @id @default(cuid())
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /** Documents: the written answer and/or an uploaded file. */
+  text     String?
+  filePath String?
+  fileName String?
+
+  /** Quizzes: the chosen option index per question. */
+  answers Json?
+
+  score    Int?
+  feedback String?
+
+  /**
+   * Set when a timed quiz is opened. The deadline is derived from this on the
+   * server, so a student cannot win time by reloading or editing the clock.
+   */
+  startedAt   DateTime?
+  submittedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assignmentId, studentId])
 }
