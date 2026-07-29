@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { classifyPaymentTransaction } from "@/lib/payment";
+import { settleExamFee } from "@/lib/exam-payments";
 
 // Paystack signs every webhook with HMAC SHA512 of the raw body, keyed by the
 // secret key, in the x-paystack-signature header. Without this check anyone who
@@ -52,6 +53,21 @@ export async function POST(request: Request) {
 
     const data = payload.data || {};
     const metadata = data.metadata || {};
+
+    // Exam fees settle here as well as on the redirect. Relying on the
+    // redirect alone loses the payment whenever someone closes the tab on
+    // Paystack's success page — the money is taken and the seat stays unpaid.
+    // settleExamFee is idempotent, so both paths arriving is harmless.
+    if (metadata.kind === "exam_fee" && metadata.registrationId) {
+      const amount = Math.round(Number(data.amount || 0) / 100);
+      const result = await settleExamFee({
+        registrationId: String(metadata.registrationId),
+        reference: String(data.reference || ""),
+        amount,
+      });
+      return NextResponse.json({ received: true, examFee: result });
+    }
+
     const rawStudentId = String(metadata.studentId || metadata.userId || "");
     const pathwayId = String(metadata.pathwayId || "");
     const pathwayName = metadata.pathwayName || "program";

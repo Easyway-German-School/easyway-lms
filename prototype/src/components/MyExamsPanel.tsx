@@ -59,6 +59,7 @@ export default function MyExamsPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [payingId, setPayingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -94,6 +95,25 @@ export default function MyExamsPanel() {
       setError(e instanceof Error ? e.message : "Could not register");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function payFee(registrationId: string) {
+    setPayingId(registrationId);
+    try {
+      const res = await fetch("/api/exam-centre/pay", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ registrationId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not start payment");
+      // Straight to Paystack; the seat is settled by the webhook regardless of
+      // whether they make it back to the callback page.
+      window.location.href = data.authorization_url;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start payment");
+      setPayingId(null);
     }
   }
 
@@ -142,9 +162,18 @@ export default function MyExamsPanel() {
                         {e.seatNumber && ` · seat ${e.seatNumber}`}
                       </p>
                       {e.paymentStatus === "unpaid" && e.fee && (
-                        <p className="mt-2 text-xs text-red-600">
-                          ₦{e.fee.toLocaleString()} payable — your seat is held once the fee is received.
-                        </p>
+                        <div className="mt-3">
+                          <p className="text-xs text-red-600">
+                            ₦{e.fee.toLocaleString()} payable — your seat is held once the fee is received.
+                          </p>
+                          <button
+                            onClick={() => payFee(e.registrationId)}
+                            disabled={payingId === e.registrationId}
+                            className="mt-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                          >
+                            {payingId === e.registrationId ? "Opening checkout…" : `Pay ₦${e.fee.toLocaleString()}`}
+                          </button>
+                        </div>
                       )}
                     </div>
 

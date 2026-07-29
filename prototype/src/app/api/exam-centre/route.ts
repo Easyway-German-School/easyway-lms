@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { listOpenExams, registerForExam } from "@/lib/exam-centre";
 import { queueEmail } from "@/lib/email-queue";
 import { ensureCandidateAccount } from "@/lib/candidates";
+import { payToken } from "@/lib/exam-payments";
 
 /**
  * Public exam centre: browse open sittings and book a seat.
@@ -150,6 +151,9 @@ export async function POST(req: NextRequest) {
       // Returned only to the browser that just registered with this address,
       // so a new candidate can set a password without waiting for the email.
       claimUrl: claimLink ?? null,
+      // Lets them pay immediately, before claiming the account. Bound to this
+      // one registration.
+      payToken: result.fee ? payToken(result.registrationId) : null,
     });
   } catch (error) {
     console.error("Exam registration POST failed:", error);
