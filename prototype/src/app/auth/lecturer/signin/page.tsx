@@ -4,7 +4,7 @@ import { useState, Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Interactive3DCharacterLoader from "@/components/Interactive3DCharacterLoader";
+import BrandLoader from "@/components/BrandLoader";
 import PasswordInput from "@/components/PasswordInput";
 
 function LecturerSignInContent() {
@@ -42,7 +42,7 @@ function LecturerSignInContent() {
   };
 
   if (loading) {
-    return <Interactive3DCharacterLoader />;
+    return <BrandLoader fullscreen size="lg" title="Anmeldung läuft…" message="Signing you in to your teaching dashboard." />;
   }
 
   return (

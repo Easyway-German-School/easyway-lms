@@ -4,7 +4,7 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Interactive3DCharacterLoader from "@/components/Interactive3DCharacterLoader";
+import BrandLoader from "@/components/BrandLoader";
 import PasswordInput from "@/components/PasswordInput";
 
 export default function AdminSignInForm() {
@@ -38,7 +38,7 @@ export default function AdminSignInForm() {
   };
 
   if (loading) {
-    return <Interactive3DCharacterLoader />;
+    return <BrandLoader fullscreen size="lg" title="Anmeldung läuft…" message="Signing you in to the admin console." />;
   }
 
   return (

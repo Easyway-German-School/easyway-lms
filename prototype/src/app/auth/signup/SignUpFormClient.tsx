@@ -3,7 +3,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { buildApiUrl } from "@/lib/api";
-import Interactive3DCharacterLoader from "@/components/Interactive3DCharacterLoader";
+import BrandLoader from "@/components/BrandLoader";
 import { countries, nigerianStates, packageOptions, professionOptions } from "@/app/auth/signup/options";
 import PasswordInput from "@/components/PasswordInput";
 
@@ -271,7 +271,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   };
 
   if (loading) {
-    return <Interactive3DCharacterLoader />;
+    return (
+      <BrandLoader
+        fullscreen
+        size="lg"
+        title="Wir richten dein Konto ein…"
+        message="Setting up your account and reserving your place in class."
+      />
+    );
   }
 
   return (

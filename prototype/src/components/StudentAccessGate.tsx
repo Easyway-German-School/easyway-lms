@@ -4,7 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { usePathname } from "next/navigation";
 import LoadingExperience from "@/components/LoadingExperience";
-import Interactive3DCharacterLoader from "@/components/Interactive3DCharacterLoader";
+import BrandLoader from "@/components/BrandLoader";
 
 export default function StudentAccessGate({
   children,
@@ -76,7 +76,7 @@ export default function StudentAccessGate({
   if (loading) {
     return (
       <div className="px-6 py-10">
-        <Interactive3DCharacterLoader />
+        <BrandLoader />
       </div>
     );
   }

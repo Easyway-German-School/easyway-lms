@@ -375,3 +375,72 @@ html.theme-custom ::selection {
   opacity: 0.09;
   pointer-events: none;
 }
+
+/* ---------------------------------------------------------------------------
+   Brand loader
+   Animation primitives for <BrandLoader />. Namespaced ew- because this file
+   already carries several generic keyframe names (shimmer, float, blob) from
+   the marketing scenes and they must not collide.
+   --------------------------------------------------------------------------- */
+
+/* The emblem breathes rather than spins — the artwork has a fixed "up"
+   (the mortarboard) and rotating it would read as broken. */
+@keyframes ew-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-6px) scale(1.035); }
+}
+
+/* Counter-rotating orbit rings in the brand orange/teal. */
+@keyframes ew-orbit {
+  to { transform: rotate(360deg); }
+}
+
+/* Light sweeping across the emblem, masked to the badge shape. */
+@keyframes ew-sweep {
+  0%   { transform: translateX(-120%) skewX(-18deg); opacity: 0; }
+  35%  { opacity: 1; }
+  100% { transform: translateX(220%) skewX(-18deg); opacity: 0; }
+}
+
+/* Concentric rings expanding out from the emblem. */
+@keyframes ew-ripple {
+  0%   { transform: scale(0.82); opacity: 0.5; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+
+/* Indeterminate bar that travels rather than filling, so it never implies a
+   percentage we don't actually know. */
+@keyframes ew-track {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+@keyframes ew-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.ew-breathe { animation: ew-breathe 3.6s ease-in-out infinite; }
+.ew-orbit   { animation: ew-orbit 7s linear infinite; }
+.ew-orbit-reverse { animation: ew-orbit 11s linear infinite reverse; }
+.ew-sweep   { animation: ew-sweep 2.9s ease-in-out infinite; }
+.ew-ripple  { animation: ew-ripple 2.8s ease-out infinite; }
+.ew-track   { animation: ew-track 1.6s ease-in-out infinite; }
+.ew-fade-up { animation: ew-fade-up 0.45s ease-out both; }
+
+/* Vestibular safety: hold the layout, drop the motion. */
+@media (prefers-reduced-motion: reduce) {
+  .ew-breathe,
+  .ew-orbit,
+  .ew-orbit-reverse,
+  .ew-sweep,
+  .ew-ripple,
+  .ew-fade-up {
+    animation: none !important;
+  }
+  /* The bar keeps a slow pulse so "still working" stays legible. */
+  .ew-track {
+    animation: pulseSlow 2s ease-in-out infinite !important;
+    transform: none !important;
+  }
+}

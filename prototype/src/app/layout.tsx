@@ -6,14 +6,16 @@ import PageContainer from "@/components/PageContainer";
 export const metadata: Metadata = {
   title: "Easyway German Language School",
   description: "Web-based learner portal for Easyway German Language School",
-  // Uses public/logo-mark.png when present (the square emblem reads far better
-  // at 16px than the full lockup), otherwise the wordmark.
+  // The square emblem, not the horizontal lockup — the lockup is illegible at
+  // 16px. Sizes are declared so browsers pick without downscaling the 512.
   icons: {
     icon: [
-      { url: "/logo-mark.png", type: "image/png" },
-      { url: "/logo.png", type: "image/png" },
+      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: "/logo-mark.png",
+    // Flattened onto white: iOS renders PNG transparency as black.
+    apple: { url: "/apple-icon.png", sizes: "180x180" },
   },
 };
 

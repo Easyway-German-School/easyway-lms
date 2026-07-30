@@ -4,7 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import Interactive3DCharacterLoader from "@/components/Interactive3DCharacterLoader";
+import BrandLoader from "@/components/BrandLoader";
 import PaymentSuccessToastClient from "@/components/PaymentSuccessToastClient";
 
 type Mission = {
@@ -458,7 +458,7 @@ function DashboardContent() {
     return (
       <StudentShell>
         <PaymentSuccessToastClient />
-        <Interactive3DCharacterLoader />
+        <BrandLoader />
       </StudentShell>
     );
   }
