@@ -144,6 +144,7 @@ const navItems: NavItem[] = [
   { label: 'Branches', href: '/admin/branches', capability: 'branches' as const, icon: <BranchIcon className="h-4 w-4" />, group: 'Academics' },
   { label: 'Lecturers', href: '/admin/lecturer-invite', capability: 'staff' as const, icon: <LecturerIcon className="h-4 w-4" />, group: 'Academics' },
   { label: 'Attendance', href: '/admin/attendance', capability: 'attendance' as const, icon: <AttendanceIcon className="h-4 w-4" />, group: 'Academics' },
+  { label: 'Promotions', href: '/admin/promotions', capability: 'students' as const, icon: <StudentsIcon className="h-4 w-4" />, group: 'Academics' },
   
   { label: 'Exams', href: '/admin/exams', capability: 'exams' as const, icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
   { label: 'Exam centre', href: '/admin/exam-centre', capability: 'exams' as const, icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },

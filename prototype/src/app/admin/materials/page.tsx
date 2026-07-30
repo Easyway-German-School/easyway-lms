@@ -182,7 +182,12 @@ export default function MaterialsPage() {
 
         {/* Upload Form */}
         <div className="bg-white rounded-lg border p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">Upload Material</h2>
+          <h2 className="text-xl font-semibold mb-1">Upload Material</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            The file lands in the Materials library of every student at this course&apos;s level, and shows
+            on their dashboard as newly added. Tutors can also attach it to a specific day from
+            the class timetable.
+          </p>
           <form onSubmit={handleUpload} className="grid gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">

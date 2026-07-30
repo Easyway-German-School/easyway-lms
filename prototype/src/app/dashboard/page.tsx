@@ -66,6 +66,7 @@ const TUITION_FEES: Record<string, number> = {
 
 import StudentShell from "@/components/StudentShell";
 import UpcomingExamsCard from "@/components/UpcomingExamsCard";
+import NewMaterialsCard from "@/components/NewMaterialsCard";
 
 export default function DashboardPage() {
   return (
@@ -674,6 +675,8 @@ function DashboardContent() {
               {/* Bookings made on the public exam-centre page appear here too —
                   both write the same registrations. */}
               <UpcomingExamsCard />
+
+              <NewMaterialsCard />
 
               <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
                 <div className="flex items-center justify-between gap-4">

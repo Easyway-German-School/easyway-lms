@@ -171,7 +171,12 @@ export default function LecturerMaterials() {
           {/* Upload Form */}
           {showForm && (
             <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
-              <h2 className="text-lg font-bold text-[var(--foreground)] mb-4">Upload New Material</h2>
+              <h2 className="text-lg font-bold text-[var(--foreground)] mb-1">Upload New Material</h2>
+              <p className="mb-4 text-sm text-[var(--muted)]">
+                Students at this course&apos;s level get it in their Materials library and see it flagged as
+                newly added on their dashboard. To tie it to one class day instead, attach it from
+                the Timetable page.
+              </p>
               <form onSubmit={handleUpload} className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
