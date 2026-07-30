@@ -40,6 +40,7 @@ export async function GET(req: NextRequest) {
       branchId: student.branchId,
       level,
       batch,
+      sessionSlot: student.sessionSlot,
       now: new Date(),
       months: 2,
     });

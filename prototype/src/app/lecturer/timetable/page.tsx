@@ -47,6 +47,7 @@ export default function LecturerTimetablePage() {
   const [months, setMonths] = useState<Month[]>([]);
   const [branchId, setBranchId] = useState("");
   const [level, setLevel] = useState("A1");
+  const [slot, setSlot] = useState("morning");
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -72,7 +73,7 @@ export default function LecturerTimetablePage() {
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/lecturer/sessions?branchId=${encodeURIComponent(branchId)}&level=${encodeURIComponent(level)}`,
+        `/api/lecturer/sessions?branchId=${encodeURIComponent(branchId)}&level=${encodeURIComponent(level)}&slot=${encodeURIComponent(slot)}`,
         { cache: "no-store" },
       );
       if (!res.ok) throw new Error("Unable to load the timetable");
@@ -85,7 +86,7 @@ export default function LecturerTimetablePage() {
     } finally {
       setLoading(false);
     }
-  }, [branchId, level]);
+  }, [branchId, level, slot]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -99,7 +100,10 @@ export default function LecturerTimetablePage() {
           branchId,
           level,
           date: session.date,
-          timeSlot: patch.timeSlot ?? session.timeSlot,
+          // The sitting comes from the page filter, never from the row: it is
+          // part of the row's identity, so editing it here would silently move
+          // the day into a different class.
+          timeSlot: slot,
           topic: patch.topic ?? session.topic,
           notes: patch.notes ?? session.notes,
           status: patch.status ?? session.status,
@@ -138,7 +142,17 @@ export default function LecturerTimetablePage() {
           <select value={level} onChange={(e) => setLevel(e.target.value)} className="rounded-lg border px-3 py-2 text-sm">
             {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
           </select>
+          <select value={slot} onChange={(e) => setSlot(e.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+            <option value="morning">Morning session</option>
+            <option value="afternoon">Afternoon session</option>
+            <option value="evening">Evening session</option>
+          </select>
         </div>
+
+        <p className="mb-4 text-xs text-slate-500">
+          You are editing the <strong className="capitalize">{slot}</strong> sitting. The same level at a
+          different sitting is a separate class with its own topics — switch above to edit it.
+        </p>
 
         {error && <div className="mb-4 rounded bg-red-100 p-4 text-red-700">{error}</div>}
 
@@ -193,19 +207,6 @@ export default function LecturerTimetablePage() {
                                 onChange={(e) => setEditing({ ...editing!, topic: e.target.value })}
                                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
                               />
-                            </label>
-
-                            <label>
-                              <span className="text-xs font-medium text-slate-600">Session</span>
-                              <select
-                                defaultValue={s.timeSlot}
-                                onChange={(e) => setEditing({ ...editing!, timeSlot: e.target.value })}
-                                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                              >
-                                <option value="morning">Morning</option>
-                                <option value="afternoon">Afternoon</option>
-                                <option value="evening">Evening</option>
-                              </select>
                             </label>
 
                             <label>

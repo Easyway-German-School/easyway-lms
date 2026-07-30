@@ -30,6 +30,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [religion, setReligion] = useState("");
   const [profession, setProfession] = useState("");
   const [batch, setBatch] = useState("");
+  const [sessionSlot, setSessionSlot] = useState("morning");
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [city, setCity] = useState("");
@@ -199,6 +200,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         role: branchRole,
         branchId,
         level,
+        sessionSlot,
         pathway,
         batch,
         classApplied: level,
@@ -352,6 +354,17 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                     <option value="C1">C1 — professional class</option>
                   </select>
                   <p className="mt-2 text-xs text-[var(--muted)]">Choose the level that best matches your current language confidence. A1/A2 are for beginners, B1/B2 are for learners moving into stronger communication, and C1 is for professional learners.</p>
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-1">
+                <div>
+                  <label htmlFor="sessionSlot" className="block text-sm font-semibold text-[var(--muted)]">Which session suits you?</label>
+                  <select id="sessionSlot" name="sessionSlot" value={sessionSlot} onChange={(e) => setSessionSlot(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
+                    <option value="morning">Morning — 9:00 to 11:00</option>
+                    <option value="afternoon">Afternoon — 13:00 to 15:00</option>
+                    <option value="evening">Evening — 17:00 to 19:00</option>
+                  </select>
+                  <p className="mt-2 text-xs text-[var(--muted)]">Your calendar and your tutor come from the session you pick. Contact your branch office if you need to change it later.</p>
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-3">

@@ -43,6 +43,9 @@ export async function GET(req: NextRequest) {
     const branchId = req.nextUrl.searchParams.get("branchId");
     const level = req.nextUrl.searchParams.get("level") ?? "A1";
     const batch = req.nextUrl.searchParams.get("batch");
+    // Which sitting is being edited. A branch can run the same level morning
+    // and evening, and those are different classes with different topics.
+    const slot = normalizeSlot(req.nextUrl.searchParams.get("slot"));
 
     if (!branchId) {
       return NextResponse.json({ error: "branchId is required" }, { status: 400 });
@@ -52,6 +55,7 @@ export async function GET(req: NextRequest) {
       branchId,
       level,
       batch,
+      sessionSlot: slot,
       now: new Date(),
       months: 2,
     });

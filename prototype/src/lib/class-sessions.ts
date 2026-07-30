@@ -70,14 +70,23 @@ export type MergedMonth = Omit<ScheduleMonth, "sessions"> & { sessions: MergedSe
  * Build the merged timetable for one cohort.
  * `branchId` may be null for students without a branch — they still get the
  * generated skeleton, just with no overrides to apply.
+ *
+ * `sessionSlot` is the sitting the student actually attends. It has to be part
+ * of the query: ClassSession is unique on branch + level + date + timeSlot, so
+ * a branch running a morning AND an evening group of the same level has two
+ * rows for the same day. Matching on date alone would hand every student
+ * whichever of the two happened to be read last.
  */
 export async function getMergedSchedule(args: {
   branchId: string | null;
   level: string;
   batch?: string | null;
+  sessionSlot?: string | null;
   now?: Date;
   months?: number;
-}): Promise<{ level: string; batchMonth: string; batchYear: number; months: MergedMonth[] }> {
+}): Promise<{ level: string; batchMonth: string; batchYear: number; sessionSlot: TimeSlot; months: MergedMonth[] }> {
+  const slot = normalizeSlot(args.sessionSlot);
+
   const generated = generatePersonalizedSchedule({
     level: args.level,
     batch: args.batch ?? null,
@@ -87,13 +96,14 @@ export async function getMergedSchedule(args: {
 
   const allDates = generated.months.flatMap((m) => m.sessions.map((s) => dayKey(s.date)));
   if (!args.branchId || allDates.length === 0) {
-    return { ...generated, months: generated.months.map(withDefaults) };
+    return { ...generated, sessionSlot: slot, months: generated.months.map((m) => withDefaults(m, slot)) };
   }
 
   const overrides = await prisma.classSession.findMany({
     where: {
       branchId: args.branchId,
       level: generated.level,
+      timeSlot: slot,
       date: { in: allDates },
     },
     include: {
@@ -110,7 +120,8 @@ export async function getMergedSchedule(args: {
     ...month,
     sessions: month.sessions.map((s) => {
       const override = byDay.get(dayKey(s.date).toISOString());
-      const timeSlot = normalizeSlot(override?.timeSlot);
+      // An unedited day still belongs to the student's own sitting.
+      const timeSlot = normalizeSlot(override?.timeSlot ?? slot);
       const defaults = SLOT_DEFAULTS[timeSlot];
 
       return {
@@ -134,12 +145,12 @@ export async function getMergedSchedule(args: {
     }),
   }));
 
-  return { ...generated, months };
+  return { ...generated, sessionSlot: slot, months };
 }
 
 /** Shape an unedited month so the client only deals with one session type. */
-function withDefaults(month: ScheduleMonth): MergedMonth {
-  const defaults = SLOT_DEFAULTS.morning;
+function withDefaults(month: ScheduleMonth, slot: TimeSlot): MergedMonth {
+  const defaults = SLOT_DEFAULTS[slot];
   return {
     ...month,
     sessions: month.sessions.map((s) => ({
@@ -149,7 +160,7 @@ function withDefaults(month: ScheduleMonth): MergedMonth {
       title: s.title,
       defaultFocus: s.focus,
       slot: s.slot,
-      timeSlot: "morning" as TimeSlot,
+      timeSlot: slot,
       startTime: defaults.startTime,
       endTime: defaults.endTime,
       topic: null,

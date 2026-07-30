@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { assignStudentCode } from "@/lib/student-code";
+import { notifyAdminsOfRegistration } from "@/lib/admin-alerts";
 
 async function branchTableExists() {
   try {
@@ -40,6 +41,8 @@ export async function POST(request: NextRequest) {
       level,
       pathway,
       batch,
+      sessionSlot,
+      classType,
       // Admission extra fields
       gender,
       dob,
@@ -96,6 +99,12 @@ export async function POST(request: NextRequest) {
     const normalizedLevel = typeof level === "string" && level.trim() ? level : "A1";
     const normalizedPathway = typeof pathway === "string" && pathway.trim() ? pathway : "Goethe exam mastery";
     const normalizedBatch = typeof batch === "string" && batch.trim() ? batch : "";
+    const normalizedSessionSlot = ["morning", "afternoon", "evening"].includes(
+      String(sessionSlot ?? "").toLowerCase(),
+    )
+      ? String(sessionSlot).toLowerCase()
+      : "morning";
+    const normalizedClassType = String(classType ?? "").toLowerCase() === "private" ? "private" : "group";
 
     // Build admission payload to persist as JSON
     const normalizedAdmission: Record<string, unknown> = {
@@ -206,6 +215,8 @@ export async function POST(request: NextRequest) {
             create: ({
               level: normalizedLevel,
               pathway: normalizedPathway,
+              sessionSlot: normalizedSessionSlot,
+              classType: normalizedClassType,
               outcome: "Goethe C1 readiness + German work placement support",
               branchId: hasBranchTable ? normalizedBranchId : null,
               // store admission payload as JSON
@@ -250,6 +261,26 @@ export async function POST(request: NextRequest) {
       } catch (codeError) {
         console.error("Student code assignment failed:", codeError);
       }
+
+      // The office needs to know a registration landed. Queued, not sent
+      // inline, so a slow mail provider cannot delay the signup response.
+      const branchName = normalizedBranchId
+        ? (await prisma.branch.findUnique({
+            where: { id: normalizedBranchId },
+            select: { name: true },
+          }))?.name ?? null
+        : null;
+
+      await notifyAdminsOfRegistration({
+        studentName: normalizedName,
+        studentEmail: normalizedEmail,
+        studentCode,
+        level: normalizedLevel,
+        sessionSlot: normalizedSessionSlot,
+        pathway: normalizedPathway,
+        branchName,
+        classType: normalizedClassType,
+      });
     }
 
     return NextResponse.json(
