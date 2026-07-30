@@ -97,6 +97,30 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
     loadBranches();
   }, [initialBranchName]);
 
+  /**
+   * Prefill from an enrolment invite link.
+   *
+   * Read from window.location rather than useSearchParams so the component does
+   * not need a Suspense boundary. Runs once: it seeds the fields and then stays
+   * out of the way, so nothing the student subsequently types gets overwritten.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const prefill = (key: string, apply: (value: string) => void) => {
+      const value = params.get(key)?.trim();
+      if (value) apply(value);
+    };
+
+    prefill("email", setEmail);
+    prefill("name", setName);
+    prefill("level", (v) => setLevel(v.toUpperCase()));
+    prefill("branchId", setBranchId);
+    prefill("sessionSlot", (v) => {
+      const slot = v.toLowerCase();
+      if (["morning", "afternoon", "evening"].includes(slot)) setSessionSlot(slot);
+    });
+  }, []);
+
   // Returns the uploaded URL so callers can use it immediately — React state
   // updates (setPhotoUrl) are async and would still be stale in the same tick.
   const uploadFile = async (file: File): Promise<string> => {

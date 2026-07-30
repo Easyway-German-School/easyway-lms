@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { assignStudentCode } from "@/lib/student-code";
 import { notifyAdminsOfRegistration } from "@/lib/admin-alerts";
+import { linkLeadOnSignup } from "@/lib/leads";
 
 async function branchTableExists() {
   try {
@@ -257,6 +258,9 @@ export async function POST(request: NextRequest) {
             level: normalizedLevel,
             batch: (normalizedAdmission as any)?.batch,
           });
+          // Close the enquiry this signup came from, so the office stops
+          // chasing someone who has already enrolled.
+          await linkLeadOnSignup(normalizedEmail, created.id);
         }
       } catch (codeError) {
         console.error("Student code assignment failed:", codeError);

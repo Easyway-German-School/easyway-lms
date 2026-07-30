@@ -917,9 +917,12 @@ model Lead {
 
   /** Where the enquiry came from: website, campaign name, csv_import, walk_in. */
   source String @default("website")
-  /** new | contacted | converted | dropped */
+  /** new | invited | converted | dropped */
   status String @default("new")
   notes  String?
+
+  /** When the enrolment invite was last emailed, so the office can chase. */
+  invitedAt DateTime?
 
   /**
    * Set on conversion. One-to-one, so a Lead cannot be converted twice into
