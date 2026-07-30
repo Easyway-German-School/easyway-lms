@@ -76,6 +76,7 @@ export async function GET() {
         grade: string;
         passed: boolean;
         feedback: string | null;
+        submissionMode: string;
       }>;
       average: number;
     }>();
@@ -105,6 +106,7 @@ export async function GET() {
         grade: letterFor(g.score),
         passed: g.score >= PASS_MARK,
         feedback: g.feedback,
+        submissionMode: g.submissionMode,
       });
       byCourse.set(groupId, entry);
     }
@@ -135,6 +137,7 @@ export async function GET() {
         score: g.score,
         grade: letterFor(g.score),
         feedback: g.feedback,
+        submissionMode: g.submissionMode,
         createdAt: g.createdAt,
       })),
     });

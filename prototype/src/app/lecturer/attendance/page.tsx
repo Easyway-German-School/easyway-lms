@@ -29,6 +29,7 @@ export default function LecturerAttendance() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedCourse, setSelectedCourse] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
+  const [studentFilter, setStudentFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [marking, setMarking] = useState(false);
@@ -74,6 +75,7 @@ export default function LecturerAttendance() {
       if (!res.ok) throw new Error('Failed to fetch students');
       const data = await res.json();
       setStudents(data);
+      setStudentFilter('all');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch students');
     }
@@ -128,6 +130,9 @@ export default function LecturerAttendance() {
     );
   }
 
+  const visibleStudents =
+    studentFilter === 'all' ? students : students.filter((s) => s.id === studentFilter);
+
   return (
     <LecturerShell>
       <div className="h-screen overflow-y-auto">
@@ -150,10 +155,10 @@ export default function LecturerAttendance() {
           {/* Filters */}
           <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
             <h2 className="text-lg font-bold text-[var(--foreground)] mb-4">Attendance Details</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
-                  Select Course
+                  Select Class
                 </label>
                 <select
                   value={selectedCourse}
@@ -188,6 +193,24 @@ export default function LecturerAttendance() {
 
               <div>
                 <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
+                  Find student
+                </label>
+                <select
+                  value={studentFilter}
+                  onChange={(e) => setStudentFilter(e.target.value)}
+                  className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
+                >
+                  <option value="all">All students ({students.length})</option>
+                  {students.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
                   Summary
                 </label>
                 <div className="px-4 py-2 bg-[var(--surface-alt)] rounded-lg">
@@ -204,10 +227,24 @@ export default function LecturerAttendance() {
             <div className="text-center py-12">
               <p className="text-3xl mb-2">👥</p>
               <p className="text-[var(--foreground)] font-semibold">No students enrolled</p>
-              <p className="text-[var(--muted)] text-sm mt-1">Enroll students to your course to mark attendance</p>
+              <p className="text-[var(--muted)] text-sm mt-1">Enroll students to your class to mark attendance</p>
             </div>
           ) : (
             <>
+              {studentFilter !== 'all' && (
+                <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <span>
+                    Showing one student. Saving still records attendance for the whole class.
+                  </span>
+                  <button
+                    onClick={() => setStudentFilter('all')}
+                    className="font-semibold underline"
+                  >
+                    Show all students
+                  </button>
+                </div>
+              )}
+
               <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
                 <table className="w-full">
                   <thead className="bg-[var(--surface-alt)] border-b border-[var(--border)]">
@@ -219,7 +256,7 @@ export default function LecturerAttendance() {
                     </tr>
                   </thead>
                   <tbody>
-                    {students.map((student) => (
+                    {visibleStudents.map((student) => (
                       <tr
                         key={student.id}
                         className="border-b border-[var(--border)] hover:bg-[var(--surface-alt)] transition-colors"

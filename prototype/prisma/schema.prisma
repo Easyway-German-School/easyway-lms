@@ -69,6 +69,14 @@ model Student {
 
   status        String @default("active")
   level         String @default("A1") // A1, A2, B1, B2, C1, C2
+  /** morning | afternoon | evening — which sitting of their level they attend. */
+  sessionSlot   String @default("morning")
+  /**
+   * group | private. A private student sits no group timetable, so the
+   * generated branch+level schedule does not apply to them — their calendar
+   * comes from PrivateClass rows instead.
+   */
+  classType     String @default("group")
   pathway       String @default("Goethe exam mastery")
   examReadiness Int    @default(0)
   outcome       String @default("Goethe C1 readiness + German work placement support")
@@ -97,6 +105,8 @@ model Student {
   invoices          Invoice[]
   payments          Payment[]
   assignmentSubmissions AssignmentSubmission[]
+  privateClasses    PrivateClass[]
+  convertedFromLead Lead?
 }
 
 model Branch {
@@ -113,6 +123,8 @@ model Branch {
   classSessions ClassSession[]
   assignments   Assignment[]
   exams         Exam[]
+  lecturers     Lecturer[]
+  leads         Lead[]
 }
 
 model ExamRegistration {
@@ -256,7 +268,8 @@ model Material {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  classSessions ClassSession[]
+  classSessions  ClassSession[]
+  privateClasses PrivateClass[]
 }
 
 model Completion {
@@ -325,6 +338,13 @@ model Grade {
   score    Int // 0-100
   grade    String? // A, B, C, D, F
   feedback String? // grading feedback
+
+  /**
+   * platform | physical — whether the work was sat on the LMS or on paper in
+   * the branch. A physical score is keyed in by a tutor, so it has no
+   * submission record behind it and cannot be audited the same way.
+   */
+  submissionMode String @default("platform")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -469,6 +489,12 @@ model Lecturer {
   specialization String?
   bio            String?
   phone          String?
+
+  /** Which class a tutor takes: branch + level + session. */
+  branchId    String?
+  branch      Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  level       String?
+  sessionSlot String?
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -479,6 +505,7 @@ model Lecturer {
   students      Student[]
   classSessions ClassSession[]
   assignments   Assignment[]
+  privateClasses PrivateClass[]
 }
 
 model Class {
@@ -765,6 +792,9 @@ model AssignmentSubmission {
   score    Int?
   feedback String?
 
+  /** platform | physical — paper submissions are recorded by a tutor. */
+  submissionMode String @default("platform")
+
   /**
    * Set when a timed quiz is opened. The deadline is derived from this on the
    * server, so a student cannot win time by reloading or editing the clock.
@@ -825,4 +855,83 @@ model EmailSuppression {
   note   String?
 
   createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Private (one-to-one) classes.
+//
+// A private student has no branch+level timetable to generate from, so their
+// calendar is these rows and nothing else. Kept separate from ClassSession
+// because that model is keyed on branch + level + slot — the exact thing a
+// private class does not have.
+// ---------------------------------------------------------------------------
+
+model PrivateClass {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  scheduledAt     DateTime
+  durationMinutes Int     @default(60)
+  topic           String?
+  /** scheduled | completed | cancelled | postponed */
+  status          String  @default("scheduled")
+  notes           String?
+
+  materialId String?
+  material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId, scheduledAt])
+}
+
+// ---------------------------------------------------------------------------
+// Registration funnel.
+//
+// Enquiries land here, NOT in Student. A campaign can bring in thousands of
+// registrants who never pay or enrol, and putting those straight into the
+// roster would wreck every count the school reports on — class sizes, revenue
+// per branch, attendance rates. An admin converts a Lead into a real Student
+// (payment pending, access gated) when it is genuinely an enrolment.
+// ---------------------------------------------------------------------------
+
+model Lead {
+  id    String  @id @default(cuid())
+  name  String
+  email String  @unique
+  phone String?
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  /** Level they enquired about, and the sitting they asked for. */
+  interestedLevel String?
+  sessionSlot     String?
+  /** group | private */
+  classType       String  @default("group")
+
+  /** Where the enquiry came from: website, campaign name, csv_import, walk_in. */
+  source String @default("website")
+  /** new | contacted | converted | dropped */
+  status String @default("new")
+  notes  String?
+
+  /**
+   * Set on conversion. One-to-one, so a Lead cannot be converted twice into
+   * two competing student records.
+   */
+  convertedStudentId String?  @unique
+  convertedStudent   Student? @relation(fields: [convertedStudentId], references: [id], onDelete: SetNull)
+  convertedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([branchId, interestedLevel])
 }

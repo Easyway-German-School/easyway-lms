@@ -16,6 +16,7 @@ interface StudentGrade {
   grade: string;
   studentCode?: string | null;
   feedback?: string;
+  submissionMode?: string;
   graded?: boolean;
 }
 
@@ -86,7 +87,12 @@ export default function LecturerGrades() {
     }
   }
 
-  async function updateGrade(studentId: string, newScore: number, newFeedback?: string) {
+  async function updateGrade(
+    studentId: string,
+    newScore: number,
+    newFeedback?: string,
+    newSubmissionMode?: string,
+  ) {
     if (newScore < 0 || newScore > 100) {
       setError('Score must be between 0 and 100');
       return;
@@ -102,6 +108,7 @@ export default function LecturerGrades() {
           examId: selectedExam,
           score: newScore,
           feedback: newFeedback,
+          submissionMode: newSubmissionMode,
         }),
       });
 
@@ -111,7 +118,14 @@ export default function LecturerGrades() {
       setStudents(
         students.map((s) =>
           s.studentId === studentId
-            ? { ...s, score: updated.score, grade: updated.grade, feedback: updated.feedback ?? '', graded: true }
+            ? {
+                ...s,
+                score: updated.score,
+                grade: updated.grade,
+                feedback: updated.feedback ?? '',
+                submissionMode: updated.submissionMode ?? 'platform',
+                graded: true,
+              }
             : s
         )
       );
@@ -151,8 +165,8 @@ export default function LecturerGrades() {
         {/* Header */}
         <div className="bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6 border-b border-[var(--border)]">
           <div className="max-w-7xl mx-auto">
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">Enter Exam Grades 📝</h1>
-            <p className="text-[var(--muted)] mt-2">Record and manage student exam scores</p>
+            <h1 className="text-3xl font-bold text-[var(--foreground)]">Enter Exam/Test Results 📝</h1>
+            <p className="text-[var(--muted)] mt-2">Record and manage student exam and test scores</p>
           </div>
         </div>
 
@@ -166,11 +180,11 @@ export default function LecturerGrades() {
 
           {/* Exam Selection */}
           <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
-            <h2 className="text-lg font-bold text-[var(--foreground)] mb-4">Select Exam</h2>
+            <h2 className="text-lg font-bold text-[var(--foreground)] mb-4">Select Exam/Test</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
-                  Choose Exam
+                  Choose Exam/Test
                 </label>
                 <select
                   value={selectedExam}
@@ -241,6 +255,7 @@ export default function LecturerGrades() {
                     <th className="px-4 py-3 text-left text-sm font-semibold text-[var(--foreground)]">Email</th>
                     <th className="px-4 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Score (out of 100)</th>
                     <th className="px-4 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Grade</th>
+                    <th className="px-4 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Sat</th>
                     <th className="px-4 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Action</th>
                   </tr>
                 </thead>
@@ -282,7 +297,8 @@ export default function LecturerGrades() {
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
                                 const fb = (document.getElementById(`feedback-${student.studentId}`) as HTMLInputElement | null)?.value;
-                                updateGrade(student.studentId, parseInt(e.currentTarget.value), fb);
+                                const mode = (document.getElementById(`mode-${student.studentId}`) as HTMLSelectElement | null)?.value;
+                                updateGrade(student.studentId, parseInt(e.currentTarget.value), fb, mode);
                               }
                             }}
                             autoFocus
@@ -313,15 +329,41 @@ export default function LecturerGrades() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         {editingId === student.studentId ? (
+                          <select
+                            id={`mode-${student.studentId}`}
+                            defaultValue={student.submissionMode ?? 'platform'}
+                            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)]"
+                          >
+                            <option value="platform">On platform</option>
+                            <option value="physical">On paper</option>
+                          </select>
+                        ) : student.graded === false ? (
+                          <span className="text-[var(--muted)]">—</span>
+                        ) : (
+                          <span
+                            className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                              student.submissionMode === 'physical'
+                                ? 'bg-purple-100 text-purple-700'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {student.submissionMode === 'physical' ? 'Paper' : 'Platform'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {editingId === student.studentId ? (
                           <div className="flex items-center justify-center gap-2">
                             <button
                               onClick={() => {
                                 const feedbackEl = document.getElementById(`feedback-${student.studentId}`) as HTMLInputElement | null;
                                 const scoreEl = feedbackEl?.closest('tr')?.querySelector<HTMLInputElement>('input[type=number]');
+                                const modeEl = document.getElementById(`mode-${student.studentId}`) as HTMLSelectElement | null;
                                 updateGrade(
                                   student.studentId,
                                   parseInt(scoreEl?.value ?? String(student.score)),
                                   feedbackEl?.value,
+                                  modeEl?.value,
                                 );
                               }}
                               disabled={saving}

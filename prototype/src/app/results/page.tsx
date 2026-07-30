@@ -14,6 +14,7 @@ type ExamResult = {
   grade: string;
   passed: boolean;
   feedback: string | null;
+  submissionMode: string;
 };
 
 type CourseResults = {
@@ -30,6 +31,7 @@ type Coursework = {
   score: number;
   grade: string;
   feedback: string | null;
+  submissionMode: string;
   createdAt: string;
 };
 
@@ -180,6 +182,7 @@ export default function ResultsPage() {
                           <p className="truncate text-sm font-semibold">{r.examName}</p>
                           <p className="text-xs text-[var(--muted)]">
                             {new Date(r.examDate).toLocaleDateString()}
+                            {r.submissionMode === "physical" && " · sat on paper"}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">

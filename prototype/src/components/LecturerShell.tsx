@@ -88,12 +88,12 @@ function SettingsIcon({ className }: { className?: string }) {
 
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/lecturer/dashboard', icon: <DashboardIcon className="h-4 w-4" /> },
-  { label: 'My Classes', href: '/lecturer/classes', icon: <ClassIcon className="h-4 w-4" /> },
+  { label: 'Customise my classes', href: '/lecturer/classes', icon: <ClassIcon className="h-4 w-4" /> },
   { label: 'Timetable', href: '/lecturer/timetable', icon: <ClassIcon className="h-4 w-4" /> },
   { label: 'Assignments', href: '/lecturer/assignments', icon: <GradeIcon className="h-4 w-4" /> },
   { label: 'Materials', href: '/lecturer/materials', icon: <MaterialIcon className="h-4 w-4" /> },
   { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon className="h-4 w-4" /> },
-  { label: 'Grades', href: '/lecturer/grades', icon: <GradeIcon className="h-4 w-4" /> },
+  { label: 'Exam/Test', href: '/lecturer/grades', icon: <GradeIcon className="h-4 w-4" /> },
   { label: 'Messages', href: '/lecturer/messages', icon: <MessageIcon className="h-4 w-4" /> },
   { label: 'Settings', href: '/lecturer/settings', icon: <SettingsIcon className="h-4 w-4" /> },
 ];

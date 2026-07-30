@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
         totalScore: 100,
         grade: calculateGrade(score),
         feedback: grade?.feedback ?? '',
+        submissionMode: grade?.submissionMode ?? 'platform',
         // Distinguishes "scored zero" from "not marked yet" — both show 0.
         graded: Boolean(grade),
       };
