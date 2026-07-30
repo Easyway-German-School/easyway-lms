@@ -38,10 +38,13 @@ export async function GET(request: Request) {
 
   if (search) {
     whereClause.AND = whereClause.AND || [];
+    // No `mode: "insensitive"` here: SQLite does not support it and Prisma
+    // rejects the whole query, so every search returned a 500. SQLite's LIKE is
+    // already case-insensitive for ASCII, which is what these columns hold.
     whereClause.AND.push({
       OR: [
-        { user: { name: { contains: search, mode: "insensitive" } } },
-        { user: { email: { contains: search, mode: "insensitive" } } },
+        { user: { name: { contains: search } } },
+        { user: { email: { contains: search } } },
       ],
     });
   }
@@ -163,6 +166,10 @@ export async function PATCH(request: Request) {
   const branchId = typeof body.branchId === "string" ? body.branchId : null;
   const tutorId = typeof body.tutorId === "string" ? body.tutorId : null;
   const status = typeof body.status === "string" ? body.status : undefined;
+  const classType = body.classType === "private" || body.classType === "group" ? body.classType : undefined;
+  const sessionSlot = ["morning", "afternoon", "evening"].includes(String(body.sessionSlot))
+    ? String(body.sessionSlot)
+    : undefined;
 
   if (!studentId) {
     return NextResponse.json({ error: "Student ID is required" }, { status: 400 });
@@ -185,11 +192,20 @@ export async function PATCH(request: Request) {
     if (name) updateUser.name = name;
     if (email) updateUser.email = email;
 
-    const updateStudent = {} as { level?: string; branchId?: string | null; status?: string; tutorId?: string | null };
+    const updateStudent = {} as {
+      level?: string;
+      branchId?: string | null;
+      status?: string;
+      tutorId?: string | null;
+      classType?: string;
+      sessionSlot?: string;
+    };
     if (level) updateStudent.level = level;
     if (body.branchId !== undefined) updateStudent.branchId = branchId;
     if (body.tutorId !== undefined) updateStudent.tutorId = tutorId;
     if (status) updateStudent.status = status;
+    if (classType) updateStudent.classType = classType;
+    if (sessionSlot) updateStudent.sessionSlot = sessionSlot;
 
     await prisma.user.update({ where: { id: student.userId }, data: updateUser });
     await prisma.student.update({ where: { id: studentId }, data: updateStudent });

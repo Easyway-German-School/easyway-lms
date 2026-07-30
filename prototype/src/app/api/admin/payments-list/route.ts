@@ -24,9 +24,12 @@ export async function GET(request: Request) {
   if (status) where.status = status;
   if (method) where.method = method;
   if (search) {
+    // No `mode: "insensitive"`: SQLite does not support it and Prisma rejects
+    // the whole query, so every payment search returned a 500. SQLite's LIKE is
+    // already case-insensitive for ASCII.
     where.OR = [
-      { student: { user: { name: { contains: search, mode: "insensitive" } } } },
-      { student: { user: { email: { contains: search, mode: "insensitive" } } } },
+      { student: { user: { name: { contains: search } } } },
+      { student: { user: { email: { contains: search } } } },
     ];
   }
 

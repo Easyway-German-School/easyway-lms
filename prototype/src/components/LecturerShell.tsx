@@ -90,6 +90,7 @@ const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/lecturer/dashboard', icon: <DashboardIcon className="h-4 w-4" /> },
   { label: 'Customise my classes', href: '/lecturer/classes', icon: <ClassIcon className="h-4 w-4" /> },
   { label: 'Timetable', href: '/lecturer/timetable', icon: <ClassIcon className="h-4 w-4" /> },
+  { label: 'Private classes', href: '/lecturer/private-classes', icon: <ClassIcon className="h-4 w-4" /> },
   { label: 'Assignments', href: '/lecturer/assignments', icon: <GradeIcon className="h-4 w-4" /> },
   { label: 'Materials', href: '/lecturer/materials', icon: <MaterialIcon className="h-4 w-4" /> },
   { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon className="h-4 w-4" /> },

@@ -46,6 +46,30 @@ function normalize(input: LeadInput) {
   };
 }
 
+/**
+ * The subset of a normalised lead that is safe to write over an existing row.
+ *
+ * A CSV without a `session` column must not blank the sitting someone chose on
+ * the web form, and an import must not downgrade a private enquiry to a group
+ * one just because `classType` defaults to "group". So only fields the caller
+ * actually supplied are updated; everything else is left as it was.
+ */
+function updatablePatch(input: LeadInput, data: ReturnType<typeof normalize>) {
+  const patch: Record<string, string | null> = { name: data.name };
+
+  if (data.phone !== null) patch.phone = data.phone;
+  if (data.branchId !== null) patch.branchId = data.branchId;
+  if (data.interestedLevel !== null) patch.interestedLevel = data.interestedLevel;
+  if (data.sessionSlot !== null) patch.sessionSlot = data.sessionSlot;
+  if (data.notes !== null) patch.notes = data.notes;
+  // These two have non-null defaults, so presence has to be checked on the raw
+  // input rather than on the normalised value.
+  if (input.classType) patch.classType = data.classType;
+  if (input.source) patch.source = data.source;
+
+  return patch;
+}
+
 export type CaptureResult =
   | { ok: true; leadId: string; duplicate: boolean }
   | { ok: false; error: string };
@@ -82,7 +106,10 @@ export async function captureLead(input: LeadInput): Promise<CaptureResult> {
     if (existing.status === "converted") {
       return { ok: true, leadId: existing.id, duplicate: true };
     }
-    await prisma.lead.update({ where: { id: existing.id }, data });
+    await prisma.lead.update({
+      where: { id: existing.id },
+      data: updatablePatch(input, data),
+    });
     return { ok: true, leadId: existing.id, duplicate: true };
   }
 

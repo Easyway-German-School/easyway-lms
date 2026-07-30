@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getMergedSchedule } from "@/lib/class-sessions";
+import { getPrivateSchedule } from "@/lib/private-classes";
 import { nextLevelAfter } from "@/lib/levels";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -29,6 +30,26 @@ export async function GET(req: NextRequest) {
     const batch = typeof admission.batch === "string" ? admission.batch : null;
 
     const nextLevel = nextLevelAfter(student.level);
+
+    // A private student sits no group rotation. Sending them the generated
+    // timetable would tell them to attend on days they have no class.
+    if (student.classType === "private") {
+      const schedule = await getPrivateSchedule({
+        studentId: student.id,
+        level: student.level,
+        now: new Date(),
+        months: 2,
+      });
+
+      return NextResponse.json({
+        ...schedule,
+        currentLevel: student.level,
+        nextLevel,
+        viewingNextLevel: false,
+        classType: "private",
+        provider: "private-classes",
+      });
+    }
 
     // Students can preview the timetable for the level they move up to, but
     // only that one — ?level= is not a way to browse the whole school.
@@ -76,6 +97,7 @@ export async function GET(req: NextRequest) {
       currentLevel: student.level,
       nextLevel,
       viewingNextLevel: viewingNext,
+      classType: "group",
       provider: "batch-level-engine",
     });
   } catch (error) {

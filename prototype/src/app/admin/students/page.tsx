@@ -76,6 +76,8 @@ export default function AdminStudentsPage() {
   const [newBranchId, setNewBranchId] = useState<string>("");
   const [newTutorId, setNewTutorId] = useState<string>("");
   const [newStatus, setNewStatus] = useState("active");
+  const [newClassType, setNewClassType] = useState("group");
+  const [newSessionSlot, setNewSessionSlot] = useState("morning");
   const [studentError, setStudentError] = useState("");
   const [selectedAdmission, setSelectedAdmission] = useState<AdmissionData>(null);
   const [selectedStudentName, setSelectedStudentName] = useState("");
@@ -144,6 +146,8 @@ export default function AdminStudentsPage() {
       branchId: newBranchId || null,
       tutorId: newTutorId || null,
       status: newStatus,
+      classType: newClassType,
+      sessionSlot: newSessionSlot,
     } as Record<string, unknown>;
 
     let res: Response;
@@ -213,6 +217,8 @@ export default function AdminStudentsPage() {
     setNewBranchId(student.branch?.id || "");
     setNewTutorId(student.tutor?.id || "");
     setNewStatus(student.status || "active");
+    setNewClassType(student.classType || "group");
+    setNewSessionSlot(student.sessionSlot || "morning");
     setStudentError("");
     setShowStudentForm(true);
   }
@@ -226,6 +232,8 @@ export default function AdminStudentsPage() {
     setNewBranchId("");
     setNewTutorId("");
     setNewStatus("active");
+    setNewClassType("group");
+    setNewSessionSlot("morning");
     setStudentError("");
     setShowStudentForm(false);
   }
@@ -585,6 +593,35 @@ export default function AdminStudentsPage() {
                   <option value="paused">Paused</option>
                   <option value="graduated">Graduated</option>
                 </select>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Session</span>
+                <select
+                  value={newSessionSlot}
+                  onChange={(event) => setNewSessionSlot(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="morning">Morning</option>
+                  <option value="afternoon">Afternoon</option>
+                  <option value="evening">Evening</option>
+                </select>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Class type</span>
+                <select
+                  value={newClassType}
+                  onChange={(event) => setNewClassType(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="group">Group class</option>
+                  <option value="private">Private (one-to-one)</option>
+                </select>
+                {newClassType === "private" && (
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Private students follow no group timetable. Their calendar comes only from
+                    sessions booked on the tutor&apos;s Private classes page.
+                  </span>
+                )}
               </label>
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
