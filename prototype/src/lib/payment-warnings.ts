@@ -6,7 +6,7 @@ import { sendPushToUsers } from "@/lib/push";
  * Warns students before their account locks for non-payment.
  *
  * Access to classes, assignments, attendance and certificates is gated on
- * tuition being fully paid (see StudentAccessGate). Locking someone out with
+ * tuition being paid (see PaymentLockScreen). Locking someone out with
  * no warning is the kind of thing that loses a student rather than collecting
  * a fee, so this gives three escalating notices first.
  *

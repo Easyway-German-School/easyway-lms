@@ -1,352 +1,788 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { Button } from "@/components/Buttons";
 import StudentShell from "@/components/StudentShell";
+import BrandLoader from "@/components/BrandLoader";
+import { useGamification } from "@/lib/useGamification";
+import { uploadImage, validateImageFile } from "@/lib/upload";
+import type { Badge } from "@/lib/gamification";
 
-export default function ProfilePage() {
-  const [profile, setProfile] = useState<any>(null);
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
-  const [formState, setFormState] = useState({
-    fullName: "",
-    gender: "",
-    dateOfBirth: "",
-    phone: "",
-    email: "",
-    address: "",
-    branch: "",
-    currentLevel: "",
-    currentCourse: "",
-    preferredExam: "",
-  });
+type Profile = {
+  studentCode: string;
+  fullName: string;
+  gender: string;
+  dateOfBirth: string;
+  email: string;
+  phone: string;
+  address: string;
+  branch: string;
+  currentLevel: string;
+  currentCourse: string;
+  assignedTutor: string;
+  registrationDate: string;
+  paymentStatus: string;
+  preferredExam: string;
+  targetRoute: string;
+  emergencyContact: string;
+  photoUrl: string;
+};
+
+const EMPTY_FORM = {
+  fullName: "",
+  gender: "",
+  dateOfBirth: "",
+  phone: "",
+  email: "",
+  address: "",
+  branch: "",
+  currentLevel: "",
+  currentCourse: "",
+  preferredExam: "",
+};
+
+const TABS = ["Overview", "Achievements", "Details"] as const;
+type Tab = (typeof TABS)[number];
+
+function initialsOf(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+/** A number that counts up when it first appears, like a game HUD. */
+function CountUp({ value, duration = 900 }: { value: number; duration?: number }) {
+  const [shown, setShown] = useState(0);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
-    async function loadProfile() {
-      const response = await fetch("/api/student/profile");
-      const data = await response.json();
-      const student = data?.student || data;
-      const user = data?.user || {};
+    if (reduceMotion) {
+      setShown(value);
+      return;
+    }
+    let frame = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      // easeOutCubic, so it decelerates into the final figure
+      const t = Math.min(1, (now - start) / duration);
+      setShown(Math.round(value * (1 - Math.pow(1 - t, 3))));
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value, duration, reduceMotion]);
 
-      const loaded = {
-        // The official code, not the internal cuid — this is what appears on
-        // certificates and exam entries.
-        id: student?.studentCode || "Not yet issued",
-        fullName: user?.name || student?.name || "Learner",
-        gender: student?.admission?.gender || "Female",
-        dateOfBirth: student?.admission?.dob || "1998-05-14",
-        email: user?.email || "student@example.com",
-        phone: student?.admission?.phone || "+234 803 123 4567",
-        address: student?.admission?.address || "12 Victoria Island Road, Lagos, Nigeria",
-        branch: student?.branch?.name || student?.branch || "Lagos Branch",
-        currentLevel: student?.level || "B1",
-        currentCourse: student?.pathway || "German for Relocation",
-        currentWeek: student?.currentWeek || "Week 6",
-        assignedTutor: student?.tutor || "Coach Lena",
-        attendancePercentage: student?.attendancePercentage || "92%",
-        registrationDate: student?.createdAt ? new Date(student.createdAt).toLocaleDateString() : "10 April 2026",
-        paymentStatus: student?.paymentStatus || "Pending",
-        paymentBalance: student?.paymentSummary?.balance ?? 0,
-        requiredDeposit: student?.paymentSummary?.requiredDeposit ?? 0,
-        tuitionFee: student?.paymentSummary?.tuitionFee ?? 150000,
-        totalPaid: student?.paymentSummary?.totalPaid ?? 0,
-        preferredExam: student?.admission?.preferredExam || student?.preferredExam || "Goethe",
-        targetRoute: student?.admission?.targetRoute || student?.targetRoute || "Skilled Worker Route",
-        emergencyContact: student?.admission?.emergencyContactName
-          ? `${student.admission.emergencyContactName} · ${student.admission.emergencyContactInfo}`
-          : "Baba Yusuf · +234 803 987 6543",
-        photoUrl:
-          student?.photoUrl ||
-          "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=facearea&w=400&h=400&q=80",
-      };
+  return <>{shown.toLocaleString()}</>;
+}
 
-      setProfile(loaded);
-      setFormState({
-        fullName: loaded.fullName,
-        gender: loaded.gender,
-        dateOfBirth: loaded.dateOfBirth,
-        phone: loaded.phone,
-        email: loaded.email,
-        address: loaded.address,
-        branch: loaded.branch,
-        currentLevel: loaded.currentLevel,
-        currentCourse: loaded.currentCourse,
-        preferredExam: loaded.preferredExam,
-      });
+function StatPill({
+  label,
+  value,
+  suffix = "",
+  icon,
+  index,
+}: {
+  label: string;
+  value: number;
+  suffix?: string;
+  icon: string;
+  index: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.1 + index * 0.07, type: "spring", stiffness: 120, damping: 16 }}
+      className="flex-1 rounded-3xl border border-white/10 bg-white/[0.06] px-4 py-4 text-center backdrop-blur-xl"
+    >
+      <p className="text-lg">{icon}</p>
+      <p className="mt-1 text-2xl font-bold text-white sm:text-3xl">
+        <CountUp value={value} />
+        {suffix}
+      </p>
+      <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">{label}</p>
+    </motion.div>
+  );
+}
+
+function BadgeTile({ badge, index }: { badge: Badge; index: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ delay: index * 0.05, type: "spring", stiffness: 160, damping: 18 }}
+      whileHover={{ y: -4 }}
+      className={`relative overflow-hidden rounded-3xl border p-5 text-center transition ${
+        badge.earned
+          ? "border-[var(--accent)]/40 bg-gradient-to-b from-[var(--accent)]/12 to-transparent shadow-[0_16px_40px_rgba(255,102,0,0.14)]"
+          : "border-slate-200 bg-slate-50"
+      }`}
+    >
+      <div
+        className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl text-2xl ${
+          badge.earned ? "bg-[var(--accent)]/15" : "bg-slate-200 grayscale"
+        }`}
+      >
+        {badge.icon}
+      </div>
+      <p className={`mt-3 text-sm font-bold ${badge.earned ? "text-slate-900" : "text-slate-500"}`}>
+        {badge.name}
+      </p>
+      <p className="mt-1 text-xs text-slate-500">{badge.description}</p>
+
+      {badge.earned ? (
+        <p className="mt-3 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--accent)]">Earned</p>
+      ) : (
+        <div className="mt-3">
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+            <motion.div
+              className="h-full rounded-full bg-slate-400"
+              initial={{ width: 0 }}
+              animate={{ width: `${badge.progress}%` }}
+              transition={{ duration: 0.8, delay: 0.2 + index * 0.05 }}
+            />
+          </div>
+          <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+            {badge.progress}%
+          </p>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function DetailCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--muted)]">{label}</p>
+      <p className="mt-2 text-sm font-medium text-[var(--foreground)]">{value}</p>
+    </div>
+  );
+}
+
+export default function ProfilePage() {
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [tab, setTab] = useState<Tab>("Overview");
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [formState, setFormState] = useState(EMPTY_FORM);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { game } = useGamification();
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/student/profile");
+        if (!response.ok) throw new Error("Could not load your profile");
+        const data = await response.json();
+        if (!active) return;
+
+        const student = data?.student ?? {};
+        const user = data?.user ?? {};
+        const admission = student?.admission ?? {};
+
+        const loaded: Profile = {
+          // The official code, not the internal cuid — this is what appears on
+          // certificates and exam entries.
+          studentCode: student?.studentCode || "Not yet issued",
+          fullName: user?.name || "Learner",
+          gender: admission?.gender || "—",
+          dateOfBirth: admission?.dob || "—",
+          email: user?.email || "—",
+          phone: admission?.phone || "—",
+          address: admission?.address || "—",
+          branch: student?.branch?.name || admission?.branch || "—",
+          currentLevel: student?.level || "A1",
+          currentCourse: student?.pathway || "—",
+          assignedTutor: student?.tutor?.name || "To be assigned",
+          registrationDate: user?.createdAt
+            ? new Date(user.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+            : "—",
+          paymentStatus: student?.paymentStatus || "Pending",
+          preferredExam: admission?.preferredExam || "Goethe",
+          targetRoute: admission?.targetRoute || "—",
+          emergencyContact: admission?.emergencyContactName
+            ? `${admission.emergencyContactName} · ${admission.emergencyContactInfo ?? ""}`.trim()
+            : "—",
+          photoUrl: student?.photoUrl || admission?.photoUrl || "",
+        };
+
+        setProfile(loaded);
+        setFormState({
+          fullName: loaded.fullName,
+          gender: loaded.gender === "—" ? "" : loaded.gender,
+          dateOfBirth: loaded.dateOfBirth === "—" ? "" : loaded.dateOfBirth,
+          phone: loaded.phone === "—" ? "" : loaded.phone,
+          email: loaded.email === "—" ? "" : loaded.email,
+          address: loaded.address === "—" ? "" : loaded.address,
+          branch: loaded.branch === "—" ? "" : loaded.branch,
+          currentLevel: loaded.currentLevel,
+          currentCourse: loaded.currentCourse === "—" ? "" : loaded.currentCourse,
+          preferredExam: loaded.preferredExam,
+        });
+      } catch (loadError) {
+        if (active) setError(loadError instanceof Error ? loadError.message : "Could not load your profile");
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  /**
+   * Avatars save on their own rather than waiting for the edit form, because a
+   * student who picks a photo and then closes the sheet would reasonably expect
+   * the photo to have stuck.
+   */
+  async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    const invalid = validateImageFile(file);
+    if (invalid) {
+      setError(invalid);
+      return;
     }
 
-    loadProfile();
-  }, []);
+    setUploading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const url = await uploadImage(file);
+      if (!url) throw new Error("Upload failed");
+
+      const response = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...formState, photoUrl: url }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || "Could not save your new photo");
+
+      setProfile((prev) => (prev ? { ...prev, photoUrl: url } : prev));
+      setMessage("Profile photo updated.");
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Could not upload that photo");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
     setMessage("");
+    setError("");
 
     try {
       const response = await fetch("/api/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName: formState.fullName,
-          email: formState.email,
-          phone: formState.phone,
-          gender: formState.gender,
-          dateOfBirth: formState.dateOfBirth,
-          address: formState.address,
-          branch: formState.branch,
-          currentLevel: formState.currentLevel,
-          currentCourse: formState.currentCourse,
-          preferredExam: formState.preferredExam,
-        }),
+        body: JSON.stringify(formState),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || "Unable to save your profile right now.");
 
-      if (!response.ok) {
-        setMessage(data.error || "Unable to save profile right now.");
-        return;
-      }
-
-      setMessage("Profile saved successfully.");
+      setProfile((prev) =>
+        prev
+          ? {
+              ...prev,
+              fullName: formState.fullName || prev.fullName,
+              gender: formState.gender || prev.gender,
+              dateOfBirth: formState.dateOfBirth || prev.dateOfBirth,
+              phone: formState.phone || prev.phone,
+              email: formState.email || prev.email,
+              address: formState.address || prev.address,
+              branch: formState.branch || prev.branch,
+              currentLevel: formState.currentLevel || prev.currentLevel,
+              currentCourse: formState.currentCourse || prev.currentCourse,
+              preferredExam: formState.preferredExam || prev.preferredExam,
+            }
+          : prev,
+      );
+      // The level can change tuition and therefore XP, so drop the cached stats.
+      queryClient.invalidateQueries({ queryKey: ["student", "gamification"] });
+      setMessage("Profile saved.");
       setEditing(false);
-      setProfile((prev: any) => ({
-        ...prev,
-        fullName: formState.fullName,
-        gender: formState.gender,
-        dateOfBirth: formState.dateOfBirth,
-        phone: formState.phone,
-        email: formState.email,
-        address: formState.address,
-        branch: formState.branch,
-        currentLevel: formState.currentLevel,
-        currentCourse: formState.currentCourse,
-        preferredExam: formState.preferredExam,
-      }));
-    } catch (error) {
-      setMessage("Unable to save profile right now.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save your profile right now.");
     } finally {
       setSaving(false);
     }
   }
 
   if (!profile) {
-    return null;
+    return (
+      <StudentShell>
+        <div className="px-6 py-16">
+          {error ? <p className="text-center text-sm text-red-600">{error}</p> : <BrandLoader />}
+        </div>
+      </StudentShell>
+    );
   }
+
+  const tier = game?.tier;
+  const ring = tier ? `linear-gradient(135deg, ${tier.colors[0]}, ${tier.colors[1]})` : "linear-gradient(135deg, #FF6600, #0D7C7E)";
+  const verified = profile.paymentStatus === "Completed";
 
   return (
     <StudentShell>
-      <motion.div
-        initial={{ opacity: 0, y: 24 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: "easeOut" }}
-        className="space-y-6 px-6 py-10 md:px-10"
-      >
-        <section className="overflow-hidden rounded-[32px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(10,124,255,0.16),_transparent_35%),linear-gradient(135deg,_#0f172a_0%,_#111827_55%,_#1e293b_100%)] p-6 text-white shadow-[0_30px_90px_rgba(15,23,42,0.26)]">
-          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-[0.35em] text-slate-300">Creator profile</p>
-              <h1 className="mt-3 text-4xl font-semibold text-white">{profile.fullName}</h1>
-              <p className="mt-3 text-sm leading-7 text-slate-300">Your digital identity, learning path, and payment momentum all in one cinematic profile hub.</p>
+      <div className="pb-16">
+        {/* ---------- Cinematic cover ---------- */}
+        <div className="relative h-64 overflow-hidden sm:h-72">
+          <div className="absolute inset-0 bg-[linear-gradient(135deg,_#041418_0%,_#0b2f36_45%,_#12100a_100%)]" />
+          {/* Slow drifting colour fields — the "cinematic" part */}
+          <motion.div
+            className="absolute -left-24 -top-24 h-96 w-96 rounded-full bg-[#0D7C7E]/45 blur-[90px]"
+            animate={{ x: [0, 70, 0], y: [0, 40, 0] }}
+            transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <motion.div
+            className="absolute -right-16 top-10 h-80 w-80 rounded-full bg-[#FF6600]/40 blur-[90px]"
+            animate={{ x: [0, -60, 0], y: [0, 50, 0] }}
+            transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <div className="absolute inset-0 bg-[linear-gradient(to_top,_rgba(2,6,23,0.95),_transparent_70%)]" />
+
+          <div className="relative flex h-full items-start justify-between px-6 py-6 sm:px-10">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/60">Student profile</p>
+              {tier && (
+                <div
+                  className="mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold text-white shadow-lg"
+                  style={{ background: ring }}
+                >
+                  <span>★</span>
+                  {tier.name}
+                  <span className="font-medium opacity-80">· {tier.blurb}</span>
+                </div>
+              )}
             </div>
-            <div className="flex flex-wrap gap-3">
-              <span className="rounded-2xl border border-amber-300/30 bg-amber-300/15 px-4 py-3 text-sm font-semibold text-amber-100 shadow-[0_0_20px_rgba(251,191,36,0.2)]">
-                Payment: {profile.paymentStatus}
-              </span>
-              <Button onClick={() => setEditing(true)} variant="primary" className="rounded-2xl bg-white px-4 py-3 text-slate-950 shadow-lg shadow-white/20 hover:bg-slate-100">
-                Edit profile
-              </Button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="rounded-full border border-white/25 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white backdrop-blur transition hover:bg-white/20"
+            >
+              Edit profile
+            </button>
           </div>
-
-          <div className="mt-8 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-            <div className="rounded-[28px] border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
-              <div className="flex flex-col gap-6 md:flex-row md:items-center">
-                <div className="relative h-28 w-28 overflow-hidden rounded-[28px] border border-white/20 bg-slate-900/50 shadow-2xl">
-                  <img src={profile.photoUrl} alt="Student photo" className="h-full w-full object-cover" />
-                  <button className="absolute bottom-2 right-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-950">
-                    Update
-                  </button>
-                </div>
-                <div>
-                  <p className="text-sm uppercase tracking-[0.35em] text-slate-300">Student ID</p>
-                  <p className="mt-2 font-mono text-xl font-semibold tracking-tight text-white">{profile.id}</p>
-                  <p className="mt-2 text-sm text-slate-300">Registered on {profile.registrationDate}</p>
-                </div>
-              </div>
-
-              <div className="mt-6 flex flex-wrap gap-3">
-                <span className="rounded-full border border-emerald-300/30 bg-emerald-400/15 px-3 py-2 text-sm font-semibold text-emerald-100">{profile.currentLevel} learner</span>
-                <span className="rounded-full border border-cyan-300/30 bg-cyan-400/15 px-3 py-2 text-sm font-semibold text-cyan-100">{profile.currentCourse}</span>
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm uppercase tracking-[0.35em] text-slate-400">Momentum</p>
-                  <p className="mt-2 text-3xl font-semibold text-white">{profile.paymentStatus}</p>
-                </div>
-                <div className="rounded-full border border-white/10 bg-white/10 px-3 py-2 text-sm font-semibold text-slate-100">{profile.currentWeek}</div>
-              </div>
-              <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10">
-                <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400" style={{ width: `${Math.min(100, Math.max(12, Number(profile.totalPaid || 0) > 0 ? 40 : 18))}%` }} />
-              </div>
-              <p className="mt-3 text-sm text-slate-300">Your tuition progress keeps your full learning experience unlocked.</p>
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#0A7CFF]">About you</p>
-                <h2 className="mt-2 text-2xl font-semibold text-slate-900">Profile spotlight</h2>
-              </div>
-              <div className="rounded-full bg-[#EEF7FF] px-3 py-2 text-sm font-semibold text-[#0A7CFF]">Live now</div>
-            </div>
-
-            <div className="mt-8 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                <p className="text-sm font-medium text-slate-900">Gender</p>
-                <p className="mt-2 text-sm text-slate-600">{profile.gender}</p>
-              </div>
-              <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                <p className="text-sm font-medium text-slate-900">Date of birth</p>
-                <p className="mt-2 text-sm text-slate-600">{profile.dateOfBirth}</p>
-              </div>
-              <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                <p className="text-sm font-medium text-slate-900">Phone number</p>
-                <p className="mt-2 text-sm text-slate-600">{profile.phone}</p>
-              </div>
-              <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                <p className="text-sm font-medium text-slate-900">Emergency contact</p>
-                <p className="mt-2 text-sm text-slate-600">{profile.emergencyContact}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#0A7CFF]">Enrollment snapshot</p>
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                  <p className="text-sm font-medium text-slate-900">Residential address</p>
-                  <p className="mt-2 text-sm text-slate-600">{profile.address}</p>
-                </div>
-                <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                  <p className="text-sm font-medium text-slate-900">Target Germany route</p>
-                  <p className="mt-2 text-sm text-slate-600">{profile.targetRoute}</p>
-                </div>
-                <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                  <p className="text-sm font-medium text-slate-900">Payment status</p>
-                  <p className="mt-2 text-sm font-semibold text-[#c2410c]">{profile.paymentStatus}</p>
-                </div>
-                <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                  <p className="text-sm font-medium text-slate-900">Preferred exam</p>
-                  <p className="mt-2 text-sm text-slate-600">{profile.preferredExam}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#0A7CFF]">Learning vibe</p>
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                  <p className="text-sm font-medium text-slate-900">Branch</p>
-                  <p className="mt-2 text-sm text-slate-600">{profile.branch}</p>
-                </div>
-                <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                  <p className="text-sm font-medium text-slate-900">Current course</p>
-                  <p className="mt-2 text-sm text-slate-600">{profile.currentCourse}</p>
-                </div>
-                <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                  <p className="text-sm font-medium text-slate-900">Current week</p>
-                  <p className="mt-2 text-sm text-slate-600">{profile.currentWeek}</p>
-                </div>
-                <div className="rounded-[24px] bg-[#F8FBFF] p-5">
-                  <p className="text-sm font-medium text-slate-900">Assigned tutor</p>
-                  <p className="mt-2 text-sm text-slate-600">{profile.assignedTutor}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-          <a href="/" className="inline-flex rounded-full bg-[#111827] px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110">
-            Back to dashboard
-          </a>
         </div>
 
+        {/* ---------- Identity + stats, overlapping the cover ---------- */}
+        <div className="relative -mt-24 px-6 sm:px-10">
+          <div className="mx-auto max-w-6xl">
+            <div className="rounded-[36px] border border-white/10 bg-[linear-gradient(160deg,_rgba(2,15,20,0.96),_rgba(6,25,32,0.92))] p-6 shadow-[0_40px_100px_rgba(2,6,23,0.4)] backdrop-blur-2xl sm:p-8">
+              <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-end">
+                {/* Avatar with a tier-coloured story ring */}
+                <div className="relative shrink-0">
+                  <div className="rounded-full p-[3px]" style={{ background: ring }}>
+                    <div className="rounded-full border-[3px] border-[#04141a] bg-[#04141a] p-0.5">
+                      <div className="relative h-28 w-28 overflow-hidden rounded-full sm:h-32 sm:w-32">
+                        {profile.photoUrl ? (
+                          <img src={profile.photoUrl} alt={profile.fullName} className="h-full w-full object-cover" />
+                        ) : (
+                          <div
+                            className="flex h-full w-full items-center justify-center text-3xl font-black text-white"
+                            style={{ background: ring }}
+                          >
+                            {initialsOf(profile.fullName) || "EW"}
+                          </div>
+                        )}
+
+                        <AnimatePresence>
+                          {uploading && (
+                            <motion.div
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              className="absolute inset-0 flex items-center justify-center bg-black/60"
+                            >
+                              <motion.span
+                                className="h-7 w-7 rounded-full border-2 border-white/30 border-t-white"
+                                animate={{ rotate: 360 }}
+                                transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                              />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Camera button. `capture` makes phones offer the camera directly. */}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    aria-label="Change profile photo"
+                    className="absolute -bottom-1 -right-1 flex h-10 w-10 items-center justify-center rounded-full border-[3px] border-[#04141a] bg-[var(--accent)] text-white shadow-lg transition hover:brightness-110 disabled:opacity-60"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                      <circle cx="12" cy="13" r="4" />
+                    </svg>
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="user"
+                    onChange={handleAvatarChange}
+                    className="hidden"
+                  />
+
+                  {game && (
+                    <div className="absolute -left-2 bottom-1 rounded-full border-[3px] border-[#04141a] bg-white px-2.5 py-1 text-[10px] font-black text-slate-900">
+                      LVL {game.level}
+                    </div>
+                  )}
+                </div>
+
+                {/* Name block */}
+                <div className="flex-1 text-center sm:text-left">
+                  <div className="flex items-center justify-center gap-2 sm:justify-start">
+                    <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">{profile.fullName}</h1>
+                    {verified && (
+                      <span
+                        title="Tuition paid in full"
+                        className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-500 text-xs font-bold text-white"
+                      >
+                        ✓
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 font-mono text-sm text-slate-400">@{profile.studentCode}</p>
+
+                  <div className="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
+                    <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
+                      {profile.currentLevel} · German
+                    </span>
+                    <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
+                      📍 {profile.branch}
+                    </span>
+                    <span
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                        verified ? "bg-emerald-400/15 text-emerald-200" : "bg-amber-400/15 text-amber-200"
+                      }`}
+                    >
+                      {profile.paymentStatus === "Completed" ? "Tuition paid" : `Payment: ${profile.paymentStatus}`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Stat strip */}
+              <div className="mt-8 flex gap-3">
+                <StatPill index={0} icon="⚡" label="XP" value={game?.xp ?? 0} />
+                <StatPill index={1} icon="🔥" label="Streak" value={game?.streak ?? 0} />
+                <StatPill index={2} icon="🏅" label="Badges" value={game?.badgesEarned ?? 0} />
+                <StatPill
+                  index={3}
+                  icon="📋"
+                  label="Attendance"
+                  value={game?.stats.attendanceRate ?? 0}
+                  suffix="%"
+                />
+              </div>
+
+              {/* XP bar */}
+              {game && (
+                <div className="mt-6">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+                    <span>
+                      Level {game.level} → {game.level + 1}
+                    </span>
+                    <span>
+                      {game.xpIntoLevel} / {game.xpForNextLevel} XP
+                    </span>
+                  </div>
+                  <div className="mt-2 h-3 overflow-hidden rounded-full bg-white/10">
+                    <motion.div
+                      className="h-full rounded-full"
+                      style={{ background: ring }}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.max(game.levelProgressPercent, 2)}%` }}
+                      transition={{ duration: 1.1, ease: "easeOut" }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {(message || error) && (
+                <p className={`mt-5 text-sm ${error ? "text-red-300" : "text-emerald-300"}`}>{error || message}</p>
+              )}
+            </div>
+
+            {/* ---------- Tabs ---------- */}
+            <div className="mt-8 flex gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1.5">
+              {TABS.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setTab(item)}
+                  className={`relative flex-1 rounded-full px-4 py-2.5 text-sm font-bold transition ${
+                    tab === item ? "text-white" : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                  }`}
+                >
+                  {tab === item && (
+                    <motion.span
+                      layoutId="profile-tab"
+                      className="absolute inset-0 rounded-full bg-[var(--accent)]"
+                      transition={{ type: "spring", stiffness: 320, damping: 30 }}
+                    />
+                  )}
+                  <span className="relative">{item}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* ---------- Tab panels ---------- */}
+            <div className="mt-6">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={tab}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.22 }}
+                >
+                  {tab === "Overview" && (
+                    <div className="grid gap-5 lg:grid-cols-3">
+                      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 lg:col-span-2">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
+                          Learning snapshot
+                        </p>
+                        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                          <DetailCard label="Course" value={profile.currentCourse} />
+                          <DetailCard label="Level" value={profile.currentLevel} />
+                          <DetailCard label="Assigned tutor" value={profile.assignedTutor} />
+                          <DetailCard label="Preferred exam" value={profile.preferredExam} />
+                          <DetailCard
+                            label="Classes attended"
+                            value={
+                              game
+                                ? `${game.stats.sessionsAttended} of ${game.stats.totalSessions}`
+                                : "—"
+                            }
+                          />
+                          <DetailCard
+                            label="Average score"
+                            value={game?.stats.averageGrade != null ? `${game.stats.averageGrade}%` : "Not graded yet"}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-5">
+                        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
+                            Exam readiness
+                          </p>
+                          <p className="mt-4 text-4xl font-black text-[var(--foreground)]">
+                            {game?.stats.examReadiness ?? 0}%
+                          </p>
+                          <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--surface-alt)]">
+                            <motion.div
+                              className="h-full rounded-full bg-[var(--accent)]"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${game?.stats.examReadiness ?? 0}%` }}
+                              transition={{ duration: 0.9 }}
+                            />
+                          </div>
+                        </div>
+                        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
+                            Member since
+                          </p>
+                          <p className="mt-3 text-lg font-bold text-[var(--foreground)]">{profile.registrationDate}</p>
+                          <p className="mt-1 text-sm text-[var(--muted)]">
+                            {game?.stats.submissions ?? 0} assignments handed in
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {tab === "Achievements" && (
+                    <div>
+                      <div className="mb-5 flex items-baseline justify-between">
+                        <p className="text-sm font-bold text-[var(--foreground)]">
+                          {game?.badgesEarned ?? 0} of {game?.badges.length ?? 0} unlocked
+                        </p>
+                        <p className="text-xs text-[var(--muted)]">Earned from your real class record</p>
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        {(game?.badges ?? []).map((badge, index) => (
+                          <BadgeTile key={badge.id} badge={badge} index={index} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {tab === "Details" && (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      <DetailCard label="Full name" value={profile.fullName} />
+                      <DetailCard label="Student ID" value={profile.studentCode} />
+                      <DetailCard label="Email" value={profile.email} />
+                      <DetailCard label="Phone" value={profile.phone} />
+                      <DetailCard label="Gender" value={profile.gender} />
+                      <DetailCard label="Date of birth" value={profile.dateOfBirth} />
+                      <DetailCard label="Address" value={profile.address} />
+                      <DetailCard label="Branch" value={profile.branch} />
+                      <DetailCard label="Target route" value={profile.targetRoute} />
+                      <DetailCard label="Emergency contact" value={profile.emergencyContact} />
+                      <DetailCard label="Registered" value={profile.registrationDate} />
+                      <DetailCard label="Payment status" value={profile.paymentStatus} />
+                    </div>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ---------- Edit sheet ---------- */}
+      <AnimatePresence>
         {editing && (
-          <section className="rounded-[28px] border border-[#0A7CFF]/20 bg-[#eef6ff] p-6 shadow-sm">
-            <div className="flex flex-col gap-4">
-              <h2 className="text-xl font-semibold text-[#111827]">Edit profile</h2>
-              <div className="grid gap-4 md:grid-cols-2">
+          <motion.div
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => !saving && setEditing(false)}
+          >
+            <motion.div
+              className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-[32px] bg-[var(--surface)] p-6 shadow-2xl sm:rounded-[32px] sm:p-8"
+              initial={{ y: 60, opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 40, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 200, damping: 26 }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-2xl font-black text-[var(--foreground)]">Edit profile</h2>
+                  <p className="mt-1 text-sm text-[var(--muted)]">
+                    Your name and photo appear across the portal and on your certificates.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  className="rounded-full p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="mt-6 flex items-center gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <div className="h-16 w-16 overflow-hidden rounded-full" style={{ background: ring }}>
+                  {profile.photoUrl ? (
+                    <img src={profile.photoUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center font-black text-white">
+                      {initialsOf(profile.fullName) || "EW"}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-60"
+                  >
+                    {uploading ? "Uploading…" : "Change photo"}
+                  </button>
+                  <p className="mt-1.5 text-xs text-[var(--muted)]">JPG or PNG, up to 5MB.</p>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 {[
-                  { label: 'Full name', key: 'fullName' },
-                  { label: 'Email', key: 'email' },
-                  { label: 'Phone', key: 'phone' },
-                  { label: 'Address', key: 'address' },
-                  { label: 'Branch', key: 'branch' },
-                  { label: 'Current course', key: 'currentCourse' },
+                  { label: "Full name", key: "fullName" as const, type: "text" },
+                  { label: "Email", key: "email" as const, type: "email" },
+                  { label: "Phone", key: "phone" as const, type: "tel" },
+                  { label: "Address", key: "address" as const, type: "text" },
+                  { label: "Branch", key: "branch" as const, type: "text" },
+                  { label: "Current course", key: "currentCourse" as const, type: "text" },
                 ].map((field) => (
-                  <label key={field.key} className="block">
-                    <span className="text-sm font-medium text-[#334155]">{field.label}</span>
+                  <label key={field.key} className={field.key === "address" ? "sm:col-span-2" : ""}>
+                    <span className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                      {field.label}
+                    </span>
                     <input
-                      type="text"
-                      value={(formState as any)[field.key]}
-                      onChange={(e) => setFormState((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                      className="mt-2 w-full rounded-3xl border border-slate-300 bg-white px-4 py-3 text-sm text-[#0f172a] outline-none transition focus:border-[#0A7CFF] focus:ring-2 focus:ring-[#0A7CFF]/10"
+                      type={field.type}
+                      value={formState[field.key]}
+                      onChange={(event) =>
+                        setFormState((prev) => ({ ...prev, [field.key]: event.target.value }))
+                      }
+                      className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/15"
                     />
                   </label>
                 ))}
 
-                <label className="block">
-                  <span className="text-sm font-medium text-[#334155]">Gender</span>
+                <label>
+                  <span className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Gender</span>
                   <select
                     value={formState.gender}
-                    onChange={(e) => setFormState((prev) => ({ ...prev, gender: e.target.value }))}
-                    className="mt-2 w-full rounded-3xl border border-slate-300 bg-white px-4 py-3 text-sm text-[#0f172a] outline-none transition focus:border-[#0A7CFF] focus:ring-2 focus:ring-[#0A7CFF]/10"
+                    onChange={(event) => setFormState((prev) => ({ ...prev, gender: event.target.value }))}
+                    className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
                   >
+                    <option value="">Prefer not to say</option>
                     <option value="Female">Female</option>
                     <option value="Male">Male</option>
                     <option value="Other">Other</option>
                   </select>
                 </label>
 
-                <label className="block">
-                  <span className="text-sm font-medium text-[#334155]">Date of birth</span>
+                <label>
+                  <span className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                    Date of birth
+                  </span>
                   <input
                     type="date"
                     value={formState.dateOfBirth}
-                    onChange={(e) => setFormState((prev) => ({ ...prev, dateOfBirth: e.target.value }))}
-                    className="mt-2 w-full rounded-3xl border border-slate-300 bg-white px-4 py-3 text-sm text-[#0f172a] outline-none transition focus:border-[#0A7CFF] focus:ring-2 focus:ring-[#0A7CFF]/10"
+                    onChange={(event) => setFormState((prev) => ({ ...prev, dateOfBirth: event.target.value }))}
+                    className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
                   />
                 </label>
 
-                <label className="block">
-                  <span className="text-sm font-medium text-[#334155]">Current level</span>
+                <label>
+                  <span className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Level</span>
                   <select
                     value={formState.currentLevel}
-                    onChange={(e) => setFormState((prev) => ({ ...prev, currentLevel: e.target.value }))}
-                    className="mt-2 w-full rounded-3xl border border-slate-300 bg-white px-4 py-3 text-sm text-[#0f172a] outline-none transition focus:border-[#0A7CFF] focus:ring-2 focus:ring-[#0A7CFF]/10"
+                    onChange={(event) => setFormState((prev) => ({ ...prev, currentLevel: event.target.value }))}
+                    className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
                   >
-                    {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((level) => (
-                      <option key={level} value={level}>{level}</option>
+                    {["A1", "A2", "B1", "B2", "C1", "C2"].map((level) => (
+                      <option key={level} value={level}>
+                        {level}
+                      </option>
                     ))}
                   </select>
                 </label>
 
-                <label className="block">
-                  <span className="text-sm font-medium text-[#334155]">Preferred exam</span>
+                <label>
+                  <span className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                    Preferred exam
+                  </span>
                   <select
                     value={formState.preferredExam}
-                    onChange={(e) => setFormState((prev) => ({ ...prev, preferredExam: e.target.value }))}
-                    className="mt-2 w-full rounded-3xl border border-slate-300 bg-white px-4 py-3 text-sm text-[#0f172a] outline-none transition focus:border-[#0A7CFF] focus:ring-2 focus:ring-[#0A7CFF]/10"
+                    onChange={(event) => setFormState((prev) => ({ ...prev, preferredExam: event.target.value }))}
+                    className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
                   >
                     <option value="Goethe">Goethe</option>
                     <option value="Internal Easyway exam">Internal Easyway exam</option>
@@ -355,20 +791,30 @@ export default function ProfilePage() {
                 </label>
               </div>
 
-              <div className="flex flex-wrap gap-3 pt-3">
-                <Button onClick={handleSave} variant="primary" className="rounded-2xl bg-[#0A7CFF] px-5 py-3 text-white hover:bg-[#003087]" disabled={saving}>
-                  {saving ? 'Saving...' : 'Save changes'}
-                </Button>
-                <Button onClick={() => setEditing(false)} variant="secondary" className="rounded-2xl bg-white px-5 py-3 text-[#0f172a] border border-slate-300">
-                  Cancel
-                </Button>
-              </div>
+              {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
 
-              {message && <p className="text-sm text-[#0A7CFF]">{message}</p>}
-            </div>
-          </section>
+              <div className="mt-7 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[var(--accent)]/25 transition hover:brightness-110 disabled:opacity-60"
+                >
+                  {saving ? "Saving…" : "Save changes"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  disabled={saving}
+                  className="rounded-full border border-[var(--border)] px-6 py-3 text-sm font-bold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
-      </motion.div>
+      </AnimatePresence>
     </StudentShell>
   );
 }

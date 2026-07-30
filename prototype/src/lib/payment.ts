@@ -1,5 +1,32 @@
 export type PaymentStatus = "Pending" | "Partial" | "Completed";
 
+/**
+ * Tuition by level. This table used to be copy-pasted into the student API,
+ * the profile API and the dashboard, which meant a price change had to be made
+ * in several files or the portal would quote two different fees for one level.
+ */
+export const TUITION_FEES: Record<string, number> = {
+  A1: 150000,
+  A2: 150000,
+  B1: 180000,
+  B2: 180000,
+  C1: 200000,
+  C2: 220000,
+};
+
+export const DEFAULT_TUITION_FEE = TUITION_FEES.A1;
+
+/** Share of tuition that must be paid before classes open. */
+export const DEPOSIT_RATE = 0.6;
+
+export function tuitionFeeForLevel(level?: string | null): number {
+  return TUITION_FEES[String(level ?? "").toUpperCase()] ?? DEFAULT_TUITION_FEE;
+}
+
+export function requiredDepositForLevel(level?: string | null): number {
+  return Math.round(tuitionFeeForLevel(level) * DEPOSIT_RATE);
+}
+
 export function derivePaymentStatus({
   totalPaid,
   tuitionFee,

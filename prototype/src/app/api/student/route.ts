@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositForLevel, tuitionFeeForLevel } from "@/lib/payment";
 import { NextResponse } from "next/server";
 import { mayAutoCreateStudent } from "@/lib/candidates";
 
@@ -77,18 +77,9 @@ export async function GET() {
       take: 8,
     });
 
-    const tuitionFees: Record<string, number> = {
-      A1: 150000,
-      A2: 150000,
-      B1: 180000,
-      B2: 180000,
-      C1: 200000,
-      C2: 220000,
-    };
-
-    const tuitionFee = tuitionFees[student.level] ?? 150000;
+    const tuitionFee = tuitionFeeForLevel(student.level);
     const registrationFee = 5000;
-    const requiredDeposit = Math.round(tuitionFee * 0.6);
+    const requiredDeposit = requiredDepositForLevel(student.level);
     const totalPaid = student.payments
       .filter((payment) => payment.status === "completed")
       .reduce((sum, payment) => sum + payment.amount, 0);

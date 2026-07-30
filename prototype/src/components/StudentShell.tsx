@@ -4,6 +4,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
 import BrandLogo from "@/components/BrandLogo";
+import PaymentLockScreen from "@/components/PaymentLockScreen";
+import { isTuitionGatedRoute } from "@/lib/access";
+import { useStudentAccess } from "@/lib/useStudentAccess";
 
 type NavItem = {
   label: string;
@@ -55,10 +58,28 @@ const navItems: NavItem[] = [
   { label: "Settings", href: "/settings", icon: "⚙" },
 ];
 
+function LockGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4.5" y="11" width="15" height="10" rx="2.5" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
 export default function StudentShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const { access, hasAccess } = useStudentAccess();
+
+  // One gate for the whole portal. Every student page renders through this
+  // shell, so locking here covers pages that do not exist yet — and there is no
+  // per-page payment fetch to forget to add.
+  const routeLocked = !hasAccess && isTuitionGatedRoute(pathname);
+  const lockedAreaLabel =
+    navItems.find((item) => pathname === item.href || pathname.startsWith(item.href + "/"))?.label ??
+    "This page";
 
   return (
     <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(10,124,255,0.10),_transparent_30%),linear-gradient(135deg,_#f7faff_0%,_#eef3ff_100%)] text-[var(--foreground)]">
@@ -87,19 +108,26 @@ export default function StudentShell({ children }: { children: React.ReactNode }
           <div className="space-y-1">
             {navItems.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
+              // Locked items stay clickable on purpose: tapping Classes and
+              // meeting the padlock explains the paywall far better than a
+              // dead, greyed-out button does.
+              const locked = !hasAccess && isTuitionGatedRoute(item.href);
               return (
                 <button
                   key={item.href}
                   onClick={() => router.push(item.href)}
-                  title={collapsed ? item.label : ""}
+                  title={collapsed ? (locked ? `${item.label} — locked until tuition is paid` : item.label) : ""}
                   className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition-all duration-200 ${
                     active
                       ? "bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_8px_24px_rgba(10,124,255,0.12)]"
+                      : locked
+                      ? "text-slate-400 hover:bg-slate-100/70 hover:text-slate-600"
                       : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
                   }`}
                 >
                   <span className={`flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-base shadow-sm transition ${active ? "border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]" : "group-hover:border-slate-300"}`}>{item.icon}</span>
-                  {!collapsed && <span className="font-medium">{item.label}</span>}
+                  {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
+                  {!collapsed && locked && <LockGlyph className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]/70" />}
                 </button>
               );
             })}
@@ -112,12 +140,13 @@ export default function StudentShell({ children }: { children: React.ReactNode }
       </aside>
 
       <main className={`flex-1 transition-all duration-300 ${collapsed ? "ml-20" : "ml-72"}`}>
-        {children}
+        {routeLocked ? <PaymentLockScreen areaLabel={lockedAreaLabel} access={access} /> : children}
       </main>
 
       {/* Lives in the shell, not on one page, so the community (and its unread
-          badge) is one tap away from anywhere in the portal. */}
-      {pathname !== "/community" && <CommunityLauncher />}
+          badge) is one tap away from anywhere in the portal. The community is
+          itself a paid feature, so it goes away entirely while locked. */}
+      {pathname !== "/community" && hasAccess && <CommunityLauncher />}
     </div>
   );
 }

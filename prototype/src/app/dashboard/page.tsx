@@ -6,6 +6,9 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import BrandLoader from "@/components/BrandLoader";
 import PaymentSuccessToastClient from "@/components/PaymentSuccessToastClient";
+import { summarizeGamification } from "@/lib/gamification";
+import { requiredDepositForLevel, tuitionFeeForLevel } from "@/lib/payment";
+import { useGamification } from "@/lib/useGamification";
 
 type Mission = {
   id?: string;
@@ -55,15 +58,6 @@ type PendingPayment = {
   pathwayName?: string;
 };
 
-const TUITION_FEES: Record<string, number> = {
-  A1: 150000,
-  A2: 150000,
-  B1: 180000,
-  B2: 180000,
-  C1: 200000,
-  C2: 220000,
-};
-
 import StudentShell from "@/components/StudentShell";
 import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
@@ -78,6 +72,7 @@ export default function DashboardPage() {
 
 function DashboardContent() {
   const { data: session, status } = useSession();
+  const { game } = useGamification();
   const [student, setStudent] = useState<Student | null>(null);
   const [paymentSummary, setPaymentSummary] = useState<Student["paymentSummary"] | null>(null);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -140,8 +135,8 @@ function DashboardContent() {
           const paymentsData = await paymentsResponse.json();
           const completed = (paymentsData.payments || []).filter((payment: any) => payment.status === "completed");
           const totalPaid = completed.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
-          const tuitionFee = TUITION_FEES[data.level] ?? TUITION_FEES.A1;
-          const requiredDeposit = Math.round(tuitionFee * 0.6);
+          const tuitionFee = tuitionFeeForLevel(data.level);
+          const requiredDeposit = requiredDepositForLevel(data.level);
           setPaymentUnlock({ requiredDeposit, totalPaid, tuitionFee });
         }
       }
@@ -158,8 +153,8 @@ function DashboardContent() {
         paymentSummary: {
           totalPaid: 0,
           registrationFee: 5000,
-          requiredDeposit: Math.round(TUITION_FEES.A1 * 0.6),
-          tuitionFee: TUITION_FEES.A1,
+          requiredDeposit: requiredDepositForLevel("A1"),
+          tuitionFee: tuitionFeeForLevel("A1"),
           registrationPaid: true,
           depositPaid: false,
           fullPaid: false,
@@ -485,11 +480,20 @@ function DashboardContent() {
     );
   }
 
-  const gradeBonus = resolvedStudent?.averageGrade ? Math.round((resolvedStudent.averageGrade - 70) / 2) : 0;
-  const xp = Math.max(180, insights.completedLessons * 45 + insights.streak * 25 + (resolvedStudent?.examReadiness || 0) * 2 + gradeBonus);
-  const level = Math.floor(xp / 250) + 1;
-  const xpIntoLevel = xp % 250;
-  const xpProgress = Math.min(100, (xpIntoLevel / 250) * 100);
+  // Server-derived XP is authoritative — it can see attendance, submissions and
+  // mission ticks. The local fallback keeps the hero card populated on the first
+  // paint (and if the request fails) using the same shared formula, so the two
+  // never disagree by more than the data each had available.
+  const fallbackGame = summarizeGamification({
+    completedLessons: insights.completedLessons,
+    streak: insights.streak,
+    examReadiness: resolvedStudent?.examReadiness || 0,
+    averageGrade: resolvedStudent?.averageGrade ?? null,
+  });
+  const xp = game?.xp ?? fallbackGame.xp;
+  const level = game?.level ?? fallbackGame.level;
+  const xpProgress = game?.levelProgressPercent ?? fallbackGame.levelProgressPercent;
+  const streakDays = game?.streak ?? insights.streak;
   const examReadiness = resolvedStudent?.examReadiness ?? 0;
   const tuitionFee = paymentSummary?.tuitionFee ?? paymentUnlock?.tuitionFee ?? 0;
   const requiredDeposit = paymentSummary?.requiredDeposit ?? paymentUnlock?.requiredDeposit ?? 0;
@@ -566,7 +570,7 @@ function DashboardContent() {
                 <p className="mt-4 max-w-2xl text-slate-100">Your academy experience is now a cinematic quest board with live XP, missions, and progress tracking.</p>
                 <div className="mt-6 flex flex-wrap gap-3">
                   <div className="glass-chip rounded-full px-3 py-2 text-sm text-white">⚡ XP boost active</div>
-                  <div className="glass-chip rounded-full px-3 py-2 text-sm text-white">🔥 Streak {insights.streak} days</div>
+                  <div className="glass-chip rounded-full px-3 py-2 text-sm text-white">🔥 Streak {streakDays} days</div>
                   <div className="glass-chip rounded-full px-3 py-2 text-sm text-white">🎯 Next: {insights.nextMilestone}</div>
                 </div>
               </div>

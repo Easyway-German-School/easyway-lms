@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositForLevel, tuitionFeeForLevel } from "@/lib/payment";
 import { NextResponse } from "next/server";
 
 export async function GET() {
@@ -17,6 +17,9 @@ export async function GET() {
       include: {
         user: true,
         branch: true,
+        // The profile page names the assigned tutor. A Lecturer has no name of
+        // its own — it hangs off the linked user account.
+        tutor: { select: { id: true, user: { select: { name: true } } } },
         enrollments: {
           include: {
             pathway: {
@@ -58,17 +61,8 @@ export async function GET() {
     }
 
     // Format the response
-    const tuitionFees: Record<string, number> = {
-      A1: 150000,
-      A2: 150000,
-      B1: 180000,
-      B2: 180000,
-      C1: 200000,
-      C2: 220000,
-    };
-
-    const tuitionFee = tuitionFees[student.level] ?? 150000;
-    const requiredDeposit = Math.round(tuitionFee * 0.6);
+    const tuitionFee = tuitionFeeForLevel(student.level);
+    const requiredDeposit = requiredDepositForLevel(student.level);
     const totalPaid = student.payments
       .filter((payment) => payment.status === "completed")
       .reduce((sum, payment) => sum + payment.amount, 0);
@@ -91,6 +85,7 @@ export async function GET() {
         examReadiness: student.examReadiness,
         nextLive: student.nextLive,
         branch: student.branch,
+        tutor: student.tutor ? { id: student.tutor.id, name: student.tutor.user?.name ?? null } : null,
         admission: student.admission,
         paymentStatus,
         paymentSummary: {

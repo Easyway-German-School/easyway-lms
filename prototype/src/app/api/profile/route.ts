@@ -92,6 +92,17 @@ export async function POST(request: NextRequest) {
   const branch = normalizeString(body.branch);
   const preferredExam = normalizeString(body.preferredExam);
   const currentLevel = normalizeString(body.currentLevel) || "A1";
+  const photoUrl = normalizeString(body.photoUrl);
+
+  // Only accept paths this app served. A student editing their own profile
+  // could otherwise point their avatar at any URL on the internet, which would
+  // then be rendered for tutors and admins looking at their record.
+  if (photoUrl && !photoUrl.startsWith("/uploads/")) {
+    return NextResponse.json(
+      { error: "Profile photos must be uploaded, not linked." },
+      { status: 400 },
+    );
+  }
 
   const student = await prisma.student.findUnique({
     where: { userId: session.user.id as string },
@@ -129,6 +140,7 @@ export async function POST(request: NextRequest) {
         dob: dateOfBirth || currentAdmission.dob,
         preferredExam: preferredExam || currentAdmission.preferredExam || "Goethe",
         branch: branch || currentAdmission.branch || (student.branch ? student.branch.name : undefined),
+        photoUrl: photoUrl || currentAdmission.photoUrl,
       },
       user: {
         update: {

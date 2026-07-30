@@ -19,7 +19,6 @@ type Material = {
 };
 
 import StudentShell from "@/components/StudentShell";
-import InteractiveLockedGate from "@/components/InteractiveLockedGate";
 
 export default function MaterialsPage() {
   const { data: session } = useSession();
@@ -27,8 +26,9 @@ export default function MaterialsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filterType, setFilterType] = useState("all");
+  // The paywall itself is now the shell's job. This only survives so a 403 from
+  // the materials API still says something useful instead of an empty page.
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
-  const [unlockProgress, setUnlockProgress] = useState<{ requiredDeposit: number; totalPaid: number; tuitionFee: number } | null>(null);
 
   useEffect(() => {
     async function loadMaterials() {
@@ -44,11 +44,6 @@ export default function MaterialsPage() {
           if (res.status === 403) {
             setMaterials([]);
             setLockedMessage(data.message || "Pay the required deposit to unlock materials.");
-            setUnlockProgress({
-              requiredDeposit: Number(data.requiredDeposit || 0),
-              totalPaid: Number(data.totalPaid || 0),
-              tuitionFee: Number(data.tuitionFee || 0),
-            });
             setError(null);
             setLoading(false);
             return;
@@ -58,7 +53,6 @@ export default function MaterialsPage() {
         const data = await res.json();
         setMaterials(data.materials || []);
         setLockedMessage(null);
-        setUnlockProgress(null);
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load materials");
@@ -108,13 +102,14 @@ export default function MaterialsPage() {
           </div>
         )}
 
-        {lockedMessage && unlockProgress && (
-          <InteractiveLockedGate
-            requiredDeposit={unlockProgress.requiredDeposit}
-            totalPaid={unlockProgress.totalPaid}
-            tuitionFee={unlockProgress.tuitionFee}
-            onPayClick={() => window.location.href = "/programs"}
-          />
+        {lockedMessage && (
+          <div className="rounded-3xl border border-amber-400/40 bg-amber-500/10 p-6 text-sm text-amber-900">
+            <p className="font-semibold">Materials are locked</p>
+            <p className="mt-2">{lockedMessage}</p>
+            <a href="/programs" className="mt-4 inline-flex rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">
+              Pay tuition now
+            </a>
+          </div>
         )}
 
         <div className="flex gap-3 flex-wrap">

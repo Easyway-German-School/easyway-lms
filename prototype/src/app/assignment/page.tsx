@@ -5,7 +5,6 @@ import { useEffect, useState, Suspense, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import StudentShell from "@/components/StudentShell";
-import StudentAccessGate from "@/components/StudentAccessGate";
 import AssignmentsPanel from "@/components/AssignmentsPanel";
 
 function AssignmentContent() {
@@ -19,37 +18,12 @@ function AssignmentContent() {
   const [file, setFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [paymentReady, setPaymentReady] = useState(false);
-  const [paymentLoading, setPaymentLoading] = useState(true);
 
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/auth/signin");
     }
   }, [status, router]);
-
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      try {
-        const res = await fetch("/api/student", { credentials: "include" });
-        if (!active) return;
-        if (res.ok) {
-          const data = await res.json();
-          const hasAccess = Boolean(data?.paymentSummary?.depositPaid || data?.paymentSummary?.fullPaid);
-          setPaymentReady(hasAccess);
-        }
-      } catch {
-        // ignore
-      } finally {
-        if (active) setPaymentLoading(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const loadLesson = useCallback(async () => {
     if (!lessonId) return;
@@ -114,18 +88,16 @@ function AssignmentContent() {
   if (!lessonId) {
     return (
       <StudentShell>
-        <StudentAccessGate hasAccess={paymentReady} loading={paymentLoading}>
-          <div className="px-6 py-8">
-            <div className="mb-6">
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Your work</p>
-              <h1 className="mt-2 text-3xl font-bold">Assignments</h1>
-              <p className="mt-2 text-sm text-[var(--muted)]">
-                Documents to hand in and timed quizzes set by your tutor.
-              </p>
-            </div>
-            <AssignmentsPanel />
+        <div className="px-6 py-8">
+          <div className="mb-6">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Your work</p>
+            <h1 className="mt-2 text-3xl font-bold">Assignments</h1>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              Documents to hand in and timed quizzes set by your tutor.
+            </p>
           </div>
-        </StudentAccessGate>
+          <AssignmentsPanel />
+        </div>
       </StudentShell>
     );
   }
@@ -143,79 +115,77 @@ function AssignmentContent() {
 
   return (
     <StudentShell>
-      <StudentAccessGate hasAccess={paymentReady} loading={paymentLoading}>
-        <div className="min-h-screen bg-slate-50 py-10">
-          <div className="mx-auto max-w-4xl px-6 md:px-10 space-y-8">
-            <header className="rounded-3xl bg-white p-8 shadow-sm">
-              <div className="mb-4">
-                <Link href="/dashboard" className="text-emerald-500 hover:text-emerald-600 text-sm font-semibold">
-                  ← Back to dashboard
-                </Link>
-              </div>
-              <h1 className="text-4xl font-bold text-slate-950">Submit Assignment</h1>
-              <p className="text-slate-600 mt-2">{lesson.title}</p>
-            </header>
-
-            <div className="rounded-3xl bg-white p-8 shadow-sm space-y-6">
-              <h2 className="text-2xl font-bold text-slate-950">Instructions</h2>
-              <div className="prose prose-sm max-w-none">
-                <p className="text-slate-700 whitespace-pre-wrap">{lesson.content}</p>
-              </div>
+      <div className="min-h-screen bg-slate-50 py-10">
+        <div className="mx-auto max-w-4xl px-6 md:px-10 space-y-8">
+          <header className="rounded-3xl bg-white p-8 shadow-sm">
+            <div className="mb-4">
+              <Link href="/dashboard" className="text-emerald-500 hover:text-emerald-600 text-sm font-semibold">
+                ← Back to dashboard
+              </Link>
             </div>
+            <h1 className="text-4xl font-bold text-slate-950">Submit Assignment</h1>
+            <p className="text-slate-600 mt-2">{lesson.title}</p>
+          </header>
 
-            {!submitted ? (
-              <form onSubmit={handleSubmit} className="rounded-3xl bg-white p-8 shadow-sm space-y-6">
-                <h2 className="text-2xl font-bold text-slate-950">Your Submission</h2>
-                
-                <div>
-                  <label className="block text-sm font-semibold text-slate-950 mb-2">Write your response</label>
-                  <textarea
-                    value={submission}
-                    onChange={(e) => setSubmission(e.target.value)}
-                    placeholder="Type your answer or essay here..."
-                    className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-500 resize-none h-40"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-950 mb-2">Or upload a file</label>
-                  <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-emerald-500 transition">
-                    <input
-                      type="file"
-                      onChange={(e) => setFile(e.target.files?.[0] || null)}
-                      className="hidden"
-                      id="file-input"
-                      accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
-                    />
-                    <label htmlFor="file-input" className="cursor-pointer">
-                      <p className="text-slate-600 font-semibold">
-                        {file ? file.name : "Click to upload file"}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-1">PDF, DOC, DOCX, TXT, PNG, JPG</p>
-                    </label>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-3 bg-emerald-500 text-white font-semibold rounded-lg hover:bg-emerald-600 disabled:opacity-60"
-                >
-                  {isSubmitting ? "Submitting..." : "Submit Assignment"}
-                </button>
-              </form>
-            ) : (
-              <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm border border-emerald-200 space-y-4">
-                <p className="text-2xl font-bold text-emerald-700">✓ Assignment submitted!</p>
-                <p className="text-emerald-600">Your work has been received. The instructor will review and provide feedback soon.</p>
-                <Link href="/dashboard" className="inline-block px-6 py-2 bg-emerald-500 text-white font-semibold rounded-lg hover:bg-emerald-600">
-                  Back to dashboard
-                </Link>
-              </div>
-            )}
+          <div className="rounded-3xl bg-white p-8 shadow-sm space-y-6">
+            <h2 className="text-2xl font-bold text-slate-950">Instructions</h2>
+            <div className="prose prose-sm max-w-none">
+              <p className="text-slate-700 whitespace-pre-wrap">{lesson.content}</p>
+            </div>
           </div>
+
+          {!submitted ? (
+            <form onSubmit={handleSubmit} className="rounded-3xl bg-white p-8 shadow-sm space-y-6">
+              <h2 className="text-2xl font-bold text-slate-950">Your Submission</h2>
+              
+              <div>
+                <label className="block text-sm font-semibold text-slate-950 mb-2">Write your response</label>
+                <textarea
+                  value={submission}
+                  onChange={(e) => setSubmission(e.target.value)}
+                  placeholder="Type your answer or essay here..."
+                  className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-500 resize-none h-40"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-950 mb-2">Or upload a file</label>
+                <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-emerald-500 transition">
+                  <input
+                    type="file"
+                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                    id="file-input"
+                    accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                  />
+                  <label htmlFor="file-input" className="cursor-pointer">
+                    <p className="text-slate-600 font-semibold">
+                      {file ? file.name : "Click to upload file"}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">PDF, DOC, DOCX, TXT, PNG, JPG</p>
+                  </label>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full py-3 bg-emerald-500 text-white font-semibold rounded-lg hover:bg-emerald-600 disabled:opacity-60"
+              >
+                {isSubmitting ? "Submitting..." : "Submit Assignment"}
+              </button>
+            </form>
+          ) : (
+            <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm border border-emerald-200 space-y-4">
+              <p className="text-2xl font-bold text-emerald-700">✓ Assignment submitted!</p>
+              <p className="text-emerald-600">Your work has been received. The instructor will review and provide feedback soon.</p>
+              <Link href="/dashboard" className="inline-block px-6 py-2 bg-emerald-500 text-white font-semibold rounded-lg hover:bg-emerald-600">
+                Back to dashboard
+              </Link>
+            </div>
+          )}
         </div>
-      </StudentAccessGate>
+      </div>
     </StudentShell>
   );
 }

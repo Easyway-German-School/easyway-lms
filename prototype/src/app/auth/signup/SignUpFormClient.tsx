@@ -6,6 +6,7 @@ import { buildApiUrl } from "@/lib/api";
 import BrandLoader from "@/components/BrandLoader";
 import { countries, nigerianStates, packageOptions, professionOptions } from "@/app/auth/signup/options";
 import PasswordInput from "@/components/PasswordInput";
+import { uploadImage } from "@/lib/upload";
 
 type BranchOption = { id: string; name: string; location?: string | null };
 
@@ -129,30 +130,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
     setPhotoFileName(file.name);
 
     try {
-      const reader = new FileReader();
-      const result = await new Promise<string | ArrayBuffer | null>((resolve, reject) => {
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
-      });
-
-      if (!result || typeof result !== "string") {
-        throw new Error("Unable to read file");
-      }
-
-      const base64 = result.split(",")[1];
-      const res = await fetch("/api/media/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: file.name, contentType: file.type, data: base64 }),
-      });
-
-      const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json?.error || "Upload failed");
-      }
-
-      const uploadedUrl = json.url || "";
+      const uploadedUrl = await uploadImage(file);
       setPhotoUrl(uploadedUrl);
       return uploadedUrl;
     } catch (uploadError) {
