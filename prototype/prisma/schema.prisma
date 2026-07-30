@@ -11,35 +11,35 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  password  String
-  role      Role     @default(STUDENT)
+  id              String   @id @default(cuid())
+  email           String   @unique
+  name            String?
+  password        String
+  role            Role     @default(STUDENT)
   /**
    * Which kind of admin, when role is ADMIN: super | secretary | data_comm.
    * Null for everyone else. Deliberately a separate field rather than more
    * Role values, so every existing auth check on ADMIN keeps working and
    * existing admins keep full access by defaulting to super.
    */
-  adminRole String?
+  adminRole       String?
   /**
    * False on an account created by an exam booking, which starts with a
    * password nobody knows. The claim link works only while this is false, so
    * a forwarded confirmation email cannot be used to take the account later.
    */
-  passwordClaimed Boolean @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  passwordClaimed Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  student         Student?
-  lecturer        Lecturer?
-  sessions        Session[]
-  missionProgress MissionProgress[]
-  threads         Thread[]
-  comments        Comment[]
-  channelReads    ChannelRead[]
-  pushSubs        PushSubscription[]
+  student           Student?
+  lecturer          Lecturer?
+  sessions          Session[]
+  missionProgress   MissionProgress[]
+  threads           Thread[]
+  comments          Comment[]
+  channelReads      ChannelRead[]
+  pushSubs          PushSubscription[]
   examRegistrations ExamRegistration[]
 }
 
@@ -69,7 +69,9 @@ model Student {
 
   status        String @default("active")
   level         String @default("A1") // A1, A2, B1, B2, C1, C2
-  /** morning | afternoon | evening — which sitting of their level they attend. */
+  /**
+   * morning | afternoon | evening — which sitting of their level they attend.
+   */
   sessionSlot   String @default("morning")
   /**
    * group | private. A private student sits no group timetable, so the
@@ -83,30 +85,32 @@ model Student {
   nextLive      String @default("No live session scheduled")
   // Arbitrary admission form payload saved as JSON
   admission     Json?
-  
+
   // Graduation tracking
   graduationDate DateTime?
-  
+
   // Email tracking for scheduled reminders
   feeRemindersScheduled Json? // tracks which reminders (7d, 14d, 30d) have been sent
-  emailPreferences Json? // user preferences for notification types
+  emailPreferences      Json? // user preferences for notification types
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  enrollments       Enrollment[]
-  progress          Progress[]
-  grades            Grade[]
-  completions       Completion[]
-  personalizedPlan  PersonalizedPlan?
-  examRegistrations ExamRegistration[]
-  attendances       Attendance[]
-  notifications     Notification[]
-  invoices          Invoice[]
-  payments          Payment[]
+  enrollments           Enrollment[]
+  progress              Progress[]
+  grades                Grade[]
+  completions           Completion[]
+  personalizedPlan      PersonalizedPlan?
+  examRegistrations     ExamRegistration[]
+  attendances           Attendance[]
+  notifications         Notification[]
+  invoices              Invoice[]
+  payments              Payment[]
   assignmentSubmissions AssignmentSubmission[]
-  privateClasses    PrivateClass[]
-  convertedFromLead Lead?
+  privateClasses        PrivateClass[]
+  certificates          Certificate[]
+  videoProgress         VideoProgress[]
+  convertedFromLead     Lead?
 }
 
 model Branch {
@@ -114,6 +118,17 @@ model Branch {
   name      String   @unique
   location  String?
   status    String   @default("active")
+  /**
+   * physical | online. The online branch is a real branch — it has its own
+   * cohorts, tutors, timetable, community space and fees, and every existing
+   * branch+level query keeps working unchanged. This flag only drives the
+   * differences that genuinely exist: no campus, a live room instead of a
+   * classroom, and recordings as the safety net for a dropped connection.
+   *
+   * Defaulted to physical so every branch created before this existed keeps
+   * behaving exactly as it did.
+   */
+  mode      String   @default("physical")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -145,7 +160,9 @@ model ExamRegistration {
   userId String?
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  /** Details captured for candidates who are not students. */
+  /**
+   * Details captured for candidates who are not students.
+   */
   candidateName  String?
   candidateEmail String?
   candidatePhone String?
@@ -155,11 +172,15 @@ model ExamRegistration {
 
   examName String
   examDate DateTime
-  /** registered | confirmed | cancelled | completed | no_show */
+  /**
+   * registered | confirmed | cancelled | completed | no_show
+   */
   status   String   @default("registered")
   notes    String?
 
-  /** unpaid | paid | waived — a seat is only held once the fee is settled. */
+  /**
+   * unpaid | paid | waived — a seat is only held once the fee is settled.
+   */
   paymentStatus    String  @default("unpaid")
   paymentReference String?
   amountPaid       Int?
@@ -207,11 +228,11 @@ model Course {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  modules      Module[]
-  progress     Progress[]
-  materials    Material[]
-  classes      Class[]
-  exams        Exam[]
+  modules   Module[]
+  progress  Progress[]
+  materials Material[]
+  classes   Class[]
+  exams     Exam[]
 
   @@unique([source, externalId])
 }
@@ -250,9 +271,14 @@ model Lesson {
 }
 
 model Material {
-  id        String   @id @default(cuid())
-  courseId  String
-  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+  /**
+   * Optional since class recordings arrived. A recording belongs to a level
+   * and a date, not to a course — forcing tutors to pick an unrelated course
+   * just to upload Tuesday's class would have put junk in the catalogue.
+   */
+  courseId String?
+  course   Course? @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
   lecturerId String?
   lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
@@ -264,12 +290,82 @@ model Material {
   fileType    String // pdf, doc, video, image, etc
   fileSize    Int // bytes
   uploadedBy  String? // admin user id who uploaded
-  
+
+  /**
+   * document | video | recording.
+   *
+   * `fileType` already says "video/mp4", but it cannot tell a taught lesson
+   * apart from an auto-captured class recording, and the library shelves the
+   * two differently. Derived from fileType on upload, so old rows read as
+   * documents until backfilled.
+   */
+  kind String @default("document")
+
+  /**
+   * Video shelf metadata. All nullable: a PDF has none of it, and a video
+   * uploaded before the library existed simply shows fewer details rather
+   * than breaking the row.
+   */
+  durationSeconds Int?
+  thumbnailPath   String?
+  /**
+   * Which CEFR level this belongs to. Duplicated from `course.level` on
+   * purpose — a class recording belongs to a level but not always to a
+   * course, and the library filters on level far more often than it joins.
+   */
+  level           String?
+  /**
+   * Groups episodes into a shelf, e.g. "A1 Speaking Lab". Free text: the
+   * tutor names their own series, the library rows come from whatever exists.
+   */
+  series          String?
+  episodeNumber   Int?
+  /**
+   * Recorded-on date for a class tape, which is what the library sorts and
+   * labels by. Distinct from createdAt, since a tutor often uploads last
+   * week's class today.
+   */
+  recordedAt      DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   classSessions  ClassSession[]
   privateClasses PrivateClass[]
+  videoProgress  VideoProgress[]
+
+  @@index([kind, level])
+}
+
+/**
+ * Where a student stopped watching.
+ *
+ * One row per student per video, upserted as the player reports progress. It
+ * powers "Continue watching" and the resume-from-here jump, which matter far
+ * more here than on a normal video site: a student on a bad Nigerian
+ * connection gets dropped mid-lesson routinely and must not lose their place.
+ */
+model VideoProgress {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  materialId String
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  /** Furthest playback position reached, in seconds. */
+  positionSeconds Int     @default(0)
+  /**
+   * Set once the student passes ~95% of the runtime. Stored rather than
+   * recomputed because `durationSeconds` can be null on older uploads, and a
+   * finished video must not silently reappear as unwatched.
+   */
+  completed       Boolean @default(false)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, materialId])
+  @@index([studentId, updatedAt])
 }
 
 model Completion {
@@ -330,8 +426,8 @@ model Grade {
   studentId String
   student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  examId    String?
-  exam      Exam?   @relation(fields: [examId], references: [id], onDelete: SetNull)
+  examId String?
+  exam   Exam?   @relation(fields: [examId], references: [id], onDelete: SetNull)
 
   type     String // "essay", "quiz", "speaking", "pronunciation", "exam"
   content  String? // the essay text, quiz answers, etc
@@ -374,21 +470,22 @@ model PersonalizedPlan {
 
   @@unique([studentId])
 }
+
 model Notification {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   title     String
   message   String
-  channel   String   @default("email")
+  channel   String    @default("email")
   studentId String?
-  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  student   Student?  @relation(fields: [studentId], references: [id], onDelete: SetNull)
   branchId  String?
-  branch    Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branch    Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
   level     String?
-  status    String   @default("pending")
+  status    String    @default("pending")
   sentAt    DateTime?
   readAt    DateTime? // for in-app notifications
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 model Invoice {
@@ -406,123 +503,124 @@ model Invoice {
 }
 
 model Payment {
-  id              String   @id @default(cuid())
-  studentId       String
-  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  invoiceId       String?
-  invoice         Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
-  amount          Int
-  currency        String   @default("usd")
-  status          String   @default("pending")
-  method          String
-  description     String?
-  stripeSessionId String?
-  paymentIntentId String?
+  id                 String    @id @default(cuid())
+  studentId          String
+  student            Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  invoiceId          String?
+  invoice            Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  amount             Int
+  currency           String    @default("usd")
+  status             String    @default("pending")
+  method             String
+  description        String?
+  stripeSessionId    String?
+  paymentIntentId    String?
   welcomeEmailSentAt DateTime? // tracks when welcome email was sent
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 }
 
 model EmailLog {
-  id            String   @id @default(cuid())
-  studentId     String?
+  id             String   @id @default(cuid())
+  studentId      String?
   recipientEmail String
-  type          String   // "welcome", "fee_reminder_7d", "fee_reminder_14d", "fee_reminder_30d", "exam_reminder", "graduation"
-  subject       String
-  status        String   @default("sent") // "sent", "failed", "bounced"
-  sentAt        DateTime @default(now())
-  errorMessage  String?
-  retries       Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
+  type           String // "welcome", "fee_reminder_7d", "fee_reminder_14d", "fee_reminder_30d", "exam_reminder", "graduation"
+  subject        String
+  status         String   @default("sent") // "sent", "failed", "bounced"
+  sentAt         DateTime @default(now())
+  errorMessage   String?
+  retries        Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
   @@index([studentId])
   @@index([type])
   @@index([sentAt])
 }
+
 model Attendance {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   studentId String
-  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  
-  classId   String?
-  class     Class?   @relation(fields: [classId], references: [id], onDelete: SetNull)
-  
-  date      DateTime
-  present   Boolean  @default(true)
-  status    String   @default("present") // present, absent, late, excused
-  notes     String?
-  
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  classId String?
+  class   Class?  @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  date    DateTime
+  present Boolean  @default(true)
+  status  String   @default("present") // present, absent, late, excused
+  notes   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([studentId, date])
 }
 
-
-
 // Persisted state for each external LMS/community connector.
 // Replaces the old in-memory scheduler so sync status survives restarts and
 // is shared across every server instance (single source of truth for "always-on").
 model IntegrationConnector {
-  id              String    @id // "moodle", "canvas", "discourse", "open-edx"
+  id              String  @id // "moodle", "canvas", "discourse", "open-edx"
   name            String
-  enabled         Boolean   @default(true)
-  autoSync        Boolean   @default(true)
-  intervalMinutes Int       @default(30)
+  enabled         Boolean @default(true)
+  autoSync        Boolean @default(true)
+  intervalMinutes Int     @default(30)
 
-  status          String    @default("idle") // idle, syncing, connected, degraded, error
-  lastSyncAt      DateTime?
-  nextSyncAt      DateTime?
-  lastError       String?
-  itemsSynced     Int       @default(0)
+  status      String    @default("idle") // idle, syncing, connected, degraded, error
+  lastSyncAt  DateTime?
+  nextSyncAt  DateTime?
+  lastError   String?
+  itemsSynced Int       @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Lecturer {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   specialization String?
   bio            String?
   phone          String?
 
-  /** Which class a tutor takes: branch + level + session. */
+  /**
+   * Which class a tutor takes: branch + level + session.
+   */
   branchId    String?
   branch      Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
   level       String?
   sessionSlot String?
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
-  classes       Class[]
-  exams         Exam[]
-  materials     Material[]
-  students      Student[]
-  classSessions ClassSession[]
-  assignments   Assignment[]
+
+  classes        Class[]
+  exams          Exam[]
+  materials      Material[]
+  students       Student[]
+  classSessions  ClassSession[]
+  assignments    Assignment[]
   privateClasses PrivateClass[]
 }
 
 model Class {
-  id          String   @id @default(cuid())
-  courseId    String
-  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  
-  lecturerId  String
-  lecturer    Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
-  
+  id       String @id @default(cuid())
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  lecturerId String
+  lecturer   Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+
   name        String
   description String?
   schedule    String? // JSON formatted schedule
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   enrollments Enrollment[]
   attendance  Attendance[]
 }
@@ -542,22 +640,32 @@ model Exam {
   examDate    DateTime
   totalScore  Int      @default(100)
 
-  /** ÖSD | Goethe | telc | internal — who awards the certificate. */
-  examBody String @default("internal")
-  /** CEFR level the sitting is for. */
+  /**
+   * ÖSD | Goethe | telc | internal — who awards the certificate.
+   */
+  examBody String  @default("internal")
+  /**
+   * CEFR level the sitting is for.
+   */
   level    String?
 
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
-  /** Fee in kobo-free naira. Null means no fee (internal tests). */
+  /**
+   * Fee in kobo-free naira. Null means no fee (internal tests).
+   */
   fee Int?
 
-  /** Seats available. Null means uncapped. */
-  capacity              Int?
-  registrationDeadline  DateTime?
+  /**
+   * Seats available. Null means uncapped.
+   */
+  capacity             Int?
+  registrationDeadline DateTime?
 
-  /** Only published sittings are bookable by candidates. */
+  /**
+   * Only published sittings are bookable by candidates.
+   */
   published Boolean @default(false)
 
   createdAt DateTime @default(now())
@@ -573,7 +681,9 @@ enum Role {
   STUDENT
   LECTURER
   ADMIN
-  /** Registered for an exam only — no classes, materials or community. */
+  /**
+   * Registered for an exam only — no classes, materials or community.
+   */
   CANDIDATE
 }
 
@@ -593,7 +703,7 @@ model Space {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  channels    Channel[]
+  channels Channel[]
 
   @@unique([branchId, level])
 }
@@ -610,8 +720,8 @@ model Channel {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  threads     Thread[]
-  reads       ChannelRead[]
+  threads Thread[]
+  reads   ChannelRead[]
 
   @@unique([spaceId, slug])
 }
@@ -663,7 +773,7 @@ model Thread {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  comments       Comment[]
+  comments Comment[]
 
   @@index([channelId, lastActivityAt])
 }
@@ -704,19 +814,27 @@ model ClassSession {
   branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
   level    String
 
-  /** Midnight UTC on the day of the class — the join key back to the skeleton. */
+  /**
+   * Midnight UTC on the day of the class — the join key back to the skeleton.
+   */
   date     DateTime
-  /** morning | afternoon | evening — the branch runs all three. */
-  timeSlot String @default("morning")
+  /**
+   * morning | afternoon | evening — the branch runs all three.
+   */
+  timeSlot String   @default("morning")
 
   startTime String? // "09:00"
   endTime   String? // "11:00"
 
-  /** The day's topic, editable by the tutor and visible to students. */
+  /**
+   * The day's topic, editable by the tutor and visible to students.
+   */
   topic String?
   notes String?
 
-  /** scheduled | postponed | cancelled | held */
+  /**
+   * scheduled | postponed | cancelled | held
+   */
   status      String    @default("scheduled")
   postponedTo DateTime?
 
@@ -725,6 +843,14 @@ model ClassSession {
 
   materialId String?
   material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  /**
+   * Live-room override. The room name is normally derived from branch + level
+   * + date + slot (see lib/live-classroom.ts) so no row is needed for a class
+   * to be joinable; this only exists for the case where a tutor moves a
+   * session into an existing room, or pins a permanent one.
+   */
+  roomName String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -753,13 +879,19 @@ model Assignment {
   title       String
   description String?
 
-  /** document | quiz */
+  /**
+   * document | quiz
+   */
   type String @default("document")
 
-  /** Quizzes only. Null means untimed. */
+  /**
+   * Quizzes only. Null means untimed.
+   */
   timeLimitMinutes Int?
 
-  /** Quizzes only: [{ prompt, options: string[], answerIndex }] */
+  /**
+   * Quizzes only: [{ prompt, options: string[], answerIndex }]
+   */
   questions Json?
 
   dueAt     DateTime?
@@ -781,18 +913,24 @@ model AssignmentSubmission {
   studentId String
   student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  /** Documents: the written answer and/or an uploaded file. */
+  /**
+   * Documents: the written answer and/or an uploaded file.
+   */
   text     String?
   filePath String?
   fileName String?
 
-  /** Quizzes: the chosen option index per question. */
+  /**
+   * Quizzes: the chosen option index per question.
+   */
   answers Json?
 
   score    Int?
   feedback String?
 
-  /** platform | physical — paper submissions are recorded by a tutor. */
+  /**
+   * platform | physical — paper submissions are recorded by a tutor.
+   */
   submissionMode String @default("platform")
 
   /**
@@ -823,21 +961,29 @@ model EmailMessage {
   to      String
   subject String
   html    String
-  /** welcome | fee_reminder | exam_reminder | bulk | ... */
+  /**
+   * welcome | fee_reminder | exam_reminder | bulk | ...
+   */
   type    String @default("general")
 
   studentId String?
 
-  /** queued | sending | sent | failed | suppressed | cancelled */
-  status   String @default("queued")
-  attempts Int    @default(0)
+  /**
+   * queued | sending | sent | failed | suppressed | cancelled
+   */
+  status    String  @default("queued")
+  attempts  Int     @default(0)
   lastError String?
 
-  /** Not sent before this time; drives reminders and scheduled campaigns. */
-  scheduledFor DateTime @default(now())
+  /**
+   * Not sent before this time; drives reminders and scheduled campaigns.
+   */
+  scheduledFor DateTime  @default(now())
   sentAt       DateTime?
 
-  /** Groups the messages produced by one bulk send. */
+  /**
+   * Groups the messages produced by one bulk send.
+   */
   campaignId String?
 
   createdAt DateTime @default(now())
@@ -848,9 +994,11 @@ model EmailMessage {
 }
 
 model EmailSuppression {
-  id     String @id @default(cuid())
-  email  String @unique
-  /** bounced | complained | unsubscribed | manual */
+  id     String  @id @default(cuid())
+  email  String  @unique
+  /**
+   * bounced | complained | unsubscribed | manual
+   */
   reason String
   note   String?
 
@@ -875,10 +1023,12 @@ model PrivateClass {
   lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
 
   scheduledAt     DateTime
-  durationMinutes Int     @default(60)
+  durationMinutes Int      @default(60)
   topic           String?
-  /** scheduled | completed | cancelled | postponed */
-  status          String  @default("scheduled")
+  /**
+   * scheduled | completed | cancelled | postponed
+   */
+  status          String   @default("scheduled")
   notes           String?
 
   materialId String?
@@ -909,27 +1059,37 @@ model Lead {
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
-  /** Level they enquired about, and the sitting they asked for. */
+  /**
+   * Level they enquired about, and the sitting they asked for.
+   */
   interestedLevel String?
   sessionSlot     String?
-  /** group | private */
+  /**
+   * group | private
+   */
   classType       String  @default("group")
 
-  /** Where the enquiry came from: website, campaign name, csv_import, walk_in. */
-  source String @default("website")
-  /** new | invited | converted | dropped */
-  status String @default("new")
+  /**
+   * Where the enquiry came from: website, campaign name, csv_import, walk_in.
+   */
+  source String  @default("website")
+  /**
+   * new | invited | converted | dropped
+   */
+  status String  @default("new")
   notes  String?
 
-  /** When the enrolment invite was last emailed, so the office can chase. */
+  /**
+   * When the enrolment invite was last emailed, so the office can chase.
+   */
   invitedAt DateTime?
 
   /**
    * Set on conversion. One-to-one, so a Lead cannot be converted twice into
    * two competing student records.
    */
-  convertedStudentId String?  @unique
-  convertedStudent   Student? @relation(fields: [convertedStudentId], references: [id], onDelete: SetNull)
+  convertedStudentId String?   @unique
+  convertedStudent   Student?  @relation(fields: [convertedStudentId], references: [id], onDelete: SetNull)
   convertedAt        DateTime?
 
   createdAt DateTime @default(now())
@@ -937,4 +1097,70 @@ model Lead {
 
   @@index([status, createdAt])
   @@index([branchId, interestedLevel])
+}
+
+// A certificate is a historical document, so the level, branch, tutor and score
+// are SNAPSHOT here rather than read through the student relation at render
+// time. A student promoted from A1 to A2, or moved from Lagos to Abuja, must
+// still hold an A1 Lagos certificate afterwards.
+//
+// Every student who completes a session gets one. Passing decides the KIND, not
+// whether there is a certificate at all: `achievement` for a pass, `completion`
+// for attendance without one. Nothing in the wording of either says "failed".
+model Certificate {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /**
+   * achievement | completion
+   */
+  kind  String
+  level String
+
+  /**
+   * distinction | merit | pass | participation — printed on the face.
+   */
+  award String @default("participation")
+
+  /**
+   * Printed serial, e.g. EW/CERT/2026/A1/0007. Public, so it must be unique.
+   */
+  serial     String @unique
+  /**
+   * Short code for third-party verification at /verify/<code>. Separate from
+   * the serial because the serial is guessable by design (it counts up) and a
+   * guessable code would let anyone enumerate every student's result.
+   */
+  verifyCode String @unique
+
+  /**
+   * Average across all grades at issue. Null when the student was never scored.
+   */
+  averageScore Int?
+  passed       Boolean @default(false)
+
+  // Snapshots, deliberately denormalised. See the note above.
+  studentName String
+  studentCode String?
+  branchName  String?
+  tutorName   String?
+  batch       String?
+
+  /**
+   * Tuition still owed when the certificate was issued, kept for the record.
+   * The PROVISIONAL stamp is NOT driven by this column — it is recomputed from
+   * the live balance, so a student who settles up later gets a clean document
+   * instead of being punished forever by a snapshot.
+   */
+  outstandingAtIssue Int @default(0)
+
+  issuedAt  DateTime  @default(now())
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // One certificate per student per level. Re-running the issuer is safe.
+  @@unique([studentId, level])
+  @@index([issuedAt])
 }

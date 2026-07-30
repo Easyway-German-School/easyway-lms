@@ -1,0 +1,177 @@
+/**
+ * The live classroom, and why it is built the way it is.
+ *
+ * Students told us the same thing over and over: video on Zoom freezes on a
+ * Nigerian connection. That is not a bandwidth problem you fix by asking people
+ * to buy more data — it is an architecture problem. A conference that sends one
+ * quality to everybody runs at the speed of its worst participant.
+ *
+ * So classes run on LiveKit, an open-source SFU (Apache-2.0). The four things
+ * that actually stop the freezing:
+ *
+ *   1. SIMULCAST — every publisher sends several quality layers at once, and
+ *      the server forwards each viewer the layer their link can carry. One
+ *      student on 3G no longer drags the whole class down.
+ *   2. ADAPTIVE STREAM + DYNACAST — the server stops sending video nobody is
+ *      looking at, and stops the publisher encoding layers nobody subscribes
+ *      to. Uplink is the scarce resource on Nigerian mobile, and this is the
+ *      only thing that gives it back.
+ *   3. OPUS RED + DTX — audio packets are sent with redundancy, and silence is
+ *      not sent at all. Speech survives 20–30% packet loss. In a language
+ *      class, audio *is* the lesson; video is a nice-to-have.
+ *   4. SELECTIVE SUBSCRIPTION — a 40-student room subscribes to the speaker
+ *      and the tutor, not to 40 video streams.
+ *
+ * None of that is vendored into this repo. LiveKit runs as a service; we hold
+ * a client and a token minter. Moving from their cloud to a self-hosted server
+ * in Lagos is a change of LIVEKIT_URL and nothing else.
+ *
+ * This module is shared between server and browser, so it must not import
+ * `livekit-server-sdk` (server-only) or `livekit-client` (browser-only).
+ */
+
+/** Which backend the room will actually use. */
+export type LiveProvider = "livekit" | "jitsi";
+
+/**
+ * LiveKit needs three environment variables:
+ *   LIVEKIT_URL         wss://your-project.livekit.cloud   (or your own server)
+ *   LIVEKIT_API_KEY
+ *   LIVEKIT_API_SECRET
+ *
+ * Until they are set the classroom falls back to the Jitsi embed that was here
+ * before. That fallback is deliberate: a half-configured deployment must still
+ * be able to hold a class, and "the video page is broken" is a much worse
+ * failure than "the video page is on the old provider".
+ */
+export function liveKitConfigured(): boolean {
+  return Boolean(process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET);
+}
+
+export function liveProvider(): LiveProvider {
+  return liveKitConfigured() ? "livekit" : "jitsi";
+}
+
+function slug(value: string): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * A cohort's permanent room.
+ *
+ * Derived from branch + level + slot rather than stored, so a class is
+ * joinable even when no ClassSession row was generated for today — a tutor
+ * holding an unscheduled catch-up should not hit a dead end. Everyone in the
+ * same cohort computes the same string, which is the whole trick.
+ *
+ * `ClassSession.roomName` overrides this when a tutor pins a specific room.
+ */
+export function cohortRoomName({
+  branchName,
+  level,
+  sessionSlot,
+}: {
+  branchName?: string | null;
+  level?: string | null;
+  sessionSlot?: string | null;
+}): string {
+  const branch = slug(branchName || "easyway");
+  const lvl = slug(level || "a1");
+  const slot = slug(sessionSlot || "morning");
+  return `ew-${branch}-${lvl}-${slot}`;
+}
+
+/** A one-to-one private class gets its own room, keyed on the booking. */
+export function privateRoomName(privateClassId: string): string {
+  return `ew-private-${slug(privateClassId)}`;
+}
+
+/**
+ * Human label for a room, for the page header and the Jitsi fallback subject.
+ */
+export function roomDisplayName({
+  branchName,
+  level,
+  sessionSlot,
+}: {
+  branchName?: string | null;
+  level?: string | null;
+  sessionSlot?: string | null;
+}): string {
+  const slot = String(sessionSlot || "morning");
+  return `${branchName || "EasyWay"} · ${String(level || "A1").toUpperCase()} · ${slot.charAt(0).toUpperCase()}${slot.slice(1)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Quality modes
+//
+// Four rungs rather than a slider. A slider asks a student to guess a bitrate;
+// a named mode tells them what they get and what it costs. The classroom picks
+// the opening rung from what they told us at signup and lets them move.
+// ---------------------------------------------------------------------------
+
+export type QualityMode = "high" | "medium" | "low" | "audio";
+
+export type QualityModeSpec = {
+  value: QualityMode;
+  label: string;
+  /** What the student actually experiences. */
+  description: string;
+  /** Rough downstream cost, so "Data saver" is a number and not a vibe. */
+  dataHint: string;
+  /** Whether the student's own camera publishes in this mode. */
+  publishesVideo: boolean;
+  /** Height of the video layer we ask the server for. */
+  maxHeight: number;
+};
+
+export const QUALITY_MODES: QualityModeSpec[] = [
+  {
+    value: "high",
+    label: "Sharp",
+    description: "Full video for everyone on screen. Best on fibre or a strong Wi-Fi.",
+    dataHint: "~1.2 GB per 2-hour class",
+    publishesVideo: true,
+    maxHeight: 720,
+  },
+  {
+    value: "medium",
+    label: "Balanced",
+    description: "Clear enough to read the board, light enough for most connections.",
+    dataHint: "~500 MB per 2-hour class",
+    publishesVideo: true,
+    maxHeight: 360,
+  },
+  {
+    value: "low",
+    label: "Data saver",
+    description: "Small video, full audio. Holds up on mobile data.",
+    dataHint: "~180 MB per 2-hour class",
+    publishesVideo: true,
+    maxHeight: 180,
+  },
+  {
+    value: "audio",
+    label: "Audio only",
+    description: "No video at all. The lesson still works — and the recording has the video.",
+    dataHint: "~40 MB per 2-hour class",
+    publishesVideo: false,
+    maxHeight: 0,
+  },
+];
+
+export function qualitySpec(mode: QualityMode): QualityModeSpec {
+  return QUALITY_MODES.find((spec) => spec.value === mode) ?? QUALITY_MODES[1];
+}
+
+/**
+ * What a student is allowed to do in the room.
+ *
+ * A tutor publishes and moderates; a student publishes their own camera and
+ * mic but cannot mute the room or end the class. Enforced when the token is
+ * minted, not in the UI — a hidden button is not a permission.
+ */
+export type RoomRole = "tutor" | "student";

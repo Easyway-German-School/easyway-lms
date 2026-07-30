@@ -1,30 +1,133 @@
 export type PaymentStatus = "Pending" | "Partial" | "Completed";
 
 /**
- * Tuition by level. This table used to be copy-pasted into the student API,
- * the profile API and the dashboard, which meant a price change had to be made
- * in several files or the portal would quote two different fees for one level.
+ * Tuition pricing.
+ *
+ * Two things decide a fee: the level and the BRANCH. Abuja charges more than
+ * Lagos and Port Harcourt for the same level, so a level-only lookup silently
+ * undercharges every Abuja student by ₦20,000–₦30,000. That is why the public
+ * API here takes a branch and there is no level-only shortcut — if a call site
+ * genuinely has no branch it has to say so with `branch: null`, which is a
+ * deliberate choice rather than a forgotten argument.
+ *
+ * This table used to be copy-pasted into seven files. A price change had to be
+ * made in all of them or the portal quoted two different fees for one level.
+ * Everything now reads from here.
  */
-export const TUITION_FEES: Record<string, number> = {
-  A1: 150000,
-  A2: 150000,
-  B1: 180000,
-  B2: 180000,
-  C1: 200000,
-  C2: 220000,
+
+export type FeeTier = "premium" | "standard" | "online";
+
+/**
+ * Branch name → fee tier. Matched on a normalised substring rather than an
+ * exact name because branches are created by hand in the admin ("Abuja",
+ * "Abuja Branch", "EasyWay Abuja" have all been typed at some point).
+ * Anything unrecognised falls to `standard`, which is the cheaper of the two
+ * campus tiers — a misspelled branch undercharges rather than overcharges, and
+ * an office chasing ₦20k is a better failure than a student overbilled at
+ * checkout.
+ */
+const PREMIUM_BRANCH_KEYWORDS = ["abuja"] as const;
+const ONLINE_BRANCH_KEYWORDS = ["online", "virtual", "remote"] as const;
+
+const FEE_TABLE: Record<FeeTier, Record<string, number>> = {
+  // Abuja
+  premium: {
+    A1: 180000,
+    A2: 180000,
+    B1: 200000,
+    B2: 200000,
+    C1: 220000,
+    C2: 240000,
+  },
+  // Lagos, Port Harcourt, and any campus branch added later
+  standard: {
+    A1: 150000,
+    A2: 150000,
+    B1: 180000,
+    B2: 180000,
+    C1: 200000,
+    C2: 220000,
+  },
+  // ---------------------------------------------------------------------
+  // ONLINE BRANCH — PLACEHOLDER PRICES.
+  //
+  // These numbers are a template, NOT a decision. They sit ~10% under the
+  // standard campus tier on the reasoning that there is no campus overhead to
+  // pass on, which is the usual shape, but nobody has signed off on them.
+  //
+  // To set the real prices, edit ONLY this block. Every quote in the app —
+  // checkout, the paywall, admin price lists, invoices, reminder emails —
+  // reads from here, so there is nowhere else to change.
+  // ---------------------------------------------------------------------
+  online: {
+    A1: 135000,
+    A2: 135000,
+    B1: 160000,
+    B2: 160000,
+    C1: 180000,
+    C2: 200000,
+  },
 };
 
-export const DEFAULT_TUITION_FEE = TUITION_FEES.A1;
+/** True while the online tier is still carrying the placeholder numbers above. */
+export const ONLINE_PRICES_ARE_PLACEHOLDER = true;
+
+/**
+ * Levels a student may buy through the portal. C1 and C2 are quoted by the
+ * branch office for now, so they are priced in FEE_TABLE (the paywall still
+ * needs a number for a C1 student who was enrolled by hand) but kept out of
+ * self-service checkout.
+ */
+export const SELLABLE_LEVELS = ["A1", "A2", "B1", "B2"] as const;
+
+export const REGISTRATION_FEE = 5000;
 
 /** Share of tuition that must be paid before classes open. */
 export const DEPOSIT_RATE = 0.6;
 
-export function tuitionFeeForLevel(level?: string | null): number {
-  return TUITION_FEES[String(level ?? "").toUpperCase()] ?? DEFAULT_TUITION_FEE;
+export function isLevelSellable(level?: string | null): boolean {
+  return (SELLABLE_LEVELS as readonly string[]).includes(normaliseLevel(level));
 }
 
-export function requiredDepositForLevel(level?: string | null): number {
-  return Math.round(tuitionFeeForLevel(level) * DEPOSIT_RATE);
+function normaliseLevel(level?: string | null): string {
+  return String(level ?? "").trim().toUpperCase();
+}
+
+export function feeTierForBranch(branchName?: string | null): FeeTier {
+  const name = String(branchName ?? "").toLowerCase();
+  // Online is checked first: a branch named "Abuja (Online)" is an online
+  // cohort that happens to be run by the Abuja team, not a premium campus
+  // seat, and charging it the campus rate would be wrong in the expensive
+  // direction.
+  if (ONLINE_BRANCH_KEYWORDS.some((keyword) => name.includes(keyword))) return "online";
+  return PREMIUM_BRANCH_KEYWORDS.some((keyword) => name.includes(keyword)) ? "premium" : "standard";
+}
+
+export type FeeLookup = {
+  level?: string | null;
+  /** Branch name. Pass `null` explicitly when the caller truly has no branch. */
+  branch?: string | null;
+};
+
+export function tuitionFeeFor({ level, branch }: FeeLookup): number {
+  const tier = FEE_TABLE[feeTierForBranch(branch)];
+  return tier[normaliseLevel(level)] ?? tier.A1;
+}
+
+export function requiredDepositFor(lookup: FeeLookup): number {
+  return Math.round(tuitionFeeFor(lookup) * DEPOSIT_RATE);
+}
+
+/** Every level and its price at one branch — for checkout and admin price lists. */
+export function priceListForBranch(branchName?: string | null) {
+  const tier = feeTierForBranch(branchName);
+  return Object.entries(FEE_TABLE[tier]).map(([level, fee]) => ({
+    level,
+    tuitionFee: fee,
+    requiredDeposit: Math.round(fee * DEPOSIT_RATE),
+    sellable: isLevelSellable(level),
+    tier,
+  }));
 }
 
 export function derivePaymentStatus({

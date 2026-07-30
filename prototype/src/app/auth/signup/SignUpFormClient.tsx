@@ -2,13 +2,20 @@
 
 import { type FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { buildApiUrl } from "@/lib/api";
 import BrandLoader from "@/components/BrandLoader";
 import { countries, nigerianStates, packageOptions, professionOptions } from "@/app/auth/signup/options";
 import PasswordInput from "@/components/PasswordInput";
 import { uploadImage } from "@/lib/upload";
+import {
+  CONNECTION_OPTIONS,
+  DEVICE_OPTIONS,
+  TIMEZONE_OPTIONS,
+  isOnlineBranch,
+} from "@/lib/online-branch";
 
-type BranchOption = { id: string; name: string; location?: string | null };
+type BranchOption = { id: string; name: string; location?: string | null; mode?: string | null };
 
 type SignUpFormClientProps = { pageTitle?: string; initialBranchName?: string };
 
@@ -16,7 +23,20 @@ const branchGuidanceMap: Record<string, string> = {
   Lagos: "Lagos branch students get access to weekday group classes and Lagos campus support.",
   Abuja: "Abuja branch students get access to capital city study plans and local visa guidance.",
   "Port Harcourt": "Port Harcourt branch students get local cohort support plus flexible evening sessions.",
+  Online: "Online students join live classes over video from anywhere, and every class is recorded so a dropped connection never costs you the lesson.",
 };
+
+/**
+ * Class times are quoted in Nigerian time because that is when the tutors
+ * teach. Shown as a fixed WAT label rather than converted per student: a
+ * timetable that silently reads differently for two classmates is worse than
+ * one everybody has to convert once.
+ */
+const SESSION_SLOTS = [
+  { value: "morning", campus: "Morning — 9:00 to 11:00", online: "Morning — 9:00 to 11:00 WAT" },
+  { value: "afternoon", campus: "Afternoon — 13:00 to 15:00", online: "Afternoon — 13:00 to 15:00 WAT" },
+  { value: "evening", campus: "Evening — 17:00 to 19:00", online: "Evening — 17:00 to 19:00 WAT" },
+] as const;
 
 export default function SignUpFormClient({ pageTitle, initialBranchName }: SignUpFormClientProps) {
   const [email, setEmail] = useState("");
@@ -44,6 +64,12 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [heardFrom] = useState("");
   const [emergencyContactName] = useState("");
   const [emergencyContactInfo] = useState("");
+  // Online-only answers. They decide what the classroom optimises for, so they
+  // are asked once at signup rather than left for the student to discover
+  // through a frozen video mid-lesson.
+  const [timezone, setTimezone] = useState("Africa/Lagos");
+  const [device, setDevice] = useState("");
+  const [connection, setConnection] = useState("");
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -51,27 +77,58 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(1);
   const stepCount = 3;
-  const stepTitles = ["Program", "Profile", "Launch"];
-  const stepIntroText = {
-    1: "Pick your branch, pathway, and account details.",
-    2: "Tell us about yourself so we can tailor your plan.",
-    3: "Review and finish your signup quickly.",
-  }[step] as string;
+  const router = useRouter();
+  const selectedBranch = branches.find((branch) => branch.id === branchId) || null;
+
+  // The one switch the whole form turns on. Everything below reads from it
+  // rather than testing the branch name again, so an online student never sees
+  // a campus question and a campus student never sees a bandwidth one.
+  const isOnline = isOnlineBranch(selectedBranch);
+
+  const stepTitles = isOnline ? ["Program", "Your setup", "Launch"] : ["Program", "Profile", "Launch"];
+  const stepIntroText = (
+    isOnline
+      ? {
+          1: "Pick your level, your session, and your account details.",
+          2: "Tell us how you will be joining class so we can tune your video.",
+          3: "Review and finish — you go straight to your dashboard.",
+        }
+      : {
+          1: "Pick your branch, pathway, and account details.",
+          2: "Tell us about yourself so we can tailor your plan.",
+          3: "Review and finish your signup quickly.",
+        }
+  )[step] as string;
   const isLastStep = step === stepCount;
   const isDobValid = (value: string) => /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/.test(value.trim());
   const isAusbildungPathway = pathway === "Ausbildung (vocational training)";
+
+  // The Nigerian-states dropdown only makes sense inside Nigeria. Online reaches
+  // the diaspora, so outside Nigeria the field becomes free text — a student in
+  // Berlin was previously stuck picking a state they do not live in.
+  const usesNigerianStates = country === "Nigeria";
+
   const canAdvanceStep =
     step === 1
       ? name.trim() !== "" && email.trim() !== "" && password.length >= 8 && branchId !== "" && pathway.trim() !== "" && batch !== ""
       : step === 2
-      ? phone.trim() !== "" && city.trim() !== "" && address.trim() !== "" && stateField.trim() !== "" && gender.trim() !== "" && dob.trim() !== "" && isDobValid(dob) && (!isAusbildungPathway || profession.trim() !== "")
+      ? phone.trim() !== "" &&
+        city.trim() !== "" &&
+        address.trim() !== "" &&
+        stateField.trim() !== "" &&
+        gender.trim() !== "" &&
+        dob.trim() !== "" &&
+        isDobValid(dob) &&
+        (!isAusbildungPathway || profession.trim() !== "") &&
+        (!isOnline || (device !== "" && connection !== "" && timezone !== ""))
       : true;
   const nextButtonLabel = !isLastStep ? "Next" : "Finish signup";
-  const router = useRouter();
-  const selectedBranch = branches.find((branch) => branch.id === branchId) || null;
   const branchHint = selectedBranch
-    ? branchGuidanceMap[selectedBranch.name] || `You are signing up for the ${selectedBranch.name} branch.`
-    : "Select Lagos, Abuja, or Port Harcourt to see branch-specific guidance.";
+    ? branchGuidanceMap[selectedBranch.name] ||
+      (isOnline
+        ? "You are joining an online cohort — live classes over video, recorded every time."
+        : `You are signing up for the ${selectedBranch.name} branch.`)
+    : "Pick a campus, or choose Online to study live over video from anywhere.";
 
   useEffect(() => {
     async function loadBranches() {
@@ -220,6 +277,10 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         heardFrom,
         emergencyContactName,
         emergencyContactInfo,
+        // Only sent for an online signup. A campus student has no meaningful
+        // answer to any of it, and an empty object in their admission record
+        // would just be noise for whoever reads it in the admin later.
+        ...(isOnline ? { online: { timezone, device, connection } } : {}),
       } as Record<string, unknown>;
 
       const res = await fetch(buildApiUrl("/api/auth/signup"), {
@@ -234,6 +295,28 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error((data as { error?: string }).error || "Sign up failed");
+      }
+
+      // An online student has no branch office to walk into, so a page telling
+      // them to go and sign in is a dead end at the exact moment they are most
+      // likely to drop off. Sign them straight in and land them in the portal.
+      // A campus student still gets the confirmation page, which is where the
+      // office's next-steps instructions live.
+      if (isOnline) {
+        setSuccessMessage("Welcome to EasyWay Online. Taking you to your dashboard…");
+        setShowSuccess(true);
+
+        const signedIn = await signIn("credentials", {
+          email,
+          password,
+          role: "student",
+          redirect: false,
+        });
+
+        // A failed auto sign-in must not look like a failed signup — the
+        // account exists either way, so fall back to the normal sign-in page.
+        router.replace(signedIn?.ok ? "/dashboard" : "/auth/signin?message=Your%20account%20is%20ready.%20Please%20sign%20in.");
+        return;
       }
 
       setSuccessMessage("Signup successful. You will receive confirmation and can sign in next.");
@@ -318,11 +401,20 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                   <label htmlFor="branchId" className="block text-sm font-semibold text-[var(--muted)]">Choose your branch</label>
                   <select id="branchId" name="branchId" value={branchId} onChange={(e) => setBranchId(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
                     <option value="">Choose branch</option>
-                    {branches.map((branch) => (
-                      <option key={branch.id} value={branch.id}>{branch.name}</option>
-                    ))}
+                    {/* Grouped so Online reads as a real alternative to a
+                        campus rather than a fourth city in the list. */}
+                    <optgroup label="Study on campus">
+                      {branches.filter((branch) => !isOnlineBranch(branch)).map((branch) => (
+                        <option key={branch.id} value={branch.id}>{branch.name}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Study from anywhere">
+                      {branches.filter((branch) => isOnlineBranch(branch)).map((branch) => (
+                        <option key={branch.id} value={branch.id}>{branch.name} — live over video</option>
+                      ))}
+                    </optgroup>
                   </select>
-                  <p className="mt-2 text-xs text-[var(--muted)]">{branchHint}</p>
+                  <p className={`mt-2 text-xs ${isOnline ? "font-medium text-[var(--accent)]" : "text-[var(--muted)]"}`}>{branchHint}</p>
                 </div>
                 <div>
                   <label htmlFor="pathway" className="block text-sm font-semibold text-[var(--muted)]">Package type</label>
@@ -369,11 +461,15 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <div>
                   <label htmlFor="sessionSlot" className="block text-sm font-semibold text-[var(--muted)]">Which session suits you?</label>
                   <select id="sessionSlot" name="sessionSlot" value={sessionSlot} onChange={(e) => setSessionSlot(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
-                    <option value="morning">Morning — 9:00 to 11:00</option>
-                    <option value="afternoon">Afternoon — 13:00 to 15:00</option>
-                    <option value="evening">Evening — 17:00 to 19:00</option>
+                    {SESSION_SLOTS.map((slot) => (
+                      <option key={slot.value} value={slot.value}>{isOnline ? slot.online : slot.campus}</option>
+                    ))}
                   </select>
-                  <p className="mt-2 text-xs text-[var(--muted)]">Your calendar and your tutor come from the session you pick. Contact your branch office if you need to change it later.</p>
+                  <p className="mt-2 text-xs text-[var(--muted)]">
+                    {isOnline
+                      ? "Class times are Nigerian time (WAT). Your dashboard converts them to your own timezone once you tell us where you are, on the next step."
+                      : "Your calendar and your tutor come from the session you pick. Contact your branch office if you need to change it later."}
+                  </p>
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-3">
@@ -393,6 +489,61 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
             </div>
           ) : step === 2 ? (
             <div className="space-y-6">
+              {isOnline ? (
+                <div className="rounded-3xl border border-[var(--accent)]/25 bg-[var(--accent-soft)] p-5">
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 grid h-10 w-10 flex-none place-items-center rounded-2xl bg-white/80 text-lg shadow-sm">📶</span>
+                    <div>
+                      <h2 className="text-base font-semibold text-[var(--foreground)]">How you will join class</h2>
+                      <p className="mt-1 text-sm text-[var(--muted)]">
+                        We use these three answers to choose your starting video quality. Nigerian networks are unpredictable — starting you
+                        at the right level means the lesson holds instead of freezing while it works itself out.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid gap-4 md:grid-cols-3">
+                    <div>
+                      <label htmlFor="timezone" className="block text-sm font-semibold text-[var(--muted)]">Where are you studying from?</label>
+                      <select id="timezone" name="timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white">
+                        {TIMEZONE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <p className="mt-2 text-xs text-[var(--muted)]">Your timetable is shown in this timezone.</p>
+                    </div>
+                    <div>
+                      <label htmlFor="device" className="block text-sm font-semibold text-[var(--muted)]">What will you join on?</label>
+                      <select id="device" name="device" value={device} onChange={(e) => setDevice(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white">
+                        <option value="">Select your device</option>
+                        {DEVICE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <p className="mt-2 text-xs text-[var(--muted)]">Most of our online students are on a phone. That is fine.</p>
+                    </div>
+                    <div>
+                      <label htmlFor="connection" className="block text-sm font-semibold text-[var(--muted)]">How is your internet?</label>
+                      <select id="connection" name="connection" value={connection} onChange={(e) => setConnection(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white">
+                        <option value="">Select your connection</option>
+                        {CONNECTION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <p className="mt-2 text-xs text-[var(--muted)]">
+                        {CONNECTION_OPTIONS.find((option) => option.value === connection)?.hint ??
+                          "Be honest — a lower setting is not a worse class, it is a class that does not freeze."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="mt-4 rounded-2xl bg-white/70 px-4 py-3 text-xs leading-5 text-[var(--muted)]">
+                    Whatever you pick, every online class is recorded and lands in your video library the same day. If your network drops,
+                    you have not lost the lesson.
+                  </p>
+                </div>
+              ) : null}
+
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
                   <label htmlFor="phone" className="block text-sm font-semibold text-[var(--muted)]">Phone</label>
@@ -409,22 +560,40 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <label htmlFor="state" className="block text-sm font-semibold text-[var(--muted)]">State</label>
-                  <select id="state" name="state" value={stateField} onChange={(e) => setStateField(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white">
-                    <option value="">Select state</option>
-                    {nigerianStates.map((state) => (
-                      <option key={state} value={state}>{state}</option>
-                    ))}
-                  </select>
+                  <label htmlFor="state" className="block text-sm font-semibold text-[var(--muted)]">{usesNigerianStates ? "State" : "State / region"}</label>
+                  {usesNigerianStates ? (
+                    <select id="state" name="state" value={stateField} onChange={(e) => setStateField(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white">
+                      <option value="">Select state</option>
+                      {nigerianStates.map((state) => (
+                        <option key={state} value={state}>{state}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input id="state" name="state" value={stateField} onChange={(e) => setStateField(e.target.value)} placeholder="e.g. Nordrhein-Westfalen" className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
+                  )}
                 </div>
                 <div>
                   <label htmlFor="country" className="block text-sm font-semibold text-[var(--muted)]">Country</label>
-                  <select id="country" name="country" value={country} onChange={(e) => setCountry(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white">
+                  <select
+                    id="country"
+                    name="country"
+                    value={country}
+                    onChange={(e) => {
+                      // The state field changes shape with the country, so a
+                      // stale Nigerian state must not survive a move abroad.
+                      setCountry(e.target.value);
+                      setStateField("");
+                    }}
+                    className="mt-1 w-full rounded-xl border px-3 py-2 bg-white"
+                  >
                     <option value="Nigeria">Nigeria</option>
                     {countries.filter((countryName) => countryName !== "Nigeria").map((countryName) => (
                       <option key={countryName} value={countryName}>{countryName}</option>
                     ))}
                   </select>
+                  {isOnline ? (
+                    <p className="mt-2 text-xs text-[var(--muted)]">Studying from outside Nigeria is fine — the online branch was built for it.</p>
+                  ) : null}
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -473,7 +642,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-3xl border border-[var(--border)] bg-white p-4">
                   <h3 className="text-sm font-semibold text-[var(--foreground)]">Program</h3>
-                  <p className="mt-2 text-sm text-[var(--muted)]">Branch: {selectedBranch?.name || "Not selected"}</p>
+                  <p className="mt-2 text-sm text-[var(--muted)]">Branch: {selectedBranch?.name || "Not selected"}{isOnline ? " (live over video)" : ""}</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">Pathway: {pathway}</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">Level: {level}</p>
                 </div>
@@ -485,6 +654,17 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                   <p className="mt-2 text-sm text-[var(--muted)]">City: {city || "Not specified"}</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">DOB: {dob || "Not specified"}</p>
                 </div>
+                {isOnline ? (
+                  <div className="rounded-3xl border border-[var(--accent)]/25 bg-[var(--accent-soft)] p-4 md:col-span-2">
+                    <h3 className="text-sm font-semibold text-[var(--foreground)]">Your online setup</h3>
+                    <div className="mt-2 grid gap-2 text-sm text-[var(--muted)] sm:grid-cols-3">
+                      <p>Timezone: {TIMEZONE_OPTIONS.find((option) => option.value === timezone)?.label || timezone}</p>
+                      <p>Device: {DEVICE_OPTIONS.find((option) => option.value === device)?.label || "Not specified"}</p>
+                      <p>Connection: {CONNECTION_OPTIONS.find((option) => option.value === connection)?.label || "Not specified"}</p>
+                    </div>
+                    <p className="mt-3 text-xs text-[var(--muted)]">You can change any of this later in Settings — nothing here is locked in.</p>
+                  </div>
+                ) : null}
               </div>
               <div>
                 <label className="block text-sm font-semibold text-[var(--muted)]">Upload profile photo</label>

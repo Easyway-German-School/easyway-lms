@@ -107,6 +107,18 @@ export async function POST(request: NextRequest) {
       : "morning";
     const normalizedClassType = String(classType ?? "").toLowerCase() === "private" ? "private" : "group";
 
+    // Only present on an online signup. Left undefined for a campus student so
+    // their admission record does not gain an empty object.
+    const onlineProfile = (body as Record<string, unknown> | null)?.online;
+    const normalizedOnlineProfile =
+      onlineProfile && typeof onlineProfile === "object"
+        ? {
+            timezone: typeof (onlineProfile as any).timezone === "string" ? (onlineProfile as any).timezone : undefined,
+            device: typeof (onlineProfile as any).device === "string" ? (onlineProfile as any).device : undefined,
+            connection: typeof (onlineProfile as any).connection === "string" ? (onlineProfile as any).connection : undefined,
+          }
+        : undefined;
+
     // Build admission payload to persist as JSON
     const normalizedAdmission: Record<string, unknown> = {
       gender: typeof gender === "string" ? gender : undefined,
@@ -151,6 +163,10 @@ export async function POST(request: NextRequest) {
       transportRoute: typeof transportRoute === "string" ? transportRoute : undefined,
       heardFrom: typeof heardFrom === "string" ? heardFrom : undefined,
       batch: normalizedBatch,
+      // Online cohort answers (timezone / device / connection). Nested rather
+      // than flattened so `readOnlineProfile` has one place to look and these
+      // keys can never collide with an admission field added later.
+      online: normalizedOnlineProfile,
     };
 
     if (!normalizedEmail || !normalizedPassword || !normalizedName) {

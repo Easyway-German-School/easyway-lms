@@ -77,6 +77,15 @@ function MessageIcon({ className }: { className?: string }) {
   );
 }
 
+function LiveIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="6" width="14" height="12" rx="2.5" />
+      <path d="m17 10 5-3v10l-5-3z" />
+    </svg>
+  );
+}
+
 function SettingsIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -88,6 +97,7 @@ function SettingsIcon({ className }: { className?: string }) {
 
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/lecturer/dashboard', icon: <DashboardIcon className="h-4 w-4" /> },
+  { label: 'Live classroom', href: '/live', icon: <LiveIcon className="h-4 w-4" /> },
   { label: 'Customise my classes', href: '/lecturer/classes', icon: <ClassIcon className="h-4 w-4" /> },
   { label: 'Timetable', href: '/lecturer/timetable', icon: <ClassIcon className="h-4 w-4" /> },
   { label: 'Private classes', href: '/lecturer/private-classes', icon: <ClassIcon className="h-4 w-4" /> },
@@ -95,6 +105,10 @@ const navItems: NavItem[] = [
   { label: 'Materials', href: '/lecturer/materials', icon: <MaterialIcon className="h-4 w-4" /> },
   { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon className="h-4 w-4" /> },
   { label: 'Exam/Test', href: '/lecturer/grades', icon: <GradeIcon className="h-4 w-4" /> },
+  // These two pages existed but were reachable from nowhere, so nobody used
+  // them. They belong in the sidebar with everything else.
+  { label: 'Gradebook', href: '/lecturer/gradebook', icon: <GradeIcon className="h-4 w-4" /> },
+  { label: 'Lesson builder', href: '/lecturer/lesson-builder', icon: <MaterialIcon className="h-4 w-4" /> },
   { label: 'Messages', href: '/lecturer/messages', icon: <MessageIcon className="h-4 w-4" /> },
   { label: 'Settings', href: '/lecturer/settings', icon: <SettingsIcon className="h-4 w-4" /> },
 ];

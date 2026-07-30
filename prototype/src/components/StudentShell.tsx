@@ -45,6 +45,7 @@ function DollarIcon({ className }: { className?: string }) {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: "▤" },
   { label: "Classes", href: "/calendar", icon: "◷" },
+  { label: "Live class", href: "/live", icon: "◉" },
   { label: "Assignment", href: "/assignment", icon: "✎" },
   { label: "Materials", href: "/materials", icon: "▦" },
   { label: "Community", href: "/community", icon: "◍" },

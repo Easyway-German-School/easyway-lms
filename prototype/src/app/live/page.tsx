@@ -1,158 +1,255 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import BrandLoader from "@/components/BrandLoader";
+import StudentShell from "@/components/StudentShell";
+import LecturerShell from "@/components/LecturerShell";
+import JitsiClassroom from "@/components/live/JitsiClassroom";
+import LiveKitClassroom from "@/components/live/LiveKitClassroom";
+import { QUALITY_MODES, qualitySpec, type QualityMode, type RoomRole } from "@/lib/live-classroom";
 
-export default function LiveRoom() {
-  const jitsiContainerRef = useRef<HTMLDivElement>(null);
-  const [sessionActive, setSessionActive] = useState(false);
-  const [userName, setUserName] = useState("Student");
+type LiveSession = {
+  provider: "livekit" | "jitsi";
+  token: string | null;
+  url: string | null;
+  roomName: string;
+  displayName: string;
+  role: RoomRole;
+  level: string;
+  sessionSlot: string;
+  branchName: string | null;
+  isOnlineBranch: boolean;
+  initialQuality: QualityMode;
+  participantName: string;
+};
 
-  function startSession() {
-    if (!jitsiContainerRef.current) return;
-
-    // Initialize Jitsi Meet
-    const options = {
-      roomName: "EasywayGermanClass",
-      width: "100%",
-      height: 600,
-      parentNode: jitsiContainerRef.current,
-      configOverwrite: {
-        startAudioOnly: true,
-        enableWelcomePage: false,
-        disableAudioLevels: false,
-      },
-      interfaceConfigOverwrite: {
-        TOOLBAR_BUTTONS: [
-          'microphone', 'camera', 'closedcaptions', 'desktop', 'fullscreen',
-          'fodeviceselection', 'hangup', 'profile', 'chat', 'recording',
-          'livestream', 'etherpad', 'sharedvideo', 'settings', 'raisehand',
-          'videoquality', 'filmstrip', 'invite', 'feedback', 'stats', 'shortcuts',
-          'tileview', 'download', 'help', 'mute-everyone', 'e2ee'
-        ],
-        SHOW_WATERMARK: false,
-      },
-      userInfo: {
-        displayName: userName,
-      },
-    };
-
-    // Load Jitsi script
-    const script = document.createElement("script");
-    script.src = "https://meet.jit.si/external_api.js";
-    script.async = true;
-    script.onload = () => {
-      // @ts-ignore
-      const api = new window.JitsiMeetExternalAPI("meet.jit.si", options);
-      setSessionActive(true);
-
-      return () => {
-        api?.dispose();
-        setSessionActive(false);
-      };
-    };
-    document.body.appendChild(script);
-  }
-
-  function endSession() {
-    setSessionActive(false);
-    if (jitsiContainerRef.current) {
-      jitsiContainerRef.current.innerHTML = "";
-    }
-  }
-
+/**
+ * The pre-join screen.
+ *
+ * Deliberately not skipped. A student on mobile data who lands straight in a
+ * 720p room has already lost the first minute of the lesson to a frozen
+ * picture. Thirty seconds spent choosing a quality up front is the cheapest
+ * fix available, and it is the one thing the student actually controls.
+ */
+function Lobby({
+  session,
+  mode,
+  onModeChange,
+  onJoin,
+}: {
+  session: LiveSession;
+  mode: QualityMode;
+  onModeChange: (mode: QualityMode) => void;
+  onJoin: () => void;
+}) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 24 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.55, ease: "easeOut" }}
-      className="min-h-screen bg-[var(--surface-alt)] py-10 text-[var(--foreground)]"
-    >
-      <div className="mx-auto max-w-6xl space-y-8 px-6 md:px-10">
-        <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-2xl ring-1 ring-white/10">
-          <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Live Classroom</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight text-[var(--foreground)]">Real-time German coaching with video</h1>
-          <p className="mt-4 text-[var(--muted)]">
-            Connect with instructors and peers for live German conversation practice and group lessons using Jitsi Meet.
-          </p>
-        </header>
+    <div className="space-y-6">
+      <div className="rounded-3xl bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] p-8 text-white shadow-xl">
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/70">
+          {session.isOnlineBranch ? "EasyWay Online" : "Live classroom"}
+        </p>
+        <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">{session.displayName}</h1>
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-white/85">
+          {session.role === "tutor"
+            ? "Your cohort joins this same room. Start whenever you are ready — students who arrive early will be waiting inside."
+            : "Your tutor and classmates are in this room. Pick the quality that matches your connection, then join."}
+        </p>
+      </div>
 
-        {!sessionActive ? (
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-3xl bg-[var(--surface)] p-6 shadow-2xl transition-transform duration-300 hover:-translate-y-1 ring-1 ring-white/10">
-              <h2 className="text-2xl font-semibold text-[var(--foreground)]">Join live session</h2>
-              <p className="mt-4 text-[var(--muted)]">
-                Connect with other students and instructors for real-time practice. Your camera and microphone will be enabled.
-              </p>
-              <div className="mt-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-[var(--foreground)]">Your name</label>
-                  <input
-                    type="text"
-                    value={userName}
-                    onChange={(e) => setUserName(e.target.value)}
-                    placeholder="Enter your name"
-                    className="mt-2 w-full rounded-lg border border-[rgba(148,163,184,0.25)] bg-[var(--surface-alt)] px-4 py-2 text-[var(--foreground)] placeholder-slate-400 focus:border-[var(--accent)] focus:outline-none"
-                  />
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+        <h2 className="text-lg font-semibold">Choose your video quality</h2>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          We have pre-selected <span className="font-semibold text-[var(--foreground)]">{qualitySpec(mode).label}</span>
+          {session.isOnlineBranch
+            ? " based on the connection you told us about at signup."
+            : " as a safe starting point."}{" "}
+          You can change it at any point during class.
+        </p>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          {QUALITY_MODES.map((spec) => {
+            const active = spec.value === mode;
+            return (
+              <button
+                key={spec.value}
+                type="button"
+                onClick={() => onModeChange(spec.value)}
+                className={`rounded-2xl border p-4 text-left transition ${
+                  active
+                    ? "border-[var(--accent)] bg-[var(--accent-soft)] shadow-[0_8px_24px_rgba(10,124,255,0.12)]"
+                    : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-slate-300"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-[var(--foreground)]">{spec.label}</span>
+                  <span className="text-xs font-medium text-[var(--muted)]">{spec.dataHint}</span>
                 </div>
-                <button
-                  onClick={startSession}
-                  className="w-full rounded-full bg-emerald-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-600"
-                >
-                  Start live session
-                </button>
-              </div>
-              <div className="mt-6 space-y-3 rounded-3xl border border-dashed border-[rgba(148,163,184,0.25)] bg-[var(--surface-alt)] p-5 text-sm text-[var(--foreground)]">
-                <p className="font-semibold text-[var(--foreground)]">What you can do:</p>
-                <p>• Video and audio conversation with peers</p>
-                <p>• Screen sharing for collaborative activities</p>
-                <p>• Live chat during sessions</p>
-                <p>• German roleplay scenarios with instructors</p>
-              </div>
-            </div>
+                <p className="mt-1.5 text-sm text-[var(--muted)]">{spec.description}</p>
+              </button>
+            );
+          })}
+        </div>
 
-            <div className="rounded-3xl bg-slate-950 p-6 text-slate-50 shadow-2xl ring-1 ring-white/10">
-              <h2 className="text-2xl font-semibold">Session details</h2>
-              <p className="mt-4 text-slate-300">
-                Your live classroom sessions are powered by Jitsi Meet, an open-source video conferencing platform.
-              </p>
-              <div className="mt-6 rounded-3xl bg-slate-900 p-5">
-                <div className="space-y-4">
-                  <div className="rounded-lg bg-slate-800 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Current session</p>
-                    <p className="mt-2 text-sm font-semibold text-emerald-400">EasywayGermanClass</p>
-                  </div>
-                  <div className="rounded-lg bg-slate-800 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Technology</p>
-                    <p className="mt-2 text-sm text-slate-200">Jitsi Meet (WebRTC) - P2P encrypted</p>
-                  </div>
-                  <div className="rounded-lg bg-slate-800 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Features</p>
-                    <p className="mt-2 text-sm text-slate-300">Video • Audio • Screen Share • Chat • Recording</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-3xl bg-[var(--surface)] p-6 shadow-sm ring-1 ring-white/10">
-            <div ref={jitsiContainerRef} className="rounded-2xl overflow-hidden bg-[var(--surface)]" />
-            <button
-              onClick={endSession}
-              className="mt-6 rounded-full bg-red-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-red-600"
-            >
-              End session
-            </button>
-          </div>
-        )}
-
-        <div className="rounded-3xl bg-[var(--surface)] p-6 shadow-sm ring-1 ring-white/10">
-          <Link href="/" className="inline-flex rounded-full bg-[var(--foreground)] px-5 py-3 text-sm font-semibold text-[var(--surface)] transition hover:brightness-110">
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <button
+            onClick={onJoin}
+            className="rounded-full bg-[var(--accent)] px-8 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110"
+          >
+            Join the class
+          </button>
+          <Link
+            href={session.role === "tutor" ? "/lecturer/dashboard" : "/dashboard"}
+            className="rounded-full border border-[var(--border)] px-6 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+          >
             Back to dashboard
           </Link>
         </div>
       </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        {[
+          {
+            title: "Audio survives a bad line",
+            body: "Speech is sent with redundancy, so it holds together through heavy packet loss — even when video cannot.",
+          },
+          {
+            title: "Your link, your quality",
+            body: "Everyone receives the quality their own connection can carry. One weak connection no longer slows the whole class.",
+          },
+          {
+            title: "Nothing is lost",
+            body: "Every class is recorded into your video library, so a drop-out costs you minutes rather than the lesson.",
+          },
+        ].map((card) => (
+          <div key={card.title} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+            <p className="text-sm font-semibold text-[var(--foreground)]">{card.title}</p>
+            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{card.body}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function LiveClassroomPage() {
+  const [session, setSession] = useState<LiveSession | null>(null);
+  const [lockedMessage, setLockedMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [joined, setJoined] = useState(false);
+  const [mode, setMode] = useState<QualityMode>("medium");
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch("/api/live/session", { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.status === 401) {
+          setError("Please sign in to join your class.");
+          return;
+        }
+        if (res.status === 403) {
+          setLockedMessage(data.message || "Pay your deposit to join live classes.");
+          return;
+        }
+        if (!res.ok) {
+          setError(data.error || "Could not set up the classroom.");
+          return;
+        }
+
+        setSession(data as LiveSession);
+        setMode((data as LiveSession).initialQuality);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "Could not reach the classroom service.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
+  }, []);
+
+  const handleLeave = useCallback(() => setJoined(false), []);
+
+  const body = (() => {
+    if (loading) {
+      return <BrandLoader size="lg" title="Klassenzimmer wird geöffnet…" message="Setting up your classroom." />;
+    }
+
+    if (error) {
+      return (
+        <div className="rounded-3xl border border-rose-200 bg-rose-50 p-8 text-sm text-rose-800">
+          <p className="text-base font-semibold">We could not open your classroom</p>
+          <p className="mt-2">{error}</p>
+          <Link href="/dashboard" className="mt-5 inline-flex rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white">
+            Back to dashboard
+          </Link>
+        </div>
+      );
+    }
+
+    if (lockedMessage) {
+      return (
+        <div className="rounded-3xl border border-amber-300 bg-amber-50 p-8 text-sm text-amber-900">
+          <p className="text-base font-semibold">Live classes are locked</p>
+          <p className="mt-2">{lockedMessage}</p>
+          <Link href="/programs" className="mt-5 inline-flex rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white">
+            Pay tuition now
+          </Link>
+        </div>
+      );
+    }
+
+    if (!session) return null;
+
+    if (!joined) {
+      return <Lobby session={session} mode={mode} onModeChange={setMode} onJoin={() => setJoined(true)} />;
+    }
+
+    if (session.provider === "livekit" && session.token && session.url) {
+      return (
+        <LiveKitClassroom
+          url={session.url}
+          token={session.token}
+          roomName={session.roomName}
+          displayName={session.displayName}
+          role={session.role}
+          initialQuality={mode}
+          onLeave={handleLeave}
+        />
+      );
+    }
+
+    return (
+      <JitsiClassroom
+        roomName={session.roomName}
+        displayName={session.displayName}
+        participantName={session.participantName}
+        audioFirst={mode === "audio"}
+        onLeave={handleLeave}
+      />
+    );
+  })();
+
+  const content = (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, ease: "easeOut" }}
+      className="min-h-screen px-6 py-10"
+    >
+      <div className="mx-auto max-w-5xl">{body}</div>
     </motion.div>
   );
+
+  // Tutors and students both live here, so the page picks the chrome that
+  // matches whoever is signed in rather than hard-coding the student portal.
+  if (session?.role === "tutor") return <LecturerShell>{content}</LecturerShell>;
+  if (session) return <StudentShell>{content}</StudentShell>;
+  return <div className="min-h-screen bg-[var(--background)]">{content}</div>;
 }
