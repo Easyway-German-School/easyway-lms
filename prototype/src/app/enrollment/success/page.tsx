@@ -51,22 +51,22 @@ export default async function EnrollmentSuccessPage({ searchParams }: Enrollment
           title="Finalizing your payment…"
           message="We are verifying your Paystack transaction and unlocking your classes now. You’ll be redirected to your dashboard shortly."
         />
-        <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-          <p className="font-semibold text-slate-900">Payment reference</p>
+        <div className="mt-6 rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-sm text-[var(--foreground-soft)]">
+          <p className="font-semibold text-[var(--foreground)]">Payment reference</p>
           <p className="mt-1 break-words">{reference || "—"}</p>
           {verified ? (
             verified.message ? <p className="mt-2 text-rose-600">{verified.message}</p> : <>
-              <p className="mt-2 text-slate-600">Status: {verified.status}</p>
-              {verified.amount ? <p className="mt-1 text-slate-600">Amount: {verified.amount.toLocaleString()} {verified.currency}</p> : null}
+              <p className="mt-2 text-[var(--muted)]">Status: {verified.status}</p>
+              {verified.amount ? <p className="mt-1 text-[var(--muted)]">Amount: {verified.amount.toLocaleString()} {verified.currency}</p> : null}
             </>
           ) : (
-            <p className="mt-2 text-slate-600">Verifying transaction…</p>
+            <p className="mt-2 text-[var(--muted)]">Verifying transaction…</p>
           )}
         </div>
         {searchParams?.source === "paystack" ? (
           <div className="mt-4 rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
             <p className="font-semibold">Paystack checkout complete</p>
-            <p className="mt-1 text-slate-700">This page was reached from Paystack and confirms the payment callback completed successfully.</p>
+            <p className="mt-1 text-[var(--foreground-soft)]">This page was reached from Paystack and confirms the payment callback completed successfully.</p>
             <PaystackAutoRedirectClient reference={reference} source={searchParams?.source} />
             <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:gap-4">
               <form method="get" action="/dashboard">

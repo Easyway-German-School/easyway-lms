@@ -27,7 +27,6 @@ import {
   PaymentIcon,
   ProfileIcon,
   ResultsIcon,
-  SettingsIcon,
 } from "@/components/icons";
 
 type NavItem = {
@@ -38,6 +37,10 @@ type NavItem = {
 
 // These were box-drawing characters — ▤ ◷ ◉ ◈ — sitting next to three real
 // SVGs, which is why the sidebar looked half-finished.
+//
+// There is no Settings entry. Everything it held is either on Profile or is a
+// school decision a student cannot make, and the theme switch — the one thing
+// in there anybody used — lives in the corner of every page.
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
   { label: "Classes", href: "/calendar", icon: <CalendarIcon /> },
@@ -52,7 +55,6 @@ const navItems: NavItem[] = [
   { label: "Notifications", href: "/notifications", icon: <BellIcon /> },
   { label: "Payments", href: "/payments", icon: <PaymentIcon /> },
   { label: "Profile", href: "/profile", icon: <ProfileIcon /> },
-  { label: "Settings", href: "/settings", icon: <SettingsIcon /> },
 ];
 
 export default function StudentShell({ children }: { children: React.ReactNode }) {
@@ -105,7 +107,9 @@ export default function StudentShell({ children }: { children: React.ReactNode }
     "This page";
 
   return (
-    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(10,124,255,0.10),_transparent_30%),linear-gradient(135deg,_#f7faff_0%,_#eef3ff_100%)] text-[var(--foreground)]">
+    // Was a hardcoded blue gradient, which is why the portal stayed daylight-
+    // blue whatever theme was chosen. The themed canvas is the page's job now.
+    <div className="app-canvas flex min-h-screen text-[var(--foreground)]">
       {/* Scrim, phones only. Tapping anywhere off the drawer closes it. */}
       {drawerOpen && (
         <button
@@ -117,11 +121,11 @@ export default function StudentShell({ children }: { children: React.ReactNode }
 
       <aside
         data-tour="sidebar"
-        className={`fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-white/60 bg-white/95 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:bg-white/80 lg:transition-all ${
+        className={`fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:transition-all ${
           drawerOpen ? "translate-x-0" : "-translate-x-full"
         } w-[17rem] ${collapsed ? "lg:w-20" : "lg:w-72"}`}
       >
-        <div className="border-b border-slate-200/70 p-4">
+        <div className="border-b border-[var(--border)] p-4">
           <div className="flex items-center justify-between gap-3">
             {/* The wordmark already carries the school name, so it is not
                 repeated beside it — only which portal you are in. */}
@@ -138,14 +142,14 @@ export default function StudentShell({ children }: { children: React.ReactNode }
             <button
               onClick={() => setCollapsed(!collapsed)}
               aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="hidden rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:block"
+              className="hidden rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:block"
             >
               {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
             </button>
             <button
               onClick={() => setDrawerOpen(false)}
               aria-label="Close menu"
-              className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:hidden"
+              className="rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:hidden"
             >
               <CrossIcon className="h-5 w-5" />
             </button>
@@ -173,11 +177,11 @@ export default function StudentShell({ children }: { children: React.ReactNode }
                     active
                       ? "bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_8px_24px_rgba(10,124,255,0.12)]"
                       : locked
-                      ? "text-slate-400 hover:bg-slate-100/70 hover:text-slate-600"
-                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+                      ? "text-[var(--muted)] opacity-70 hover:bg-[var(--surface-alt)] hover:opacity-100"
+                      : "text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
                   }`}
                 >
-                  <span className={`flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-base shadow-sm transition ${active ? "border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]" : "group-hover:border-slate-300"}`}>{item.icon}</span>
+                  <span className={`flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${active ? "border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]" : "group-hover:border-[var(--border-strong)]"}`}>{item.icon}</span>
                   {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
                   {!collapsed && locked && <LockIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]/70" strokeWidth={2.2} />}
                 </button>
@@ -186,8 +190,8 @@ export default function StudentShell({ children }: { children: React.ReactNode }
           </div>
         </nav>
 
-        <div className={`border-t border-slate-200/70 p-4 ${collapsed ? "text-center" : ""}`}>
-          <p className="text-xs text-slate-500">{collapsed ? "v1" : "AI-ready student workspace"}</p>
+        <div className={`border-t border-[var(--border)] p-4 ${collapsed ? "text-center" : ""}`}>
+          <p className="text-xs text-[var(--muted)]">{collapsed ? "v1" : "AI-ready student workspace"}</p>
         </div>
       </aside>
 
@@ -195,11 +199,11 @@ export default function StudentShell({ children }: { children: React.ReactNode }
         {/* The only chrome on a phone: the way back to the menu, and the bell.
             On desktop it keeps the bell reachable from every page, which it
             was not before — the component existed but nothing rendered it. */}
-        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-white/60 bg-white/80 px-3 py-2 backdrop-blur-xl sm:px-5">
+        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2 backdrop-blur-xl sm:px-5">
           <button
             onClick={() => setDrawerOpen(true)}
             aria-label="Open menu"
-            className="grid h-10 w-10 place-items-center rounded-xl text-slate-600 transition hover:bg-slate-100 lg:hidden"
+            className="grid h-10 w-10 place-items-center rounded-xl text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)] lg:hidden"
           >
             <MenuIcon className="h-5 w-5" />
           </button>
@@ -208,7 +212,7 @@ export default function StudentShell({ children }: { children: React.ReactNode }
             <BrandLogo variant="wordmark" className="h-7" />
           </div>
 
-          <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-slate-700 lg:block">
+          <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-[var(--foreground-soft)] lg:block">
             {lockedAreaLabel === "This page" ? "Student portal" : lockedAreaLabel}
           </p>
 

@@ -33,7 +33,14 @@ export async function GET() {
       id: true,
       level: true,
       admission: true,
+      studentCode: true,
       branch: { select: { name: true } },
+      // The name and tutor are here for the LOCKED preview, not for any
+      // certificate that exists: a student with nothing issued yet is still
+      // shown their own document, sealed, with their real name on it. A
+      // placeholder name would defeat the entire point of showing it.
+      user: { select: { name: true } },
+      tutor: { select: { user: { select: { name: true } } } },
       payments: { where: { status: "completed" }, select: { amount: true } },
     },
   });
@@ -74,5 +81,14 @@ export async function GET() {
     outstanding,
     pending: eligibility.eligible ? null : eligibility.reason,
     certificates: rows.map((row) => toCertificateView(row, outstanding)),
+    // Everything the sealed preview needs to render the student's OWN
+    // certificate before they have earned it.
+    identity: {
+      studentName: student.user?.name ?? "Student",
+      studentCode: student.studentCode,
+      branchName: student.branch?.name ?? null,
+      tutorName: student.tutor?.user?.name ?? null,
+      batch,
+    },
   });
 }

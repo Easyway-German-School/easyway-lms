@@ -7,6 +7,7 @@ import { buildApiUrl } from "@/lib/api";
 import BrandLoader from "@/components/BrandLoader";
 import { countries, nigerianStates, packageOptions, professionOptions } from "@/app/auth/signup/options";
 import PasswordInput from "@/components/PasswordInput";
+import PhotoCapture from "@/components/PhotoCapture";
 import { CheckCircleIcon, SignalIcon } from "@/components/icons";
 import { uploadImage } from "@/lib/upload";
 import {
@@ -658,15 +659,29 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                       <p>Device: {DEVICE_OPTIONS.find((option) => option.value === device)?.label || "Not specified"}</p>
                       <p>Connection: {CONNECTION_OPTIONS.find((option) => option.value === connection)?.label || "Not specified"}</p>
                     </div>
-                    <p className="mt-3 text-xs text-[var(--muted)]">You can change any of this later in Settings — nothing here is locked in.</p>
+                    <p className="mt-3 text-xs text-[var(--muted)]">You can change any of this later on your Profile — nothing here is locked in.</p>
                   </div>
                 ) : null}
               </div>
               <div>
-                <label className="block text-sm font-semibold text-[var(--muted)]">Upload profile photo</label>
-                <input type="file" accept="image/*" capture="user" onChange={(e) => { const file = e.target.files?.[0] || null; setPhotoFile(file); setPhotoFileName(file?.name || ""); }} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
-                <p className="mt-2 text-xs text-[var(--muted)]">Camera capture supported. Photo is required to complete signup.</p>
-                {uploadingPhoto ? <p className="mt-2 text-xs text-[var(--muted)]">Uploading photo…</p> : photoUrl ? <p className="mt-2 text-xs text-[var(--muted)]">Uploaded: <a href={photoUrl} className="text-[var(--accent)]" target="_blank" rel="noreferrer">View</a></p> : photoFileName ? <p className="mt-2 text-xs text-[var(--muted)]">Selected: {photoFileName}</p> : null}
+                <label className="block text-sm font-semibold text-[var(--muted)]">Your profile photo</label>
+                {/* Was a bare file input with `capture="user"`, which on a
+                    desktop is just a file picker and on a phone hands the
+                    student off to the OS camera app and hopes they come back.
+                    <PhotoCapture /> keeps them in the form either way. */}
+                <div className="mt-2">
+                  <PhotoCapture
+                    disabled={uploadingPhoto}
+                    onChange={(file) => {
+                      setPhotoFile(file);
+                      setPhotoFileName(file?.name || "");
+                      // A new photo invalidates whatever was uploaded before it,
+                      // or the submit would quietly keep the old one.
+                      setPhotoUrl("");
+                    }}
+                  />
+                </div>
+                {uploadingPhoto ? <p className="mt-2 text-xs text-[var(--muted)]">Uploading photo…</p> : null}
               </div>
             </div>
           )}

@@ -19,14 +19,38 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * Applied before React hydrates, and before the first paint.
+ *
+ * The theme used to be set in a `useEffect`, which meant the server sent a
+ * class-less <html>, the browser painted the default, and only then did the
+ * chosen theme snap in. On a slow connection that is a full second of the
+ * wrong palette — and because `theme-light` was never on the server's markup,
+ * a student who had picked dark spent every navigation watching the page
+ * flash white first.
+ *
+ * Inline and synchronous on purpose: it has to run before the body is painted,
+ * so it cannot be a module.
+ */
+const THEME_BOOT = `(function(){try{
+var t=localStorage.getItem('easyway-theme');
+if(t!=='light'&&t!=='dark'&&t!=='custom'){t='light'}
+document.documentElement.classList.add('theme-'+t);
+}catch(e){document.documentElement.classList.add('theme-light')}})();`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--foreground)] transition-colors duration-300">
+    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
+      </head>
+      {/* `app-canvas`, not `bg-[var(--background)]`: the latter compiles to
+          background-color and throws the gradient away. See globals.css. */}
+      <body className="app-canvas min-h-full flex flex-col text-[var(--foreground)] transition-colors duration-300">
         <Providers>
           <PageContainer>{children}</PageContainer>
         </Providers>

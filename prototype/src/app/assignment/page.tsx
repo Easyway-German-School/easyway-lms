@@ -106,10 +106,10 @@ function AssignmentContent() {
 
   if (status === "loading" || !lesson) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--surface-alt)] flex items-center justify-center">
         <div className="text-center space-y-4">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mx-auto"></div>
-          <p className="text-slate-600">Loading assignment...</p>
+          <p className="text-[var(--muted)]">Loading assignment...</p>
         </div>
       </div>
     );
@@ -117,27 +117,27 @@ function AssignmentContent() {
 
   return (
     <StudentShell>
-      <div className="min-h-screen bg-slate-50 py-10">
+      <div className="min-h-screen bg-[var(--surface-alt)] py-10">
         <div className="mx-auto max-w-4xl px-6 md:px-10 space-y-8">
-          <header className="rounded-3xl bg-white p-8 shadow-sm">
+          <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
             <div className="mb-4">
               <Link href="/dashboard" className="inline-flex items-center gap-2 text-emerald-500 hover:text-emerald-600 text-sm font-semibold">
                 <ArrowLeftIcon /> Back to dashboard
               </Link>
             </div>
             <h1 className="text-4xl font-bold text-slate-950">Submit Assignment</h1>
-            <p className="text-slate-600 mt-2">{lesson.title}</p>
+            <p className="text-[var(--muted)] mt-2">{lesson.title}</p>
           </header>
 
-          <div className="rounded-3xl bg-white p-8 shadow-sm space-y-6">
+          <div className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm space-y-6">
             <h2 className="text-2xl font-bold text-slate-950">Instructions</h2>
             <div className="prose prose-sm max-w-none">
-              <p className="text-slate-700 whitespace-pre-wrap">{lesson.content}</p>
+              <p className="text-[var(--foreground-soft)] whitespace-pre-wrap">{lesson.content}</p>
             </div>
           </div>
 
           {!submitted ? (
-            <form onSubmit={handleSubmit} className="rounded-3xl bg-white p-8 shadow-sm space-y-6">
+            <form onSubmit={handleSubmit} className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm space-y-6">
               <h2 className="text-2xl font-bold text-slate-950">Your Submission</h2>
               
               <div>
@@ -146,13 +146,13 @@ function AssignmentContent() {
                   value={submission}
                   onChange={(e) => setSubmission(e.target.value)}
                   placeholder="Type your answer or essay here..."
-                  className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-500 resize-none h-40"
+                  className="w-full px-4 py-3 border border-[var(--border)] rounded-lg focus:outline-none focus:border-emerald-500 resize-none h-40"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-slate-950 mb-2">Or upload a file</label>
-                <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-emerald-500 transition">
+                <div className="border-2 border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center hover:border-emerald-500 transition">
                   <input
                     type="file"
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
@@ -161,10 +161,10 @@ function AssignmentContent() {
                     accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
                   />
                   <label htmlFor="file-input" className="cursor-pointer">
-                    <p className="text-slate-600 font-semibold">
+                    <p className="text-[var(--muted)] font-semibold">
                       {file ? file.name : "Click to upload file"}
                     </p>
-                    <p className="text-xs text-slate-500 mt-1">PDF, DOC, DOCX, TXT, PNG, JPG</p>
+                    <p className="text-xs text-[var(--muted)] mt-1">PDF, DOC, DOCX, TXT, PNG, JPG</p>
                   </label>
                 </div>
               </div>
@@ -179,7 +179,7 @@ function AssignmentContent() {
             </form>
           ) : (
             <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm border border-emerald-200 space-y-4">
-              <p className="flex items-center gap-2 text-2xl font-bold text-emerald-700"><CheckCircleIcon className="h-7 w-7" /> Assignment submitted!</p>
+              <p className="flex items-center gap-2 text-2xl font-bold text-[var(--success)]"><CheckCircleIcon className="h-7 w-7" /> Assignment submitted!</p>
               <p className="text-emerald-600">Your work has been received. The instructor will review and provide feedback soon.</p>
               <Link href="/dashboard" className="inline-block px-6 py-2 bg-emerald-500 text-white font-semibold rounded-lg hover:bg-emerald-600">
                 Back to dashboard

@@ -72,8 +72,8 @@ export default function NewMaterialsCard() {
     <div className="cinematic-card rounded-[32px] p-8">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Just added</p>
-          <h2 className="mt-3 text-2xl font-semibold text-slate-900">New materials</h2>
+          <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Just added</p>
+          <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">New materials</h2>
         </div>
         <Link href="/materials" className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">
           Open library
@@ -87,14 +87,14 @@ export default function NewMaterialsCard() {
             <a
               key={material.id}
               href={material.fileUrl}
-              className="flex items-center gap-4 rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-white"
+              className="flex items-center gap-4 rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]"
             >
               <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
                 {TYPE_ICON[material.fileType?.toLowerCase()] ?? <AttachmentIcon className="h-6 w-6" />}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-semibold text-slate-900">{material.title}</p>
-                <p className="text-sm text-slate-500">
+                <p className="truncate font-semibold text-[var(--foreground)]">{material.title}</p>
+                <p className="text-sm text-[var(--muted)]">
                   {material.course?.title ?? "Course material"}
                   {" · "}
                   {days === 0 ? "added today" : days === 1 ? "added yesterday" : `added ${days} days ago`}

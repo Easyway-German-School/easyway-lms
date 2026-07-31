@@ -36,7 +36,7 @@ const BODY_TONE: Record<string, string> = {
   "ÖSD": "bg-red-100 text-red-700",
   Goethe: "bg-blue-100 text-blue-700",
   telc: "bg-purple-100 text-purple-700",
-  internal: "bg-slate-100 text-slate-700",
+  internal: "bg-[var(--surface-alt)] text-[var(--foreground-soft)]",
 };
 
 export default function ExamCentrePage() {
@@ -104,7 +104,7 @@ export default function ExamCentrePage() {
         <div className="mt-8">
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Examination centre</p>
           <h1 className="mt-2 text-4xl font-bold">Book your German exam</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted)]">
             Easyway is an accredited examination centre. You do not need to be a student here to sit an
             exam with us — anyone may register for a seat.
           </p>
@@ -113,22 +113,22 @@ export default function ExamCentrePage() {
         {confirmation && (
           <div className="mt-8 rounded-3xl border border-emerald-200 bg-emerald-50 p-6">
             <p className="text-sm font-bold text-emerald-800">Seat confirmed</p>
-            <p className="mt-2 text-sm text-emerald-700">
+            <p className="mt-2 text-sm text-[var(--success)]">
               Your seat number is <span className="font-mono font-bold">{confirmation.seatNumber}</span>.
               {confirmation.fee
                 ? ` A fee of ₦${confirmation.fee.toLocaleString()} is payable to hold it.`
                 : " No fee is payable."}
             </p>
-            <p className="mt-2 text-xs text-emerald-700">A confirmation email is on its way.</p>
+            <p className="mt-2 text-xs text-[var(--success)]">A confirmation email is on its way.</p>
           </div>
         )}
 
         {error && <div className="mt-6 rounded-2xl bg-red-50 p-4 text-sm text-red-700">{error}</div>}
 
         {me && (
-          <p className="mt-6 rounded-2xl bg-white p-4 text-sm text-slate-600 shadow-sm">
+          <p className="mt-6 rounded-2xl bg-[var(--surface)] p-4 text-sm text-[var(--muted)] shadow-sm">
             Signed in as <span className="font-semibold">{me.name}</span>
-            {me.studentCode && <span className="ml-2 font-mono text-xs text-slate-400">{me.studentCode}</span>}
+            {me.studentCode && <span className="ml-2 font-mono text-xs text-[var(--muted)]">{me.studentCode}</span>}
             {" "}— your details will be used automatically.
           </p>
         )}
@@ -137,10 +137,10 @@ export default function ExamCentrePage() {
           {loading ? (
             [0, 1].map((i) => <div key={i} className="h-32 animate-pulse rounded-3xl bg-white/70" />)
           ) : exams.length === 0 ? (
-            <div className="rounded-3xl bg-white p-10 text-center shadow-sm">
-              <CalendarIcon className="mx-auto h-10 w-10 text-slate-400" />
+            <div className="rounded-3xl bg-[var(--surface)] p-10 text-center shadow-sm">
+              <CalendarIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
               <p className="mt-3 text-sm font-semibold">No sittings open right now</p>
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="mt-1 text-sm text-[var(--muted)]">
                 New exam dates are published here as soon as they are scheduled.
               </p>
             </div>
@@ -148,7 +148,7 @@ export default function ExamCentrePage() {
             exams.map((exam) => {
               const closed = exam.full || exam.deadlinePassed;
               return (
-                <div key={exam.id} className="rounded-3xl bg-white p-6 shadow-sm">
+                <div key={exam.id} className="rounded-3xl bg-[var(--surface)] p-6 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -156,7 +156,7 @@ export default function ExamCentrePage() {
                           {exam.examBody}
                         </span>
                         {exam.level && (
-                          <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold">{exam.level}</span>
+                          <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{exam.level}</span>
                         )}
                         {exam.full && (
                           <span className="rounded bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">FULL</span>
@@ -169,9 +169,9 @@ export default function ExamCentrePage() {
                       </div>
 
                       <h2 className="mt-2 text-lg font-bold">{exam.name}</h2>
-                      {exam.description && <p className="mt-1 text-sm text-slate-600">{exam.description}</p>}
+                      {exam.description && <p className="mt-1 text-sm text-[var(--muted)]">{exam.description}</p>}
 
-                      <p className="mt-2 text-sm text-slate-500">
+                      <p className="mt-2 text-sm text-[var(--muted)]">
                         {new Date(exam.examDate).toDateString()}
                         {exam.branch && ` · ${exam.branch.name}`}
                         {exam.registrationDeadline &&
@@ -183,7 +183,7 @@ export default function ExamCentrePage() {
                       {exam.fee !== null && (
                         <p className="text-2xl font-bold">₦{exam.fee.toLocaleString()}</p>
                       )}
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-[var(--muted)]">
                         {exam.capacity === null
                           ? "Unlimited seats"
                           : `${exam.remaining} of ${exam.capacity} seats left`}
@@ -201,7 +201,7 @@ export default function ExamCentrePage() {
                   {openId === exam.id && !closed && (
                     <div className="mt-5 border-t pt-5">
                       {me ? (
-                        <p className="text-sm text-slate-600">
+                        <p className="text-sm text-[var(--muted)]">
                           Registering as <span className="font-semibold">{me.name}</span> ({me.email}).
                         </p>
                       ) : (

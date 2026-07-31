@@ -15,7 +15,6 @@ export const TUITION_FREE_ROUTES = [
   "/notifications",
   "/profile",
   "/payments",
-  "/settings",
   // The tuition checkout itself — locking this would make the paywall a
   // dead end, since every "Pay tuition" call to action lands here.
   "/programs",

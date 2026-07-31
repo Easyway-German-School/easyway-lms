@@ -8,7 +8,15 @@ export default function PageContainer({ children }: { children: React.ReactNode 
   const isAuthRoute = pathname?.startsWith("/auth") ?? false;
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[var(--background)] text-[var(--foreground)] transition-colors duration-300">
+    // `app-canvas` rather than `bg-[var(--background)]` — Tailwind's arbitrary
+    // background utility sets background-color, which cannot hold a gradient,
+    // so this element used to be transparent and the (hardcoded, dark) body
+    // showed through under every theme.
+    <main
+      className={`app-canvas relative min-h-screen overflow-x-hidden text-[var(--foreground)] transition-colors duration-300 ${
+        isAuthRoute ? "theme-light" : ""
+      }`}
+    >
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="scene-stars" />
         <div className="scene-grid" />

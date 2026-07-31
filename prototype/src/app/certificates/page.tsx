@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import StudentShell from "@/components/StudentShell";
+import BrandLoader from "@/components/BrandLoader";
 import CertificateDocument from "@/components/CertificateDocument";
+import LockedCertificate, { type LockedIdentity } from "@/components/LockedCertificate";
 import TuitionNudge from "@/components/TuitionNudge";
 import { safeJson } from "@/lib/safe-json";
 import type { CertificateView } from "@/lib/certificates";
@@ -16,6 +18,10 @@ import type { CertificateView } from "@/lib/certificates";
  * excellence") that belonged to nobody. Now every card is a real issued
  * document rendered by the same component that prints it, so the thumbnail is
  * the certificate rather than a description of one.
+ *
+ * With nothing issued yet the page does NOT go blank. It shows the student
+ * their own certificate under a padlock — see <LockedCertificate /> for why
+ * that is worth the extra component.
  */
 
 type Payload = {
@@ -23,6 +29,7 @@ type Payload = {
   outstanding: number;
   pending: string | null;
   certificates: CertificateView[];
+  identity?: LockedIdentity;
 };
 
 export default function CertificatesPage() {
@@ -74,28 +81,38 @@ export default function CertificatesPage() {
             {data && data.outstanding > 0 ? <TuitionNudge className="mt-8" /> : null}
 
             {loading ? (
-              <p className="mt-10 rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-6 py-10 text-center text-sm text-[var(--muted)]">
-                Loading your certificates…
-              </p>
+              <div className="mt-10">
+                <BrandLoader title="Deine Urkunden werden geladen…" message="Fetching your certificates" />
+              </div>
             ) : error ? (
-              <p className="mt-10 rounded-3xl border border-rose-200 bg-rose-50 px-6 py-10 text-center text-sm text-rose-700">
+              <p className="mt-10 rounded-3xl border border-[var(--danger)]/30 bg-[var(--danger-soft)] px-6 py-10 text-center text-sm text-[var(--danger)]">
                 {error}
               </p>
             ) : certificates.length === 0 ? (
-              <div className="mt-10 rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-6 py-12 text-center">
-                <p className="text-lg font-semibold">No certificate yet</p>
-                <p className="mx-auto mt-3 max-w-xl text-sm text-[var(--muted)]">
-                  {data?.pending ??
-                    "Your certificate appears here as soon as your session is complete."}
-                </p>
-                {data?.pending?.includes("deposit") ? (
-                  <Link
-                    href="/programs"
-                    className="mt-6 inline-flex rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white"
-                  >
-                    Pay tuition
-                  </Link>
-                ) : null}
+              <div className="mt-10 space-y-6">
+                {data?.identity ? (
+                  <LockedCertificate
+                    identity={data.identity}
+                    level={data.level}
+                    reason={data.pending}
+                    outstanding={data.outstanding}
+                  />
+                ) : (
+                  <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-6 py-12 text-center">
+                    <p className="text-lg font-semibold">No certificate yet</p>
+                    <p className="mx-auto mt-3 max-w-xl text-sm text-[var(--muted)]">
+                      {data?.pending ?? "Your certificate appears here as soon as your session is complete."}
+                    </p>
+                    {data?.pending?.includes("deposit") ? (
+                      <Link
+                        href="/programs"
+                        className="mt-6 inline-flex rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white"
+                      >
+                        Pay tuition
+                      </Link>
+                    ) : null}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="mt-10 grid gap-8 xl:grid-cols-2">

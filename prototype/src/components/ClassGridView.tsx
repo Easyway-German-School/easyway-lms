@@ -25,7 +25,7 @@ import {
 const STATE_STYLE: Record<string, string> = {
   done: "bg-emerald-500 text-white border-emerald-600",
   today: "bg-amber-400 text-white border-amber-500 ring-4 ring-amber-200",
-  locked: "bg-slate-200 text-slate-500 border-slate-300",
+  locked: "bg-[var(--border)] text-[var(--muted)] border-[var(--border-strong)]",
   off: "bg-red-100 text-red-600 border-red-300 line-through",
 };
 
@@ -69,7 +69,7 @@ function DayPopover({ node, below }: { node: ClassNode; below: boolean }) {
       ) : s.topic ? (
         <p className="mt-2 text-xs leading-5 text-[var(--foreground)]">{s.topic}</p>
       ) : (
-        <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+        <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-[var(--muted)]">
           <LockIcon className="h-3.5 w-3.5" /> Topic unlocks on {s.lockedUntil}
         </p>
       )}

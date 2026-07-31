@@ -66,7 +66,7 @@ export default function CertificatePrintPage() {
 
   if (state === "loading") {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-950 text-slate-300">
+      <main className="grid min-h-screen place-items-center app-canvas text-[var(--muted)]">
         Preparing your certificate…
       </main>
     );
@@ -74,11 +74,11 @@ export default function CertificatePrintPage() {
 
   if (state === "missing" || !cert) {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-950 px-6 text-center text-slate-300">
+      <main className="grid min-h-screen place-items-center app-canvas px-6 text-center text-[var(--muted)]">
         <div>
-          <p className="text-xl font-semibold text-white">Certificate not found</p>
+          <p className="text-xl font-semibold text-[var(--foreground)]">Certificate not found</p>
           <p className="mt-2 text-sm">This certificate does not exist, or it is not yours to view.</p>
-          <Link href="/certificates" className="mt-6 inline-flex rounded-full bg-white/10 px-5 py-2.5 text-sm">
+          <Link href="/certificates" className="mt-6 inline-flex rounded-full border border-[var(--border)] bg-[var(--surface)] px-5 py-2.5 text-sm text-[var(--foreground)]">
             Back to certificates
           </Link>
         </div>
@@ -87,23 +87,23 @@ export default function CertificatePrintPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 py-8">
+    <main className="app-canvas min-h-screen py-8">
       {/* The toolbar must not print — hence `print:hidden` on every part of it. */}
       <div className="mx-auto mb-6 flex max-w-[1180px] flex-wrap items-center justify-between gap-4 px-6 print:hidden">
         <div>
-          <Link href="/certificates" className="inline-flex items-center gap-2 text-sm text-slate-400 underline underline-offset-4">
+          <Link href="/certificates" className="inline-flex items-center gap-2 text-sm text-[var(--muted)] underline underline-offset-4">
             <ArrowLeftIcon /> All certificates
           </Link>
-          <p className="mt-2 text-lg font-semibold text-white">
+          <p className="mt-2 text-lg font-semibold text-[var(--foreground)]">
             {cert.level} · {cert.title}
           </p>
-          <p className="text-xs text-slate-500">{cert.serial}</p>
+          <p className="text-xs text-[var(--muted)]">{cert.serial}</p>
         </div>
         <div className="flex items-center gap-3">
           {cert.provisional ? (
             <Link
               href="/programs"
-              className="rounded-full border border-[#c8a24a]/60 px-5 py-2.5 text-sm font-semibold text-[#e8cf8f]"
+              className="rounded-full border border-[var(--accent)]/60 px-5 py-2.5 text-sm font-semibold text-[var(--accent)]"
             >
               Clear ₦{cert.outstanding.toLocaleString()} to remove the stamp
             </Link>
@@ -111,7 +111,7 @@ export default function CertificatePrintPage() {
           <button
             type="button"
             onClick={() => window.print()}
-            className="rounded-full bg-[#c8a24a] px-6 py-3 text-sm font-bold text-[#1a1206] transition hover:bg-[#d8b45f]"
+            className="rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
           >
             Download as PDF
           </button>
@@ -122,7 +122,7 @@ export default function CertificatePrintPage() {
         <CertificateDocument certificate={cert} verifyBaseUrl={origin} />
       </div>
 
-      <p className="mx-auto mt-6 max-w-[1180px] px-6 text-xs text-slate-500 print:hidden">
+      <p className="mx-auto mt-6 max-w-[1180px] px-6 text-xs text-[var(--muted)] print:hidden">
         Choose “Save as PDF” as the destination in the print dialogue. The sheet is already set to A4 landscape.
       </p>
     </main>

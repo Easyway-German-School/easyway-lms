@@ -640,8 +640,8 @@ function DashboardContent() {
               <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Path progress</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-slate-900">
+                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Path progress</p>
+                    <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">
                       {paymentFullyPaid
                         ? 'Your tuition is fully paid — enjoy your classes'
                         : paymentUnlocked
@@ -655,20 +655,20 @@ function DashboardContent() {
                     </Link>
                   )}
                 </div>
-                <div className="mt-6 rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-6 shadow-inner shadow-slate-100">
-                  <p className="text-sm text-slate-500">{paymentUnlocked ? 'Your premium learning library is unlocked.' : `You’ve paid ${Math.max(effectivePayment?.totalPaid ?? 0, effectiveTotalPaid).toLocaleString()} of ${tuitionFee.toLocaleString()} NGN tuition.`}</p>
-                  <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-200">
+                <div className="mt-6 rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-6 shadow-inner shadow-slate-100">
+                  <p className="text-sm text-[var(--muted)]">{paymentUnlocked ? 'Your premium learning library is unlocked.' : `You’ve paid ${Math.max(effectivePayment?.totalPaid ?? 0, effectiveTotalPaid).toLocaleString()} of ${tuitionFee.toLocaleString()} NGN tuition.`}</p>
+                  <div className="mt-5 h-3 overflow-hidden rounded-full bg-[var(--border)]">
                     <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${paymentProgressPercent}%` }} />
                   </div>
-                  <p className="mt-3 text-sm text-slate-500">{paymentProgressPercent}% complete</p>
+                  <p className="mt-3 text-sm text-[var(--muted)]">{paymentProgressPercent}% complete</p>
                 </div>
               </motion.div>
 
-              <div className="rounded-[32px] border border-slate-200/70 bg-white/90 p-8 shadow-[0_16px_50px_rgba(15,23,42,0.06)]">
+              <div className="rounded-[32px] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[0_16px_50px_rgba(15,23,42,0.06)]">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Daily missions</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-slate-900">Quest board</h2>
+                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Daily missions</p>
+                    <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">Quest board</h2>
                   </div>
                   <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">{missionCompletePercent}% complete</span>
                 </div>
@@ -676,13 +676,13 @@ function DashboardContent() {
                   {displayMissions.slice(0, 3).map((quest) => {
                     const done = quest.id ? completedMissionIds[quest.id] : quest.done;
                     return (
-                      <div key={quest.id || quest.title} className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-white">
+                      <div key={quest.id || quest.title} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <p className="font-semibold text-slate-900">{quest.title}</p>
-                            <p className="mt-2 text-sm text-slate-600">{quest.description}</p>
+                            <p className="font-semibold text-[var(--foreground)]">{quest.title}</p>
+                            <p className="mt-2 text-sm text-[var(--muted)]">{quest.description}</p>
                           </div>
-                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${done ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{done ? 'Completed' : 'Pending'}</span>
+                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${done ? 'bg-[var(--success-soft)] text-[var(--success)]' : 'bg-[var(--surface-alt)] text-[var(--muted)]'}`}>{done ? 'Completed' : 'Pending'}</span>
                         </div>
                       </div>
                     );
@@ -701,22 +701,22 @@ function DashboardContent() {
               <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Course highlights</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-slate-900">Your active courses</h2>
+                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Course highlights</p>
+                    <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">Your active courses</h2>
                   </div>
                   <Link href="/materials" className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">Open library</Link>
                 </div>
                 <div className="mt-6 space-y-4">
                   {resolvedCourses.slice(0, 3).map((course) => (
-                    <div key={course.id} className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-white">
+                    <div key={course.id} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
                       <div className="flex items-center justify-between gap-4">
                         <div>
-                          <p className="font-semibold text-slate-900">{course.title}</p>
-                          <p className="mt-1 text-sm text-slate-600">{course.description}</p>
+                          <p className="font-semibold text-[var(--foreground)]">{course.title}</p>
+                          <p className="mt-1 text-sm text-[var(--muted)]">{course.description}</p>
                         </div>
                         <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">{course.progress}%</span>
                       </div>
-                      <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200">
+                      <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--border)]">
                         <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${course.progress}%` }} />
                       </div>
                     </div>
@@ -727,16 +727,16 @@ function DashboardContent() {
               <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm uppercase tracking-[0.3em] text-slate-500">AI coach</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-slate-900">Pronunciation practice</h2>
+                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">AI coach</p>
+                    <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">Pronunciation practice</h2>
                   </div>
                 </div>
-                <p className="mt-4 text-sm text-slate-600">Type your German phrase and get instant AI feedback.</p>
+                <p className="mt-4 text-sm text-[var(--muted)]">Type your German phrase and get instant AI feedback.</p>
                 <textarea
                   value={phrase}
                   onChange={(e) => setPhrase(e.target.value)}
                   rows={4}
-                  className="mt-4 w-full rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-900 focus:outline-none"
+                  className="mt-4 w-full rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-sm text-[var(--foreground)] focus:outline-none"
                   placeholder="Ich möchte ein Visum beantragen."
                 />
                 <button
@@ -746,7 +746,7 @@ function DashboardContent() {
                 >
                   {isAnalyzing ? 'Analyzing...' : 'Analyze pronunciation'}
                 </button>
-                <div className="mt-4 space-y-2 text-sm text-slate-600">
+                <div className="mt-4 space-y-2 text-sm text-[var(--muted)]">
                   {feedback.map((item, index) => (
                     <p key={`${item}-${index}`}>• {item}</p>
                   ))}
@@ -759,10 +759,10 @@ function DashboardContent() {
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Personalized plan</p>
-                  <h2 className="mt-3 text-2xl font-semibold text-slate-900">AI learning path</h2>
+                  <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Personalized plan</p>
+                  <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">AI learning path</h2>
                 </div>
-                <select value={plannerStrategy} onChange={(e) => setPlannerStrategy(e.target.value)} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900">
+                <select value={plannerStrategy} onChange={(e) => setPlannerStrategy(e.target.value)} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-sm text-[var(--foreground)]">
                   <option value="deterministic">Deterministic</option>
                   <option value="fewshot">Few-shot</option>
                   <option value="hybrid">Hybrid</option>
@@ -772,19 +772,19 @@ function DashboardContent() {
               <div className="mt-6 space-y-4">
                 {personalizedPlan ? (
                   <>
-                    {personalizedPlan.rationale ? <p className="text-sm text-slate-600">{personalizedPlan.rationale}</p> : null}
+                    {personalizedPlan.rationale ? <p className="text-sm text-[var(--muted)]">{personalizedPlan.rationale}</p> : null}
                     <div className="grid gap-4 sm:grid-cols-2">
                       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                       {(personalizedPlan.lessons || []).slice(0, 4).map((lesson: any, idx: number) => (
-                        <div key={lesson.id || idx} className="rounded-3xl border border-slate-200/70 bg-slate-50/80 p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-white">
-                          <p className="font-semibold text-slate-900">{lesson.title}</p>
-                          <p className="mt-2 text-sm text-slate-600">{lesson.goal}</p>
+                        <div key={lesson.id || idx} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
+                          <p className="font-semibold text-[var(--foreground)]">{lesson.title}</p>
+                          <p className="mt-2 text-sm text-[var(--muted)]">{lesson.goal}</p>
                         </div>
                       ))}
                     </div>
                   </>
                 ) : (
-                  <p className="text-sm text-slate-600">Your personalized plan will appear here once the AI recommendation service loads.</p>
+                  <p className="text-sm text-[var(--muted)]">Your personalized plan will appear here once the AI recommendation service loads.</p>
                 )}
               </div>
             </motion.div>
@@ -792,16 +792,16 @@ function DashboardContent() {
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Announcements</p>
-                  <h2 className="mt-3 text-2xl font-semibold text-slate-900">What’s new</h2>
+                  <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Announcements</p>
+                  <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">What’s new</h2>
                 </div>
               </div>
               <div className="mt-6 space-y-4">
                 {displayAnnouncements.map((item) => (
-                  <div key={item.title} className="rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-white">
-                    <p className="font-semibold text-slate-900">{item.title}</p>
-                    <p className="mt-2 text-sm text-slate-600">{item.text}</p>
-                    <p className="mt-3 text-xs uppercase tracking-[0.3em] text-slate-500">{item.time}</p>
+                  <div key={item.title} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
+                    <p className="font-semibold text-[var(--foreground)]">{item.title}</p>
+                    <p className="mt-2 text-sm text-[var(--muted)]">{item.text}</p>
+                    <p className="mt-3 text-xs uppercase tracking-[0.3em] text-[var(--muted)]">{item.time}</p>
                   </div>
                 ))}
               </div>

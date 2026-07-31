@@ -41,22 +41,22 @@ function PathwayContent() {
   const program = programs[pathway] || programs["Goethe exam mastery"];
 
   return (
-    <div className="min-h-screen bg-slate-50 py-10 text-slate-950">
+    <div className="min-h-screen bg-[var(--surface-alt)] py-10 text-slate-950">
       <div className="mx-auto max-w-6xl space-y-8 px-6 md:px-10">
-        <header className="rounded-3xl bg-white p-8 shadow-sm">
-          <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Pathway details</p>
+        <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
+          <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Pathway details</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight">{program.title}</h1>
-          <p className="mt-4 text-slate-600">{program.headline}</p>
+          <p className="mt-4 text-[var(--muted)]">{program.headline}</p>
         </header>
 
         <section className="grid gap-6 lg:grid-cols-[1fr_0.9fr]">
-          <div className="rounded-3xl bg-white p-8 shadow-sm">
+          <div className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-950">What this path delivers</h2>
-            <p className="mt-4 text-slate-600">{program.details}</p>
+            <p className="mt-4 text-[var(--muted)]">{program.details}</p>
             <div className="mt-6 space-y-4">
               {program.stats.map((stat) => (
-                <div key={stat} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                  <p className="text-sm text-slate-500">Feature</p>
+                <div key={stat} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+                  <p className="text-sm text-[var(--muted)]">Feature</p>
                   <p className="mt-2 text-lg font-semibold text-slate-950">{stat}</p>
                 </div>
               ))}
@@ -74,7 +74,7 @@ function PathwayContent() {
               ))}
             </ul>
             <div className="mt-8 rounded-3xl bg-slate-900 p-5 text-slate-300">
-              <p className="text-sm uppercase tracking-[0.2em] text-slate-500">What makes this advanced</p>
+              <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">What makes this advanced</p>
               <p className="mt-3 text-sm leading-7">
                 We keep the student view minimal: one pathway, one next step, one clean progress card. Behind the scenes, the platform adapts content, live sessions, and AI scoring to that pathway.
               </p>
@@ -82,7 +82,7 @@ function PathwayContent() {
           </aside>
         </section>
 
-        <div className="rounded-3xl bg-white p-8 shadow-sm">
+        <div className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
           <Link href="/" className="inline-flex rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">
             Back to dashboard
           </Link>
@@ -98,7 +98,7 @@ function PathwayContent() {
  */
 export default function PathwayPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-slate-50 py-10" />}>
+    <Suspense fallback={<div className="min-h-screen bg-[var(--surface-alt)] py-10" />}>
       <PathwayContent />
     </Suspense>
   );

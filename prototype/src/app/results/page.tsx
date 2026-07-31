@@ -56,7 +56,7 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 function gradeTone(grade: string) {
-  if (grade === "A" || grade === "B") return "bg-emerald-100 text-emerald-700";
+  if (grade === "A" || grade === "B") return "bg-[var(--success-soft)] text-[var(--success)]";
   if (grade === "C") return "bg-amber-100 text-amber-700";
   if (grade === "D") return "bg-orange-100 text-orange-700";
   return "bg-red-100 text-red-700";
@@ -65,7 +65,7 @@ function gradeTone(grade: string) {
 function ScoreBar({ score, passMark }: { score: number; passMark: number }) {
   const passed = score >= passMark;
   return (
-    <div className="relative h-2 w-full overflow-hidden rounded-full bg-slate-200">
+    <div className="relative h-2 w-full overflow-hidden rounded-full bg-[var(--border)]">
       <div
         className={`h-full rounded-full ${passed ? "bg-emerald-500" : "bg-red-400"}`}
         style={{ width: `${Math.min(100, score)}%` }}

@@ -68,17 +68,17 @@ function LessonContent() {
 
   if (status === "loading" || !lesson) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--surface-alt)] flex items-center justify-center">
         <div className="text-center space-y-4">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mx-auto"></div>
-          <p className="text-slate-600">Loading lesson...</p>
+          <p className="text-[var(--muted)]">Loading lesson...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 py-10">
+    <div className="min-h-screen bg-[var(--surface-alt)] py-10">
       <div className="mx-auto max-w-4xl px-6 md:px-10 space-y-8">
         {/* Header */}
         <header className="rounded-3xl bg-gradient-to-br from-slate-950 to-emerald-700 p-8 text-white shadow-sm">
@@ -105,12 +105,12 @@ function LessonContent() {
         </div>
 
         {/* Content */}
-        <div className="rounded-3xl bg-white p-8 shadow-sm space-y-6">
+        <div className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm space-y-6">
           <div className="prose prose-sm max-w-none">
-            <div className="text-slate-700 leading-relaxed whitespace-pre-wrap">{lesson.content}</div>
+            <div className="text-[var(--foreground-soft)] leading-relaxed whitespace-pre-wrap">{lesson.content}</div>
             {lesson.content?.includes('![](') || lesson.content?.includes('<video') ? (
-              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-semibold text-slate-800">Attached media</p>
+              <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <p className="text-sm font-semibold text-[var(--foreground)]">Attached media</p>
                 <div className="mt-3 space-y-3">
                   {lesson.content.match(/!\[.*?\]\((.*?)\)/g)?.map((item: string, idx: number) => {
                     const url = item.match(/\((.*?)\)/)?.[1];
@@ -154,12 +154,12 @@ function LessonContent() {
 
         {completion?.completedAt && (
           <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm border border-emerald-200">
-            <p className="flex items-center gap-2 text-emerald-700 font-semibold"><CheckCircleIcon className="h-5 w-5" /> You&apos;ve completed this lesson!</p>
+            <p className="flex items-center gap-2 text-[var(--success)] font-semibold"><CheckCircleIcon className="h-5 w-5" /> You&apos;ve completed this lesson!</p>
             <p className="text-sm text-emerald-600 mt-2">Great progress. Move on to the next lesson.</p>
             {personalizedPlan ? (
-              <div className="mt-4 rounded-2xl border border-emerald-200 bg-white/80 p-4">
+              <div className="mt-4 rounded-2xl border border-emerald-200 bg-[var(--surface)] p-4">
                 <p className="text-sm font-semibold text-emerald-800">Personalized plan refreshed</p>
-                <p className="mt-1 text-sm text-emerald-700">{(personalizedPlan.lessons || []).length} recommended next steps are ready.</p>
+                <p className="mt-1 text-sm text-[var(--success)]">{(personalizedPlan.lessons || []).length} recommended next steps are ready.</p>
               </div>
             ) : null}
           </div>
@@ -171,7 +171,7 @@ function LessonContent() {
 
 export default function LessonPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center"><p>Loading...</p></div>}>
+    <Suspense fallback={<div className="min-h-screen bg-[var(--surface-alt)] flex items-center justify-center"><p>Loading...</p></div>}>
       <LessonContent />
     </Suspense>
   );

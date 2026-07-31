@@ -51,14 +51,14 @@ function ClaimContent() {
       {done ? (
         <div className="mt-8 rounded-2xl bg-emerald-50 p-6">
           <p className="text-sm font-bold text-emerald-800">Password set</p>
-          <p className="mt-2 text-sm text-emerald-700">
+          <p className="mt-2 text-sm text-[var(--success)]">
             You can now sign in with {email} to see your exam bookings. Taking you to sign in…
           </p>
         </div>
       ) : (
         <>
           <h1 className="mt-8 text-2xl font-bold">Set your password</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
+          <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
             We created an account for <span className="font-semibold">{email}</span> when you booked
             your exam. Choose a password to sign in and check your seat, results and certificate.
           </p>
@@ -70,13 +70,13 @@ function ClaimContent() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="New password (at least 8 characters)"
-              className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm"
+              className="w-full rounded-2xl border border-[var(--border-strong)] px-4 py-3 text-sm"
             />
             <PasswordInput
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               placeholder="Confirm password"
-              className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm"
+              className="w-full rounded-2xl border border-[var(--border-strong)] px-4 py-3 text-sm"
             />
           </div>
 

@@ -192,7 +192,7 @@ export default function TandemPartner() {
 
           <aside className="rounded-3xl bg-gradient-to-b from-slate-950 to-slate-800 p-6 text-slate-50 shadow-2xl ring-1 ring-white/10">
             <div>
-              <p className="text-sm uppercase tracking-[0.2em] text-slate-400">Session transcript</p>
+              <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Session transcript</p>
               <h2 className="mt-3 text-2xl font-semibold">Live speech analysis</h2>
             </div>
             <div className="mt-5 rounded-3xl bg-slate-900 p-5 text-sm leading-7 text-slate-300">

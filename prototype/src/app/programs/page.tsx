@@ -65,12 +65,12 @@ export default function ProgramsPage() {
   }, [status, router]);
 
   return (
-    <div className="min-h-screen bg-slate-50 py-10 text-slate-950">
+    <div className="min-h-screen bg-[var(--surface-alt)] py-10 text-slate-950">
       <div className="mx-auto max-w-6xl space-y-8 px-6 md:px-10">
-        <header className="rounded-3xl bg-white p-8 shadow-sm">
-          <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Tuition &amp; pathways</p>
+        <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
+          <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Tuition &amp; pathways</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight">Settle your tuition</h1>
-          <p className="mt-4 max-w-2xl text-slate-600">
+          <p className="mt-4 max-w-2xl text-[var(--muted)]">
             Your tuition is set by your level and your branch — the pathway you pick decides what you study, not
             what you pay. Choose a track, then complete payment below.
           </p>
@@ -79,9 +79,9 @@ export default function ProgramsPage() {
         {/* The checkout comes first: it is the reason students land on this page. */}
         <TuitionCheckout pathwayName={selected} />
 
-        <section className="rounded-3xl bg-white p-8 shadow-sm">
+        <section className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
           <h2 className="text-2xl font-semibold">Choose your pathway</h2>
-          <p className="mt-2 text-sm text-slate-600">
+          <p className="mt-2 text-sm text-[var(--muted)]">
             All four cost the same at your level. This is about the outcome you are training for.
           </p>
 
@@ -126,25 +126,25 @@ export default function ProgramsPage() {
           </div>
         </section>
 
-        <section className="rounded-3xl bg-white p-8 shadow-sm">
+        <section className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
           <h2 className="text-3xl font-semibold text-slate-950">Why Easyway&rsquo;s portal is different</h2>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
-            <div className="rounded-3xl border border-slate-200 p-6">
+            <div className="rounded-3xl border border-[var(--border)] p-6">
               <h3 className="text-xl font-semibold">Outcome-first</h3>
-              <p className="mt-3 text-slate-600">Programs are organized around results: certification success, German nursing work, IT relocation, or apprenticeship admission.</p>
+              <p className="mt-3 text-[var(--muted)]">Programs are organized around results: certification success, German nursing work, IT relocation, or apprenticeship admission.</p>
             </div>
-            <div className="rounded-3xl border border-slate-200 p-6">
+            <div className="rounded-3xl border border-[var(--border)] p-6">
               <h3 className="text-xl font-semibold">AI-assisted progress</h3>
-              <p className="mt-3 text-slate-600">Smart recommendations, mock grading, and pronunciation coaching keep every lesson on target.</p>
+              <p className="mt-3 text-[var(--muted)]">Smart recommendations, mock grading, and pronunciation coaching keep every lesson on target.</p>
             </div>
-            <div className="rounded-3xl border border-slate-200 p-6">
+            <div className="rounded-3xl border border-[var(--border)] p-6">
               <h3 className="text-xl font-semibold">Live hybrid learning</h3>
-              <p className="mt-3 text-slate-600">Learners get a clear path plus live sessions, shared whiteboards, and voice roleplay support.</p>
+              <p className="mt-3 text-[var(--muted)]">Learners get a clear path plus live sessions, shared whiteboards, and voice roleplay support.</p>
             </div>
           </div>
           <Link
             href="/tandem"
-            className="mt-6 inline-flex rounded-full border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            className="mt-6 inline-flex rounded-full border border-[var(--border)] px-5 py-3 text-sm font-semibold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)]"
           >
             Practise a roleplay first
           </Link>

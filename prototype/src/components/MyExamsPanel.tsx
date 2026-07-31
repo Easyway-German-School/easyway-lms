@@ -45,7 +45,7 @@ const BODY_TONE: Record<string, string> = {
   "ÖSD": "bg-red-100 text-red-700",
   Goethe: "bg-blue-100 text-blue-700",
   telc: "bg-purple-100 text-purple-700",
-  internal: "bg-slate-100 text-slate-700",
+  internal: "bg-[var(--surface-alt)] text-[var(--foreground-soft)]",
 };
 
 function daysUntil(iso: string) {
@@ -148,12 +148,12 @@ export default function MyExamsPanel() {
                             {e.examBody}
                           </span>
                         )}
-                        {e.level && <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold">{e.level}</span>}
+                        {e.level && <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{e.level}</span>}
                         {e.paymentStatus === "unpaid" && e.fee && (
                           <span className="rounded bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">FEE DUE</span>
                         )}
                         {e.paymentStatus === "paid" && (
-                          <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">PAID</span>
+                          <span className="rounded bg-[var(--success-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--success)]">PAID</span>
                         )}
                       </div>
                       <h3 className="mt-2 font-semibold">{e.name}</h3>
@@ -204,7 +204,7 @@ export default function MyExamsPanel() {
                       <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${BODY_TONE[e.examBody] ?? BODY_TONE.internal}`}>
                         {e.examBody}
                       </span>
-                      {e.level && <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold">{e.level}</span>}
+                      {e.level && <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{e.level}</span>}
                     </div>
                     <h3 className="mt-2 font-semibold">{e.name}</h3>
                     <p className="mt-1 text-sm text-[var(--muted)]">

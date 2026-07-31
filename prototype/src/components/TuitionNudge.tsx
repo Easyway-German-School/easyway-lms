@@ -48,7 +48,7 @@ export default function TuitionNudge({ className = "" }: { className?: string })
             Tuition outstanding
           </p>
           <p className="mt-2 font-serif text-3xl font-semibold text-white">{naira(offer.outstanding)}</p>
-          <p className="mt-1 text-sm text-slate-400">
+          <p className="mt-1 text-sm text-[var(--muted)]">
             {offer.remainingPercent}% of your tuition is still unpaid
             {offer.windowOpen
               ? ` · ${offer.daysLeftInWindow} day${offer.daysLeftInWindow === 1 ? "" : "s"} left for the pay-in-full extras`
@@ -65,7 +65,7 @@ export default function TuitionNudge({ className = "" }: { className?: string })
               style={{ width: `${offer.progressPercent}%` }}
             />
           </div>
-          <div className="mt-2 flex justify-between text-[0.65rem] uppercase tracking-[0.16em] text-slate-500">
+          <div className="mt-2 flex justify-between text-[0.65rem] uppercase tracking-[0.16em] text-[var(--muted)]">
             <span>{offer.progressPercent}% paid</span>
             <span>100%</span>
           </div>

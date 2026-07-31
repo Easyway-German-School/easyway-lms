@@ -55,13 +55,13 @@ function PaidContent() {
       <BrandLogo variant="wordmark" className="h-10" />
 
       {state === "checking" && (
-        <p className="mt-8 text-sm text-slate-600">Confirming your payment…</p>
+        <p className="mt-8 text-sm text-[var(--muted)]">Confirming your payment…</p>
       )}
 
       {state === "paid" && (
         <div className="mt-8 rounded-2xl bg-emerald-50 p-6">
           <p className="text-sm font-bold text-emerald-800">Payment received</p>
-          <p className="mt-2 text-sm text-emerald-700">
+          <p className="mt-2 text-sm text-[var(--success)]">
             {amount !== null && `₦${amount.toLocaleString()} received. `}
             Your seat is confirmed and a receipt is on its way.
           </p>

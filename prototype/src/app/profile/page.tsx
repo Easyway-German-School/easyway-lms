@@ -133,7 +133,7 @@ function StatPill({
         <CountUp value={value} />
         {suffix}
       </p>
-      <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">{label}</p>
+      <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">{label}</p>
     </motion.div>
   );
 }
@@ -150,26 +150,26 @@ function BadgeTile({ badge, index }: { badge: Badge; index: number }) {
       className={`relative overflow-hidden rounded-3xl border p-5 text-center transition ${
         badge.earned
           ? "border-[var(--accent)]/40 bg-gradient-to-b from-[var(--accent)]/12 to-transparent shadow-[0_16px_40px_rgba(255,102,0,0.14)]"
-          : "border-slate-200 bg-slate-50"
+          : "border-[var(--border)] bg-[var(--surface-alt)]"
       }`}
     >
       <div
         className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl ${
-          badge.earned ? "bg-[var(--accent)]/15 text-[var(--accent)]" : "bg-slate-200 text-slate-500"
+          badge.earned ? "bg-[var(--accent)]/15 text-[var(--accent)]" : "bg-[var(--border)] text-[var(--muted)]"
         }`}
       >
         <BadgeGlyph className="h-7 w-7" />
       </div>
-      <p className={`mt-3 text-sm font-bold ${badge.earned ? "text-slate-900" : "text-slate-500"}`}>
+      <p className={`mt-3 text-sm font-bold ${badge.earned ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}>
         {badge.name}
       </p>
-      <p className="mt-1 text-xs text-slate-500">{badge.description}</p>
+      <p className="mt-1 text-xs text-[var(--muted)]">{badge.description}</p>
 
       {badge.earned ? (
         <p className="mt-3 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--accent)]">Earned</p>
       ) : (
         <div className="mt-3">
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+          <div className="h-1.5 overflow-hidden rounded-full bg-[var(--border)]">
             <motion.div
               className="h-full rounded-full bg-slate-400"
               initial={{ width: 0 }}
@@ -177,7 +177,7 @@ function BadgeTile({ badge, index }: { badge: Badge; index: number }) {
               transition={{ duration: 0.8, delay: 0.2 + index * 0.05 }}
             />
           </div>
-          <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+          <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
             {badge.progress}%
           </p>
         </div>
@@ -473,7 +473,7 @@ export default function ProfilePage() {
                   />
 
                   {game && (
-                    <div className="absolute -left-2 bottom-1 rounded-full border-[3px] border-[#04141a] bg-white px-2.5 py-1 text-[10px] font-black text-slate-900">
+                    <div className="absolute -left-2 bottom-1 rounded-full border-[3px] border-[#04141a] bg-[var(--surface)] px-2.5 py-1 text-[10px] font-black text-[var(--foreground)]">
                       LVL {game.level}
                     </div>
                   )}
@@ -492,7 +492,7 @@ export default function ProfilePage() {
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 font-mono text-sm text-slate-400">@{profile.studentCode}</p>
+                  <p className="mt-1 font-mono text-sm text-[var(--muted)]">@{profile.studentCode}</p>
 
                   <div className="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
                     <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">

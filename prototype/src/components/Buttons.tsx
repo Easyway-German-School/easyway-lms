@@ -8,8 +8,8 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const variantClasses: Record<NonNullable<ButtonProps["variant"]>, string> = {
   primary: "rounded-2xl bg-[#FF6600] text-white shadow-lg shadow-[#FF6600]/20 hover:bg-[#FF7722] focus:ring-4 focus:ring-[#FF6600]/20",
-  secondary: "rounded-2xl border border-slate-200 bg-white text-[#0F172A] hover:bg-slate-50 focus:ring-4 focus:ring-slate-200",
-  ghost: "rounded-2xl bg-transparent text-[#0F172A] hover:bg-slate-100 focus:ring-4 focus:ring-slate-200",
+  secondary: "rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[#0F172A] hover:bg-[var(--surface-alt)] focus:ring-4 focus:ring-slate-200",
+  ghost: "rounded-2xl bg-transparent text-[#0F172A] hover:bg-[var(--surface-alt)] focus:ring-4 focus:ring-slate-200",
 }
 
 export function Button({ variant = "primary", className = "", children, ...props }: ButtonProps) {

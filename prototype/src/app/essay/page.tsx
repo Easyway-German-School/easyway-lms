@@ -79,7 +79,7 @@ export default function EssayGrader() {
 
           <aside className="space-y-5 rounded-3xl bg-gradient-to-b from-slate-950 to-slate-800 p-6 text-slate-50 shadow-2xl ring-1 ring-white/10">
             <div>
-              <p className="text-sm uppercase tracking-[0.2em] text-slate-400">Mission rules</p>
+              <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Mission rules</p>
               <h2 className="mt-3 text-2xl font-semibold">What this quest rewards</h2>
             </div>
             <ul className="space-y-3 text-sm leading-7 text-slate-300">
@@ -104,7 +104,7 @@ export default function EssayGrader() {
             </div>
 
             {score !== null && (
-              <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+              <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-[var(--success)]">
                 <p className="flex items-center gap-2 font-semibold"><TargetIcon /> Suggested next step</p>
                 <p className="mt-1">{nextStep || "Focus on the weakest category and practice targeted exercises."}</p>
               </div>

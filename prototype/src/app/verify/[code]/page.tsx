@@ -93,7 +93,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
           </>
         )}
 
-        <p className="mt-8 text-xs text-slate-500">
+        <p className="mt-8 text-xs text-[var(--muted)]">
           Verification confirms the document and the name on it. For anything further, contact the branch that issued
           it.{" "}
           <Link href="/" className="underline underline-offset-4">

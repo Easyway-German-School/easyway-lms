@@ -273,7 +273,7 @@ export default function PaymentLockScreen({
                         transition={{ duration: 1, delay: 0.8, ease: "easeOut" }}
                       />
                     </div>
-                    <p className="mt-2 text-xs text-slate-400">
+                    <p className="mt-2 text-xs text-[var(--muted)]">
                       {naira(access.totalPaid)} of {naira(access.requiredDeposit)} paid
                     </p>
                   </div>
@@ -299,7 +299,7 @@ export default function PaymentLockScreen({
         </AnimatePresence>
 
         {!revealed && (
-          <p className="mt-10 max-w-md text-sm leading-7 text-slate-400">
+          <p className="mt-10 max-w-md text-sm leading-7 text-[var(--muted)]">
             Your registration is confirmed — pay the tuition fee to unlock {areaLabel.toLowerCase()}.
           </p>
         )}

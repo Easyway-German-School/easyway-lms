@@ -141,7 +141,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
             <p className="mt-3 font-serif text-5xl font-semibold tracking-tight text-white">
               {naira(offer.tuitionFee)}
             </p>
-            <p className="mt-2 text-sm text-slate-400">
+            <p className="mt-2 text-sm text-[var(--muted)]">
               About {naira(offer.perWeek)} a week across {offer.weeksOfTeaching} weeks of teaching.
             </p>
           </div>
@@ -166,7 +166,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
                 Recommended
               </span>
               <h3 className="mt-4 text-2xl font-semibold text-white">{options.full.headline}</h3>
-              <p className="mt-2 max-w-md text-sm text-slate-400">{options.full.subline}</p>
+              <p className="mt-2 max-w-md text-sm text-[var(--muted)]">{options.full.subline}</p>
             </div>
             <p className="font-serif text-4xl font-semibold text-[#e8cf8f]">{naira(options.full.amount)}</p>
           </div>
@@ -188,14 +188,14 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
           </button>
 
           {/* A real deadline, stated in days and never restarted. */}
-          <p className={`mt-4 text-center text-xs font-semibold uppercase tracking-[0.18em] ${offer.windowOpen ? "text-[#e8cf8f]" : "text-slate-500"}`}>
+          <p className={`mt-4 text-center text-xs font-semibold uppercase tracking-[0.18em] ${offer.windowOpen ? "text-[#e8cf8f]" : "text-[var(--muted)]"}`}>
             {options.windowNote}
           </p>
         </div>
 
         {/* Real peer behaviour, or nothing at all. */}
         {socialProof ? (
-          <p className="mt-6 text-center text-sm text-slate-400">
+          <p className="mt-6 text-center text-sm text-[var(--muted)]">
             <span className="font-semibold text-white">{socialProof.percent}%</span> of the {socialProof.sample}{" "}
             students at {data.branchName} have paid their tuition in full.
           </p>
@@ -208,7 +208,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
               type="button"
               onClick={() => setPartPayOpen((open) => !open)}
               aria-expanded={partPayOpen}
-              className="text-sm font-medium text-slate-400 underline decoration-slate-600 underline-offset-4 transition hover:text-slate-200"
+              className="text-sm font-medium text-[var(--muted)] underline decoration-slate-600 underline-offset-4 transition hover:text-slate-200"
             >
               {partPayOpen ? "Hide part-payment" : "I can only part-pay right now"}
             </button>
@@ -224,8 +224,8 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
                 >
                   <div className="mt-5 rounded-3xl border border-white/10 bg-white/[0.03] p-6">
                     <p className="text-base font-semibold text-slate-200">{options.deposit.headline}</p>
-                    <p className="mt-2 text-sm text-slate-400">{options.deposit.subline}</p>
-                    <ul className="mt-4 space-y-2 text-sm text-slate-400">
+                    <p className="mt-2 text-sm text-[var(--muted)]">{options.deposit.subline}</p>
+                    <ul className="mt-4 space-y-2 text-sm text-[var(--muted)]">
                       <li>· Your certificate is stamped PROVISIONAL with the balance printed on it.</li>
                       <li>· Fee reminders begin after 14 days and escalate at 30 and 45.</li>
                       <li>· The {offer.perks.length} extras above are not included.</li>
@@ -261,7 +261,7 @@ function PerkRow({ perk }: { perk: Perk }) {
       <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-[#c8a24a]" />
       <span>
         <span className="block text-sm font-medium text-slate-100">{perk.label}</span>
-        <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">{perk.detail}</span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-[var(--muted)]">{perk.detail}</span>
       </span>
     </li>
   );
@@ -296,7 +296,7 @@ function ProgressRing({ percent }: { percent: number }) {
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="font-serif text-2xl font-semibold text-white">{filled}%</span>
-        <span className="text-[0.6rem] uppercase tracking-[0.16em] text-slate-500">paid</span>
+        <span className="text-[0.6rem] uppercase tracking-[0.16em] text-[var(--muted)]">paid</span>
       </div>
     </div>
   );

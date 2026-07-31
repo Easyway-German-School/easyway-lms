@@ -6,5 +6,5 @@ type PanelItemProps = {
 };
 
 export default function PanelItem({ children, className = "" }: PanelItemProps) {
-  return <div className={`rounded-[20px] border border-slate-200 bg-[#F8FBFF] px-4 py-4 ${className}`.trim()}>{children}</div>;
+  return <div className={`rounded-[20px] border border-[var(--border)] bg-[#F8FBFF] px-4 py-4 ${className}`.trim()}>{children}</div>;
 }
