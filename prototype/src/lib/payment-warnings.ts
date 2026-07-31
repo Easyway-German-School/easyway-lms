@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
-import { sendPushToUsers } from "@/lib/push";
+import { KIND, notify } from "@/lib/notify";
 
 /**
  * Warns students before their account locks for non-payment.
@@ -46,7 +46,14 @@ function messageFor(tier: WarningTier, balance: number, daysLeft: number) {
   return `${amount} remains outstanding. This is the last notice before access to your classes, assignments and certificates is paused. Please pay from the Payments page or speak to your branch office today.`;
 }
 
-/** Marker stored on the notification so a tier is never sent twice. */
+/**
+ * Idempotency token so a tier is never sent twice.
+ *
+ * This used to be written into the notification's `channel` column, which made
+ * every warning invisible in the portal — the bell only shows rows whose
+ * channel is not "email", and these were neither. It is `dedupeKey` now, which
+ * is what that column is for, and notify() drops a repeat itself.
+ */
 function markerFor(tier: WarningTier) {
   return `payment-${tier}`;
 }
@@ -93,8 +100,9 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     if (!due) continue;
 
     const marker = markerFor(due.tier);
+    // Both spellings are checked: rows written before this used `channel`.
     const already = await prisma.notification.findFirst({
-      where: { studentId: student.id, channel: marker },
+      where: { studentId: student.id, OR: [{ dedupeKey: marker }, { channel: marker }] },
       select: { id: true },
     });
     if (already) {
@@ -109,28 +117,20 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     const message = messageFor(due.tier, balance, daysLeft);
 
     if (!dryRun) {
-      await prisma.notification.create({
-        data: {
-          studentId: student.id,
-          title,
-          message,
-          // The channel doubles as the idempotency marker for this tier.
-          channel: marker,
-          status: "sent",
-          sentAt: now,
-        },
+      // notify() writes the row, dedupes on the marker and pushes, and never
+      // throws — a mail or push failure must not stop the run.
+      await notify({
+        to: { studentIds: [student.id] },
+        kind: KIND.tuitionReminder,
+        // The final notice is the one that precedes losing access, so it is
+        // the one that is allowed to interrupt.
+        severity: due.tier === "final" ? "critical" : due.tier === "warning" ? "warning" : "info",
+        title,
+        message,
+        link: "/payments",
+        dedupeKey: marker,
+        push: true,
       });
-
-      // Best effort — a push failure must not stop the run or the record.
-      try {
-        await sendPushToUsers([student.user.id], {
-          title,
-          body: message,
-          url: "/payments",
-        });
-      } catch (err) {
-        console.warn("Payment warning push failed:", err);
-      }
     }
 
     run.created.push({

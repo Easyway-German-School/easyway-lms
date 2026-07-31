@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { queueEmail } from "@/lib/email-queue";
-import { adminCan } from "@/lib/admin-roles";
+import { capabilitiesForUser } from "@/lib/admin-roles";
+import { KIND, notify } from "@/lib/notify";
 
 /**
  * Office-facing alerts.
@@ -71,12 +72,32 @@ function registrationHtml(input: RegistrationAlert): string {
  */
 export async function notifyAdminsOfRegistration(input: RegistrationAlert): Promise<void> {
   try {
+    // The bell, first: it arrives in seconds and does not depend on a mail
+    // provider being configured, which — at time of writing — it is not.
+    await notify({
+      to: { audience: "admin", capability: "students" },
+      kind: KIND.studentRegistered,
+      severity: "info",
+      title: `New registration: ${input.studentName}`,
+      message: `${input.studentName} signed up for ${input.level} (${input.sessionSlot}${
+        input.classType === "private" ? ", private" : ""
+      }) at ${input.branchName ?? "no branch selected"}.`,
+      link: "/admin/students",
+      push: true,
+    });
+  } catch (error) {
+    console.error("Could not raise admin registration notification:", error);
+  }
+
+  try {
     const admins = await prisma.user.findMany({
       where: { role: "ADMIN" },
-      select: { email: true, adminRole: true },
+      select: { email: true, adminRole: true, adminCapabilities: true },
     });
 
-    const recipients = admins.filter((a) => a.email && adminCan(a.adminRole, "students"));
+    const recipients = admins.filter(
+      (a) => a.email && capabilitiesForUser(a.adminRole, a.adminCapabilities).includes("students"),
+    );
     if (recipients.length === 0) return;
 
     const html = registrationHtml(input);

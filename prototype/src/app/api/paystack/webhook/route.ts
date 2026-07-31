@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { classifyPaymentTransaction } from "@/lib/payment";
 import { settleExamFee } from "@/lib/exam-payments";
+import { KIND, notifyInBackground } from "@/lib/notify";
 
 // Paystack signs every webhook with HMAC SHA512 of the raw body, keyed by the
 // secret key, in the x-paystack-signature header. Without this check anyone who
@@ -41,6 +42,21 @@ export async function POST(request: Request) {
 
     if (!isValidPaystackSignature(body, request.headers.get("x-paystack-signature"))) {
       console.error("Paystack webhook rejected: invalid or missing signature");
+      // Either somebody is POSTing at the endpoint, or PAYSTACK_SECRET_KEY no
+      // longer matches the dashboard — in which case every real payment is
+      // being rejected too, silently, until somebody notices. Worth waking the
+      // office for.
+      notifyInBackground({
+        to: { audience: "admin", capability: "payments" },
+        kind: KIND.gatewayError,
+        severity: "critical",
+        title: "Paystack webhook rejected",
+        message:
+          "A payment webhook arrived with an invalid signature. If payments are not appearing, check that PAYSTACK_SECRET_KEY matches the key in the Paystack dashboard.",
+        link: "/admin/payments",
+        // One alert per hour at most, however many bad requests arrive.
+        dedupeKey: `gateway-signature-${new Date().toISOString().slice(0, 13)}`,
+      });
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
 
@@ -251,6 +267,30 @@ export async function POST(request: Request) {
       });
     }
 
+    // The rows above are email records — channel "email", which the bell
+    // deliberately excludes. The student also needs to see this in the portal,
+    // and the office needs to know money arrived without watching Paystack.
+    notifyInBackground({
+      to: { studentIds: [student.id] },
+      kind: KIND.paymentReceived,
+      severity: "success",
+      title: confirmation.title,
+      message: notificationMessage,
+      link: "/payments",
+    });
+
+    notifyInBackground({
+      to: { audience: "admin", capability: "payments" },
+      kind: KIND.paymentReceived,
+      severity: "success",
+      title: `₦${paymentAmount.toLocaleString()} received`,
+      message: `${student.user?.name || "A student"} paid ₦${paymentAmount.toLocaleString()} (${effectivePaymentType}) for ${pathwayName}.`,
+      link: "/admin/payments",
+      // The office wants to hear this one, so it overrides the default of
+      // pushing only for warnings and above.
+      push: true,
+    });
+
     // Send welcome email if this is a 100% full payment
     if (effectivePaymentType === "full" && student.user?.email) {
       try {
@@ -288,6 +328,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true });
   } catch (error) {
     console.error("Paystack webhook error:", error);
+    // A payment was taken and we failed to record it. Somebody has to
+    // reconcile that by hand, so somebody has to be told.
+    notifyInBackground({
+      to: { audience: "admin", capability: "payments" },
+      kind: KIND.gatewayError,
+      severity: "critical",
+      title: "Payment webhook failed",
+      message: `A Paystack webhook could not be processed: ${
+        error instanceof Error ? error.message : "unknown error"
+      }. The money may have been taken without the payment being recorded — check the Paystack dashboard against Payments.`,
+      link: "/admin/payments",
+    });
     return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
   }
 }
