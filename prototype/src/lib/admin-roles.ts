@@ -67,6 +67,51 @@ export function capabilitiesFor(adminRole: unknown): Capability[] {
 }
 
 /**
+ * Per-person adjustments layered on top of a preset.
+ *
+ * Stored on User.adminCapabilities as `{ grant: [...], revoke: [...] }`. It is
+ * a diff rather than a flat list on purpose: a secretary given `payments` by
+ * hand still picks up anything added to the secretary preset later, which a
+ * frozen copy of the list would not.
+ *
+ * Null — every admin who existed before this — means "just the preset", so
+ * nobody's access moves until somebody deliberately ticks a box.
+ */
+export type CapabilityOverrides = {
+  grant: Capability[];
+  revoke: Capability[];
+};
+
+function isCapability(value: unknown): value is Capability {
+  return (CAPABILITIES as readonly string[]).includes(String(value));
+}
+
+/** Tolerant of anything: bad JSON in the column must not lock an admin out. */
+export function parseOverrides(raw: unknown): CapabilityOverrides {
+  const empty: CapabilityOverrides = { grant: [], revoke: [] };
+  if (!raw || typeof raw !== "object") return empty;
+
+  const source = raw as Record<string, unknown>;
+  const read = (key: string) =>
+    Array.isArray(source[key]) ? (source[key] as unknown[]).filter(isCapability) : [];
+
+  const grant = read("grant");
+  const revoke = read("revoke");
+  // A capability in both lists is a contradiction; revoking wins, because the
+  // safer reading of an ambiguous permission is the narrower one.
+  return { grant: grant.filter((c) => !revoke.includes(c)), revoke };
+}
+
+/** The preset, plus this person's grants, minus their revocations. */
+export function capabilitiesForUser(adminRole: unknown, overrides: unknown): Capability[] {
+  const { grant, revoke } = parseOverrides(overrides);
+  const base = new Set<Capability>(capabilitiesFor(adminRole));
+  for (const capability of grant) base.add(capability);
+  for (const capability of revoke) base.delete(capability);
+  return CAPABILITIES.filter((capability) => base.has(capability));
+}
+
+/**
  * Convenience for route handlers that already established the user is an
  * admin and just need to check one capability by user id.
  */
@@ -78,6 +123,8 @@ export async function adminHasCapability(userId: string, capability: Capability)
 export type AdminContext = {
   userId: string;
   adminRole: AdminRole;
+  /** What this person can actually reach: preset plus their own overrides. */
+  capabilities: Capability[];
   can: (capability: Capability) => boolean;
 };
 
@@ -90,15 +137,17 @@ export async function resolveAdmin(userId: string | undefined): Promise<AdminCon
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, adminRole: true },
+    select: { id: true, role: true, adminRole: true, adminCapabilities: true },
   });
 
   if (!user || String(user.role).toLowerCase() !== "admin") return null;
 
   const adminRole = normalizeAdminRole(user.adminRole);
+  const capabilities = capabilitiesForUser(adminRole, user.adminCapabilities);
   return {
     userId: user.id,
     adminRole,
-    can: (capability: Capability) => adminCan(adminRole, capability),
+    capabilities,
+    can: (capability: Capability) => capabilities.includes(capability),
   };
 }

@@ -3,7 +3,24 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { safeJson } from "@/lib/safe-json";
+import {
+  DEPOSIT_RATE,
+  isLevelSellable,
+  REGISTRATION_FEE,
+  requiredDepositFor,
+  tuitionFeeFor,
+} from "@/lib/payment";
 
+/**
+ * Opens a Paystack checkout.
+ *
+ * The client picks a STAGE — full, deposit or registration — and nothing more.
+ * It used to send the naira figure and the tuition fee too, which the route
+ * charged as given: anyone could post `amount: 100, paymentStage: "full"` from
+ * devtools and be recorded as having settled their tuition. The price is now
+ * derived here from the student's own level and branch, which is also the only
+ * way the Abuja premium can be enforced.
+ */
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -11,21 +28,59 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { pathwayId, pathwayName, amount, depositPercent = 100, tuitionFee, paymentStage } = await request.json();
+    const body = await request.json();
+    const { pathwayId, pathwayName } = body ?? {};
+    const requestedStage = String(body?.paymentStage ?? body?.stage ?? "full").toLowerCase();
 
-    const normalizedAmount = Math.max(0, Math.round(Number(amount) || 0));
-    const normalizedTuitionFee = Math.max(0, Math.round(Number(tuitionFee) || 0));
-    const normalizedDepositPercent = Math.min(100, Math.max(0, Number(depositPercent) || 100));
-    const normalizedPaymentStage = typeof paymentStage === "string" ? paymentStage : "";
-    const amountToCharge = normalizedAmount;
-    const paymentType = normalizedPaymentStage === "registration"
-      ? "registration"
-      : normalizedPaymentStage === "full"
-      ? "full"
-      : normalizedDepositPercent < 100
-      ? "deposit"
-      : "full";
-    const requiredThreshold = normalizedTuitionFee > 0 ? Math.round(normalizedTuitionFee * (normalizedDepositPercent / 100)) : 0;
+    const studentRecord = await prisma.student.findUnique({
+      where: { userId: session.user.id as string },
+      select: {
+        id: true,
+        level: true,
+        branch: { select: { name: true } },
+        payments: { where: { status: "completed" }, select: { amount: true } },
+      },
+    });
+
+    if (!studentRecord) {
+      return NextResponse.json({ error: "No student record to bill" }, { status: 404 });
+    }
+
+    const feeLookup = { level: studentRecord.level, branch: studentRecord.branch?.name ?? null };
+    const normalizedTuitionFee = tuitionFeeFor(feeLookup);
+    const requiredDeposit = requiredDepositFor(feeLookup);
+    const alreadyPaid = studentRecord.payments.reduce((sum, payment) => sum + payment.amount, 0);
+
+    if (requestedStage !== "registration" && !isLevelSellable(studentRecord.level)) {
+      return NextResponse.json(
+        {
+          error:
+            `${studentRecord.level} tuition is quoted by your branch office rather than the portal. Please contact them to pay.`,
+        },
+        { status: 409 },
+      );
+    }
+
+    // What is genuinely still owed at each stage — never more, so a student who
+    // has already deposited is charged the balance instead of the whole fee again.
+    const paymentType =
+      requestedStage === "registration" ? "registration" : requestedStage === "deposit" ? "deposit" : "full";
+    const amountToCharge =
+      paymentType === "registration"
+        ? REGISTRATION_FEE
+        : paymentType === "deposit"
+        ? Math.max(0, requiredDeposit - alreadyPaid)
+        : Math.max(0, normalizedTuitionFee - alreadyPaid);
+
+    if (amountToCharge <= 0) {
+      return NextResponse.json(
+        { error: "There is nothing outstanding on your tuition for this level." },
+        { status: 409 },
+      );
+    }
+
+    const normalizedDepositPercent = paymentType === "deposit" ? Math.round(DEPOSIT_RATE * 100) : 100;
+    const requiredThreshold = paymentType === "deposit" ? requiredDeposit : normalizedTuitionFee;
 
     const resolvedPathway = await prisma.pathway.findFirst({
       where: {
@@ -42,10 +97,7 @@ export async function POST(request: Request) {
     const callbackUrlBase = process.env.PAYSTACK_CALLBACK_URL || `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/enrollment/success`;
     const callbackUrl = `${callbackUrlBase}${callbackUrlBase.includes("?") ? "&" : "?"}source=paystack`;
 
-    const studentRecord = await prisma.student.findUnique({
-      where: { userId: session.user.id as string },
-    });
-    const studentId = studentRecord?.id;
+    const studentId = studentRecord.id;
 
     const userEmail = String(session.user.email || "").trim().toLowerCase();
     const validEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

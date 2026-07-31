@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus, requiredDepositForLevel, tuitionFeeForLevel } from "@/lib/payment";
+import { derivePaymentStatus, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { NextResponse } from "next/server";
 import { mayAutoCreateStudent } from "@/lib/candidates";
 
@@ -16,6 +16,8 @@ export async function GET() {
       where: { userId: session.user.id as string },
       include: {
         user: true,
+        // Tuition is priced by branch as well as level.
+        branch: { select: { name: true } },
         enrollments: {
           include: {
             pathway: true,
@@ -57,6 +59,7 @@ export async function GET() {
         },
         include: {
           user: true,
+          branch: { select: { name: true } },
           enrollments: {
             include: {
               pathway: true,
@@ -77,9 +80,10 @@ export async function GET() {
       take: 8,
     });
 
-    const tuitionFee = tuitionFeeForLevel(student.level);
-    const registrationFee = 5000;
-    const requiredDeposit = requiredDepositForLevel(student.level);
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const tuitionFee = tuitionFeeFor(feeLookup);
+    const registrationFee = REGISTRATION_FEE;
+    const requiredDeposit = requiredDepositFor(feeLookup);
     const totalPaid = student.payments
       .filter((payment) => payment.status === "completed")
       .reduce((sum, payment) => sum + payment.amount, 0);
@@ -101,6 +105,7 @@ export async function GET() {
       name: student.user?.name || "Learner",
       studentCode: student.studentCode,
       level: student.level,
+      branchName: student.branch?.name ?? null,
       pathway: student.pathway,
       nextLive: student.nextLive,
       examReadiness: student.examReadiness,
@@ -134,11 +139,14 @@ export async function GET() {
       recentGrades: [],
       activePrograms: [],
       outcome: "Goethe C1 readiness + German work placement support",
+      branchName: null,
       paymentSummary: {
         totalPaid: 0,
-        registrationFee: 5000,
-        requiredDeposit: 90000,
-        tuitionFee: 150000,
+        registrationFee: REGISTRATION_FEE,
+        // No branch on this path, so the standard-tier A1 price is the honest
+        // placeholder rather than a number invented here.
+        requiredDeposit: requiredDepositFor({ level: "A1", branch: null }),
+        tuitionFee: tuitionFeeFor({ level: "A1", branch: null }),
         registrationPaid: true,
         depositPaid: false,
         fullPaid: false,

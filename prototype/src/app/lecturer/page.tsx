@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import BrandLoader from "@/components/BrandLoader";
+import { ArrowLeftIcon, CheckIcon, GradebookIcon, RobotIcon, ShieldIcon } from "@/components/icons";
 
 export default function LecturerPage() {
   const { data: session, status } = useSession();
@@ -132,7 +133,7 @@ export default function LecturerPage() {
 
       const result = await res.json();
       if (res.ok) {
-        setUploadMessage("✓ Import complete!");
+        setUploadMessage("Import complete.");
         setValidationPreview(null);
         setPendingFile(null);
         fetchCourses();
@@ -195,8 +196,8 @@ export default function LecturerPage() {
         {/* Header */}
         <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
           <div className="mb-4">
-            <Link href="/dashboard" className="text-[var(--accent)] hover:brightness-110 text-sm font-semibold">
-              ← Back to dashboard
+            <Link href="/dashboard" className="inline-flex items-center gap-2 text-[var(--accent)] hover:brightness-110 text-sm font-semibold">
+              <ArrowLeftIcon /> Back to dashboard
             </Link>
           </div>
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
@@ -206,14 +207,14 @@ export default function LecturerPage() {
             </div>
             <div className="flex flex-wrap gap-3">
               <Link href="/lecturer/lesson-builder" className="inline-flex items-center justify-center rounded-lg bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-[var(--surface)] hover:brightness-110">
-                🤖 AI Lesson Builder
+                <RobotIcon className="mr-2 h-4 w-4" /> AI Lesson Builder
               </Link>
               <Link href="/lecturer/gradebook" className="inline-flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-5 py-3 text-sm font-semibold text-[var(--foreground)] hover:brightness-110">
-                📊 View Gradebook
+                <GradebookIcon className="mr-2 h-4 w-4" /> View Gradebook
               </Link>
               {(session as any)?.user?.role === "ADMIN" ? (
                 <Link href="/admin/lecturer-invite" className="inline-flex items-center justify-center rounded-lg border border-[var(--accent)] bg-[var(--accent)]/10 px-5 py-3 text-sm font-semibold text-[var(--accent)] hover:bg-[var(--accent)]/20">
-                  🔐 Invite Lecturers
+                  <ShieldIcon className="mr-2 h-4 w-4" /> Invite Lecturers
                 </Link>
               ) : null}
             </div>
@@ -352,7 +353,7 @@ export default function LecturerPage() {
                   disabled={isImporting || validationPreview.validCount === 0}
                   className="px-4 py-2 bg-[var(--accent)] text-white rounded-lg text-sm font-semibold hover:brightness-110 disabled:opacity-60"
                 >
-                  {isImporting ? "Importing..." : "✓ Confirm Import"}
+                  {isImporting ? "Importing…" : <><CheckIcon className="mr-2 inline h-4 w-4 align-[-3px]" />Confirm Import</>}
                 </button>
                 <button
                   onClick={cancelPreview}

@@ -1,8 +1,30 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from "@/components/BrandLogo";
+import NotificationCenter from "@/components/NotificationCenter";
+import {
+  AssignmentIcon,
+  AttendanceIcon,
+  BookOpenIcon,
+  BroadcastIcon,
+  BroadcastMessageIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CrossIcon,
+  CustomiseIcon,
+  DashboardIcon,
+  ExamIcon,
+  GradebookIcon,
+  LessonBuilderIcon,
+  MailIcon,
+  MenuIcon,
+  PrivateClassIcon,
+  SettingsIcon,
+  TimetableIcon,
+  UsersIcon,
+} from "@/components/icons";
 
 type NavItem = {
   label: string;
@@ -10,132 +32,79 @@ type NavItem = {
   icon: ReactNode;
 };
 
-function DashboardIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="3" width="7" height="4" rx="1.5" />
-      <rect x="14" y="9" width="7" height="12" rx="1.5" />
-      <rect x="3" y="12" width="7" height="9" rx="1.5" />
-    </svg>
-  );
-}
-
-function ClassIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
-      <circle cx="9.5" cy="7" r="3" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-function MaterialIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v15H6.5A2.5 2.5 0 0 0 4 19.5V4.5A2.5 2.5 0 0 1 6.5 2Z" />
-      <path d="M8 7h8" />
-      <path d="M8 11h8" />
-    </svg>
-  );
-}
-
-function AttendanceIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="4" width="18" height="18" rx="2" />
-      <path d="M8 2v4" />
-      <path d="M16 2v4" />
-      <path d="M3 10h18" />
-      <path d="M8 14h3" />
-      <path d="M8 18h8" />
-    </svg>
-  );
-}
-
-function GradeIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <path d="M14 2v6h6" />
-      <path d="M9 13h6" />
-      <path d="M9 17h6" />
-    </svg>
-  );
-}
-
-function MessageIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-      <path d="M8 9h8" />
-      <path d="M8 13h5" />
-    </svg>
-  );
-}
-
-function LiveIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="2" y="6" width="14" height="12" rx="2.5" />
-      <path d="m17 10 5-3v10l-5-3z" />
-    </svg>
-  );
-}
-
-function SettingsIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01A1.65 1.65 0 0 0 20.91 10H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
-    </svg>
-  );
-}
-
+// One icon per destination, no repeats. Four entries used to share the same
+// pair-of-people glyph and three shared the same sheet-of-paper, which made
+// the sidebar useless to scan — you had to read every label.
 const navItems: NavItem[] = [
-  { label: 'Dashboard', href: '/lecturer/dashboard', icon: <DashboardIcon className="h-4 w-4" /> },
-  { label: 'Live classroom', href: '/live', icon: <LiveIcon className="h-4 w-4" /> },
-  { label: 'Customise my classes', href: '/lecturer/classes', icon: <ClassIcon className="h-4 w-4" /> },
-  { label: 'My students', href: '/lecturer/students', icon: <ClassIcon className="h-4 w-4" /> },
-  { label: 'Timetable', href: '/lecturer/timetable', icon: <ClassIcon className="h-4 w-4" /> },
-  { label: 'Private classes', href: '/lecturer/private-classes', icon: <ClassIcon className="h-4 w-4" /> },
-  { label: 'Assignments', href: '/lecturer/assignments', icon: <GradeIcon className="h-4 w-4" /> },
-  { label: 'Materials', href: '/lecturer/materials', icon: <MaterialIcon className="h-4 w-4" /> },
-  { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon className="h-4 w-4" /> },
-  { label: 'Exam/Test', href: '/lecturer/grades', icon: <GradeIcon className="h-4 w-4" /> },
+  { label: 'Dashboard', href: '/lecturer/dashboard', icon: <DashboardIcon /> },
+  { label: 'Live classroom', href: '/live', icon: <BroadcastIcon /> },
+  { label: 'Customise my classes', href: '/lecturer/classes', icon: <CustomiseIcon /> },
+  { label: 'My students', href: '/lecturer/students', icon: <UsersIcon /> },
+  { label: 'Timetable', href: '/lecturer/timetable', icon: <TimetableIcon /> },
+  { label: 'Private classes', href: '/lecturer/private-classes', icon: <PrivateClassIcon /> },
+  { label: 'Assignments', href: '/lecturer/assignments', icon: <AssignmentIcon /> },
+  { label: 'Materials', href: '/lecturer/materials', icon: <BookOpenIcon /> },
+  { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon /> },
+  { label: 'Exam/Test', href: '/lecturer/grades', icon: <ExamIcon /> },
   // These two pages existed but were reachable from nowhere, so nobody used
   // them. They belong in the sidebar with everything else.
-  { label: 'Gradebook', href: '/lecturer/gradebook', icon: <GradeIcon className="h-4 w-4" /> },
-  { label: 'Lesson builder', href: '/lecturer/lesson-builder', icon: <MaterialIcon className="h-4 w-4" /> },
-  { label: 'Messages', href: '/lecturer/messages', icon: <MessageIcon className="h-4 w-4" /> },
-  { label: 'Settings', href: '/lecturer/settings', icon: <SettingsIcon className="h-4 w-4" /> },
+  { label: 'Gradebook', href: '/lecturer/gradebook', icon: <GradebookIcon /> },
+  { label: 'Lesson builder', href: '/lecturer/lesson-builder', icon: <LessonBuilderIcon /> },
+  { label: 'Messages', href: '/lecturer/messages', icon: <MailIcon /> },
+  { label: 'Announcements', href: '/lecturer/announcements', icon: <BroadcastMessageIcon /> },
+  { label: 'Settings', href: '/lecturer/settings', icon: <SettingsIcon /> },
 ];
 
 export default function LecturerShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  // Below lg the sidebar is a drawer. A tutor marking attendance on their
+  // phone had 288px of the 375px screen taken by a sidebar they could not
+  // dismiss.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
 
   return (
     <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(10,124,255,0.10),_transparent_30%),linear-gradient(135deg,_#f7faff_0%,_#eef3ff_100%)] text-[var(--foreground)]">
-      <aside className={`fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-white/60 bg-white/80 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-all duration-300 ${collapsed ? 'w-20' : 'w-72'}`}>
+      {drawerOpen && (
+        <button
+          aria-label="Close menu"
+          onClick={() => setDrawerOpen(false)}
+          className="fixed inset-0 z-40 cursor-default bg-slate-950/40 backdrop-blur-sm lg:hidden"
+        />
+      )}
+
+      <aside
+        className={`fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-white/60 bg-white/95 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:bg-white/80 lg:transition-all ${
+          drawerOpen ? 'translate-x-0' : '-translate-x-full'
+        } w-[17rem] ${collapsed ? 'lg:w-20' : 'lg:w-72'}`}
+      >
         <div className="border-b border-slate-200/70 p-4">
           <div className="flex items-center justify-between gap-3">
-            {collapsed ? (
-              <BrandLogo variant="mark" className="h-10 w-10" />
-            ) : (
-              <div className="min-w-0">
-                <BrandLogo variant="wordmark" className="h-9" />
-                <h1 className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
-                  Lecturer portal
-                </h1>
-              </div>
-            )}
-            <button onClick={() => setCollapsed(!collapsed)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)]">
-              {collapsed ? '→' : '←'}
+            {collapsed && <BrandLogo variant="mark" className="hidden h-10 w-10 lg:block" />}
+            <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
+              <BrandLogo variant="wordmark" className="h-9" />
+              <h1 className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
+                Lecturer portal
+              </h1>
+            </div>
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="hidden rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:block"
+            >
+              {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+            </button>
+            <button
+              onClick={() => setDrawerOpen(false)}
+              aria-label="Close menu"
+              className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:hidden"
+            >
+              <CrossIcon className="h-5 w-5" />
             </button>
           </div>
         </div>
@@ -168,7 +137,27 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
         </div>
       </aside>
 
-      <main className={`flex-1 transition-all duration-300 ${collapsed ? 'ml-20' : 'ml-72'}`}>
+      <main className={`flex-1 transition-all duration-300 ${collapsed ? 'lg:ml-20' : 'lg:ml-72'}`}>
+        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-white/60 bg-white/80 px-3 py-2 backdrop-blur-xl sm:px-5">
+          <button
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open menu"
+            className="grid h-10 w-10 place-items-center rounded-xl text-slate-600 transition hover:bg-slate-100 lg:hidden"
+          >
+            <MenuIcon className="h-5 w-5" />
+          </button>
+
+          <div className="min-w-0 flex-1 lg:hidden">
+            <BrandLogo variant="wordmark" className="h-7" />
+          </div>
+
+          <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-slate-700 lg:block">
+            {navItems.find((item) => pathname === item.href)?.label ?? 'Lecturer portal'}
+          </p>
+
+          <NotificationCenter />
+        </header>
+
         {children}
       </main>
     </div>

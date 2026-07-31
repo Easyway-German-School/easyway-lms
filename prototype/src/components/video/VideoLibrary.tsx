@@ -1,5 +1,7 @@
 "use client";
 
+import { FilmIcon, PlayIcon } from "@/components/icons";
+
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import VideoThumb from "@/components/video/VideoThumb";
@@ -73,7 +75,7 @@ function ShelfRow({ shelf, previewOnHover }: { shelf: VideoShelf; previewOnHover
 
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 transition group-hover:opacity-100" />
                 <div className="absolute inset-0 grid place-items-center opacity-0 transition group-hover:opacity-100">
-                  <span className="grid h-11 w-11 place-items-center rounded-full bg-white/90 text-lg text-slate-900">▶</span>
+                  <span className="grid h-11 w-11 place-items-center rounded-full bg-white/90 text-slate-900"><PlayIcon className="h-6 w-6" /></span>
                 </div>
 
                 {video.durationSeconds ? (
@@ -131,7 +133,7 @@ export default function VideoLibrary({ videos, level }: { videos: LibraryVideo[]
   if (videos.length === 0) {
     return (
       <div className="rounded-3xl bg-slate-950 p-12 text-center text-slate-300">
-        <p className="text-4xl">🎬</p>
+        <FilmIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
         <p className="mt-4 text-lg font-semibold text-white">Your video library is empty for now</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-slate-400">
           Class recordings appear here the same day they are taught, and your tutors add lesson videos as the level goes on.
@@ -173,9 +175,9 @@ export default function VideoLibrary({ videos, level }: { videos: LibraryVideo[]
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 <Link
                   href={`/materials/watch/${billboard.id}`}
-                  className="rounded-lg bg-white px-7 py-2.5 text-sm font-bold text-slate-900 transition hover:bg-white/85"
+                  className="inline-flex items-center gap-2 rounded-lg bg-white px-7 py-2.5 text-sm font-bold text-slate-900 transition hover:bg-white/85"
                 >
-                  ▶ {billboard.positionSeconds > 30 ? "Resume" : "Play"}
+                  <PlayIcon className="h-5 w-5" /> {billboard.positionSeconds > 30 ? "Resume" : "Play"}
                 </Link>
                 <span className="rounded-lg bg-white/15 px-5 py-2.5 text-sm font-semibold text-white">
                   {watchPercent(billboard) > 0 ? `${watchPercent(billboard)}% watched` : "Not started"}

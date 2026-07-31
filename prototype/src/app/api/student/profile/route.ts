@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus, requiredDepositForLevel, tuitionFeeForLevel } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { NextResponse } from "next/server";
 
 export async function GET() {
@@ -61,8 +61,9 @@ export async function GET() {
     }
 
     // Format the response
-    const tuitionFee = tuitionFeeForLevel(student.level);
-    const requiredDeposit = requiredDepositForLevel(student.level);
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const tuitionFee = tuitionFeeFor(feeLookup);
+    const requiredDeposit = requiredDepositFor(feeLookup);
     const totalPaid = student.payments
       .filter((payment) => payment.status === "completed")
       .reduce((sum, payment) => sum + payment.amount, 0);

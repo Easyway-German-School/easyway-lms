@@ -1,5 +1,7 @@
 "use client";
 
+import { CameraIcon, MicIcon, MicOffIcon, ScreenShareIcon, SpeakerOffIcon } from "@/components/icons";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ConnectionQuality,
@@ -150,7 +152,7 @@ function ParticipantTile({
       ) : null}
 
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
-        {micMuted ? <span className="text-xs text-rose-400">🔇</span> : null}
+        {micMuted ? <SpeakerOffIcon className="h-3.5 w-3.5 shrink-0 text-rose-400" /> : null}
         <span className="truncate text-[11px] font-medium text-white">
           {participant instanceof LocalParticipant ? "You" : participant.name || participant.identity}
         </span>
@@ -409,28 +411,28 @@ export default function LiveKitClassroom({
       <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-slate-900/90 p-3">
         <button
           onClick={toggleMic}
-          className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
             micOn ? "bg-white/10 text-white hover:bg-white/20" : "bg-rose-500 text-white"
           }`}
         >
-          {micOn ? "🎙 Mic on" : "🔇 Mic off"}
+          {micOn ? <><MicIcon /> Mic on</> : <><MicOffIcon /> Mic off</>}
         </button>
         <button
           onClick={toggleCamera}
-          className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
             cameraOn ? "bg-white/10 text-white hover:bg-white/20" : "bg-white/5 text-slate-400 hover:bg-white/10"
           }`}
         >
-          {cameraOn ? "📹 Camera on" : "📷 Camera off"}
+          <CameraIcon /> {cameraOn ? "Camera on" : "Camera off"}
         </button>
         {role === "tutor" ? (
           <button
             onClick={toggleScreenShare}
-            className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
               screenSharing ? "bg-[var(--accent)] text-white" : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
-            {screenSharing ? "🖥 Stop sharing" : "🖥 Share screen"}
+            <ScreenShareIcon /> {screenSharing ? "Stop sharing" : "Share screen"}
           </button>
         ) : null}
 

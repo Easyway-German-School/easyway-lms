@@ -1,4 +1,5 @@
 "use client";
+import { MedalIcon, TrophyIcon } from "@/components/icons";
 
 import { useEffect, useState } from "react";
 
@@ -43,7 +44,9 @@ export default function Leaderboard() {
                 <p className="font-medium text-[var(--foreground)]">{e.rank}. {e.name}</p>
                 <p className="text-xs text-[var(--muted)]">{e.xp} XP</p>
               </div>
-              <div className="text-sm font-semibold text-[var(--accent)]">{e.rank === 1 ? "🏆" : e.rank === 2 ? "🥈" : e.rank === 3 ? "🥉" : ""}</div>
+              <div className="text-[var(--accent)]">
+                {e.rank === 1 ? <TrophyIcon className="h-5 w-5" /> : e.rank <= 3 ? <MedalIcon className="h-5 w-5" /> : null}
+              </div>
             </div>
           ))
         )}

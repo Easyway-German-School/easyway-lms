@@ -1,7 +1,8 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { CalendarIcon, CommunityIcon, FilmIcon, HandIcon, VideoIcon } from "@/components/icons";
 
 /**
  * The first sixty seconds in the portal.
@@ -31,7 +32,7 @@ type Slide = {
   eyebrow: string;
   title: string;
   body: string;
-  art: string;
+  art: ReactNode;
   /** Brand gradient pair for the slide's stage. */
   from: string;
   to: string;
@@ -52,7 +53,7 @@ function buildSlides(profile: Onboarding): Slide[] {
       eyebrow: "Welcome",
       title: profile.firstName ? `Willkommen, ${profile.firstName}.` : "Willkommen.",
       body: `You are starting at ${profile.level}.${where} Here is the whole portal in four screens — under a minute, and you never have to see it again.`,
-      art: "👋",
+      art: <HandIcon className="h-12 w-12" />,
       from: "#0D7C7E",
       to: "#FF6600",
     },
@@ -62,7 +63,7 @@ function buildSlides(profile: Onboarding): Slide[] {
       body: profile.isOnlineBranch
         ? `Your ${profile.sessionSlot} session runs live over video. Pick your video quality before you join — on mobile data, Data saver keeps the lesson steady instead of frozen.`
         : `Your ${profile.sessionSlot} session, the topic for each day and any material your tutor attaches are all on your Classes calendar.`,
-      art: profile.isOnlineBranch ? "🎥" : "🗓️",
+      art: profile.isOnlineBranch ? <VideoIcon className="h-12 w-12" /> : <CalendarIcon className="h-12 w-12" />,
       from: "#0D7C7E",
       to: "#0EA5A7",
     },
@@ -70,7 +71,7 @@ function buildSlides(profile: Onboarding): Slide[] {
       eyebrow: "If you miss one",
       title: "Every class is recorded",
       body: "Materials has a Watch tab. Class recordings land there the same day, and the player picks up exactly where your connection dropped. Missing a class costs you minutes, not the lesson.",
-      art: "🎬",
+      art: <FilmIcon className="h-12 w-12" />,
       from: "#7C3AED",
       to: "#FF6600",
     },
@@ -78,7 +79,7 @@ function buildSlides(profile: Onboarding): Slide[] {
       eyebrow: "You are not alone in this",
       title: "Your class is in Community",
       body: "Your branch and level have their own space — ask questions between classes, and practise with the people sitting the same exam as you. Students who post in their first week finish at nearly twice the rate.",
-      art: "💬",
+      art: <CommunityIcon className="h-12 w-12" />,
       from: "#FF6600",
       to: "#FF8533",
     },
@@ -164,7 +165,7 @@ export default function WelcomeTour() {
                 initial={{ scale: 0.4, opacity: 0, rotate: -12 }}
                 animate={{ scale: 1, opacity: 1, rotate: 0 }}
                 transition={{ type: "spring", stiffness: 260, damping: 16 }}
-                className="relative mx-auto grid h-24 w-24 place-items-center rounded-3xl bg-white/15 text-5xl backdrop-blur"
+                className="relative mx-auto grid h-24 w-24 place-items-center rounded-3xl bg-white/15 text-white backdrop-blur"
               >
                 {slide.art}
               </motion.div>

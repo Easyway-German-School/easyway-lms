@@ -10,6 +10,7 @@ interface FeedbackItem {
 }
 
 import StudentShell from "@/components/StudentShell";
+import { TargetIcon } from "@/components/icons";
 
 export default function EssayGrader() {
   const [essay, setEssay] = useState(
@@ -104,7 +105,7 @@ export default function EssayGrader() {
 
             {score !== null && (
               <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-                <p className="font-semibold">🎯 Suggested next step</p>
+                <p className="flex items-center gap-2 font-semibold"><TargetIcon /> Suggested next step</p>
                 <p className="mt-1">{nextStep || "Focus on the weakest category and practice targeted exercises."}</p>
               </div>
             )}

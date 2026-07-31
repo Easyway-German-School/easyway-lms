@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { sendPushToUsers } from "@/lib/push";
 
 /**
@@ -20,10 +20,6 @@ import { sendPushToUsers } from "@/lib/push";
  * Each tier fires at most once per student — the sent Notification row is the
  * record, so re-running is safe and will not spam anyone.
  */
-
-const TUITION_BY_LEVEL: Record<string, number> = {
-  A1: 150000, A2: 150000, B1: 180000, B2: 180000, C1: 200000, C2: 220000,
-};
 
 export const WARNING_TIERS = [
   { tier: "notice", afterDays: 14 },
@@ -72,6 +68,7 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
       id: true,
       level: true,
       createdAt: true,
+      branch: { select: { name: true } },
       user: { select: { id: true, name: true } },
       payments: { where: { status: "completed" }, select: { amount: true } },
     },
@@ -80,8 +77,9 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
   const run: WarningRun = { checked: students.length, atRisk: 0, created: [], skipped: 0 };
 
   for (const student of students) {
-    const tuitionFee = TUITION_BY_LEVEL[student.level] ?? 150000;
-    const requiredDeposit = Math.round(tuitionFee * 0.6);
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const tuitionFee = tuitionFeeFor(feeLookup);
+    const requiredDeposit = requiredDepositFor(feeLookup);
     const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
     const { fullPaid } = derivePaymentStatus({ totalPaid, tuitionFee, requiredDeposit });
 

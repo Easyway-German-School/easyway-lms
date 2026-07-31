@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
+import { ExamIcon, ResultsIcon } from '@/components/icons';
 
 interface StudentGrade {
   id: string;
@@ -165,7 +166,7 @@ export default function LecturerGrades() {
         {/* Header */}
         <div className="bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6 border-b border-[var(--border)]">
           <div className="max-w-7xl mx-auto">
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">Enter Exam/Test Results 📝</h1>
+            <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]"><ExamIcon className="h-7 w-7 text-[var(--accent)]" />Enter Exam/Test Results</h1>
             <p className="text-[var(--muted)] mt-2">Record and manage student exam and test scores</p>
           </div>
         </div>
@@ -242,7 +243,7 @@ export default function LecturerGrades() {
           {/* Students Grades */}
           {students.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-3xl mb-2">📊</p>
+              <ResultsIcon className="mx-auto mb-2 h-9 w-9 text-[var(--muted)]" />
               <p className="text-[var(--foreground)] font-semibold">No students for this exam</p>
               <p className="text-[var(--muted)] text-sm mt-1">Enroll students to enter their grades</p>
             </div>

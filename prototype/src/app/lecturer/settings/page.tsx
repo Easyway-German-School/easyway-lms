@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
 import LecturerShell from "@/components/LecturerShell";
+import { SettingsIcon } from "@/components/icons";
 import BrandLoader from "@/components/BrandLoader";
 import PasswordInput from "@/components/PasswordInput";
 
@@ -133,7 +134,7 @@ export default function LecturerSettingsPage() {
       <div className="h-screen overflow-y-auto">
         <div className="border-b border-[var(--border)] bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6">
           <div className="mx-auto max-w-3xl">
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">Settings ⚙️</h1>
+            <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]"><SettingsIcon className="h-7 w-7 text-[var(--accent)]" />Settings</h1>
             <p className="mt-2 text-[var(--muted)]">Your details and your password.</p>
           </div>
         </div>

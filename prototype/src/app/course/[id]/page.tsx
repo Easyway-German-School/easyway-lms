@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ArrowLeftIcon } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import BrandLoader from "@/components/BrandLoader";
@@ -54,7 +55,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
   return (
     <div className="min-h-screen bg-[var(--background)] py-10 text-[var(--foreground)]">
       <div className="mx-auto max-w-4xl px-6">
-        <Link href="/dashboard" className="text-[var(--accent)] font-semibold">← Back to dashboard</Link>
+        <Link href="/dashboard" className="inline-flex items-center gap-2 text-[var(--accent)] font-semibold"><ArrowLeftIcon /> Back to dashboard</Link>
         <div className="mt-6 rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
           <p className="text-sm uppercase tracking-[0.2em] text-[var(--accent)]">Course overview</p>
           <h1 className="mt-3 text-3xl font-bold">{course.title}</h1>

@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositForLevel, tuitionFeeForLevel } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 /**
  * The one question every gated page asks: may this student see class content yet?
@@ -24,6 +24,9 @@ export async function GET() {
     where: { userId: session.user.id as string },
     select: {
       level: true,
+      // The fee depends on the branch as well as the level — leaving it out
+      // would compute an Abuja student's gate at the cheaper Lagos price.
+      branch: { select: { name: true } },
       payments: {
         where: { status: "completed" },
         select: { amount: true },
@@ -36,12 +39,13 @@ export async function GET() {
   }
 
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
 
   return NextResponse.json(
     deriveStudentAccess({
       totalPaid,
-      tuitionFee: tuitionFeeForLevel(student.level),
-      requiredDeposit: requiredDepositForLevel(student.level),
+      tuitionFee: tuitionFeeFor(feeLookup),
+      requiredDeposit: requiredDepositFor(feeLookup),
     }),
   );
 }

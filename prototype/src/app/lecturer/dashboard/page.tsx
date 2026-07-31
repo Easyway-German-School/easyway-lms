@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
+import { AttendanceIcon, BookOpenIcon, GradebookIcon } from '@/components/icons';
 import BrandLoader from "@/components/BrandLoader";
 
 function StatIcon({ children }: { children: React.ReactNode }) {
@@ -251,21 +252,21 @@ export default function LecturerDashboard() {
               <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
                 <div className="space-y-4">
                   <div className="flex items-start gap-3 pb-4 border-b border-[var(--border)]">
-                    <span className="text-2xl">📚</span>
+                    <BookOpenIcon className="h-6 w-6 shrink-0 text-[var(--accent)]" />
                     <div>
                       <p className="font-semibold text-[var(--foreground)]">New material uploaded</p>
                       <p className="text-sm text-[var(--muted)]">JavaScript Fundamentals - 2 hours ago</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3 pb-4 border-b border-[var(--border)]">
-                    <span className="text-2xl">✅</span>
+                    <AttendanceIcon className="h-6 w-6 shrink-0 text-emerald-600" />
                     <div>
                       <p className="font-semibold text-[var(--foreground)]">Attendance marked</p>
                       <p className="text-sm text-[var(--muted)]">15 students present - 4 hours ago</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
-                    <span className="text-2xl">📝</span>
+                    <GradebookIcon className="h-6 w-6 shrink-0 text-indigo-600" />
                     <div>
                       <p className="font-semibold text-[var(--foreground)]">Grades submitted</p>
                       <p className="text-sm text-[var(--muted)]">Exam A1 scores entered - 1 day ago</p>

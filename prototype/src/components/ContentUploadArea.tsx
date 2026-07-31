@@ -1,5 +1,7 @@
 "use client";
 
+import { DocumentIcon, FolderIcon, PencilIcon } from "@/components/icons";
+
 import React, { useRef, useState } from "react";
 
 type QuizQuestion = {
@@ -148,26 +150,26 @@ export default function ContentUploadArea({ onContentParsed, isLoading = false }
             setUploadMode("file");
             setError("");
           }}
-          className={`px-4 py-2 rounded-xl font-semibold transition-all ${
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl font-semibold transition-all ${
             uploadMode === "file"
               ? "bg-[var(--accent)] text-white"
               : "bg-[var(--surface-alt)] text-[var(--muted)] hover:bg-[var(--border)]"
           }`}
         >
-          📁 Upload File
+          <FolderIcon /> Upload File
         </button>
         <button
           onClick={() => {
             setUploadMode("paste");
             setError("");
           }}
-          className={`px-4 py-2 rounded-xl font-semibold transition-all ${
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl font-semibold transition-all ${
             uploadMode === "paste"
               ? "bg-[var(--accent)] text-white"
               : "bg-[var(--surface-alt)] text-[var(--muted)] hover:bg-[var(--border)]"
           }`}
         >
-          📝 Paste Text
+          <PencilIcon /> Paste Text
         </button>
       </div>
       <p className="text-xs text-[var(--muted)]">Fast = quick sample; Deep = larger content scan.</p>
@@ -195,7 +197,7 @@ export default function ContentUploadArea({ onContentParsed, isLoading = false }
             className="hidden"
           />
           <div className="space-y-4">
-            <div className="text-4xl">📄</div>
+            <DocumentIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
             <div>
               <p className="font-semibold text-[var(--foreground)]">Drag and drop a TXT, PDF, or DOCX file here</p>
               <p className="text-sm text-[var(--muted)] mt-1">Or click to browse</p>

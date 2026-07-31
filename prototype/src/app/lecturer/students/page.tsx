@@ -3,6 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import LecturerShell from "@/components/LecturerShell";
+import { UsersIcon } from "@/components/icons";
 import LecturerStudentRoster from "@/components/LecturerStudentRoster";
 
 /**
@@ -20,7 +21,7 @@ export default function LecturerStudentsPage() {
       <div className="h-screen overflow-y-auto">
         <div className="border-b border-[var(--border)] bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6">
           <div className="mx-auto max-w-6xl">
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">My students 👥</h1>
+            <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]"><UsersIcon className="h-7 w-7 text-[var(--accent)]" />My students</h1>
             <p className="mt-2 text-[var(--muted)]">
               Everyone registered for the class you teach, with the same detail the office sees.
             </p>

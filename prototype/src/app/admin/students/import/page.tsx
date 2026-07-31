@@ -3,6 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
+import { ArrowLeftIcon } from "@/components/icons";
 import { useMemo, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 
@@ -138,8 +139,8 @@ export default function ImportStudentsPage() {
     <AdminShell>
       <div className="mx-auto max-w-6xl space-y-6 p-6">
         <div>
-          <Link href="/admin/students" className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
-            ← Back to students
+          <Link href="/admin/students" className="inline-flex items-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
+            <ArrowLeftIcon /> Back to students
           </Link>
           <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)]">Import existing students</h1>
           <p className="mt-2 max-w-3xl text-[var(--muted)]">

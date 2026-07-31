@@ -3,6 +3,35 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
+import BrandLogo from '@/components/BrandLogo';
+import NotificationCenter from '@/components/NotificationCenter';
+import {
+  AttendanceIcon,
+  BellIcon,
+  BookOpenIcon,
+  BranchIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CommunityIcon,
+  CrossIcon,
+  DashboardIcon,
+  ExamCentreIcon,
+  ExamIcon,
+  InboxIcon,
+  IntegrationIcon,
+  LecturerIcon,
+  LevelUpIcon,
+  MenuIcon,
+  PaletteIcon,
+  PaymentIcon,
+  RobotIcon,
+  RosterIcon,
+  SendIcon,
+  SettingsIcon,
+  ShieldIcon,
+  UserPlusIcon,
+  UsersIcon,
+} from '@/components/icons';
 
 type NavItem = {
   capability?: string;
@@ -12,156 +41,36 @@ type NavItem = {
   group?: string;
 };
 
-function DashboardIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="3" width="7" height="4" rx="1.5" />
-      <rect x="14" y="9" width="7" height="12" rx="1.5" />
-      <rect x="3" y="12" width="7" height="9" rx="1.5" />
-    </svg>
-  );
-}
-
-function StudentsIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="3" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-function BranchIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-      <polyline points="9 22 9 12 15 12 15 22" />
-    </svg>
-  );
-}
-
-function LecturerIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="3" />
-      <path d="M2 12a6 6 0 1 0 12 0 6 6 0 0 0-12 0" />
-    </svg>
-  );
-}
-
-function AttendanceIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="4" width="18" height="18" rx="2" />
-      <path d="M8 2v4" />
-      <path d="M16 2v4" />
-      <path d="M3 10h18" />
-      <path d="M8 14h3" />
-      <path d="M8 18h8" />
-    </svg>
-  );
-}
-
-function ExamIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <path d="M9 15h2" />
-      <path d="M13 15h2" />
-      <path d="M9 11h6" />
-    </svg>
-  );
-}
-
-function MaterialIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v15H6.5A2.5 2.5 0 0 0 4 19.5V4.5A2.5 2.5 0 0 1 6.5 2Z" />
-      <path d="M8 7h8" />
-      <path d="M8 11h8" />
-    </svg>
-  );
-}
-
-function CommunityIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-      <path d="M8 9h8" />
-      <path d="M8 13h5" />
-    </svg>
-  );
-}
-
-function PaymentIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="1" y="4" width="22" height="16" rx="2.5" ry="2.5" />
-      <path d="M1 10h22" />
-      <circle cx="5.5" cy="14" r="1.5" />
-    </svg>
-  );
-}
-
-function NotificationIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-    </svg>
-  );
-}
-
-function IntegrationIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 5v14" />
-      <path d="M5 12h14" />
-      <circle cx="12" cy="12" r="2" />
-    </svg>
-  );
-}
-
-function SettingsIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01A1.65 1.65 0 0 0 20.91 10H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
-    </svg>
-  );
-}
-
+// One icon per destination. Four of the Academics entries used to share the
+// same pair-of-people glyph and all three Exams entries the same page, so the
+// grouping headers were doing all the work.
 const navItems: NavItem[] = [
-  { label: 'Dashboard', href: '/admin', icon: <DashboardIcon className="h-4 w-4" />, group: 'Main' },
-  
-  { label: 'Students', href: '/admin/students', capability: 'students' as const, icon: <StudentsIcon className="h-4 w-4" />, group: 'Academics' },
-  { label: 'Import students', href: '/admin/students/import', capability: 'students' as const, icon: <StudentsIcon className="h-4 w-4" />, group: 'Academics' },
-  { label: 'Enquiries', href: '/admin/leads', capability: 'students' as const, icon: <StudentsIcon className="h-4 w-4" />, group: 'Academics' },
-  { label: 'Branches', href: '/admin/branches', capability: 'branches' as const, icon: <BranchIcon className="h-4 w-4" />, group: 'Academics' },
-  { label: 'Lecturers', href: '/admin/lecturer-invite', capability: 'staff' as const, icon: <LecturerIcon className="h-4 w-4" />, group: 'Academics' },
-  { label: 'Attendance', href: '/admin/attendance', capability: 'attendance' as const, icon: <AttendanceIcon className="h-4 w-4" />, group: 'Academics' },
-  { label: 'Promotions', href: '/admin/promotions', capability: 'students' as const, icon: <StudentsIcon className="h-4 w-4" />, group: 'Academics' },
-  
-  { label: 'Exams', href: '/admin/exams', capability: 'exams' as const, icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
-  { label: 'Exam centre', href: '/admin/exam-centre', capability: 'exams' as const, icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
-  { label: 'Exam Registrations', href: '/admin/exam-registrations', capability: 'exams' as const, icon: <ExamIcon className="h-4 w-4" />, group: 'Exams' },
-  
-  { label: 'Materials', href: '/admin/materials', capability: 'materials' as const, icon: <MaterialIcon className="h-4 w-4" />, group: 'Content' },
-  { label: 'Community', href: '/admin/community', capability: 'community' as const, icon: <CommunityIcon className="h-4 w-4" />, group: 'Content' },
-  
-  { label: 'Payments', href: '/admin/payments', capability: 'payments' as const, icon: <PaymentIcon className="h-4 w-4" />, group: 'Billing' },
-  
-  { label: 'Compose email', href: '/admin/emails/compose', capability: 'emails' as const, icon: <NotificationIcon className="h-4 w-4" />, group: 'Settings' },
-  { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <NotificationIcon className="h-4 w-4" />, group: 'Settings' },
-  { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <SettingsIcon className="h-4 w-4" />, group: 'Settings' },
-  { label: 'Integrations', href: '/admin/integrations', capability: 'integrations' as const, icon: <IntegrationIcon className="h-4 w-4" />, group: 'Settings' },
-  { label: 'Personalization', href: '/admin/personalization', icon: <SettingsIcon className="h-4 w-4" />, group: 'Settings' },
+  { label: 'Dashboard', href: '/admin', icon: <DashboardIcon />, group: 'Main' },
+
+  { label: 'Students', href: '/admin/students', capability: 'students' as const, icon: <UsersIcon />, group: 'Academics' },
+  { label: 'Import students', href: '/admin/students/import', capability: 'students' as const, icon: <UserPlusIcon />, group: 'Academics' },
+  { label: 'Enquiries', href: '/admin/leads', capability: 'students' as const, icon: <InboxIcon />, group: 'Academics' },
+  { label: 'Branches', href: '/admin/branches', capability: 'branches' as const, icon: <BranchIcon />, group: 'Academics' },
+  { label: 'Lecturers', href: '/admin/lecturer-invite', capability: 'staff' as const, icon: <LecturerIcon />, group: 'Academics' },
+  { label: 'Attendance', href: '/admin/attendance', capability: 'attendance' as const, icon: <AttendanceIcon />, group: 'Academics' },
+  { label: 'Promotions', href: '/admin/promotions', capability: 'students' as const, icon: <LevelUpIcon />, group: 'Academics' },
+
+  { label: 'Exams', href: '/admin/exams', capability: 'exams' as const, icon: <ExamIcon />, group: 'Exams' },
+  { label: 'Exam centre', href: '/admin/exam-centre', capability: 'exams' as const, icon: <ExamCentreIcon />, group: 'Exams' },
+  { label: 'Exam Registrations', href: '/admin/exam-registrations', capability: 'exams' as const, icon: <RosterIcon />, group: 'Exams' },
+
+  { label: 'Materials', href: '/admin/materials', capability: 'materials' as const, icon: <BookOpenIcon />, group: 'Content' },
+  { label: 'Community', href: '/admin/community', capability: 'community' as const, icon: <CommunityIcon />, group: 'Content' },
+
+  { label: 'Payments', href: '/admin/payments', capability: 'payments' as const, icon: <PaymentIcon />, group: 'Billing' },
+
+  { label: 'Assistant', href: '/admin/assistant', icon: <RobotIcon />, group: 'Intelligence' },
+
+  { label: 'Compose email', href: '/admin/emails/compose', capability: 'emails' as const, icon: <SendIcon />, group: 'Settings' },
+  { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <BellIcon />, group: 'Settings' },
+  { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <ShieldIcon />, group: 'Settings' },
+  { label: 'Integrations', href: '/admin/integrations', capability: 'integrations' as const, icon: <IntegrationIcon />, group: 'Settings' },
+  { label: 'Personalization', href: '/admin/personalization', icon: <PaletteIcon />, group: 'Settings' },
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
@@ -169,6 +78,9 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const pathname = usePathname();
   const { data: session, status } = useSession();
   const [collapsed, setCollapsed] = useState(false);
+  // Below lg the sidebar is a drawer. The admin area is used from a phone at
+  // the front desk more often than the desktop-only layout assumed.
+  const [drawerOpen, setDrawerOpen] = useState(false);
   // null while unknown — everything stays visible rather than flickering
   // items away on first paint.
   const [capabilities, setCapabilities] = useState<string[] | null>(null);
@@ -190,7 +102,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     return () => { cancelled = true; };
   }, []);
 
-  const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Settings'];
+  const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings'];
+
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (status === 'unauthenticated' || (status === 'authenticated' && session?.user?.role?.toLowerCase() !== 'admin')) {
@@ -208,28 +124,49 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.08),_transparent_40%),linear-gradient(135deg,_#f9f7f5_0%,_#fffbf8_100%)] text-[var(--foreground)]">
+      {drawerOpen && (
+        <button
+          aria-label="Close menu"
+          onClick={() => setDrawerOpen(false)}
+          className="fixed inset-0 z-40 cursor-default bg-slate-950/40 backdrop-blur-sm lg:hidden"
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className={`fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-white/60 bg-white/85 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-all duration-300 ${collapsed ? 'w-20' : 'w-72'}`}>
+      <aside
+        className={`fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-white/60 bg-white/95 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:bg-white/85 lg:transition-all ${
+          drawerOpen ? 'translate-x-0' : '-translate-x-full'
+        } w-[17rem] ${collapsed ? 'lg:w-20' : 'lg:w-72'}`}
+      >
         {/* Header */}
         <div className="border-b border-slate-200/70 p-4">
           <div className="flex items-center justify-between gap-3">
-            <div className={`flex items-center gap-3 ${collapsed ? 'hidden' : ''}`}>
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-strong)] text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20">
-                AW
-              </div>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">Admin</p>
-                <h1 className="text-sm font-bold text-slate-900">Easyway Admin</h1>
-                {adminRoleLabel && (
-                  <p className="text-[11px] font-medium text-[var(--accent)]">{adminRoleLabel}</p>
-                )}
-              </div>
+            {/* The real logo, not an "AW" placeholder — the school has artwork
+                and every other portal was already using it. */}
+            <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
+              <BrandLogo variant="wordmark" className="h-8" />
+              <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
+                Admin portal
+              </p>
+              {adminRoleLabel && (
+                <p className="text-[11px] font-medium text-[var(--accent)]">{adminRoleLabel}</p>
+              )}
             </div>
+            {collapsed && <BrandLogo variant="mark" className="hidden h-10 w-10 lg:block" />}
+
             <button
               onClick={() => setCollapsed(!collapsed)}
-              className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)]"
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="hidden rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:block"
             >
-              {collapsed ? '→' : '←'}
+              {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+            </button>
+            <button
+              onClick={() => setDrawerOpen(false)}
+              aria-label="Close menu"
+              className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:hidden"
+            >
+              <CrossIcon className="h-5 w-5" />
             </button>
           </div>
         </div>
@@ -288,8 +225,28 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       </aside>
 
       {/* Main Content */}
-      <main className={`flex-1 transition-all duration-300 ${collapsed ? 'ml-20' : 'ml-72'}`}>
-        <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.08),_transparent_40%),linear-gradient(135deg,_#f9f7f5_0%,_#fffbf8_100%)] p-8">
+      <main className={`flex-1 transition-all duration-300 ${collapsed ? 'lg:ml-20' : 'lg:ml-72'}`}>
+        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-white/60 bg-white/80 px-3 py-2 backdrop-blur-xl sm:px-6">
+          <button
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open menu"
+            className="grid h-10 w-10 place-items-center rounded-xl text-slate-600 transition hover:bg-slate-100 lg:hidden"
+          >
+            <MenuIcon className="h-5 w-5" />
+          </button>
+
+          <div className="min-w-0 flex-1 lg:hidden">
+            <BrandLogo variant="wordmark" className="h-7" />
+          </div>
+
+          <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-slate-700 lg:block">
+            {navItems.find((item) => pathname === item.href)?.label ?? 'Admin'}
+          </p>
+
+          <NotificationCenter />
+        </header>
+
+        <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.08),_transparent_40%),linear-gradient(135deg,_#f9f7f5_0%,_#fffbf8_100%)] p-4 sm:p-6 lg:p-8">
           <div className="mx-auto max-w-7xl">{children}</div>
         </div>
       </main>

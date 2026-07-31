@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { letterFor, PASS_MARK } from "@/lib/grading";
 
 /**
  * A student's own scores, grouped so the page can show performance per course
@@ -15,16 +16,6 @@ import { NextResponse } from "next/server";
  */
 
 export const dynamic = "force-dynamic";
-
-const PASS_MARK = 60;
-
-function letterFor(score: number) {
-  if (score >= 90) return "A";
-  if (score >= 80) return "B";
-  if (score >= 70) return "C";
-  if (score >= PASS_MARK) return "D";
-  return "F";
-}
 
 export async function GET() {
   try {

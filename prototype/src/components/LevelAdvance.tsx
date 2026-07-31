@@ -1,4 +1,5 @@
 "use client";
+import { ArrowRightIcon, CheckIcon } from "@/components/icons";
 
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
@@ -87,8 +88,8 @@ function Perks({ offer, animate }: { offer: LevelAdvanceOffer; animate?: boolean
           transition={{ delay: 0.5 + index * 0.12, duration: 0.4 }}
           className="flex gap-3"
         >
-          <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-[11px] font-bold text-emerald-700">
-            ✓
+          <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-emerald-700">
+            <CheckIcon className="h-3 w-3" strokeWidth={3} />
           </span>
           <div>
             <p className="text-sm font-semibold text-[var(--foreground)]">{perk.label}</p>
@@ -169,9 +170,9 @@ function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClos
                   initial={{ opacity: 0, x: -6 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.4 }}
-                  className="text-2xl text-white/70"
+                  className="text-white/70"
                 >
-                  →
+                  <ArrowRightIcon className="h-6 w-6" />
                 </motion.span>
                 <motion.div
                   initial={{ opacity: 0, scale: 0.6 }}
@@ -247,7 +248,7 @@ function AdvanceCard({ offer, onOpen }: { offer: LevelAdvanceOffer; onOpen: () =
         <LevelBadge level={offer.currentLevel} tone="current" />
         {!offer.atTopOfLadder && offer.nextLevel ? (
           <>
-            <span className="text-xl text-[var(--muted)]">→</span>
+            <ArrowRightIcon className="h-5 w-5 text-[var(--muted)]" />
             <LevelBadge level={offer.nextLevel} />
           </>
         ) : null}

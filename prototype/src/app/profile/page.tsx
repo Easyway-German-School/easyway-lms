@@ -1,14 +1,42 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import { useGamification } from "@/lib/useGamification";
 import { uploadImage, validateImageFile } from "@/lib/upload";
-import type { Badge } from "@/lib/gamification";
+import type { Badge, BadgeIcon } from "@/lib/gamification";
+import {
+  AttendanceIcon,
+  CalendarIcon,
+  CheckIcon,
+  CrossIcon,
+  DoorIcon,
+  ExamCentreIcon,
+  FlagIcon,
+  FlameIcon,
+  MedalIcon,
+  PencilIcon,
+  PinIcon,
+  SparklesIcon,
+  StarIcon,
+  TargetIcon,
+} from "@/components/icons";
+
+/** The badge list is built server-side and names its icon; this resolves it. */
+const BADGE_ICONS: Record<BadgeIcon, typeof FlameIcon> = {
+  door: DoorIcon,
+  calendar: CalendarIcon,
+  flame: FlameIcon,
+  pencil: PencilIcon,
+  target: TargetIcon,
+  landmark: ExamCentreIcon,
+  bolt: SparklesIcon,
+  flag: FlagIcon,
+};
 
 type Profile = {
   studentCode: string;
@@ -90,7 +118,7 @@ function StatPill({
   label: string;
   value: number;
   suffix?: string;
-  icon: string;
+  icon: ReactNode;
   index: number;
 }) {
   return (
@@ -100,7 +128,7 @@ function StatPill({
       transition={{ delay: 0.1 + index * 0.07, type: "spring", stiffness: 120, damping: 16 }}
       className="flex-1 rounded-3xl border border-white/10 bg-white/[0.06] px-4 py-4 text-center backdrop-blur-xl"
     >
-      <p className="text-lg">{icon}</p>
+      <p className="flex justify-center text-white/80">{icon}</p>
       <p className="mt-1 text-2xl font-bold text-white sm:text-3xl">
         <CountUp value={value} />
         {suffix}
@@ -111,6 +139,8 @@ function StatPill({
 }
 
 function BadgeTile({ badge, index }: { badge: Badge; index: number }) {
+  const BadgeGlyph = BADGE_ICONS[badge.icon] ?? MedalIcon;
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
@@ -124,11 +154,11 @@ function BadgeTile({ badge, index }: { badge: Badge; index: number }) {
       }`}
     >
       <div
-        className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl text-2xl ${
-          badge.earned ? "bg-[var(--accent)]/15" : "bg-slate-200 grayscale"
+        className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl ${
+          badge.earned ? "bg-[var(--accent)]/15 text-[var(--accent)]" : "bg-slate-200 text-slate-500"
         }`}
       >
-        {badge.icon}
+        <BadgeGlyph className="h-7 w-7" />
       </div>
       <p className={`mt-3 text-sm font-bold ${badge.earned ? "text-slate-900" : "text-slate-500"}`}>
         {badge.name}
@@ -363,7 +393,7 @@ export default function ProfilePage() {
                   className="mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold text-white shadow-lg"
                   style={{ background: ring }}
                 >
-                  <span>★</span>
+                  <StarIcon className="h-3.5 w-3.5" />
                   {tier.name}
                   <span className="font-medium opacity-80">· {tier.blurb}</span>
                 </div>
@@ -456,9 +486,9 @@ export default function ProfilePage() {
                     {verified && (
                       <span
                         title="Tuition paid in full"
-                        className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-500 text-xs font-bold text-white"
+                        className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-500 text-white"
                       >
-                        ✓
+                        <CheckIcon className="h-3.5 w-3.5" strokeWidth={3} />
                       </span>
                     )}
                   </div>
@@ -468,8 +498,8 @@ export default function ProfilePage() {
                     <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
                       {profile.currentLevel} · German
                     </span>
-                    <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
-                      📍 {profile.branch}
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
+                      <PinIcon className="h-3.5 w-3.5" /> {profile.branch}
                     </span>
                     <span
                       className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
@@ -484,12 +514,12 @@ export default function ProfilePage() {
 
               {/* Stat strip */}
               <div className="mt-8 flex gap-3">
-                <StatPill index={0} icon="⚡" label="XP" value={game?.xp ?? 0} />
-                <StatPill index={1} icon="🔥" label="Streak" value={game?.streak ?? 0} />
-                <StatPill index={2} icon="🏅" label="Badges" value={game?.badgesEarned ?? 0} />
+                <StatPill index={0} icon={<SparklesIcon className="h-5 w-5" />} label="XP" value={game?.xp ?? 0} />
+                <StatPill index={1} icon={<FlameIcon className="h-5 w-5" />} label="Streak" value={game?.streak ?? 0} />
+                <StatPill index={2} icon={<MedalIcon className="h-5 w-5" />} label="Badges" value={game?.badgesEarned ?? 0} />
                 <StatPill
                   index={3}
-                  icon="📋"
+                  icon={<AttendanceIcon className="h-5 w-5" />}
                   label="Attendance"
                   value={game?.stats.attendanceRate ?? 0}
                   suffix="%"
@@ -683,7 +713,7 @@ export default function ProfilePage() {
                   className="rounded-full p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
                   aria-label="Close"
                 >
-                  ✕
+                  <CrossIcon className="h-4 w-4" />
                 </button>
               </div>
 

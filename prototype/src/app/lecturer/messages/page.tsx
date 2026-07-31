@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import LecturerShell from "@/components/LecturerShell";
+import { MailIcon } from "@/components/icons";
 import BrandLoader from "@/components/BrandLoader";
 
 type SentMessage = {
@@ -109,7 +110,7 @@ export default function LecturerMessagesPage() {
       <div className="h-screen overflow-y-auto">
         <div className="border-b border-[var(--border)] bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6">
           <div className="mx-auto max-w-5xl">
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">Messages 💬</h1>
+            <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]"><MailIcon className="h-7 w-7 text-[var(--accent)]" />Messages</h1>
             <p className="mt-2 text-[var(--muted)]">
               Send an announcement to your class. It lands in each student&apos;s notifications, and you can see who has read it.
             </p>

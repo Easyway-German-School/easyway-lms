@@ -57,7 +57,7 @@ export default function TandemPartner() {
         setError(
           "Microphone access denied. Please enable microphone permissions and try again."
         );
-        setFeedback(["❌ Microphone permission required. Check browser settings."]);
+        setFeedback(["Microphone permission required. Check browser settings."]);
       } else if (event.error === "network") {
         setFeedback(["Network error. Please check your connection and try again."]);
       } else if (event.error === "no-speech") {
@@ -94,7 +94,7 @@ export default function TandemPartner() {
         setError(
           "Microphone access denied. Please enable microphone permissions in your browser settings and try again."
         );
-        setFeedback(["❌ Microphone permission required. Check browser permissions."]);
+        setFeedback(["Microphone permission required. Check browser permissions."]);
       } else {
         setError(`Error: ${err.message}`);
         setFeedback([`Error starting recording: ${err.message}`]);

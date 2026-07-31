@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ArrowLeftIcon } from "@/components/icons";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -47,8 +48,8 @@ export default function GradebookPage() {
       <div className="mx-auto max-w-6xl px-6 md:px-10 space-y-8">
         <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
           <div className="mb-4">
-            <Link href="/lecturer" className="text-[var(--accent)] hover:brightness-110 text-sm font-semibold">
-              ← Back to lecturer dashboard
+            <Link href="/lecturer" className="inline-flex items-center gap-2 text-[var(--accent)] hover:brightness-110 text-sm font-semibold">
+              <ArrowLeftIcon /> Back to lecturer dashboard
             </Link>
           </div>
           <h1 className="text-4xl font-bold text-[var(--foreground)]">Class Gradebook</h1>

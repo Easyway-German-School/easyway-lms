@@ -1,5 +1,7 @@
 "use client";
 
+import { CheckCircleIcon } from "@/components/icons";
+
 import React, { useState } from "react";
 
 export type QuizQuestion = {
@@ -79,7 +81,7 @@ export default function QuizValidationPanel({
   return (
     <div className="rounded-3xl bg-[var(--surface)] p-8 shadow-[var(--shadow)] space-y-6 border-2 border-[var(--accent)]/50">
       <div>
-        <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">✓ Review Quiz Questions</h2>
+        <h2 className="mb-2 flex items-center gap-2 text-2xl font-bold text-[var(--foreground)]"><CheckCircleIcon className="h-6 w-6 text-[var(--accent)]" />Review Quiz Questions</h2>
         <p className="text-[var(--muted)]">Edit or remove questions before saving. Link questions to vocabulary and grammar concepts.</p>
       </div>
 

@@ -1,3 +1,5 @@
+import { CheckIcon } from "@/components/icons";
+
 type JourneyStep = {
   title: string;
   status: "completed" | "current" | "locked";
@@ -64,7 +66,7 @@ export default function GermanyJourney({ overallProgress, steps }: GermanyJourne
                       isComplete ? "bg-emerald-500 text-white" : isCurrent ? "bg-[#FF6600] text-white" : "bg-slate-200 text-slate-500"
                     }`}
                   >
-                    {isComplete ? "✓" : step.icon}
+                    {isComplete ? <CheckIcon className="h-5 w-5" strokeWidth={2.6} /> : step.icon}
                   </div>
                   <div>
                     <p className={`text-sm font-semibold ${isLocked ? "text-slate-600" : "text-[#111827]"}`}>{step.title}</p>

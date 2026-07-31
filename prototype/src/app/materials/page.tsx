@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import StudentShell from "@/components/StudentShell";
 import VideoLibrary from "@/components/video/VideoLibrary";
 import { isPlayableVideo, type LibraryVideo } from "@/lib/video-library";
+import { AudioIcon, DocumentIcon, FilmIcon, ImageIcon, PackageIcon, PencilIcon } from "@/components/icons";
 
 type Material = {
   id: string;
@@ -23,10 +24,10 @@ type Material = {
 type Tab = "watch" | "documents";
 
 const DOCUMENT_FILTERS = [
-  { value: "all", label: "All documents" },
-  { value: "pdf", label: "📄 PDFs" },
-  { value: "word", label: "📝 Documents" },
-  { value: "audio", label: "🔊 Audio" },
+  { value: "all", label: "All documents", icon: null },
+  { value: "pdf", label: "PDFs", icon: <DocumentIcon /> },
+  { value: "word", label: "Documents", icon: <PencilIcon /> },
+  { value: "audio", label: "Audio", icon: <AudioIcon /> },
 ] as const;
 
 export default function MaterialsPage() {
@@ -100,11 +101,12 @@ export default function MaterialsPage() {
   };
 
   const fileTypeIcon = (type: string) => {
-    if (type.includes("pdf")) return "📄";
-    if (type.includes("word")) return "📝";
-    if (type.includes("audio")) return "🔊";
-    if (type.includes("image")) return "🖼️";
-    return "📦";
+    const className = "h-7 w-7";
+    if (type.includes("pdf")) return <DocumentIcon className={className} />;
+    if (type.includes("word")) return <PencilIcon className={className} />;
+    if (type.includes("audio")) return <AudioIcon className={className} />;
+    if (type.includes("image")) return <ImageIcon className={className} />;
+    return <PackageIcon className={className} />;
   };
 
   return (
@@ -140,19 +142,20 @@ export default function MaterialsPage() {
           <div className="flex gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1.5">
             {(
               [
-                { value: "watch" as const, label: `🎬 Watch${videos.length ? ` (${videos.length})` : ""}` },
-                { value: "documents" as const, label: `📄 Documents${documents.length ? ` (${documents.length})` : ""}` },
+                { value: "watch" as const, icon: <FilmIcon />, label: `Watch${videos.length ? ` (${videos.length})` : ""}` },
+                { value: "documents" as const, icon: <DocumentIcon />, label: `Documents${documents.length ? ` (${documents.length})` : ""}` },
               ]
             ).map((item) => (
               <button
                 key={item.value}
                 onClick={() => setTab(item.value)}
-                className={`flex-1 rounded-xl px-5 py-3 text-sm font-semibold transition ${
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition ${
                   tab === item.value
                     ? "bg-[var(--accent)] text-white shadow-lg"
                     : "text-[var(--muted)] hover:bg-[var(--surface-alt)]"
                 }`}
               >
+                {item.icon}
                 {item.label}
               </button>
             ))}
@@ -171,12 +174,13 @@ export default function MaterialsPage() {
                   <button
                     key={filter.value}
                     onClick={() => setFilterType(filter.value)}
-                    className={`rounded-full px-6 py-2 text-sm font-semibold transition ${
+                    className={`inline-flex items-center gap-2 rounded-full px-6 py-2 text-sm font-semibold transition ${
                       filterType === filter.value
                         ? "bg-[var(--accent)] text-white"
                         : "border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface-alt)]"
                     }`}
                   >
+                    {filter.icon}
                     {filter.label}
                   </button>
                 ))}
@@ -196,7 +200,9 @@ export default function MaterialsPage() {
                       animate={{ opacity: 1, y: 0 }}
                       className="flex items-center gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 transition hover:bg-[var(--surface-alt)]"
                     >
-                      <div className="text-4xl">{fileTypeIcon(material.fileType)}</div>
+                      <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                        {fileTypeIcon(material.fileType)}
+                      </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-semibold text-[var(--foreground)]">{material.title}</p>
                         {material.description ? (

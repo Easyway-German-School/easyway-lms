@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ArrowLeftIcon } from "@/components/icons";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import AdminShell from "@/components/AdminShell";
@@ -215,9 +216,9 @@ export default function LecturerInvitePage() {
           <button
             type="button"
             onClick={() => router.back()}
-            className="rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--accent)]"
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--accent)]"
           >
-            ← Back
+            <ArrowLeftIcon /> Back
           </button>
         </div>
 

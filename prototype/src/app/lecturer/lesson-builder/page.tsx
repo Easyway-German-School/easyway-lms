@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import LessonPackagePreview from "@/components/LessonPackagePreview";
 import ContentUploadArea from "@/components/ContentUploadArea";
+import { ArrowLeftIcon, CheckCircleIcon } from "@/components/icons";
 import QuizValidationPanel, { type QuizQuestion } from "@/components/QuizValidationPanel";
 
 type LessonPackage = {
@@ -83,7 +84,7 @@ export default function LessonBuilderPage() {
     setTitle(parsed.title || "");
     setDescription(parsed.rawText.slice(0, 200) || "");
     setLevel(parsed.suggestedLevel || "A1");
-    setStatusMessage(`✅ Content parsed! Suggested level: ${parsed.suggestedLevel}. Review below and click "Use This Content" to generate the lesson package.`);
+    setStatusMessage(`Content parsed. Suggested level: ${parsed.suggestedLevel}. Review below and click "Use This Content" to generate the lesson package.`);
   };
 
   const handleUseParsedContent = async () => {
@@ -303,8 +304,8 @@ export default function LessonBuilderPage() {
       <div className="mx-auto max-w-6xl px-6 md:px-10 space-y-8">
         <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
           <div className="mb-4">
-            <Link href="/lecturer" className="text-[var(--accent)] hover:brightness-110 text-sm font-semibold">
-              ← Back to lecturer dashboard
+            <Link href="/lecturer" className="inline-flex items-center gap-2 text-[var(--accent)] hover:brightness-110 text-sm font-semibold">
+              <ArrowLeftIcon /> Back to lecturer dashboard
             </Link>
           </div>
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
@@ -322,7 +323,7 @@ export default function LessonBuilderPage() {
         {showParsedReview && parsedContent && (
           <div className="rounded-3xl bg-[var(--surface)] p-8 shadow-[var(--shadow)] border-2 border-[var(--accent)]/50 space-y-6">
             <div>
-              <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">✅ Content Extracted Successfully</h2>
+              <h2 className="mb-2 flex items-center gap-2 text-2xl font-bold text-[var(--foreground)]"><CheckCircleIcon className="h-6 w-6 text-emerald-600" />Content Extracted Successfully</h2>
               <p className="text-[var(--muted)]">Review the parsed information below. Click "Use This Content" to generate a full lesson package.</p>
             </div>
 

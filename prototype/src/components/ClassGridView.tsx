@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { AttachmentIcon, LockIcon } from "@/components/icons";
 import {
   type ClassNode,
   type Month,
@@ -69,7 +70,7 @@ function DayPopover({ node, below }: { node: ClassNode; below: boolean }) {
         <p className="mt-2 text-xs leading-5 text-[var(--foreground)]">{s.topic}</p>
       ) : (
         <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-          🔒 Topic unlocks on {s.lockedUntil}
+          <LockIcon className="h-3.5 w-3.5" /> Topic unlocks on {s.lockedUntil}
         </p>
       )}
 
@@ -80,9 +81,9 @@ function DayPopover({ node, below }: { node: ClassNode; below: boolean }) {
           href={s.material.filePath}
           target="_blank"
           rel="noreferrer"
-          className="mt-2 inline-flex rounded-lg bg-[var(--accent-soft)] px-2 py-1 text-[11px] font-bold text-[var(--accent)]"
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-2 py-1 text-[11px] font-bold text-[var(--accent)]"
         >
-          📎 {s.material.title}
+          <AttachmentIcon className="h-3 w-3" /> {s.material.title}
         </a>
       )}
 

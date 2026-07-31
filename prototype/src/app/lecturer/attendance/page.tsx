@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
+import { AttendanceIcon, CheckIcon, CrossIcon, UsersIcon } from '@/components/icons';
 import LecturerStudentRoster from '@/components/LecturerStudentRoster';
 
 interface Student {
@@ -140,7 +141,7 @@ export default function LecturerAttendance() {
         {/* Header */}
         <div className="bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6 border-b border-[var(--border)]">
           <div className="max-w-7xl mx-auto">
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">Mark Attendance 📋</h1>
+            <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]"><AttendanceIcon className="h-7 w-7 text-[var(--accent)]" />Mark Attendance</h1>
             <p className="text-[var(--muted)] mt-2">Record student attendance for your classes</p>
           </div>
         </div>
@@ -237,7 +238,7 @@ export default function LecturerAttendance() {
           {/* Students List */}
           {students.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-3xl mb-2">👥</p>
+              <UsersIcon className="mx-auto mb-2 h-9 w-9 text-[var(--muted)]" />
               <p className="text-[var(--foreground)] font-semibold">No students enrolled</p>
               <p className="text-[var(--muted)] text-sm mt-1">Enroll students to your class to mark attendance</p>
             </div>
@@ -279,13 +280,13 @@ export default function LecturerAttendance() {
                         <td className="px-4 py-3 text-center">
                           <button
                             onClick={() => toggleAttendance(student.id)}
-                            className={`px-4 py-1 rounded-full text-sm font-semibold transition-colors ${
+                            className={`inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-sm font-semibold transition-colors ${
                               student.present
                                 ? 'bg-green-100 text-green-700'
                                 : 'bg-red-100 text-red-700'
                             }`}
                           >
-                            {student.present ? '✅ Present' : '❌ Absent'}
+                            {student.present ? <><CheckIcon className="h-3.5 w-3.5" /> Present</> : <><CrossIcon className="h-3.5 w-3.5" /> Absent</>}
                           </button>
                         </td>
                       </tr>

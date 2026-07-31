@@ -7,6 +7,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import VideoThumb from "@/components/video/VideoThumb";
+import { ArrowLeftIcon, DownloadIcon } from "@/components/icons";
 import {
   formatDuration,
   isEffectivelyComplete,
@@ -187,7 +188,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
     return (
       <div className="space-y-6">
         <Link href="/materials" className="inline-flex items-center gap-2 text-sm font-medium text-[var(--muted)] transition hover:text-[var(--foreground)]">
-          ← Back to the library
+          <ArrowLeftIcon /> Back to the library
         </Link>
 
         <div className="overflow-hidden rounded-3xl bg-slate-950">
@@ -226,9 +227,9 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
             <a
               href={video.fileUrl}
               download
-              className="ml-auto rounded-lg bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+              className="ml-auto inline-flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
             >
-              ⬇ Download to watch offline
+              <DownloadIcon className="h-4 w-4" /> Download to watch offline
             </a>
           </div>
         </div>

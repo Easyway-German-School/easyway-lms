@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
 import BrandLoader from "@/components/BrandLoader";
+import { BookOpenIcon, CalendarIcon, DocumentIcon, EmptyIcon, LecturerIcon, PackageIcon, VideoIcon } from '@/components/icons';
 
 interface Course {
   id: string;
@@ -203,7 +204,7 @@ export default function LecturerMaterials() {
         <div className="bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6 border-b border-[var(--border)]">
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-[var(--foreground)]">Course Materials 📚</h1>
+              <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]"><BookOpenIcon className="h-7 w-7 text-[var(--accent)]" />Course Materials</h1>
               <p className="text-[var(--muted)] mt-2">Upload and manage course resources</p>
             </div>
             <button
@@ -313,8 +314,8 @@ export default function LecturerMaterials() {
                       <p className="text-sm font-semibold text-[var(--foreground)]">This video is…</p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {[
-                          { value: false, label: '🎓 A lesson video', hint: 'Prepared teaching material' },
-                          { value: true, label: '📹 A class recording', hint: "A tape of a class you taught" },
+                          { value: false, icon: <LecturerIcon className="h-4 w-4" />, label: 'A lesson video', hint: 'Prepared teaching material' },
+                          { value: true, icon: <VideoIcon className="h-4 w-4" />, label: 'A class recording', hint: "A tape of a class you taught" },
                         ].map((option) => (
                           <button
                             key={String(option.value)}
@@ -326,7 +327,7 @@ export default function LecturerMaterials() {
                                 : 'border-[var(--border)] bg-white/50 text-[var(--muted)]'
                             }`}
                           >
-                            <span className="block">{option.label}</span>
+                            <span className="flex items-center gap-2">{option.icon}{option.label}</span>
                             <span className="block text-xs font-normal text-[var(--muted)]">{option.hint}</span>
                           </button>
                         ))}
@@ -413,7 +414,7 @@ export default function LecturerMaterials() {
           {/* Materials List */}
           {materials.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-3xl mb-2">📭</p>
+              <EmptyIcon className="mx-auto mb-2 h-9 w-9 text-[var(--muted)]" />
               <p className="text-[var(--foreground)] font-semibold">No materials uploaded yet</p>
               <p className="text-[var(--muted)] text-sm mt-1">Upload your first course material to get started</p>
             </div>
@@ -427,7 +428,7 @@ export default function LecturerMaterials() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-3">
-                        <span className="text-2xl">📄</span>
+                        <DocumentIcon className="h-6 w-6 shrink-0 text-[var(--accent)]" />
                         <div>
                           <h3 className="font-semibold text-[var(--foreground)]">{material.title}</h3>
                           <p className="text-sm text-[var(--muted)]">{material.courseName}</p>
@@ -435,8 +436,8 @@ export default function LecturerMaterials() {
                       </div>
                       <p className="text-sm text-[var(--muted)] mt-2">{material.description}</p>
                       <div className="flex items-center gap-4 mt-3 text-xs text-[var(--muted)]">
-                        <span>📦 {(material.fileSize / 1024 / 1024).toFixed(2)} MB</span>
-                        <span>📅 {new Date(material.uploadedAt).toLocaleDateString()}</span>
+                        <span className="inline-flex items-center gap-1.5"><PackageIcon className="h-3.5 w-3.5" /> {(material.fileSize / 1024 / 1024).toFixed(2)} MB</span>
+                        <span className="inline-flex items-center gap-1.5"><CalendarIcon className="h-3.5 w-3.5" /> {new Date(material.uploadedAt).toLocaleDateString()}</span>
                       </div>
                     </div>
                     <button

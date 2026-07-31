@@ -11,26 +11,35 @@ datasource db {
 }
 
 model User {
-  id              String   @id @default(cuid())
-  email           String   @unique
-  name            String?
-  password        String
-  role            Role     @default(STUDENT)
+  id                String   @id @default(cuid())
+  email             String   @unique
+  name              String?
+  password          String
+  role              Role     @default(STUDENT)
   /**
    * Which kind of admin, when role is ADMIN: super | secretary | data_comm.
    * Null for everyone else. Deliberately a separate field rather than more
    * Role values, so every existing auth check on ADMIN keeps working and
    * existing admins keep full access by defaulting to super.
    */
-  adminRole       String?
+  adminRole         String?
+  /**
+   * Per-person overrides on top of the sub-role's preset, as JSON:
+   * { "grant": ["payments"], "revoke": ["staff"] }
+   * Null means "just the preset", which is what every existing admin has, so
+   * nobody's access changes until somebody deliberately ticks a box. Kept as
+   * a diff rather than a flat capability list so that widening a preset later
+   * still reaches the people on it.
+   */
+  adminCapabilities Json?
   /**
    * False on an account created by an exam booking, which starts with a
    * password nobody knows. The claim link works only while this is false, so
    * a forwarded confirmation email cannot be used to take the account later.
    */
-  passwordClaimed Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  passwordClaimed   Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   student           Student?
   lecturer          Lecturer?
@@ -41,6 +50,8 @@ model User {
   channelReads      ChannelRead[]
   pushSubs          PushSubscription[]
   examRegistrations ExamRegistration[]
+  notifications     Notification[]     @relation("NotificationRecipient")
+  sentNotifications Notification[]     @relation("NotificationSender")
 }
 
 model Session {
@@ -91,7 +102,6 @@ model Student {
 
   /**
    * The level we have already told this student they finished, e.g. "A1".
-   *
    * Stops the "your level is complete" notification firing again every time
    * the dashboard loads. Storing the level rather than a boolean means the
    * offer fires once per level, automatically, all the way up the ladder.
@@ -100,7 +110,6 @@ model Student {
 
   /**
    * When this student finished (or skipped) the welcome tour.
-   *
    * Server-side rather than localStorage on purpose: a student who signs up on
    * a laptop and then opens the portal on their phone should not be walked
    * through the introduction a second time.
@@ -142,7 +151,6 @@ model Branch {
    * branch+level query keeps working unchanged. This flag only drives the
    * differences that genuinely exist: no campus, a live room instead of a
    * classroom, and recordings as the safety net for a dropped connection.
-   *
    * Defaulted to physical so every branch created before this existed keeps
    * behaving exactly as it did.
    */
@@ -289,7 +297,7 @@ model Lesson {
 }
 
 model Material {
-  id String @id @default(cuid())
+  id       String  @id @default(cuid())
   /**
    * Optional since class recordings arrived. A recording belongs to a level
    * and a date, not to a course — forcing tutors to pick an unrelated course
@@ -311,7 +319,6 @@ model Material {
 
   /**
    * document | video | recording.
-   *
    * `fileType` already says "video/mp4", but it cannot tell a taught lesson
    * apart from an auto-captured class recording, and the library shelves the
    * two differently. Derived from fileType on upload, so old rows read as
@@ -357,7 +364,6 @@ model Material {
 
 /**
  * Where a student stopped watching.
- *
  * One row per student per video, upserted as the player reports progress. It
  * powers "Continue watching" and the resume-from-here jump, which matter far
  * more here than on a normal video site: a student on a bad Nigerian
@@ -371,7 +377,9 @@ model VideoProgress {
   materialId String
   material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
-  /** Furthest playback position reached, in seconds. */
+  /**
+   * Furthest playback position reached, in seconds.
+   */
   positionSeconds Int     @default(0)
   /**
    * Set once the student passes ~95% of the runtime. Stored rather than
@@ -489,21 +497,98 @@ model PersonalizedPlan {
   @@unique([studentId])
 }
 
+/**
+ * One notification, for anybody.
+ * It began as a student-only record and the student columns are kept exactly
+ * as they were, so every row already written still resolves. What is new is
+ * `userId` and `audience`, which is what lets the same table reach a lecturer
+ * or an admin:
+ * userId set        one person, whoever they are
+ * studentId set     one student (the original shape)
+ * branchId / level  every student matching, the existing broadcast
+ * audience set      everyone holding that role — "admin", "lecturer",
+ * "student", or "all"
+ * A row with none of them is a notice to the whole school. Delivery goes
+ * through src/lib/notify.ts; nothing should write this table directly.
+ */
 model Notification {
-  id        String    @id @default(cuid())
-  title     String
-  message   String
-  channel   String    @default("email")
+  id      String @id @default(cuid())
+  title   String
+  message String
+  /**
+   * email | in-app. Only in-app rows reach the bell.
+   */
+  channel String @default("email")
+
+  /**
+   * Addressed to exactly this account, whatever role it holds.
+   */
+  userId String?
+  user   User?   @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+
   studentId String?
-  student   Student?  @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
   branchId  String?
-  branch    Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branch    Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   level     String?
+
+  /**
+   * Broadcast to a whole role: student | lecturer | admin | all.
+   */
+  audience String?
+
+  /**
+   * What happened, in one machine-readable token — "payment.received",
+   * "student.registered", "gateway.error". Drives the icon, and lets the
+   * portal filter without pattern-matching the title, which is what the bell
+   * used to do.
+   */
+  kind String @default("general")
+
+  /**
+   * info | success | warning | critical. Critical is what makes noise.
+   */
+  severity String @default("info")
+
+  /**
+   * Where clicking it should take the reader.
+   */
+  link String?
+
+  /**
+   * Who sent it, when a person did. Null for anything the system raised.
+   */
+  senderId String?
+  sender   User?   @relation("NotificationSender", fields: [senderId], references: [id], onDelete: SetNull)
+
+  /**
+   * One id shared by every row a single send produced.
+   * Notifications are fanned out — a broadcast to 200 students writes 200
+   * rows, because one row shared between readers cannot record which of them
+   * has read it. This is what lets the admin list fold that send back into a
+   * single line.
+   */
+  batchId String?
+
+  /**
+   * Caller-supplied idempotency token. A second send with the same key to the
+   * same person is dropped, which is how the payment-warning tiers and the
+   * level-advance offer avoid firing twice.
+   */
+  dedupeKey String?
+
   status    String    @default("pending")
   sentAt    DateTime?
   readAt    DateTime? // for in-app notifications
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  @@index([userId, readAt])
+  @@index([audience, readAt])
+  @@index([studentId, readAt])
+  @@index([batchId])
+  @@index([dedupeKey])
+  @@index([createdAt])
 }
 
 model Invoice {

@@ -1,4 +1,5 @@
 "use client";
+import { CalendarIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -129,7 +130,7 @@ export default function MyExamsPanel() {
         <h2 className="text-lg font-bold">Coming up</h2>
         {upcoming.length === 0 ? (
           <div className="mt-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
-            <div className="text-4xl">🗓️</div>
+            <CalendarIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
             <p className="mt-3 text-sm font-semibold">No exams booked</p>
             <p className="mt-1 text-sm text-[var(--muted)]">Anything you register for appears here.</p>
           </div>

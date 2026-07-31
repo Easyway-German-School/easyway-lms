@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import StudentShell from "@/components/StudentShell";
 import AssignmentsPanel from "@/components/AssignmentsPanel";
 import BrandLoader from "@/components/BrandLoader";
+import { ArrowLeftIcon, CheckCircleIcon } from "@/components/icons";
 
 function AssignmentContent() {
   const { status } = useSession();
@@ -120,8 +121,8 @@ function AssignmentContent() {
         <div className="mx-auto max-w-4xl px-6 md:px-10 space-y-8">
           <header className="rounded-3xl bg-white p-8 shadow-sm">
             <div className="mb-4">
-              <Link href="/dashboard" className="text-emerald-500 hover:text-emerald-600 text-sm font-semibold">
-                ← Back to dashboard
+              <Link href="/dashboard" className="inline-flex items-center gap-2 text-emerald-500 hover:text-emerald-600 text-sm font-semibold">
+                <ArrowLeftIcon /> Back to dashboard
               </Link>
             </div>
             <h1 className="text-4xl font-bold text-slate-950">Submit Assignment</h1>
@@ -178,7 +179,7 @@ function AssignmentContent() {
             </form>
           ) : (
             <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm border border-emerald-200 space-y-4">
-              <p className="text-2xl font-bold text-emerald-700">✓ Assignment submitted!</p>
+              <p className="flex items-center gap-2 text-2xl font-bold text-emerald-700"><CheckCircleIcon className="h-7 w-7" /> Assignment submitted!</p>
               <p className="text-emerald-600">Your work has been received. The instructor will review and provide feedback soon.</p>
               <Link href="/dashboard" className="inline-block px-6 py-2 bg-emerald-500 text-white font-semibold rounded-lg hover:bg-emerald-600">
                 Back to dashboard

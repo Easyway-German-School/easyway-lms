@@ -2,15 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-
-const TUITION_LEVELS: Record<string, number> = {
-  A1: 150000,
-  A2: 150000,
-  B1: 180000,
-  B2: 180000,
-  C1: 200000,
-  C2: 220000,
-};
+import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 export async function GET() {
   try {
@@ -23,6 +15,7 @@ export async function GET() {
       where: { userId: session.user.id },
       include: {
         payments: true,
+        branch: { select: { name: true } },
       },
     });
 
@@ -30,12 +23,12 @@ export async function GET() {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    const tuitionFee = TUITION_LEVELS[student.level] ?? 150000;
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const tuitionFee = tuitionFeeFor(feeLookup);
     const totalPaid = student.payments
       .filter((payment) => payment.status === "completed")
       .reduce((sum, payment) => sum + payment.amount, 0);
-    const registrationFee = 5000;
-    const requiredDeposit = Math.round(tuitionFee * 0.6);
+    const requiredDeposit = requiredDepositFor(feeLookup);
     const canUnlockMaterials = totalPaid >= requiredDeposit;
 
     if (!canUnlockMaterials) {

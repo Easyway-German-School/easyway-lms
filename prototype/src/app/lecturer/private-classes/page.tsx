@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import LecturerShell from "@/components/LecturerShell";
+import { AttachmentIcon, PrivateClassIcon } from "@/components/icons";
 
 /**
  * One-to-one class booking.
@@ -158,7 +159,7 @@ export default function LecturerPrivateClassesPage() {
           <div className="py-12 text-center text-slate-500">Loading…</div>
         ) : students.length === 0 ? (
           <div className="py-12 text-center">
-            <p className="text-3xl">🎓</p>
+            <PrivateClassIcon className="mx-auto h-9 w-9 text-[var(--muted)]" />
             <p className="mt-2 font-semibold">No private students yet</p>
             <p className="mt-1 text-sm text-slate-500">
               A student becomes private when their class type is set to private on their record.
@@ -275,7 +276,7 @@ export default function LecturerPrivateClassesPage() {
                           {c.topic || <span className="italic text-slate-400">No topic set</span>}
                           {c.lecturerName && <span className="text-slate-400"> · {c.lecturerName}</span>}
                         </p>
-                        {c.materialTitle && <p className="mt-1 text-xs text-blue-600">📎 {c.materialTitle}</p>}
+                        {c.materialTitle && <p className="mt-1 flex items-center gap-1.5 text-xs text-blue-600"><AttachmentIcon className="h-3.5 w-3.5" /> {c.materialTitle}</p>}
                       </div>
                       <select
                         value={c.status}

@@ -93,11 +93,26 @@ export function summarizeGamification(inputs: XpInputs): GamificationSummary {
   };
 }
 
+/**
+ * Which icon a badge wears. A name, not an emoji and not a component: this
+ * module runs on the server and has no business importing JSX, so the portal
+ * that renders a badge maps the name onto the real icon.
+ */
+export type BadgeIcon =
+  | "door"
+  | "calendar"
+  | "flame"
+  | "pencil"
+  | "target"
+  | "landmark"
+  | "bolt"
+  | "flag";
+
 export type Badge = {
   id: string;
   name: string;
   description: string;
-  icon: string;
+  icon: BadgeIcon;
   earned: boolean;
   /** 0-100 towards earning it, for the ones still locked. */
   progress: number;
@@ -125,7 +140,7 @@ export function deriveBadges(stats: {
       id: "first-steps",
       name: "Erste Schritte",
       description: "Attend your first class",
-      icon: "🚪",
+      icon: "door",
       earned: stats.sessionsAttended >= 1,
       progress: pct(stats.sessionsAttended, 1),
     },
@@ -133,7 +148,7 @@ export function deriveBadges(stats: {
       id: "regular",
       name: "Stammgast",
       description: "Attend 10 classes",
-      icon: "📅",
+      icon: "calendar",
       earned: stats.sessionsAttended >= 10,
       progress: pct(stats.sessionsAttended, 10),
     },
@@ -141,7 +156,7 @@ export function deriveBadges(stats: {
       id: "streak-week",
       name: "Sieben Tage",
       description: "Keep a 7-day streak",
-      icon: "🔥",
+      icon: "flame",
       earned: stats.streak >= 7,
       progress: pct(stats.streak, 7),
     },
@@ -149,7 +164,7 @@ export function deriveBadges(stats: {
       id: "hand-in",
       name: "Fleißig",
       description: "Hand in 5 assignments",
-      icon: "✍️",
+      icon: "pencil",
       earned: stats.submissions >= 5,
       progress: pct(stats.submissions, 5),
     },
@@ -157,7 +172,7 @@ export function deriveBadges(stats: {
       id: "high-scorer",
       name: "Bestnote",
       description: "Average 80% or better",
-      icon: "🎯",
+      icon: "target",
       earned: (stats.averageGrade ?? 0) >= 80,
       progress: pct(stats.averageGrade ?? 0, 80),
     },
@@ -165,7 +180,7 @@ export function deriveBadges(stats: {
       id: "exam-bound",
       name: "Prüfungsreif",
       description: "Register for an exam",
-      icon: "🏛️",
+      icon: "landmark",
       earned: stats.examsRegistered >= 1,
       progress: pct(stats.examsRegistered, 1),
     },
@@ -173,7 +188,7 @@ export function deriveBadges(stats: {
       id: "mission-runner",
       name: "Missionar",
       description: "Complete 10 daily missions",
-      icon: "⚡",
+      icon: "bolt",
       earned: stats.missionsCompleted >= 10,
       progress: pct(stats.missionsCompleted, 10),
     },
@@ -181,7 +196,7 @@ export function deriveBadges(stats: {
       id: "b1-club",
       name: "B1 Club",
       description: "Reach level B1 or above",
-      icon: "🇩🇪",
+      icon: "flag",
       earned: ["B1", "B2", "C1", "C2"].includes(String(stats.level ?? "").toUpperCase()),
       progress: ["B1", "B2", "C1", "C2"].includes(String(stats.level ?? "").toUpperCase()) ? 100 : 40,
     },

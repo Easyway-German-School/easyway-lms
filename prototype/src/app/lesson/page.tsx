@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, Suspense } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeftIcon, CheckCircleIcon, CheckIcon } from "@/components/icons";
 
 function LessonContent() {
   const { data: session, status } = useSession();
@@ -82,8 +83,8 @@ function LessonContent() {
         {/* Header */}
         <header className="rounded-3xl bg-gradient-to-br from-slate-950 to-emerald-700 p-8 text-white shadow-sm">
           <div className="mb-4">
-            <Link href="/dashboard" className="text-emerald-100 hover:text-white text-sm font-semibold">
-              ← Back to dashboard
+            <Link href="/dashboard" className="inline-flex items-center gap-2 text-emerald-100 hover:text-white text-sm font-semibold">
+              <ArrowLeftIcon /> Back to dashboard
             </Link>
           </div>
           <h1 className="text-4xl font-bold">{lesson.title}</h1>
@@ -93,7 +94,7 @@ function LessonContent() {
             <span className="rounded-full bg-white/15 px-3 py-1">{lesson.duration} mins</span>
             <span className="rounded-full bg-amber-400/20 px-3 py-1 font-semibold text-amber-100">Reward: +{Math.max(25, lesson.duration)} XP</span>
             {completion?.status === "completed" && (
-              <span className="rounded-full bg-emerald-400/25 px-3 py-1 text-emerald-100">✓ Completed</span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/25 px-3 py-1 text-emerald-100"><CheckIcon className="h-3.5 w-3.5" /> Completed</span>
             )}
           </div>
         </header>
@@ -153,7 +154,7 @@ function LessonContent() {
 
         {completion?.completedAt && (
           <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm border border-emerald-200">
-            <p className="text-emerald-700 font-semibold">✓ You've completed this lesson!</p>
+            <p className="flex items-center gap-2 text-emerald-700 font-semibold"><CheckCircleIcon className="h-5 w-5" /> You&apos;ve completed this lesson!</p>
             <p className="text-sm text-emerald-600 mt-2">Great progress. Move on to the next lesson.</p>
             {personalizedPlan ? (
               <div className="mt-4 rounded-2xl border border-emerald-200 bg-white/80 p-4">

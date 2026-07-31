@@ -9,6 +9,7 @@ import PaymentSuccessToastClient from "@/components/PaymentSuccessToastClient";
 import TuitionNudge from "@/components/TuitionNudge";
 import LevelAdvance from "@/components/LevelAdvance";
 import WelcomeTour from "@/components/WelcomeTour";
+import { BookOpenIcon, CompassIcon, FlameIcon, SparklesIcon, TargetIcon, TrendingUpIcon } from "@/components/icons";
 import { summarizeGamification } from "@/lib/gamification";
 import { REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { useGamification } from "@/lib/useGamification";
@@ -405,7 +406,7 @@ function DashboardContent() {
         `Transcription: ${data.transcription}`,
         `Confidence: ${data.confidence}%`,
         ...(data.issues?.map((issue: string) => `Issue: ${issue}`) || []),
-        ...(data.corrections?.map((correction: string) => `✓ ${correction}`) || []),
+        ...(data.corrections?.map((correction: string) => `Correction: ${correction}`) || []),
       ];
       setFeedback(feedbackArray.length > 0 ? feedbackArray : ["No feedback available"]);
     } catch (error) {
@@ -539,10 +540,10 @@ function DashboardContent() {
   const missionCompletedCount = displayMissions.filter((mission) => completedMissionIds[mission.id || ""] || mission.done).length;
   const missionCompletePercent = displayMissions.length > 0 ? Math.round((missionCompletedCount / displayMissions.length) * 100) : 0;
   const quickStats = [
-    { label: 'Courses enrolled', value: resolvedCourses.length.toString(), icon: '📘' },
-    { label: 'Active quests', value: displayMissions.length.toString(), icon: '🧭' },
-    { label: 'Progress', value: `${xpProgress}%`, icon: '📈' },
-    { label: 'Exam readiness', value: `${resolvedStudent?.examReadiness ?? 0}%`, icon: '🎯' },
+    { label: 'Courses enrolled', value: resolvedCourses.length.toString(), icon: <BookOpenIcon className="h-6 w-6" /> },
+    { label: 'Active quests', value: displayMissions.length.toString(), icon: <CompassIcon className="h-6 w-6" /> },
+    { label: 'Progress', value: `${xpProgress}%`, icon: <TrendingUpIcon className="h-6 w-6" /> },
+    { label: 'Exam readiness', value: `${resolvedStudent?.examReadiness ?? 0}%`, icon: <TargetIcon className="h-6 w-6" /> },
   ];
 
   const displayAnnouncements = [
@@ -584,9 +585,9 @@ function DashboardContent() {
                 <h1 className="mt-4 text-4xl font-semibold">Welcome back, {resolvedStudent?.name || session?.user?.name || 'Learner'}</h1>
                 <p className="mt-4 max-w-2xl text-slate-100">Your academy experience is now a cinematic quest board with live XP, missions, and progress tracking.</p>
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <div className="glass-chip rounded-full px-3 py-2 text-sm text-white">⚡ XP boost active</div>
-                  <div className="glass-chip rounded-full px-3 py-2 text-sm text-white">🔥 Streak {streakDays} days</div>
-                  <div className="glass-chip rounded-full px-3 py-2 text-sm text-white">🎯 Next: {insights.nextMilestone}</div>
+                  <div className="glass-chip flex items-center gap-2 rounded-full px-3 py-2 text-sm text-white"><SparklesIcon /> XP boost active</div>
+                  <div className="glass-chip flex items-center gap-2 rounded-full px-3 py-2 text-sm text-white"><FlameIcon /> Streak {streakDays} days</div>
+                  <div className="glass-chip flex items-center gap-2 rounded-full px-3 py-2 text-sm text-white"><TargetIcon /> Next: {insights.nextMilestone}</div>
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -626,7 +627,7 @@ function DashboardContent() {
                 <div className="absolute -left-10 top-10 h-24 w-24 rounded-full bg-[rgba(255,136,34,0.15)] blur-3xl" />
                 <div className="absolute -right-10 bottom-8 h-20 w-20 rounded-full bg-[rgba(13,174,255,0.14)] blur-3xl" />
                 <div className="flex items-center justify-between gap-3 relative">
-                  <span className="text-2xl">{stat.icon}</span>
+                  <span className="text-white/90">{stat.icon}</span>
                   <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.28em] text-slate-200 backdrop-blur-sm">{stat.label}</span>
                 </div>
                 <p className="mt-6 text-3xl font-semibold text-white drop-shadow-[0_10px_20px_rgba(0,0,0,0.45)]">{stat.value}</p>

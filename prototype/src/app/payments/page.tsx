@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import StudentShell from "@/components/StudentShell";
+import TuitionNudge from "@/components/TuitionNudge";
+import { CheckIcon } from "@/components/icons";
 
 type PaymentRecord = {
   id: string;
@@ -92,6 +94,8 @@ export default function PaymentsPage() {
     <StudentShell>
       <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
         <div className="mx-auto max-w-7xl px-6 py-10">
+          {/* Renders nothing once tuition is settled. */}
+          <TuitionNudge className="mb-6" />
           <div className="rounded-[32px] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
@@ -111,7 +115,7 @@ export default function PaymentsPage() {
                   aria-disabled="true"
                   className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-6 py-3 text-sm font-semibold text-emerald-700"
                 >
-                  ✓ Tuition fully paid
+                  <CheckIcon className="h-4 w-4" /> Tuition fully paid
                 </span>
               ) : (
                 <Link href="/programs" className="inline-flex items-center justify-center rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-110">

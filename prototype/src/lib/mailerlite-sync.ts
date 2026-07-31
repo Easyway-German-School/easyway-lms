@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { listGroups, upsertSubscriber } from "@/lib/mailerlite";
 
 /**
@@ -14,10 +14,6 @@ import { listGroups, upsertSubscriber } from "@/lib/mailerlite";
  *
  * Writes to a real marketing list, so `dryRun` is the default everywhere.
  */
-
-const TUITION_BY_LEVEL: Record<string, number> = {
-  A1: 150000, A2: 150000, B1: 180000, B2: 180000, C1: 200000, C2: 220000,
-};
 
 /** Group names this student belongs in, most specific last. */
 function groupNamesFor(level: string, fullPaid: boolean, year: number): string[] {
@@ -90,12 +86,13 @@ export async function syncStudentsToMailerLite(options?: {
       continue;
     }
 
-    const tuitionFee = TUITION_BY_LEVEL[student.level] ?? 150000;
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const tuitionFee = tuitionFeeFor(feeLookup);
     const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
     const { fullPaid } = derivePaymentStatus({
       totalPaid,
       tuitionFee,
-      requiredDeposit: Math.round(tuitionFee * 0.6),
+      requiredDeposit: requiredDepositFor(feeLookup),
     });
 
     const wanted = groupNamesFor(student.level, fullPaid, year);

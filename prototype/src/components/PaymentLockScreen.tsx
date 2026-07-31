@@ -1,4 +1,5 @@
 "use client";
+import { CheckIcon } from "@/components/icons";
 
 import Link from "next/link";
 import { useState } from "react";
@@ -243,8 +244,8 @@ export default function PaymentLockScreen({
 
                 <div className="mt-6 space-y-3">
                   <div className="flex items-center gap-3 text-sm text-emerald-200">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/20 text-xs">
-                      ✓
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/20">
+                      <CheckIcon className="h-3.5 w-3.5" strokeWidth={2.6} />
                     </span>
                     Registration fee received
                   </div>

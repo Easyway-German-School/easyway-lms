@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import StudentShell from "@/components/StudentShell";
+import { EmptyIcon } from "@/components/icons";
 
 type ExamResult = {
   id: string;
@@ -121,7 +122,7 @@ export default function ResultsPage() {
           <div className="rounded-2xl bg-red-50 p-4 text-sm text-red-700">{error}</div>
         ) : !data || data.totalResults === 0 ? (
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center">
-            <div className="text-4xl">📋</div>
+            <EmptyIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
             <p className="mt-3 text-sm font-semibold">No results yet</p>
             <p className="mt-1 text-sm text-[var(--muted)]">
               Your scores will appear here once your tutor releases them.

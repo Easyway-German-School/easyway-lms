@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { adminHasCapability } from "@/lib/admin-roles";
 import { queueCampaign, withUnsubscribeFooter } from "@/lib/email-queue";
-import { derivePaymentStatus } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 /**
  * Bulk email to a selected audience.
@@ -19,10 +19,6 @@ import { derivePaymentStatus } from "@/lib/payment";
  */
 
 export const dynamic = "force-dynamic";
-
-const TUITION_BY_LEVEL: Record<string, number> = {
-  A1: 150000, A2: 150000, B1: 180000, B2: 180000, C1: 200000, C2: 220000,
-};
 
 type Audience = {
   branchId?: string | null;
@@ -53,6 +49,8 @@ async function resolveAudience(audience: Audience) {
       id: true,
       level: true,
       studentCode: true,
+      // Needed for the fee: Abuja is priced above the other branches.
+      branch: { select: { name: true } },
       user: { select: { name: true, email: true } },
       payments: { where: { status: "completed" }, select: { amount: true } },
     },
@@ -63,12 +61,12 @@ async function resolveAudience(audience: Audience) {
   return students
     .filter((s) => {
       if (wanted === "all") return true;
-      const tuitionFee = TUITION_BY_LEVEL[s.level] ?? 150000;
+      const feeLookup = { level: s.level, branch: s.branch?.name ?? null };
       const totalPaid = s.payments.reduce((sum, p) => sum + p.amount, 0);
       const { fullPaid } = derivePaymentStatus({
         totalPaid,
-        tuitionFee,
-        requiredDeposit: Math.round(tuitionFee * 0.6),
+        tuitionFee: tuitionFeeFor(feeLookup),
+        requiredDeposit: requiredDepositFor(feeLookup),
       });
       return wanted === "paid" ? fullPaid : !fullPaid;
     })

@@ -1,5 +1,7 @@
 "use client";
 
+import { CheckCircleIcon, CrossCircleIcon, MailIcon, RefreshIcon, SettingsIcon } from "@/components/icons";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import BrandLoader from "@/components/BrandLoader";
@@ -31,7 +33,9 @@ export default function AdminEmailManagementPage() {
   const [sendToStudentId, setSendToStudentId] = useState("");
   const [emailType, setEmailType] = useState<"welcome" | "exam-reminder" | "graduation" | "fee-reminders">("welcome");
   const [isSending, setIsSending] = useState(false);
-  const [message, setMessage] = useState("");
+  // Was a string prefixed with a tick or a cross, which the render then had to
+  // string-match to pick a colour. The flag is the state now; the icon follows it.
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     checkAdmin();
@@ -67,7 +71,7 @@ export default function AdminEmailManagementPage() {
 
   const handleSendEmail = async () => {
     setIsSending(true);
-    setMessage("");
+    setMessage(null);
 
     try {
       let endpoint = "";
@@ -103,13 +107,13 @@ export default function AdminEmailManagementPage() {
 
       const data = await response.json();
       if (response.ok) {
-        setMessage(`✓ ${data.message || "Email sent successfully"}`);
+        setMessage({ ok: true, text: data.message || "Email sent successfully" });
         setSendToStudentId("");
       } else {
-        setMessage(`✗ ${data.error || "Failed to send email"}`);
+        setMessage({ ok: false, text: data.error || "Failed to send email" });
       }
     } catch (error) {
-      setMessage(`✗ Error: ${error}`);
+      setMessage({ ok: false, text: `Error: ${error}` });
     } finally {
       setIsSending(false);
     }
@@ -193,14 +197,15 @@ export default function AdminEmailManagementPage() {
               </button>
 
               {message && (
-                <div className={`p-3 rounded-lg text-sm ${message.startsWith("✓") ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                  {message}
+                <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${message.ok ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                  {message.ok ? <CheckCircleIcon className="h-4 w-4 shrink-0" /> : <CrossCircleIcon className="h-4 w-4 shrink-0" />}
+                  {message.text}
                 </div>
               )}
             </div>
 
             <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-              <p className="font-semibold mb-2">📧 Email Types:</p>
+              <p className="mb-2 flex items-center gap-2 font-semibold"><MailIcon /> Email Types:</p>
               <ul className="space-y-1 text-xs">
                 <li>• <strong>Welcome:</strong> Sent after successful payment</li>
                 <li>• <strong>Exam Reminder:</strong> Sent before upcoming exams</li>
@@ -245,7 +250,7 @@ export default function AdminEmailManagementPage() {
 
             <div className="space-y-6">
               <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <h3 className="font-semibold text-blue-900 mb-2">🔄 Automated Reminders</h3>
+                <h3 className="mb-2 flex items-center gap-2 font-semibold text-blue-900"><RefreshIcon /> Automated Reminders</h3>
                 <p className="text-sm text-blue-800 mb-3">
                   Fee reminders are automatically sent at 7, 14, and 30 days for students with partial payments.
                 </p>
@@ -258,7 +263,7 @@ export default function AdminEmailManagementPage() {
               </div>
 
               <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <h3 className="font-semibold text-yellow-900 mb-2">⚙️ Configuration</h3>
+                <h3 className="mb-2 flex items-center gap-2 font-semibold text-yellow-900"><SettingsIcon /> Configuration</h3>
                 <p className="text-sm text-yellow-800">
                   Email service is configured using SMTP settings in your environment variables:
                 </p>
@@ -272,7 +277,7 @@ export default function AdminEmailManagementPage() {
               </div>
 
               <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                <h3 className="font-semibold text-green-900 mb-2">✓ Enable In-App Notifications</h3>
+                <h3 className="mb-2 flex items-center gap-2 font-semibold text-green-900"><CheckCircleIcon /> Enable In-App Notifications</h3>
                 <p className="text-sm text-green-800">
                   Notifications are enabled by default. Students can view all notifications in their notification center.
                 </p>

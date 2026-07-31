@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import LecturerShell from "@/components/LecturerShell";
+import { AttachmentIcon } from "@/components/icons";
 import { LEVELS } from "@/lib/levels";
 
 /**
@@ -186,7 +187,7 @@ export default function LecturerTimetablePage() {
                               {s.topic || <span className="italic text-slate-400">{s.defaultFocus}</span>}
                             </p>
                             {s.material && (
-                              <p className="mt-1 text-xs text-blue-600">📎 {s.material.title}</p>
+                              <p className="mt-1 flex items-center gap-1.5 text-xs text-blue-600"><AttachmentIcon className="h-3.5 w-3.5" /> {s.material.title}</p>
                             )}
                           </div>
                           <button

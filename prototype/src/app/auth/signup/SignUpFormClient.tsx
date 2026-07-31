@@ -7,6 +7,7 @@ import { buildApiUrl } from "@/lib/api";
 import BrandLoader from "@/components/BrandLoader";
 import { countries, nigerianStates, packageOptions, professionOptions } from "@/app/auth/signup/options";
 import PasswordInput from "@/components/PasswordInput";
+import { CheckCircleIcon, SignalIcon } from "@/components/icons";
 import { uploadImage } from "@/lib/upload";
 import {
   CONNECTION_OPTIONS,
@@ -360,7 +361,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
           {successMessage && showSuccess ? (
             <div className="rounded-3xl border border-emerald-200/80 bg-emerald-500/10 p-5 text-sm text-emerald-900 shadow-lg shadow-emerald-500/10 transition-all duration-200">
               <div className="flex items-start gap-3">
-                <div className="mt-0.5 h-10 w-10 flex-none rounded-2xl bg-emerald-600/10 text-emerald-700 grid place-items-center text-lg">✅</div>
+                <div className="mt-0.5 h-10 w-10 flex-none rounded-2xl bg-emerald-600/10 text-emerald-700 grid place-items-center"><CheckCircleIcon className="h-5 w-5" /></div>
                 <div>
                   <p className="font-semibold text-emerald-900">Signup complete</p>
                   <p className="mt-1 text-[var(--muted)]">{successMessage}</p>
@@ -487,7 +488,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
               {isOnline ? (
                 <div className="rounded-3xl border border-[var(--accent)]/25 bg-[var(--accent-soft)] p-5">
                   <div className="flex items-start gap-3">
-                    <span className="mt-0.5 grid h-10 w-10 flex-none place-items-center rounded-2xl bg-white/80 text-lg shadow-sm">📶</span>
+                    <span className="mt-0.5 grid h-10 w-10 flex-none place-items-center rounded-2xl bg-white/80 text-[var(--accent)] shadow-sm"><SignalIcon className="h-5 w-5" /></span>
                     <div>
                       <h2 className="text-base font-semibold text-[var(--foreground)]">How you will join class</h2>
                       <p className="mt-1 text-sm text-[var(--muted)]">

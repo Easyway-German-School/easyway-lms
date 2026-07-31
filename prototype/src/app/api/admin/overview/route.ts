@@ -4,7 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveAdmin } from "@/lib/admin-roles";
-import { requiredDepositForLevel, tuitionFeeForLevel } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -114,8 +114,9 @@ export async function GET() {
   const byBranch: Record<string, { name: string; students: number; collected: number; expected: number }> = {};
 
   for (const student of students) {
-    const fee = tuitionFeeForLevel(student.level);
-    const deposit = requiredDepositForLevel(student.level);
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const fee = tuitionFeeFor(feeLookup);
+    const deposit = requiredDepositFor(feeLookup);
     const paid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
 
     expectedRevenue += fee;

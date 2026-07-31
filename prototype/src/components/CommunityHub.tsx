@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePushNotifications } from "@/lib/use-push";
+import { ArrowLeftIcon, BellIcon, BellOffIcon, BranchIcon, CommunityIcon, PinIcon } from "@/components/icons";
 
 /**
  * Discord-style channel rail + Reddit-style threads.
@@ -200,7 +201,7 @@ function NotifyToggle({ compact }: { compact: boolean }) {
           enabled ? "text-[var(--accent)]" : "text-[var(--muted)] hover:bg-[var(--surface)]"
         }`}
       >
-        <span aria-hidden="true">{enabled ? "🔔" : "🔕"}</span>
+        {enabled ? <BellIcon className="h-3.5 w-3.5 shrink-0" /> : <BellOffIcon className="h-3.5 w-3.5 shrink-0" />}
         <span className="truncate">
           {busy ? "One moment…" : enabled ? "Notifications on" : compact ? "Notify me" : "Turn on notifications"}
         </span>
@@ -431,7 +432,7 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
   if (spaces.length === 0) {
     return (
       <div className={`${compact ? "p-6" : "p-10"} text-center`}>
-        <div className="text-4xl">🏫</div>
+        <BranchIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
         <h3 className="mt-3 text-lg font-semibold">No community yet</h3>
         <p className="mt-2 text-sm text-[var(--muted)]">{scopeNote ?? error ?? "Nothing to show."}</p>
       </div>
@@ -516,8 +517,8 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
             )}
           </div>
           {openThreadId ? (
-            <button onClick={() => setOpenThreadId(null)} className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--surface-alt)]">
-              ← Back
+            <button onClick={() => setOpenThreadId(null)} className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--surface-alt)]">
+              <ArrowLeftIcon className="h-3.5 w-3.5" /> Back
             </button>
           ) : canPost ? (
             <button onClick={() => setComposerOpen((v) => !v)} className="shrink-0 rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white">
@@ -613,7 +614,7 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
             <Skeleton lines={3} />
           ) : threads.length === 0 ? (
             <div className="py-14 text-center">
-              <div className="text-3xl">💬</div>
+              <CommunityIcon className="mx-auto h-9 w-9 text-[var(--muted)]" />
               <p className="mt-3 text-sm font-semibold">Nothing here yet</p>
               <p className="mt-1 text-sm text-[var(--muted)]">
                 {canPost
@@ -633,7 +634,7 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
                     <Avatar name={t.author.name} size={32} />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        {t.pinned && <span className="text-xs">📌</span>}
+                        {t.pinned && <PinIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />}
                         <span className="truncate text-sm font-bold">{t.title}</span>
                         <RoleBadge role={t.author.role} />
                       </div>

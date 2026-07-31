@@ -1,5 +1,7 @@
 "use client";
 
+import { EmptyIcon } from "@/components/icons";
+
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
@@ -256,7 +258,7 @@ export default function AdminLeadsPage() {
           <div className="py-12 text-center text-slate-500">Loading…</div>
         ) : leads.length === 0 ? (
           <div className="py-12 text-center">
-            <p className="text-3xl">📭</p>
+            <EmptyIcon className="mx-auto h-9 w-9 text-slate-400" />
             <p className="mt-2 font-semibold">Nothing here</p>
             <p className="mt-1 text-sm text-slate-500">No enquiry matches these filters.</p>
           </div>

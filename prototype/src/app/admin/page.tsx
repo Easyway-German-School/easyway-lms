@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { LecturerIcon, PencilIcon, TrendingDownIcon, TrendingUpIcon, WalletIcon } from "@/components/icons";
+
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
@@ -90,7 +92,7 @@ function Kpi({
 }: {
   label: string;
   value: string;
-  sub?: string;
+  sub?: ReactNode;
   tone?: "neutral" | "good" | "warn" | "bad";
   index: number;
 }) {
@@ -260,7 +262,12 @@ export default function AdminHomePage() {
                 tone={finance.monthOnMonthPercent != null && finance.monthOnMonthPercent < 0 ? "bad" : "good"}
                 sub={
                   finance.monthOnMonthPercent != null
-                    ? `${finance.monthOnMonthPercent >= 0 ? "▲" : "▼"} ${Math.abs(finance.monthOnMonthPercent)}% vs last month`
+                    ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          {finance.monthOnMonthPercent >= 0 ? <TrendingUpIcon className="h-3.5 w-3.5" /> : <TrendingDownIcon className="h-3.5 w-3.5" />}
+                          {Math.abs(finance.monthOnMonthPercent)}% vs last month
+                        </span>
+                      )
                     : "No prior month to compare"
                 }
               />
@@ -484,8 +491,8 @@ export default function AdminHomePage() {
                   transition={{ delay: index * 0.04 }}
                   className="flex items-start gap-3 border-b border-[var(--border)]/50 pb-3 last:border-0"
                 >
-                  <span className="mt-0.5 text-base">
-                    {event.kind === "payment" ? "💰" : event.kind === "signup" ? "🎓" : "📝"}
+                  <span className="mt-0.5 text-[var(--accent)]">
+                    {event.kind === "payment" ? <WalletIcon /> : event.kind === "signup" ? <LecturerIcon /> : <PencilIcon />}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-[var(--foreground)]">{event.text}</p>

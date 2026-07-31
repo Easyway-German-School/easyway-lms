@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ClassGridView from "@/components/ClassGridView";
+import { AttachmentIcon, CalendarIcon, CrossIcon, LockIcon, MapIcon, SparklesIcon } from "@/components/icons";
 import {
   type ClassNode,
   type SchedulePayload,
@@ -40,14 +41,6 @@ function CheckIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
       <path d="m5 13 4 4L19 7" />
-    </svg>
-  );
-}
-function LockIcon({ className = "h-6 w-6" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
-      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
     </svg>
   );
 }
@@ -188,20 +181,20 @@ export default function SmartCalendarClient() {
           <button
             onClick={() => chooseView("path")}
             aria-pressed={view === "path"}
-            className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition ${
               view === "path" ? "bg-[var(--accent)] text-white shadow" : "text-[var(--muted)] hover:text-[var(--foreground)]"
             }`}
           >
-            🗺️ Journey map
+            <MapIcon /> Journey map
           </button>
           <button
             onClick={() => chooseView("calendar")}
             aria-pressed={view === "calendar"}
-            className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition ${
               view === "calendar" ? "bg-[var(--accent)] text-white shadow" : "text-[var(--muted)] hover:text-[var(--foreground)]"
             }`}
           >
-            🗓️ Calendar
+            <CalendarIcon /> Calendar
           </button>
         </div>
 
@@ -217,11 +210,11 @@ export default function SmartCalendarClient() {
             </button>
             <button
               onClick={() => { setPreviewLevel(data.nextLevel!); setOpenIndex(null); }}
-              className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition ${
                 data.viewingNextLevel ? "bg-slate-900 text-white" : "border border-[var(--border)] hover:bg-[var(--surface-alt)]"
               }`}
             >
-              🔮 {data.nextLevel} · peek ahead
+              <SparklesIcon /> {data.nextLevel} · peek ahead
             </button>
           </div>
         )}
@@ -311,7 +304,7 @@ export default function SmartCalendarClient() {
                               ) : node.state === "today" ? (
                                 <StarIcon />
                               ) : node.state === "off" ? (
-                                <span className="text-2xl">✕</span>
+                                <CrossIcon className="h-7 w-7" strokeWidth={3} />
                               ) : (
                                 <LockIcon className="h-7 w-7" />
                               )}
@@ -350,7 +343,7 @@ export default function SmartCalendarClient() {
                                     <p className="mt-1.5 text-sm">{summary.topic}</p>
                                   ) : (
                                     <p className="mt-1.5 text-sm font-semibold text-slate-500">
-                                      🔒 Topic unlocks on {summary.lockedUntil}
+                                      <LockIcon className="mr-1.5 inline h-4 w-4 align-[-3px]" /> Topic unlocks on {summary.lockedUntil}
                                     </p>
                                   )}
 
@@ -372,7 +365,7 @@ export default function SmartCalendarClient() {
                                       rel="noreferrer"
                                       className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-bold text-[var(--accent)]"
                                     >
-                                      📎 {summary.material.title}
+                                      <AttachmentIcon className="h-3.5 w-3.5" /> {summary.material.title}
                                     </a>
                                   )}
                                 </motion.div>

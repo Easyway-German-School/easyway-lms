@@ -1,5 +1,7 @@
 "use client";
 
+import { CheckCircleIcon } from "@/components/icons";
+
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
@@ -191,7 +193,7 @@ export default function AdminPromotionsPage() {
           <div className="py-12 text-center text-slate-500">Loading…</div>
         ) : candidates.length === 0 ? (
           <div className="py-12 text-center">
-            <p className="text-3xl">✅</p>
+            <CheckCircleIcon className="mx-auto h-9 w-9 text-emerald-500" />
             <p className="mt-2 font-semibold">Everyone is in the right class</p>
             <p className="mt-1 text-sm text-slate-500">
               No student has a finished session and an unchanged level.

@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import BrandLogo from "@/components/BrandLogo";
+import { CalendarIcon } from "@/components/icons";
 
 /**
  * Public ÖSD exam centre.
@@ -137,7 +138,7 @@ export default function ExamCentrePage() {
             [0, 1].map((i) => <div key={i} className="h-32 animate-pulse rounded-3xl bg-white/70" />)
           ) : exams.length === 0 ? (
             <div className="rounded-3xl bg-white p-10 text-center shadow-sm">
-              <div className="text-4xl">📅</div>
+              <CalendarIcon className="mx-auto h-10 w-10 text-slate-400" />
               <p className="mt-3 text-sm font-semibold">No sittings open right now</p>
               <p className="mt-1 text-sm text-slate-500">
                 New exam dates are published here as soon as they are scheduled.

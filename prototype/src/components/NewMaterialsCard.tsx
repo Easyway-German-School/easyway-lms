@@ -1,4 +1,6 @@
 "use client";
+import type { ReactNode } from "react";
+import { AttachmentIcon, AudioIcon, DocumentIcon, FilmIcon, ImageIcon, PencilIcon } from "@/components/icons";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -25,15 +27,15 @@ type Material = {
   course?: { title: string; level: string } | null;
 };
 
-const TYPE_ICON: Record<string, string> = {
-  pdf: "📄",
-  doc: "📝",
-  docx: "📝",
-  video: "🎥",
-  mp4: "🎥",
-  image: "🖼️",
-  audio: "🎧",
-  mp3: "🎧",
+const TYPE_ICON: Record<string, ReactNode> = {
+  pdf: <DocumentIcon className="h-6 w-6" />,
+  doc: <PencilIcon className="h-6 w-6" />,
+  docx: <PencilIcon className="h-6 w-6" />,
+  video: <FilmIcon className="h-6 w-6" />,
+  mp4: <FilmIcon className="h-6 w-6" />,
+  image: <ImageIcon className="h-6 w-6" />,
+  audio: <AudioIcon className="h-6 w-6" />,
+  mp3: <AudioIcon className="h-6 w-6" />,
 };
 
 export default function NewMaterialsCard() {
@@ -87,8 +89,8 @@ export default function NewMaterialsCard() {
               href={material.fileUrl}
               className="flex items-center gap-4 rounded-[28px] border border-slate-200/70 bg-slate-50/80 p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-white"
             >
-              <span className="text-2xl" aria-hidden="true">
-                {TYPE_ICON[material.fileType?.toLowerCase()] ?? "📎"}
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                {TYPE_ICON[material.fileType?.toLowerCase()] ?? <AttachmentIcon className="h-6 w-6" />}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-semibold text-slate-900">{material.title}</p>

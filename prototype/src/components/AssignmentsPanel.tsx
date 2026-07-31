@@ -1,4 +1,5 @@
 "use client";
+import { PencilIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -249,7 +250,7 @@ export default function AssignmentsPanel() {
 
       {assignments.length === 0 ? (
         <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center">
-          <div className="text-4xl">✍️</div>
+          <PencilIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
           <p className="mt-3 text-sm font-semibold">No assignments yet</p>
           <p className="mt-1 text-sm text-[var(--muted)]">Work set by your tutor will appear here.</p>
         </div>
