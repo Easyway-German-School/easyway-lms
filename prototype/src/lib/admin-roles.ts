@@ -120,6 +120,51 @@ export async function adminHasCapability(userId: string, capability: Capability)
   return Boolean(admin?.can(capability));
 }
 
+/**
+ * The whole door in one call: reads the session, resolves the admin, checks
+ * the capability, and hands back either a context or the response to return.
+ *
+ *   const gate = await requireCapability("payments");
+ *   if (!gate.ok) return gate.response;
+ *   // gate.admin is available from here
+ *
+ * This exists because eighteen admin routes had drifted into checking only
+ * `role === "admin"` — and two into checking nothing at all — which made the
+ * sub-roles decorative on every one of them: a Secretary with no `payments`
+ * capability could still read the fee book straight off the API.
+ */
+export async function requireCapability(
+  capability: Capability,
+): Promise<{ ok: true; admin: AdminContext } | { ok: false; response: Response }> {
+  // Imported here rather than at the top: this module is pulled into client
+  // bundles for its label maps, and next-auth's server entry must not follow.
+  const { getServerSession } = await import("next-auth");
+  const { authOptions } = await import("@/lib/auth");
+  const { NextResponse } = await import("next/server");
+
+  const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
+  const admin = await resolveAdmin(session?.user?.id);
+
+  if (!admin) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Admin access required" }, { status: 403 }),
+    };
+  }
+
+  if (!admin.can(capability)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: `Your admin role does not cover ${capability}` },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return { ok: true, admin };
+}
+
 export type AdminContext = {
   userId: string;
   adminRole: AdminRole;

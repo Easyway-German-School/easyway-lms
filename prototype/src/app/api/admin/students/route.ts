@@ -4,12 +4,16 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
+import { requireCapability } from "@/lib/admin-roles";
 async function isAdmin(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   return user?.role === "ADMIN";
 }
 
 export async function GET(request: Request) {
+  const gate = await requireCapability("students");
+  if (!gate.ok) return gate.response;
+
   const session = await getServerSession(authOptions as any) as any;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -90,6 +94,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const gate = await requireCapability("students");
+  if (!gate.ok) return gate.response;
+
   const session = await getServerSession(authOptions as any) as any;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -149,6 +156,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const gate = await requireCapability("students");
+  if (!gate.ok) return gate.response;
+
   const session = await getServerSession(authOptions as any) as any;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -217,6 +227,9 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const gate = await requireCapability("students");
+  if (!gate.ok) return gate.response;
+
   const session = await getServerSession(authOptions as any) as any;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

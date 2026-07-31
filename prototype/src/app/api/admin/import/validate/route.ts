@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { requireCapability } from "@/lib/admin-roles";
 export async function POST(request: NextRequest) {
+  const gate = await requireCapability("students");
+  if (!gate.ok) return gate.response;
+
   try {
     const body = await request.json();
     const { mode, csv_text } = body;

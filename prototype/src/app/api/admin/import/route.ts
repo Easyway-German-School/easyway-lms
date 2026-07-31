@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import bcryptjs from "bcryptjs";
 
+import { requireCapability } from "@/lib/admin-roles";
 async function isLecturer(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return false;
@@ -11,6 +12,9 @@ async function isLecturer(userId: string) {
 }
 
 export async function POST(request: NextRequest) {
+  const gate = await requireCapability("students");
+  if (!gate.ok) return gate.response;
+
   const session = await getServerSession(authOptions as any) as any;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

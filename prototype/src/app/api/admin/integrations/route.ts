@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getLmsConnectors, getConnectorData, testLmsConnector, syncLmsConnector } from "@/lib/integrations";
 
+import { requireCapability } from "@/lib/admin-roles";
 export async function GET(request: Request) {
+  const gate = await requireCapability("integrations");
+  if (!gate.ok) return gate.response;
+
   try {
     const { searchParams } = new URL(request.url);
     const connectorId = searchParams.get("connectorId");
@@ -26,6 +30,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const gate = await requireCapability("integrations");
+  if (!gate.ok) return gate.response;
+
   try {
     const { searchParams } = new URL(request.url);
     const connectorId = searchParams.get("connectorId");

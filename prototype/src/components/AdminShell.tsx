@@ -21,16 +21,18 @@ import {
   IntegrationIcon,
   LecturerIcon,
   LevelUpIcon,
+  MailIcon,
   MenuIcon,
   PaletteIcon,
   PaymentIcon,
   RobotIcon,
   RosterIcon,
   SendIcon,
-  SettingsIcon,
   ShieldIcon,
+  TrendingUpIcon,
   UserPlusIcon,
   UsersIcon,
+  WalletIcon,
 } from '@/components/icons';
 
 type NavItem = {
@@ -63,9 +65,14 @@ const navItems: NavItem[] = [
   { label: 'Community', href: '/admin/community', capability: 'community' as const, icon: <CommunityIcon />, group: 'Content' },
 
   { label: 'Payments', href: '/admin/payments', capability: 'payments' as const, icon: <PaymentIcon />, group: 'Billing' },
+  // These three pages existed and were reachable from nowhere — built, then
+  // never added to the sidebar, so nobody in the office knew they were there.
+  { label: 'Finance overview', href: '/admin/finance', capability: 'payments' as const, icon: <WalletIcon />, group: 'Billing' },
+  { label: 'Reports', href: '/admin/reports', capability: 'reports' as const, icon: <TrendingUpIcon />, group: 'Billing' },
 
   { label: 'Assistant', href: '/admin/assistant', icon: <RobotIcon />, group: 'Intelligence' },
 
+  { label: 'Email centre', href: '/admin/emails', capability: 'emails' as const, icon: <MailIcon />, group: 'Settings' },
   { label: 'Compose email', href: '/admin/emails/compose', capability: 'emails' as const, icon: <SendIcon />, group: 'Settings' },
   { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <BellIcon />, group: 'Settings' },
   { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <ShieldIcon />, group: 'Settings' },

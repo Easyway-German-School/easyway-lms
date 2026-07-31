@@ -3,6 +3,7 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
+import { requireCapability } from "@/lib/admin-roles";
 async function isAdmin(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   return user?.role === "ADMIN";
@@ -18,6 +19,9 @@ function escapeCsv(value: unknown) {
 }
 
 export async function GET() {
+  const gate = await requireCapability("reports");
+  if (!gate.ok) return gate.response;
+
   const session = await getServerSession(authOptions as any) as any;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

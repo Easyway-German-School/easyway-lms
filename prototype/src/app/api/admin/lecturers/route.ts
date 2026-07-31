@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+import { requireCapability } from "@/lib/admin-roles";
 const COURSE_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
 
 type CourseLevel = (typeof COURSE_LEVELS)[number];
@@ -70,6 +71,9 @@ async function createClassForLecturer(lecturerId: string, level: CourseLevel) {
 }
 
 export async function GET() {
+  const gate = await requireCapability("staff");
+  if (!gate.ok) return gate.response;
+
   const session = await getServerSession(authOptions as any) as any;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -94,6 +98,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const gate = await requireCapability("staff");
+  if (!gate.ok) return gate.response;
+
   const session = await getServerSession(authOptions as any) as any;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

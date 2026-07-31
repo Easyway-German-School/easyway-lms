@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { assignStudentCode } from "@/lib/student-code";
 import { LEVELS } from "@/lib/levels";
 
+import { requireCapability } from "@/lib/admin-roles";
 export const dynamic = "force-dynamic";
 
 /**
@@ -63,6 +64,9 @@ async function requireAdmin() {
 }
 
 export async function POST(request: NextRequest) {
+  const gate = await requireCapability("students");
+  if (!gate.ok) return gate.response;
+
   const auth = await requireAdmin();
   if (auth.error) return auth.error;
 
