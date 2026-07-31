@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { NextResponse } from "next/server";
-import { resolveAdmin, capabilitiesFor, ADMIN_ROLE_LABELS } from "@/lib/admin-roles";
+import { resolveAdmin, ADMIN_ROLE_LABELS } from "@/lib/admin-roles";
 
 /**
  * What the signed-in admin is allowed to do. The admin shell calls this to
@@ -22,6 +22,9 @@ export async function GET() {
   return NextResponse.json({
     adminRole: admin.adminRole,
     label: ADMIN_ROLE_LABELS[admin.adminRole],
-    capabilities: capabilitiesFor(admin.adminRole),
+    // This person's own capabilities, preset plus their overrides — not the
+    // preset alone, which is what this used to send and which would have
+    // hidden a hand-granted area from the sidebar.
+    capabilities: admin.capabilities,
   });
 }

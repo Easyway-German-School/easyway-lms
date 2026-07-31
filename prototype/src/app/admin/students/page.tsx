@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import { type StudentWithUser } from "@/types/admin";
 import PasswordInput from "@/components/PasswordInput";
+import BulkStudentAdd from "@/components/BulkStudentAdd";
 
 type BranchOption = {
   id: string;
@@ -537,6 +538,11 @@ export default function AdminStudentsPage() {
             </div>
           </div>
         </div>
+
+        {/* Sits beside the one-at-a-time form on purpose: the moment somebody
+            realises they have fourteen students to add is the moment they are
+            looking at this page, not hunting for an importer in the sidebar. */}
+        <BulkStudentAdd branches={branches} onImported={loadStudents} />
 
         {showStudentForm ? (
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
