@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
+import BrandLoader from "@/components/BrandLoader";
 
 interface Course {
   id: string;
@@ -135,7 +136,7 @@ export default function MaterialsPage() {
   if (loading) {
     return (
       <AdminShell>
-        <div className="p-8">Loading...</div>
+        <BrandLoader fill size="lg" message="Loading materials." />
       </AdminShell>
     );
   }

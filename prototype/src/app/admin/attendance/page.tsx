@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import { StudentWithUser } from "@/types/admin";
+import BrandLoader from "@/components/BrandLoader";
 
 interface AttendanceRecord {
   id: string;
@@ -139,7 +140,7 @@ export default function AttendancePage() {
   if (loading) {
     return (
       <AdminShell>
-        <div className="p-8">Loading...</div>
+        <BrandLoader fill size="lg" message="Loading attendance." />
       </AdminShell>
     );
   }

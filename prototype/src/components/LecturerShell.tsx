@@ -99,6 +99,7 @@ const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/lecturer/dashboard', icon: <DashboardIcon className="h-4 w-4" /> },
   { label: 'Live classroom', href: '/live', icon: <LiveIcon className="h-4 w-4" /> },
   { label: 'Customise my classes', href: '/lecturer/classes', icon: <ClassIcon className="h-4 w-4" /> },
+  { label: 'My students', href: '/lecturer/students', icon: <ClassIcon className="h-4 w-4" /> },
   { label: 'Timetable', href: '/lecturer/timetable', icon: <ClassIcon className="h-4 w-4" /> },
   { label: 'Private classes', href: '/lecturer/private-classes', icon: <ClassIcon className="h-4 w-4" /> },
   { label: 'Assignments', href: '/lecturer/assignments', icon: <GradeIcon className="h-4 w-4" /> },

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import BrandLoader from "@/components/BrandLoader";
 
 interface EmailLog {
   id: string;
@@ -115,7 +116,7 @@ export default function AdminEmailManagementPage() {
   };
 
   if (isLoading) {
-    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+    return <BrandLoader fill size="lg" />;
   }
 
   if (!isAdmin) {

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
 import LecturerShell from "@/components/LecturerShell";
+import BrandLoader from "@/components/BrandLoader";
 import PasswordInput from "@/components/PasswordInput";
 
 /**
@@ -119,7 +120,7 @@ export default function LecturerSettingsPage() {
   if (loading) {
     return (
       <LecturerShell>
-        <div className="grid h-screen place-items-center text-[var(--muted)]">Loading your settings…</div>
+        <BrandLoader fill size="lg" title="Einen Moment…" message="Loading your settings." />
       </LecturerShell>
     );
   }

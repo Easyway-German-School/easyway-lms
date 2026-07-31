@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import LecturerShell from "@/components/LecturerShell";
+import BrandLoader from "@/components/BrandLoader";
 
 type SentMessage = {
   key: string;
@@ -98,7 +99,7 @@ export default function LecturerMessagesPage() {
   if (loading) {
     return (
       <LecturerShell>
-        <div className="grid h-screen place-items-center text-[var(--muted)]">Loading your messages…</div>
+        <BrandLoader fill size="lg" title="Einen Moment…" message="Loading your messages." />
       </LecturerShell>
     );
   }

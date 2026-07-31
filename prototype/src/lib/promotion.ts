@@ -1,11 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { monthNameToIndex } from "@/lib/schedule";
-import { nextLevelAfter } from "@/lib/levels";
-import { derivePaymentStatus } from "@/lib/payment";
-
-const TUITION_BY_LEVEL: Record<string, number> = {
-  A1: 150000, A2: 150000, B1: 180000, B2: 180000, C1: 200000, C2: 220000,
-};
+import { nextLevelAfter, SESSION_MONTHS } from "@/lib/levels";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 /**
  * Who has finished a level but is still sitting in it.
@@ -21,7 +17,8 @@ const TUITION_BY_LEVEL: Record<string, number> = {
  * or a failed assessment, so this reports and the office decides.
  */
 
-export const SESSION_MONTHS = 2;
+// Re-exported from levels.ts, where it also serves client code.
+export { SESSION_MONTHS };
 
 export type PromotionCandidate = {
   studentId: string;
@@ -46,6 +43,21 @@ export type PromotionCandidate = {
   /** True when C2 — there is no level to move up to. */
   atTopOfLadder: boolean;
 };
+
+/**
+ * Whole months since a student's batch began, or null when the batch name is
+ * unusable.
+ *
+ * Exported so the student-facing advance offer derives "your level is
+ * finished" from exactly the same arithmetic as the office's promotion report.
+ * Two implementations would eventually disagree, and then the portal would be
+ * congratulating a student the office still has mid-level.
+ */
+export function monthsSinceBatchStart(batch: string | null, now: Date = new Date()): number | null {
+  const startAbsolute = batchStartAbsolute(batch, now);
+  if (startAbsolute === null) return null;
+  return now.getFullYear() * 12 + now.getMonth() - startAbsolute;
+}
 
 function batchStartAbsolute(batch: string | null, now: Date): number | null {
   const monthIndex = monthNameToIndex(batch);
@@ -101,11 +113,13 @@ export async function findPromotionCandidates(opts: {
       .filter((p) => p.status === "completed")
       .reduce((sum, p) => sum + p.amount, 0);
 
-    const tuitionFee = TUITION_BY_LEVEL[student.level] ?? 150000;
+    // Abuja charges more for the same level, so the branch has to go in.
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const tuitionFee = tuitionFeeFor(feeLookup);
     const { status } = derivePaymentStatus({
       totalPaid,
       tuitionFee,
-      requiredDeposit: Math.round(tuitionFee * 0.6),
+      requiredDeposit: requiredDepositFor(feeLookup),
     });
 
     candidates.push({

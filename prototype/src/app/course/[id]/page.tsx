@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import BrandLoader from "@/components/BrandLoader";
 
 export default function CourseDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -29,9 +30,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center text-[var(--foreground)]">
-        <p>Loading course...</p>
-      </div>
+      <BrandLoader fill size="lg" title="Kurs wird geladen…" message="Loading your course." />
     );
   }
 

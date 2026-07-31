@@ -401,18 +401,13 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                   <label htmlFor="branchId" className="block text-sm font-semibold text-[var(--muted)]">Choose your branch</label>
                   <select id="branchId" name="branchId" value={branchId} onChange={(e) => setBranchId(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
                     <option value="">Choose branch</option>
-                    {/* Grouped so Online reads as a real alternative to a
-                        campus rather than a fourth city in the list. */}
-                    <optgroup label="Study on campus">
-                      {branches.filter((branch) => !isOnlineBranch(branch)).map((branch) => (
-                        <option key={branch.id} value={branch.id}>{branch.name}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Study from anywhere">
-                      {branches.filter((branch) => isOnlineBranch(branch)).map((branch) => (
-                        <option key={branch.id} value={branch.id}>{branch.name} — live over video</option>
-                      ))}
-                    </optgroup>
+                    {/* A flat list. The campuses need no explanation, and the
+                        one option that does carries it in its own label. */}
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {isOnlineBranch(branch) ? `${branch.name} (Study from Anywhere)` : branch.name}
+                      </option>
+                    ))}
                   </select>
                   <p className={`mt-2 text-xs ${isOnline ? "font-medium text-[var(--accent)]" : "text-[var(--muted)]"}`}>{branchHint}</p>
                 </div>

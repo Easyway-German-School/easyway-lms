@@ -118,8 +118,10 @@ function LecturerSignInContent() {
 }
 
 export default function LecturerSignInPage() {
+  // The fallback used to be a near-black panel with unstyled text, so the text
+  // rendered dark-on-dark and the whole screen read as blank.
   return (
-    <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center"><p>Loading...</p></div>}>
+    <Suspense fallback={<BrandLoader fill size="lg" />}>
       <LecturerSignInContent />
     </Suspense>
   );

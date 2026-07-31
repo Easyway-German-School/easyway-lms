@@ -89,6 +89,24 @@ model Student {
   // Graduation tracking
   graduationDate DateTime?
 
+  /**
+   * The level we have already told this student they finished, e.g. "A1".
+   *
+   * Stops the "your level is complete" notification firing again every time
+   * the dashboard loads. Storing the level rather than a boolean means the
+   * offer fires once per level, automatically, all the way up the ladder.
+   */
+  advanceOfferedFor String?
+
+  /**
+   * When this student finished (or skipped) the welcome tour.
+   *
+   * Server-side rather than localStorage on purpose: a student who signs up on
+   * a laptop and then opens the portal on their phone should not be walked
+   * through the introduction a second time.
+   */
+  welcomeTourSeenAt DateTime?
+
   // Email tracking for scheduled reminders
   feeRemindersScheduled Json? // tracks which reminders (7d, 14d, 30d) have been sent
   emailPreferences      Json? // user preferences for notification types

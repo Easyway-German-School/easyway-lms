@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import StudentShell from "@/components/StudentShell";
 import AssignmentsPanel from "@/components/AssignmentsPanel";
+import BrandLoader from "@/components/BrandLoader";
 
 function AssignmentContent() {
   const { status } = useSession();
@@ -192,7 +193,7 @@ function AssignmentContent() {
 
 export default function AssignmentPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center"><p>Loading...</p></div>}>
+    <Suspense fallback={<BrandLoader fill size="lg" />}>
       <AssignmentContent />
     </Suspense>
   );

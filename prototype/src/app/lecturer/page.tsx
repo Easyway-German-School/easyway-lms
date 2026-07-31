@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import BrandLoader from "@/components/BrandLoader";
 
 export default function LecturerPage() {
   const { data: session, status } = useSession();
@@ -184,12 +185,7 @@ export default function LecturerPage() {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center text-[var(--foreground)]">
-        <div className="text-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--accent)] mx-auto"></div>
-          <p className="text-[var(--muted)]">Loading...</p>
-        </div>
-      </div>
+      <BrandLoader fill size="lg" />
     );
   }
 

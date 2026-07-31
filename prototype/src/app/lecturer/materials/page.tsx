@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
+import BrandLoader from "@/components/BrandLoader";
 
 interface Course {
   id: string;
@@ -190,12 +191,7 @@ export default function LecturerMaterials() {
   if (status === 'loading' || loading) {
     return (
       <LecturerShell>
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-center">
-            <div className="mb-4">⏳</div>
-            <p className="text-[var(--foreground)]">Loading materials...</p>
-          </div>
-        </div>
+        <BrandLoader fill size="lg" title="Einen Moment…" message="Loading your materials." />
       </LecturerShell>
     );
   }

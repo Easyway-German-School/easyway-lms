@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
+import LecturerStudentRoster from '@/components/LecturerStudentRoster';
 
 interface Student {
   id: string;
@@ -151,6 +152,17 @@ export default function LecturerAttendance() {
               {error}
             </div>
           )}
+
+          {/* Who is actually in this tutor's class.
+              The marking grid below still works off Enrollment, which most
+              cohorts have no rows in — so a tutor with a full class saw "No
+              students enrolled". This reads the branch + level + sitting
+              grouping the rest of the school uses, so the names are always
+              here even when the enrolment records are not. */}
+          <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
+            <h2 className="text-lg font-bold text-[var(--foreground)] mb-4">My class register</h2>
+            <LecturerStudentRoster />
+          </div>
 
           {/* Filters */}
           <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">

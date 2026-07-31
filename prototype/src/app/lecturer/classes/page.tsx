@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import LecturerShell from "@/components/LecturerShell";
+import BrandLoader from "@/components/BrandLoader";
 
 type Profile = {
   name: string | null;
@@ -108,7 +109,7 @@ export default function LecturerClassesPage() {
   if (loading) {
     return (
       <LecturerShell>
-        <div className="grid h-screen place-items-center text-[var(--muted)]">Loading your classes…</div>
+        <BrandLoader fill size="lg" title="Einen Moment…" message="Loading your classes." />
       </LecturerShell>
     );
   }

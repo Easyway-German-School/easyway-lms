@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
+import BrandLoader from "@/components/BrandLoader";
 
 function StatIcon({ children }: { children: React.ReactNode }) {
   return <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] shadow-sm">{children}</span>;
@@ -122,14 +123,7 @@ export default function LecturerDashboard() {
   if (status === 'loading' || loading) {
     return (
       <LecturerShell>
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-center">
-            <div className="mb-4 flex justify-center">
-              <div className="h-10 w-10 animate-spin rounded-full border-2 border-[var(--accent)]/25 border-t-[var(--accent)]" />
-            </div>
-            <p className="text-[var(--foreground)]">Loading...</p>
-          </div>
-        </div>
+        <BrandLoader fill size="lg" title="Einen Moment…" message="Loading your dashboard." />
       </LecturerShell>
     );
   }

@@ -518,7 +518,15 @@ export default function AdminStudentsPage() {
                 </select>
               </div>
             </div>
-            <div className="flex items-end justify-end">
+            <div className="flex items-end justify-end gap-2">
+              {/* One at a time here; a whole cohort at once through the
+                  importer, which is the launch-day case. */}
+              <a
+                href="/admin/students/import"
+                className="rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--foreground)]"
+              >
+                Import many
+              </a>
               <button
                 type="button"
                 className="rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white"

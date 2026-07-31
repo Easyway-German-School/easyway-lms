@@ -6,8 +6,11 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import BrandLoader from "@/components/BrandLoader";
 import PaymentSuccessToastClient from "@/components/PaymentSuccessToastClient";
+import TuitionNudge from "@/components/TuitionNudge";
+import LevelAdvance from "@/components/LevelAdvance";
+import WelcomeTour from "@/components/WelcomeTour";
 import { summarizeGamification } from "@/lib/gamification";
-import { requiredDepositForLevel, tuitionFeeForLevel } from "@/lib/payment";
+import { REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { useGamification } from "@/lib/useGamification";
 
 type Mission = {
@@ -23,6 +26,8 @@ type Mission = {
 type Student = {
   name?: string;
   level?: string;
+  /** Needed for the fee: Abuja is priced above Lagos and Port Harcourt. */
+  branchName?: string | null;
   pathway?: string;
   examReadiness?: number;
   averageGrade?: number | null;
@@ -135,8 +140,9 @@ function DashboardContent() {
           const paymentsData = await paymentsResponse.json();
           const completed = (paymentsData.payments || []).filter((payment: any) => payment.status === "completed");
           const totalPaid = completed.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
-          const tuitionFee = tuitionFeeForLevel(data.level);
-          const requiredDeposit = requiredDepositForLevel(data.level);
+          const feeLookup = { level: data.level, branch: data.branchName ?? null };
+          const tuitionFee = tuitionFeeFor(feeLookup);
+          const requiredDeposit = requiredDepositFor(feeLookup);
           setPaymentUnlock({ requiredDeposit, totalPaid, tuitionFee });
         }
       }
@@ -152,9 +158,9 @@ function DashboardContent() {
         recentGrades: [],
         paymentSummary: {
           totalPaid: 0,
-          registrationFee: 5000,
-          requiredDeposit: requiredDepositForLevel("A1"),
-          tuitionFee: tuitionFeeForLevel("A1"),
+          registrationFee: REGISTRATION_FEE,
+          requiredDeposit: requiredDepositFor({ level: "A1", branch: null }),
+          tuitionFee: tuitionFeeFor({ level: "A1", branch: null }),
           registrationPaid: true,
           depositPaid: false,
           fullPaid: false,
@@ -422,9 +428,9 @@ function DashboardContent() {
     recentGrades: [],
     paymentSummary: {
       totalPaid: 0,
-      registrationFee: 5000,
-      requiredDeposit: 90000,
-      tuitionFee: 150000,
+      registrationFee: REGISTRATION_FEE,
+      requiredDeposit: requiredDepositFor({ level: "A1", branch: null }),
+      tuitionFee: tuitionFeeFor({ level: "A1", branch: null }),
       registrationPaid: true,
       depositPaid: false,
       fullPaid: false,
@@ -554,6 +560,15 @@ function DashboardContent() {
         className="dashboard-shell min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(10,124,255,0.08),_transparent_25%),linear-gradient(135deg,_#f8fbff_0%,_#f2f6ff_100%)] text-[var(--foreground)]"
       >
         <div className="mx-auto max-w-7xl px-6 py-10">
+          {/* Shows once per account, on the very first visit, then never again. */}
+          <WelcomeTour />
+          {/* Above the hero on purpose: a student with a balance should meet it
+              before anything else, and it disappears entirely once settled. */}
+          <TuitionNudge className="mb-6" />
+          {/* Sits above the hero for the same reason the nudge does: a student
+              whose level has just ended needs to meet that before their
+              streak. Renders nothing at all until the level actually ends. */}
+          <LevelAdvance className="mb-6" />
           <section className="relative overflow-hidden rounded-[36px] border border-white/60 bg-gradient-to-r from-[var(--accent-strong)] via-[var(--accent)] to-[#FF8533] p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.16)]">
             <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/15 blur-3xl" />
             <div className="pointer-events-none absolute bottom-0 left-0 h-32 w-32 rounded-full bg-slate-950/10 blur-3xl" />
