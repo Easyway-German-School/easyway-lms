@@ -70,6 +70,22 @@ export default function StudentShell({ children }: { children: React.ReactNode }
     setDrawerOpen(false);
   }, [pathname]);
 
+  // The welcome tour spotlights real sidebar buttons, which on a phone live
+  // inside the drawer. It asks; the shell decides — the drawer's state stays
+  // owned here rather than being reached into from outside.
+  useEffect(() => {
+    const onTourDrawer = (event: Event) => {
+      const wanted = (event as CustomEvent<{ open?: boolean }>).detail?.open;
+      // Only on the small layout. On a desktop the sidebar is already a
+      // permanent column and opening a drawer over it would be nonsense.
+      if (window.innerWidth >= 1024) return;
+      setDrawerOpen(Boolean(wanted));
+    };
+
+    window.addEventListener("easyway:tour-drawer", onTourDrawer);
+    return () => window.removeEventListener("easyway:tour-drawer", onTourDrawer);
+  }, []);
+
   // A drawer over the page must not let the page behind it scroll.
   useEffect(() => {
     if (!drawerOpen) return;
