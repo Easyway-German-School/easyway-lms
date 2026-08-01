@@ -16,6 +16,7 @@ import {
   TIMEZONE_OPTIONS,
   isOnlineBranch,
 } from "@/lib/online-branch";
+import { TIME_SLOTS, slotLabel } from "@/lib/class-times";
 
 type BranchOption = { id: string; name: string; location?: string | null; mode?: string | null };
 
@@ -25,7 +26,7 @@ const branchGuidanceMap: Record<string, string> = {
   Lagos: "Lagos branch students get access to weekday group classes and Lagos campus support.",
   Abuja: "Abuja branch students get access to capital city study plans and local visa guidance.",
   "Port Harcourt": "Port Harcourt branch students get local cohort support plus flexible evening sessions.",
-  Online: "Online students join live classes over video from anywhere, and every class is recorded so a dropped connection never costs you the lesson.",
+  Online: "Online-only students join live classes over video from anywhere, with their own tutors and their own cohort. Every class is recorded, so a dropped connection never costs you the lesson.",
 };
 
 /**
@@ -33,12 +34,13 @@ const branchGuidanceMap: Record<string, string> = {
  * teach. Shown as a fixed WAT label rather than converted per student: a
  * timetable that silently reads differently for two classmates is worse than
  * one everybody has to convert once.
+ *
+ * These come from TIME_SLOTS in lib/class-sessions — the same table the
+ * generated timetable and the tutor's editor use. They were hardcoded here and
+ * had drifted out of step with it, so the signup form quoted students hours
+ * their class does not actually run.
  */
-const SESSION_SLOTS = [
-  { value: "morning", campus: "Morning — 9:00 to 11:00", online: "Morning — 9:00 to 11:00 WAT" },
-  { value: "afternoon", campus: "Afternoon — 13:00 to 15:00", online: "Afternoon — 13:00 to 15:00 WAT" },
-  { value: "evening", campus: "Evening — 17:00 to 19:00", online: "Evening — 17:00 to 19:00 WAT" },
-] as const;
+const SESSION_SLOTS = TIME_SLOTS.map((slot) => ({ value: slot, label: slotLabel(slot) }));
 
 export default function SignUpFormClient({ pageTitle, initialBranchName }: SignUpFormClientProps) {
   const [email, setEmail] = useState("");
@@ -54,6 +56,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [profession, setProfession] = useState("");
   const [batch, setBatch] = useState("");
   const [sessionSlot, setSessionSlot] = useState("morning");
+  /**
+   * physical | hybrid — how a CAMPUS student attends. The Online branch has no
+   * choice to make (it is online by definition), so this control only appears
+   * for a campus branch and the server ignores it for an online one.
+   */
+  const [deliveryMode, setDeliveryMode] = useState("physical");
+  /** group | private — a private student books a tutor rather than a seat. */
+  const [classType, setClassType] = useState("group");
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [city, setCity] = useState("");
@@ -102,7 +112,27 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         }
   )[step] as string;
   const isLastStep = step === stepCount;
-  const isDobValid = (value: string) => /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/.test(value.trim());
+  /**
+   * DOB is now a real date picker, so the value arriving here is always
+   * yyyy-mm-dd from the browser. The check is about plausibility rather than
+   * shape: a date in the future, or one implying a 4-year-old, is a typo.
+   */
+  const isDobValid = (value: string) => {
+    if (!value) return false;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return false;
+    const now = new Date();
+    const age = (now.getTime() - date.getTime()) / (365.25 * 24 * 3600 * 1000);
+    return age >= 10 && age <= 100;
+  };
+  // The office reads dd/mm/yyyy, and every record written before the picker
+  // existed is in that format, so that is still what gets stored.
+  const dobForRecord = (value: string) => {
+    if (!value) return "";
+    const [year, month, day] = value.split("-");
+    return year && month && day ? `${day}/${month}/${year}` : value;
+  };
+  const maxDob = new Date(Date.now() - 10 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const isAusbildungPathway = pathway === "Ausbildung (vocational training)";
 
   // The Nigerian-states dropdown only makes sense inside Nigeria. Online reaches
@@ -130,7 +160,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
       (isOnline
         ? "You are joining an online cohort — live classes over video, recorded every time."
         : `You are signing up for the ${selectedBranch.name} branch.`)
-    : "Pick a campus, or choose Online to study live over video from anywhere.";
+    : "Pick a campus — you can attend it in person or online — or choose Online only to study from anywhere.";
 
   useEffect(() => {
     async function loadBranches() {
@@ -230,7 +260,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
     }
 
     if (!dob.trim() || !isDobValid(dob)) {
-      setError("Date of birth must use dd/mm/yyyy format.");
+      setError("Please pick a valid date of birth.");
       return;
     }
 
@@ -262,11 +292,13 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         branchId,
         level,
         sessionSlot,
+        deliveryMode,
+        classType,
         pathway,
         batch,
         classApplied: level,
         gender,
-        dob,
+        dob: dobForRecord(dob),
         religion,
         profession,
         address,
@@ -407,7 +439,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                         one option that does carries it in its own label. */}
                     {branches.map((branch) => (
                       <option key={branch.id} value={branch.id}>
-                        {isOnlineBranch(branch) ? `${branch.name} (Study from Anywhere)` : branch.name}
+                        {/* The campuses need no explanation. The online
+                            branch is its OWN cohort with its own tutors —
+                            distinct from picking a campus and attending it
+                            over video, which is the hybrid option below. */}
+                        {isOnlineBranch(branch) ? `${branch.name} only — study from anywhere` : branch.name}
                       </option>
                     ))}
                   </select>
@@ -454,12 +490,101 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                   <p className="mt-2 text-xs text-[var(--muted)]">Choose the level that best matches your current language confidence. A1/A2 are for beginners, B1/B2 are for learners moving into stronger communication, and C1 is for professional learners.</p>
                 </div>
               </div>
-              <div className="grid gap-4 md:grid-cols-1">
+              {/* How you attend. Only a campus branch has a decision to make:
+                  the Online branch is online by definition, and the server
+                  forces it there regardless of what this form sends. */}
+              {selectedBranch && !isOnline ? (
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+                  <p className="text-sm font-semibold text-[var(--foreground)]">How will you attend?</p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {[
+                      {
+                        value: "physical",
+                        title: "On campus",
+                        blurb: `Attend your classes in person at the ${selectedBranch.name} branch.`,
+                      },
+                      {
+                        value: "hybrid",
+                        title: "Online / hybrid",
+                        blurb: "Attend on campus when you can, and join the same class live over video when you cannot.",
+                      },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setDeliveryMode(option.value)}
+                        className={`rounded-2xl border p-4 text-left transition ${
+                          deliveryMode === option.value
+                            ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                            : "border-[var(--border)] bg-white hover:border-[var(--accent)]"
+                        }`}
+                      >
+                        <p className="text-sm font-semibold text-[var(--foreground)]">{option.title}</p>
+                        <p className="mt-1 text-xs text-[var(--muted)]">{option.blurb}</p>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-xs text-[var(--muted)]">
+                    {deliveryMode === "hybrid"
+                      ? "You will have the live classroom in your portal as well as your campus timetable."
+                      : "Your portal will show your campus timetable. Choose online/hybrid if you also want to join live over video."}
+                  </p>
+                </div>
+              ) : null}
+
+              {/* Private tuition. A separate question from the pathway, because
+                  it changes the product rather than the destination: a private
+                  student books their tutor's whole session instead of a seat in
+                  it, and sits no group timetable at all. */}
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+                <p className="text-sm font-semibold text-[var(--foreground)]">Group class or private tuition?</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {[
+                    {
+                      value: "group",
+                      title: "Group class",
+                      blurb: "Learn with your cohort on the school timetable. This is what most students choose.",
+                    },
+                    {
+                      value: "private",
+                      title: "Private (one-to-one)",
+                      blurb: "Your own tutor, at times you agree between you. Priced higher than a group seat.",
+                    },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setClassType(option.value)}
+                      className={`rounded-2xl border p-4 text-left transition ${
+                        classType === option.value
+                          ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                          : "border-[var(--border)] bg-white hover:border-[var(--accent)]"
+                      }`}
+                    >
+                      <p className="text-sm font-semibold text-[var(--foreground)]">{option.title}</p>
+                      <p className="mt-1 text-xs text-[var(--muted)]">{option.blurb}</p>
+                    </button>
+                  ))}
+                </div>
+                {classType === "private" ? (
+                  <p className="mt-3 text-xs text-[var(--accent)]">
+                    The office will pair you with a tutor after you register, and you will be told who they are. Your
+                    calendar fills in once your first sessions are booked.
+                  </p>
+                ) : null}
+              </div>
+
+              {/* A private student agrees their own times with their tutor, so
+                  asking them to pick one of the house sittings would be asking
+                  a question their answer cannot affect. */}
+              <div className={`grid gap-4 md:grid-cols-1 ${classType === "private" ? "hidden" : ""}`}>
                 <div>
                   <label htmlFor="sessionSlot" className="block text-sm font-semibold text-[var(--muted)]">Which session suits you?</label>
                   <select id="sessionSlot" name="sessionSlot" value={sessionSlot} onChange={(e) => setSessionSlot(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
                     {SESSION_SLOTS.map((slot) => (
-                      <option key={slot.value} value={slot.value}>{isOnline ? slot.online : slot.campus}</option>
+                      <option key={slot.value} value={slot.value}>
+                        {isOnline ? `${slot.label} WAT` : slot.label}
+                      </option>
                     ))}
                   </select>
                   <p className="mt-2 text-xs text-[var(--muted)]">
@@ -596,8 +721,21 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <label htmlFor="dob" className="block text-sm font-semibold text-[var(--muted)]">Date of Birth</label>
-                  <input id="dob" name="dob" type="text" placeholder="dd/mm/yyyy" value={dob} onChange={(e) => setDob(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
-                  <p className="mt-2 text-xs text-[var(--muted)]">Enter a valid date in dd/mm/yyyy format.</p>
+                  {/* A real picker, not a text box. Typing dd/mm/yyyy by hand
+                      is the single most-failed field on any signup form —
+                      people write 1990-05-02, or 2/5/90, and get told off. */}
+                  <input
+                    id="dob"
+                    name="dob"
+                    type="date"
+                    max={maxDob}
+                    value={dob}
+                    onChange={(e) => setDob(e.target.value)}
+                    className="mt-1 w-full rounded-xl border px-3 py-2 bg-white"
+                  />
+                  {dob && !isDobValid(dob) ? (
+                    <p className="mt-2 text-xs text-rose-600">Please check this date.</p>
+                  ) : null}
                 </div>
                 <div>
                   <label htmlFor="gender" className="block text-sm font-semibold text-[var(--muted)]">Gender</label>
@@ -614,7 +752,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <input value={religion} onChange={(e) => setReligion(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
               </div>
               <div>
-                <label htmlFor="profession" className="block text-sm font-semibold text-[var(--muted)]">{isAusbildungPathway ? "Ausbildung focus" : "Profession or occupation"}</label>
+                <label htmlFor="profession" className="block text-sm font-semibold text-[var(--muted)]">{isAusbildungPathway ? "Ausbildung focus" : "What is your current profession?"}</label>
                 <select id="profession" name="profession" value={profession} onChange={(e) => setProfession(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white">
                   <option value="">{isAusbildungPathway ? "Select Ausbildung focus" : "Select your profession"}</option>
                   {isAusbildungPathway ? (
@@ -642,6 +780,12 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                   <p className="mt-2 text-sm text-[var(--muted)]">Branch: {selectedBranch?.name || "Not selected"}{isOnline ? " (live over video)" : ""}</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">Pathway: {pathway}</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">Level: {level}</p>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    Attending: {isOnline ? "Online only" : deliveryMode === "hybrid" ? "Online / hybrid" : "On campus"}
+                  </p>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    Class: {classType === "private" ? "Private (one-to-one)" : "Group class"}
+                  </p>
                 </div>
                 <div className="rounded-3xl border border-[var(--border)] bg-white p-4">
                   <h3 className="text-sm font-semibold text-[var(--foreground)]">Profile</h3>

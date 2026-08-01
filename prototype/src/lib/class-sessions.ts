@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { generatePersonalizedSchedule, type ScheduleMonth } from "@/lib/schedule";
+import { SLOT_DEFAULTS, normalizeSlot, type TimeSlot } from "@/lib/class-times";
 
 /**
  * Merges the generated timetable skeleton with the ClassSession overrides a
@@ -12,20 +13,10 @@ import { generatePersonalizedSchedule, type ScheduleMonth } from "@/lib/schedule
  * complete rather than empty.
  */
 
-export const TIME_SLOTS = ["morning", "afternoon", "evening"] as const;
-export type TimeSlot = (typeof TIME_SLOTS)[number];
-
-/** House hours for each slot, used when a tutor hasn't set explicit times. */
-export const SLOT_DEFAULTS: Record<TimeSlot, { startTime: string; endTime: string; label: string }> = {
-  morning: { startTime: "09:00", endTime: "11:00", label: "Morning" },
-  afternoon: { startTime: "13:00", endTime: "15:00", label: "Afternoon" },
-  evening: { startTime: "17:00", endTime: "19:00", label: "Evening" },
-};
-
-export function normalizeSlot(value: unknown): TimeSlot {
-  const v = String(value ?? "").toLowerCase();
-  return (TIME_SLOTS as readonly string[]).includes(v) ? (v as TimeSlot) : "morning";
-}
+// The hours themselves live in lib/class-times, which has no prisma import so
+// the signup form can read the same table this does. Re-exported here because
+// a dozen server routes already import them from this module.
+export { TIME_SLOTS, SLOT_DEFAULTS, normalizeSlot, type TimeSlot } from "@/lib/class-times";
 
 /**
  * The join key between the skeleton and its overrides: midnight UTC on the

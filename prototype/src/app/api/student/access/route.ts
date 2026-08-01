@@ -25,6 +25,9 @@ export async function GET() {
     select: {
       level: true,
       classType: true,
+      // Drives which pages exist for this student at all — the live classroom
+      // is meaningless to somebody who attends on campus.
+      deliveryMode: true,
       // The fee depends on the branch as well as the level — leaving it out
       // would compute an Abuja student's gate at the cheaper Lagos price.
       branch: { select: { name: true } },
@@ -47,6 +50,7 @@ export async function GET() {
       totalPaid,
       tuitionFee: tuitionFeeFor(feeLookup),
       requiredDeposit: requiredDepositFor(feeLookup),
+      deliveryMode: student.deliveryMode,
     }),
   );
 }

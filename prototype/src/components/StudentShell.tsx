@@ -6,7 +6,7 @@ import CommunityLauncher from "@/components/CommunityLauncher";
 import BrandLogo from "@/components/BrandLogo";
 import NotificationCenter from "@/components/NotificationCenter";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
-import { isTuitionGatedRoute } from "@/lib/access";
+import { canAttendLive, isLiveOnlyRoute, isTuitionGatedRoute } from "@/lib/access";
 import { useStudentAccess } from "@/lib/useStudentAccess";
 import {
   AssignmentIcon,
@@ -67,6 +67,17 @@ export default function StudentShell({ children }: { children: React.ReactNode }
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { access, hasAccess } = useStudentAccess();
 
+  /**
+   * The live classroom belongs to students who attend over video.
+   *
+   * A campus student who taps "Live class" finds an empty room and concludes
+   * the portal is broken, so the entry is not there for them at all. While the
+   * access state is still in flight `access` is null and this reads false —
+   * the entry appears once we know, rather than flashing at everybody first.
+   */
+  const showsLiveClass = canAttendLive(access?.deliveryMode);
+  const visibleNavItems = navItems.filter((item) => showsLiveClass || !isLiveOnlyRoute(item.href));
+
   // Navigating is the end of the drawer's job.
   useEffect(() => {
     setDrawerOpen(false);
@@ -105,6 +116,10 @@ export default function StudentShell({ children }: { children: React.ReactNode }
   const lockedAreaLabel =
     navItems.find((item) => pathname === item.href || pathname.startsWith(item.href + "/"))?.label ??
     "This page";
+
+  // Hiding the sidebar entry is cosmetic — /live is still reachable by typing
+  // it. The route is refused here too, and again on the server.
+  const wrongDeliveryMode = access !== null && !showsLiveClass && isLiveOnlyRoute(pathname);
 
   return (
     // Was a hardcoded blue gradient, which is why the portal stayed daylight-
@@ -158,7 +173,7 @@ export default function StudentShell({ children }: { children: React.ReactNode }
 
         <nav className="flex-1 overflow-y-auto p-3">
           <div className="space-y-1">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
               // Locked items stay clickable on purpose: tapping Classes and
               // meeting the padlock explains the paywall far better than a
@@ -219,7 +234,28 @@ export default function StudentShell({ children }: { children: React.ReactNode }
           <NotificationCenter />
         </header>
 
-        {routeLocked ? <PaymentLockScreen areaLabel={lockedAreaLabel} access={access} /> : children}
+        {wrongDeliveryMode ? (
+          <div className="mx-auto max-w-xl p-8">
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+              <h1 className="text-2xl font-bold text-[var(--foreground)]">This is an online-class page</h1>
+              <p className="mt-3 text-sm text-[var(--muted)]">
+                You are registered for classes on campus, so there is no video room for your class — your lessons
+                happen in person. If you would rather attend online as well, the branch office can move you to the
+                online/hybrid option.
+              </p>
+              <button
+                onClick={() => router.push("/calendar")}
+                className="mt-6 rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white"
+              >
+                See my class timetable
+              </button>
+            </div>
+          </div>
+        ) : routeLocked ? (
+          <PaymentLockScreen areaLabel={lockedAreaLabel} access={access} />
+        ) : (
+          children
+        )}
       </main>
 
       {/* Lives in the shell, not on one page, so the community (and its unread

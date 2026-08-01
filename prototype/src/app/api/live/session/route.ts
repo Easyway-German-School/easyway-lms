@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { AccessToken } from "livekit-server-sdk";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { deriveStudentAccess } from "@/lib/access";
+import { canAttendLive, deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { isOnlineBranch, initialVideoQualityFor, readOnlineProfile } from "@/lib/online-branch";
 import {
@@ -57,6 +57,29 @@ export async function GET(request: Request) {
     // paywall on the page is the polite version of this; this is the one that
     // matters, because a token is a key to the room.
     if (student && !lecturer) {
+      /**
+       * A campus student has no video room, and a token is a key to one.
+       *
+       * Hiding the tab in the sidebar is presentation; this is the check that
+       * decides. A student registered for physical classes who reaches this
+       * endpoint — by typing the URL, or on a stale page — gets no token,
+       * because the room they would join belongs to a different cohort.
+       *
+       * `private` is the exception: a one-to-one student takes their class
+       * wherever their tutor books it, including over video.
+       */
+      if (!canAttendLive(student.deliveryMode) && student.classType !== "private" && !privateClassId) {
+        return NextResponse.json(
+          {
+            error: "Not an online class",
+            deliveryMode: student.deliveryMode,
+            message:
+              "You are registered for classes on campus, so there is no live room for your class. Ask the branch office if you would like to move to online/hybrid.",
+          },
+          { status: 403 },
+        );
+      }
+
       const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
       const totalPaid = student.payments
         .filter((payment) => payment.status === "completed")
