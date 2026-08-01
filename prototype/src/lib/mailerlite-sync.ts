@@ -67,6 +67,7 @@ export async function syncStudentsToMailerLite(options?: {
     select: {
       id: true,
       level: true,
+      classType: true,
       studentCode: true,
       branch: { select: { name: true } },
       user: { select: { name: true, email: true } },
@@ -86,7 +87,7 @@ export async function syncStudentsToMailerLite(options?: {
       continue;
     }
 
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
     const { fullPaid } = derivePaymentStatus({

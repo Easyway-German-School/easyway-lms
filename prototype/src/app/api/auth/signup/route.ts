@@ -4,6 +4,7 @@ import bcryptjs from "bcryptjs";
 import { assignStudentCode } from "@/lib/student-code";
 import { notifyAdminsOfRegistration } from "@/lib/admin-alerts";
 import { linkLeadOnSignup } from "@/lib/leads";
+import { isOnlineBranch } from "@/lib/online-branch";
 
 async function branchTableExists() {
   try {
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
       batch,
       sessionSlot,
       classType,
+      deliveryMode,
       // Admission extra fields
       gender,
       dob,
@@ -95,10 +97,23 @@ export async function POST(request: NextRequest) {
     const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
     const normalizedName = typeof name === "string" ? name.trim() : "";
     const normalizedPassword = typeof password === "string" ? password : "";
-    const normalizedRole = role === "lecturer" ? "LECTURER" : "STUDENT";
+    // Public signup creates students and nothing else.
+    //
+    // This route used to mint a LECTURER on request. The admin console showed
+    // an "invite code" that was supposed to guard it, but nothing here ever
+    // read that code — anyone who could POST this endpoint could give
+    // themselves a tutor account, and with it every student roster in the
+    // school. Tutors are created by an admin at /admin/lecturer-invite.
+    if (role === "lecturer") {
+      return NextResponse.json(
+        { error: "Tutor accounts are created by the school office. Please contact your branch." },
+        { status: 403, headers: buildCorsHeaders(request) },
+      );
+    }
+    const normalizedRole = "STUDENT" as const;
     const normalizedBranchId = typeof branchId === "string" && branchId.trim() ? branchId : null;
     const normalizedLevel = typeof level === "string" && level.trim() ? level : "A1";
-    const normalizedPathway = typeof pathway === "string" && pathway.trim() ? pathway : "Goethe exam mastery";
+    const normalizedPathway = typeof pathway === "string" && pathway.trim() ? pathway : "Language training";
     const normalizedBatch = typeof batch === "string" && batch.trim() ? batch : "";
     const normalizedSessionSlot = ["morning", "afternoon", "evening"].includes(
       String(sessionSlot ?? "").toLowerCase(),
@@ -106,6 +121,28 @@ export async function POST(request: NextRequest) {
       ? String(sessionSlot).toLowerCase()
       : "morning";
     const normalizedClassType = String(classType ?? "").toLowerCase() === "private" ? "private" : "group";
+
+    /**
+     * How this student attends: physical | hybrid | online.
+     *
+     * Decided against the BRANCH, not taken on trust from the form. The live
+     * classroom, the recordings and the video library all hang off this, so a
+     * crafted request must not be able to hand a campus student the online
+     * product — or, just as bad, strand an online student without the one way
+     * they have of attending at all.
+     */
+    const branchRow = normalizedBranchId
+      ? await prisma.branch.findUnique({
+          where: { id: normalizedBranchId },
+          select: { name: true, mode: true },
+        })
+      : null;
+    const requestedDeliveryMode = String(deliveryMode ?? "").toLowerCase();
+    const normalizedDeliveryMode = isOnlineBranch(branchRow)
+      ? "online"
+      : requestedDeliveryMode === "hybrid"
+        ? "hybrid"
+        : "physical";
 
     // Only present on an online signup. Left undefined for a campus student so
     // their admission record does not gain an empty object.
@@ -228,25 +265,19 @@ export async function POST(request: NextRequest) {
           name: normalizedName,
           password: hashedPassword,
           role: normalizedRole,
-          student: normalizedRole === "STUDENT" ? {
+          student: {
             create: ({
               level: normalizedLevel,
               pathway: normalizedPathway,
               sessionSlot: normalizedSessionSlot,
               classType: normalizedClassType,
-              outcome: "Goethe C1 readiness + German work placement support",
+              deliveryMode: normalizedDeliveryMode,
+              outcome: "C1 readiness + German work placement support",
               branchId: hasBranchTable ? normalizedBranchId : null,
               // store admission payload as JSON
               admission: normalizedAdmission,
             } as any),
-          } : undefined,
-          lecturer: normalizedRole === "LECTURER" ? {
-            create: {
-              specialization: typeof body?.specialization === "string" ? body.specialization.trim() : null,
-              bio: typeof body?.bio === "string" ? body.bio.trim() : null,
-              phone: typeof body?.phone === "string" ? body.phone.trim() : null,
-            },
-          } : undefined,
+          },
         },
       });
     } catch (prismaError: any) {
@@ -284,12 +315,7 @@ export async function POST(request: NextRequest) {
 
       // The office needs to know a registration landed. Queued, not sent
       // inline, so a slow mail provider cannot delay the signup response.
-      const branchName = normalizedBranchId
-        ? (await prisma.branch.findUnique({
-            where: { id: normalizedBranchId },
-            select: { name: true },
-          }))?.name ?? null
-        : null;
+      const branchName = branchRow?.name ?? null;
 
       await notifyAdminsOfRegistration({
         studentName: normalizedName,

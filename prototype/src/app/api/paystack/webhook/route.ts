@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { classifyPaymentTransaction } from "@/lib/payment";
 import { settleExamFee } from "@/lib/exam-payments";
+import { enrollIfPathwayExists } from "@/lib/paystack-verify";
 import { KIND, notifyInBackground } from "@/lib/notify";
 
 // Paystack signs every webhook with HMAC SHA512 of the raw body, keyed by the
@@ -104,8 +105,12 @@ export async function POST(request: Request) {
     });
     const effectivePaymentType = paymentClassification.paymentType;
 
-    if (!rawStudentId || !pathwayId) {
-      console.error("Paystack webhook missing student or pathway metadata", { metadata });
+    // Only the student is required. Dropping the payment because no pathway id
+    // came back would now discard most of them — `initialize` sends an empty
+    // pathwayId whenever the chosen programme has no Pathway row, rather than
+    // the display name it used to fall back to. The money still has to land.
+    if (!rawStudentId) {
+      console.error("Paystack webhook missing student metadata", { metadata });
       return NextResponse.json({ received: true });
     }
 
@@ -118,26 +123,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ received: true });
     }
 
-    await prisma.enrollment.upsert({
-      where: {
-        studentId_pathwayId: {
-          studentId: student.id,
-          pathwayId,
-        },
-      },
-      update: {
-        stripeSessionId: data.reference || null,
-        status: "active",
-      },
-      create: {
-        studentId: student.id,
-        pathwayId,
-        stripeSessionId: data.reference || null,
-        status: "active",
-      },
-    });
-
     const paymentReference = String(data.reference || "");
+
+    // Enrolment deliberately does NOT run before this point. It used to: an
+    // unguarded upsert sat directly above, and a pathway id with no matching
+    // row threw a foreign-key error that 500'd the handler before the payment
+    // was written — money taken, nothing in the ledger. Recording the money now
+    // comes first, and enrolment happens afterwards through a helper that
+    // cannot throw. See `enrollIfPathwayExists`.
+
     const existingPayment = paymentReference
       ? await prisma.payment.findFirst({ where: { stripeSessionId: paymentReference } })
       : null;
@@ -163,6 +157,8 @@ export async function POST(request: Request) {
         where: { id: existingPayment.invoiceId ?? "" },
         data: { status: paymentClassification.invoiceStatus },
       }).catch(() => null);
+
+      await enrollIfPathwayExists({ studentId: student.id, pathwayId, reference: paymentReference });
 
       return NextResponse.json({ received: true });
     }
@@ -196,6 +192,8 @@ export async function POST(request: Request) {
         paymentIntentId: paymentReference,
       },
     });
+
+    await enrollIfPathwayExists({ studentId: student.id, pathwayId, reference: paymentReference });
 
     const notificationMessage =
       effectivePaymentType === "registration"

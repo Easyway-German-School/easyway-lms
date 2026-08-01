@@ -4,7 +4,14 @@ import bcryptjs from "bcryptjs";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { LEVELS } from "@/lib/levels";
-import { cohortRoomName, roomDisplayName } from "@/lib/live-classroom";
+import { cohortRoomName } from "@/lib/live-classroom";
+import {
+  describeAssignment,
+  isAssigned,
+  matchesBatch,
+  readAssignment,
+  studentWhereForAssignment,
+} from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
 
@@ -43,34 +50,35 @@ export async function GET() {
   if (auth.error) return auth.error;
   const { lecturer } = auth;
 
-  // The cohort is branch + level + slot. That is how the school actually
-  // groups people, and it is what the timetable, the community space and the
-  // live room are all keyed on — deriving the roster the same way keeps them
-  // agreeing with each other.
-  const roster = lecturer.branchId && lecturer.level
-    ? await prisma.student.findMany({
-        where: {
-          branchId: lecturer.branchId,
-          level: lecturer.level,
-          ...(lecturer.sessionSlot ? { sessionSlot: lecturer.sessionSlot } : {}),
-          status: "active",
-        },
-        select: {
-          id: true,
-          studentCode: true,
-          level: true,
-          sessionSlot: true,
-          user: { select: { name: true, email: true } },
-        },
-        orderBy: { createdAt: "asc" },
-      })
-    : [];
-
   const branches = await prisma.branch.findMany({
     where: { status: "active" },
     orderBy: { name: "asc" },
     select: { id: true, name: true, mode: true },
   });
+
+  // The cohort comes from the ADMIN-SET assignment, read through the same
+  // helper the roster and attendance use, so all three agree about who is in
+  // this tutor's class.
+  const assignment = readAssignment(lecturer);
+  const where = studentWhereForAssignment(assignment);
+
+  const roster = where
+    ? (
+        await prisma.student.findMany({
+          where: { ...(where as Record<string, unknown>), status: "active" } as any,
+          select: {
+            id: true,
+            studentCode: true,
+            level: true,
+            sessionSlot: true,
+            admission: true,
+            branch: { select: { name: true } },
+            user: { select: { name: true, email: true } },
+          },
+          orderBy: { createdAt: "asc" },
+        })
+      ).filter((student) => matchesBatch(assignment, student.admission))
+    : [];
 
   return NextResponse.json({
     profile: {
@@ -86,13 +94,18 @@ export async function GET() {
       level: lecturer.level,
       sessionSlot: lecturer.sessionSlot,
     },
+    // What the admin assigned. Sent so the tutor portal can SHOW it; there is
+    // no longer any route by which the tutor can change it.
+    assignment,
     cohort: {
-      assigned: Boolean(lecturer.branchId && lecturer.level),
-      label: roomDisplayName({
-        branchName: lecturer.branch?.name,
-        level: lecturer.level,
-        sessionSlot: lecturer.sessionSlot,
-      }),
+      assigned: isAssigned(assignment),
+      label: describeAssignment(assignment, new Map(branches.map((branch) => [branch.id, branch.name]))),
+      /**
+       * The live room is still keyed on the tutor's PRIMARY class — one tutor
+       * cannot be in two rooms at once, so a multi-branch assignment still has
+       * to pick one, and the primary mirrors the first branch and level the
+       * admin selected.
+       */
       roomName: cohortRoomName({
         branchName: lecturer.branch?.name,
         level: lecturer.level,
@@ -106,6 +119,7 @@ export async function GET() {
       email: student.user.email,
       studentCode: student.studentCode,
       level: student.level,
+      branchName: student.branch?.name ?? null,
       sessionSlot: student.sessionSlot,
     })),
     branches,
@@ -157,14 +171,28 @@ export async function PUT(request: NextRequest) {
       await prisma.user.update({ where: { id: lecturer.userId }, data: { name } });
     }
 
-    const level = typeof body.level === "string" ? body.level.trim().toUpperCase() : undefined;
-    const sessionSlot = typeof body.sessionSlot === "string" ? body.sessionSlot.trim().toLowerCase() : undefined;
-
-    if (level && !(LEVELS as readonly string[]).includes(level)) {
-      return NextResponse.json({ error: `Level must be one of ${LEVELS.join(", ")}` }, { status: 400 });
-    }
-    if (sessionSlot && !(SLOTS as readonly string[]).includes(sessionSlot)) {
-      return NextResponse.json({ error: `Session must be one of ${SLOTS.join(", ")}` }, { status: 400 });
+    /**
+     * A tutor cannot assign themselves.
+     *
+     * Branch, level, sitting, class type and batch all belong to the admin —
+     * they decide who teaches which class, and a tutor who could move
+     * themselves could pull another tutor's whole roster, attendance history
+     * and gradebook onto their own dashboard by changing one dropdown.
+     *
+     * Rejected loudly rather than ignored silently, so a client still sending
+     * the old fields finds out instead of appearing to save.
+     */
+    const assignmentKeys = ["branchId", "branchIds", "level", "levels", "sessionSlot", "sessionSlots", "classTypes", "batches"];
+    const attempted = assignmentKeys.filter((key) => body[key] !== undefined);
+    if (attempted.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Your branch, level and class sessions are set by the school office. Contact them to change which class you take.",
+          rejectedFields: attempted,
+        },
+        { status: 403 },
+      );
     }
 
     await prisma.lecturer.update({
@@ -173,9 +201,9 @@ export async function PUT(request: NextRequest) {
         phone: typeof body.phone === "string" ? body.phone.trim() || null : undefined,
         bio: typeof body.bio === "string" ? body.bio.trim() || null : undefined,
         specialization: typeof body.specialization === "string" ? body.specialization.trim() || null : undefined,
-        branchId: typeof body.branchId === "string" ? body.branchId || null : undefined,
-        level: level ?? undefined,
-        sessionSlot: sessionSlot ?? undefined,
+        // A tutor's own photo is theirs to change — it says nothing about
+        // which class they teach.
+        photoUrl: typeof body.photoUrl === "string" ? body.photoUrl.trim() || null : undefined,
       },
     });
 

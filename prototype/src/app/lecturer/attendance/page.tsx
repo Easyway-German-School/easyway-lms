@@ -60,10 +60,12 @@ export default function LecturerAttendance() {
       
       const data = await res.json();
       setSessions(data.sessions);
-      if (data.sessions.length > 0) {
-        setSelectedCourse(data.sessions[0].courseId);
-        fetchStudents(data.sessions[0].courseId, selectedDate);
-      }
+      // The register no longer depends on a Class row existing. A tutor with
+      // no course template still has students — they are found from the
+      // branch + level the office assigned — so this loads either way.
+      const firstCourseId = data.sessions?.[0]?.courseId ?? '';
+      setSelectedCourse(firstCourseId);
+      fetchStudents(firstCourseId, selectedDate);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -73,7 +75,9 @@ export default function LecturerAttendance() {
 
   async function fetchStudents(courseId: string, date: string) {
     try {
-      const res = await fetch(`/api/lecturer/attendance/students?courseId=${courseId}&date=${date}`);
+      const query = new URLSearchParams({ date });
+      if (courseId) query.set('courseId', courseId);
+      const res = await fetch(`/api/lecturer/attendance/students?${query.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch students');
       const data = await res.json();
       setStudents(data);
@@ -181,6 +185,7 @@ export default function LecturerAttendance() {
                   }}
                   className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
                 >
+                  <option value="">My whole class</option>
                   {sessions.map((s) => (
                     <option key={s.courseId} value={s.courseId}>
                       {s.courseName}
@@ -239,8 +244,11 @@ export default function LecturerAttendance() {
           {students.length === 0 ? (
             <div className="text-center py-12">
               <UsersIcon className="mx-auto mb-2 h-9 w-9 text-[var(--muted)]" />
-              <p className="text-[var(--foreground)] font-semibold">No students enrolled</p>
-              <p className="text-[var(--muted)] text-sm mt-1">Enroll students to your class to mark attendance</p>
+              <p className="text-[var(--foreground)] font-semibold">Nobody to mark yet</p>
+              <p className="text-[var(--muted)] text-sm mt-1">
+                Students appear here automatically once they register for the branch and level the office assigned you.
+                If this stays empty, ask the office to check your assignment.
+              </p>
             </div>
           ) : (
             <>

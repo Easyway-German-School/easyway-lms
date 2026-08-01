@@ -114,7 +114,7 @@ export async function findPromotionCandidates(opts: {
       .reduce((sum, p) => sum + p.amount, 0);
 
     // Abuja charges more for the same level, so the branch has to go in.
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const { status } = derivePaymentStatus({
       totalPaid,

@@ -150,6 +150,7 @@ export async function issueCertificateForStudent(
     select: {
       id: true,
       level: true,
+      classType: true,
       studentCode: true,
       admission: true,
       user: { select: { name: true } },
@@ -169,7 +170,7 @@ export async function issueCertificateForStudent(
       : {};
   const batch = typeof admission.batch === "string" && admission.batch.trim() ? admission.batch : null;
 
-  const feeLookup = { level, branch: student.branch?.name ?? null };
+  const feeLookup = { level, branch: student.branch?.name ?? null, classType: student.classType };
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
 
   const eligibility = certificateEligibility({

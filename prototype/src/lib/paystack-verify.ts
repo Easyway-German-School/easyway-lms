@@ -137,34 +137,65 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     },
   });
 
-  if (pathwayId) {
+  await enrollIfPathwayExists({ studentId, pathwayId, reference });
+}
+
+/**
+ * Enrol the student on the pathway they paid for — if that pathway is real.
+ *
+ * Deliberately last, deliberately guarded, and deliberately unable to throw.
+ * The money and the invoice are what the school and the student actually need
+ * recorded; an enrolment row is a convenience. This used to be an unguarded
+ * `upsert`, so a metadata pathway id with no matching row raised a foreign-key
+ * error AFTER the payment had been written, the caller's catch turned it into
+ * "Unable to verify payment", and a student who had just been charged was told
+ * their payment failed.
+ *
+ * Note that portal access does not depend on this: `deriveStudentAccess` reads
+ * completed payments, not enrolments.
+ */
+export async function enrollIfPathwayExists({
+  studentId,
+  pathwayId,
+  reference,
+}: {
+  studentId: string;
+  pathwayId: string;
+  reference: string;
+}): Promise<void> {
+  if (!pathwayId) return;
+
+  try {
+    const pathway = await prisma.pathway.findUnique({ where: { id: pathwayId }, select: { id: true } });
+    if (!pathway) {
+      console.warn("Paystack: skipping enrolment, no such pathway", { pathwayId, reference });
+      return;
+    }
+
     await prisma.enrollment.upsert({
-      where: {
-        studentId_pathwayId: {
-          studentId,
-          pathwayId,
-        },
-      },
-      update: {
-        status: "active",
-        stripeSessionId: reference,
-      },
-      create: {
-        studentId,
-        pathwayId,
-        status: "active",
-        stripeSessionId: reference,
-      },
+      where: { studentId_pathwayId: { studentId, pathwayId } },
+      update: { status: "active", stripeSessionId: reference },
+      create: { studentId, pathwayId, status: "active", stripeSessionId: reference },
     });
+  } catch (error) {
+    console.error("Paystack: enrolment failed, payment is still recorded", { pathwayId, reference, error });
   }
 }
 
 export type PaystackVerifyResult = {
+  /** We reached Paystack and it answered. Says nothing about the transaction. */
   success: boolean;
   status?: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data?: any;
   error?: string;
+  /**
+   * Paystack confirmed the charge but we could not write it down. The student's
+   * money is gone and the office has to reconcile by hand, so this is kept
+   * separate from a verification failure rather than collapsed into one
+   * "something went wrong" — they need completely different responses.
+   */
+  persistFailed?: boolean;
 };
 
 /**
@@ -182,6 +213,8 @@ export async function verifyPaystackTransaction(reference: string): Promise<Pays
     return { success: false, status: 500, error: "Paystack secret not configured" };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let data: any;
   try {
     const response = await fetch(
       `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
@@ -195,7 +228,7 @@ export async function verifyPaystackTransaction(reference: string): Promise<Pays
       },
     );
 
-    const data = await safeJson(response);
+    data = await safeJson(response);
     if (!response.ok) {
       return {
         success: false,
@@ -204,14 +237,29 @@ export async function verifyPaystackTransaction(reference: string): Promise<Pays
         data,
       };
     }
-
-    if (data?.data?.status === "success") {
-      await persistPaystackTransaction(data.data);
-    }
-
-    return { success: true, status: 200, data };
   } catch (error) {
-    console.error("Paystack verify error:", error);
-    return { success: false, status: 500, error: "Unable to verify payment" };
+    console.error("Paystack verify: could not reach Paystack", { reference, error });
+    return { success: false, status: 502, error: "Could not reach Paystack to verify this payment" };
   }
+
+  // Persisting is a SEPARATE failure domain from verifying. Folding it into the
+  // block above is what produced the original bug: a foreign-key error while
+  // recording the payment surfaced to the student as "Unable to verify
+  // payment", about a charge Paystack had already confirmed.
+  if (data?.data?.status === "success") {
+    try {
+      await persistPaystackTransaction(data.data);
+    } catch (error) {
+      console.error("Paystack verify: charge confirmed but could not be recorded", { reference, error });
+      return {
+        success: true,
+        status: 200,
+        data,
+        persistFailed: true,
+        error: "Your payment went through, but we could not update your account automatically.",
+      };
+    }
+  }
+
+  return { success: true, status: 200, data };
 }

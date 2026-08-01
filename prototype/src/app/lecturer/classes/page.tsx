@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import LecturerShell from "@/components/LecturerShell";
 import BrandLoader from "@/components/BrandLoader";
+import { CalendarIcon, UsersIcon } from "@/components/icons";
 
 type Profile = {
   name: string | null;
@@ -17,6 +18,14 @@ type Profile = {
   sessionSlot: string | null;
 };
 
+type Assignment = {
+  branchIds: string[];
+  levels: string[];
+  sessionSlots: string[];
+  classTypes: string[];
+  batches: string[];
+};
+
 type Cohort = { assigned: boolean; label: string; roomName: string; studentCount: number };
 
 type RosterEntry = {
@@ -25,38 +34,37 @@ type RosterEntry = {
   email: string;
   studentCode: string | null;
   level: string;
+  branchName: string | null;
   sessionSlot: string;
 };
 
 type Payload = {
   profile: Profile;
+  assignment: Assignment;
   cohort: Cohort;
   roster: RosterEntry[];
   branches: Array<{ id: string; name: string; mode: string }>;
-  levels: readonly string[];
-  slots: readonly string[];
 };
 
 /**
- * Customise my classes.
+ * My classes.
  *
- * This page was in the sidebar from the start but never existed, so every
- * tutor who clicked it got a 404. What it needed to be is the answer to "which
- * class am I actually teaching?" — because that single answer drives the
- * tutor's timetable, their roster, their live room and who their announcements
- * reach. Nothing else in the portal worked properly until it could be set.
+ * This page used to be where a tutor CHOSE their branch, level and sitting.
+ * That was the wrong shape: the school needs one reliable answer to "who
+ * teaches this class", and a tutor who could move themselves could pull
+ * another tutor's entire roster, attendance history and gradebook onto their
+ * own dashboard by changing a dropdown.
+ *
+ * So the assignment is now read-only here and set by the office. What a tutor
+ * genuinely controls — the day-to-day shape of their own class: its topics,
+ * its times, its materials, and postponing it — lives on the timetable, which
+ * this page points at.
  */
 export default function LecturerClassesPage() {
   const router = useRouter();
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
-
-  const [branchId, setBranchId] = useState("");
-  const [level, setLevel] = useState("");
-  const [sessionSlot, setSessionSlot] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -71,9 +79,6 @@ export default function LecturerClassesPage() {
         return;
       }
       setData(payload);
-      setBranchId(payload.profile.branchId || "");
-      setLevel(payload.profile.level || "");
-      setSessionSlot(payload.profile.sessionSlot || "");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load your classes");
     } finally {
@@ -85,27 +90,6 @@ export default function LecturerClassesPage() {
     load();
   }, [load]);
 
-  async function save() {
-    setSaving(true);
-    setError("");
-    setSaved(false);
-    try {
-      const res = await fetch("/api/lecturer/profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ branchId, level, sessionSlot }),
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(payload.error || "Could not save your class");
-      setSaved(true);
-      await load();
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save your class");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   if (loading) {
     return (
       <LecturerShell>
@@ -114,106 +98,91 @@ export default function LecturerClassesPage() {
     );
   }
 
-  const dirty =
-    branchId !== (data?.profile.branchId || "") ||
-    level !== (data?.profile.level || "") ||
-    sessionSlot !== (data?.profile.sessionSlot || "");
+  const branchNames = new Map((data?.branches ?? []).map((branch) => [branch.id, branch.name]));
+  const assignment = data?.assignment;
+
+  const facts: Array<[string, string]> = [
+    [
+      "Branch",
+      assignment?.branchIds.length
+        ? assignment.branchIds.map((id) => branchNames.get(id) ?? "Unknown").join(", ")
+        : "Not assigned",
+    ],
+    ["Level", assignment?.levels.length ? assignment.levels.join(", ") : "Not assigned"],
+    [
+      "Session",
+      assignment?.sessionSlots.length
+        ? assignment.sessionSlots.map((slot) => slot.charAt(0).toUpperCase() + slot.slice(1)).join(", ")
+        : "All sittings",
+    ],
+    ["Class type", assignment?.classTypes.length ? assignment.classTypes.join(", ") : "All types"],
+    ["Batch", assignment?.batches.length ? assignment.batches.join(", ") : "All batches"],
+  ];
 
   return (
     <LecturerShell>
       <div className="h-screen overflow-y-auto">
         <div className="border-b border-[var(--border)] bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6">
           <div className="mx-auto max-w-5xl">
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">Customise my classes</h1>
+            <h1 className="text-3xl font-bold text-[var(--foreground)]">My classes</h1>
             <p className="mt-2 text-[var(--muted)]">
-              Set the cohort you teach. Your timetable, roster, live room and announcements all follow from it.
+              The classes the school has assigned you, and everyone registered for them.
             </p>
           </div>
         </div>
 
         <div className="mx-auto max-w-5xl space-y-6 p-6">
-          {error ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div> : null}
-          {saved ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-              Saved. Your class is now {data?.cohort.label}.
-            </div>
+          {error ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>
           ) : null}
 
           {!data?.cohort.assigned ? (
             <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
               <p className="font-semibold">You have not been assigned a class yet</p>
               <p className="mt-1">
-                Pick your branch, level and session below. Until you do, your timetable and roster have nothing to show.
+                The school office sets which branch, level and sitting you take. Until they do, your timetable and
+                roster have nothing to show. Ask them to add you and everything below fills in on its own.
               </p>
             </div>
           ) : null}
 
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
-            <h2 className="text-lg font-bold text-[var(--foreground)]">The class you teach</h2>
+            <h2 className="text-lg font-bold text-[var(--foreground)]">What you teach</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              A class is a branch, a level and a sitting. The same level runs morning, afternoon and evening, and those are
-              different classes with different students.
+              Set by the school office. If any of this is wrong, contact them — it decides who appears on your roster,
+              whose attendance you take and whose work you grade.
             </p>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
-              <div>
-                <label htmlFor="branch" className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Branch</label>
-                <select
-                  id="branch"
-                  value={branchId}
-                  onChange={(event) => setBranchId(event.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-[var(--foreground)]"
+            <dl className="mt-5 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+              {facts.map(([label, value]) => (
+                <div
+                  key={label}
+                  className="flex justify-between gap-3 border-b border-[var(--border)]/50 pb-2 last:border-0"
                 >
-                  <option value="">Select a branch…</option>
-                  {data?.branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name}{branch.mode === "online" ? " — live over video" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</dt>
+                  <dd className="text-right text-sm font-medium capitalize text-[var(--foreground)]">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
 
-              <div>
-                <label htmlFor="level" className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Level</label>
-                <select
-                  id="level"
-                  value={level}
-                  onChange={(event) => setLevel(event.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-[var(--foreground)]"
-                >
-                  <option value="">Select a level…</option>
-                  {data?.levels.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="slot" className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Session</label>
-                <select
-                  id="slot"
-                  value={sessionSlot}
-                  onChange={(event) => setSessionSlot(event.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-[var(--foreground)]"
-                >
-                  <option value="">Select a session…</option>
-                  {data?.slots.map((slot) => (
-                    <option key={slot} value={slot}>{slot.charAt(0).toUpperCase() + slot.slice(1)}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              <button
-                onClick={save}
-                disabled={saving || !dirty}
-                className="rounded-lg bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {saving ? "Saving…" : "Save my class"}
-              </button>
-              {dirty ? <span className="text-xs text-[var(--muted)]">You have unsaved changes.</span> : null}
-            </div>
+          {/* The thing a tutor actually controls. */}
+          <div className="rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-6">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-[var(--foreground)]">
+              <CalendarIcon className="h-5 w-5 text-[var(--accent)]" />
+              What you can change
+            </h2>
+            <p className="mt-1 text-sm text-[var(--foreground-soft)]">
+              Your students&apos; calendar is yours to run. Set each day&apos;s topic and times, attach the material
+              they need to bring, or postpone a class to a new date — they see it immediately and get a notification
+              for anything that changes their week.
+            </p>
+            <Link
+              href="/lecturer/timetable"
+              className="mt-4 inline-flex rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white"
+            >
+              Open my timetable
+            </Link>
           </div>
 
           {data?.cohort.assigned ? (
@@ -232,7 +201,10 @@ export default function LecturerClassesPage() {
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
                 <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Live room</p>
                 <p className="mt-2 truncate text-sm font-medium text-[var(--foreground)]">{data.cohort.roomName}</p>
-                <Link href="/live" className="mt-3 inline-flex rounded-full bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-white">
+                <Link
+                  href="/live"
+                  className="mt-3 inline-flex rounded-full bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-white"
+                >
                   Open the classroom
                 </Link>
               </div>
@@ -241,12 +213,21 @@ export default function LecturerClassesPage() {
 
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-bold text-[var(--foreground)]">Your roster</h2>
+              <h2 className="flex items-center gap-2 text-lg font-bold text-[var(--foreground)]">
+                <UsersIcon className="h-5 w-5 text-[var(--accent)]" />
+                Your roster
+              </h2>
               <div className="flex gap-2">
-                <Link href="/lecturer/attendance" className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs font-semibold text-[var(--foreground)]">
+                <Link
+                  href="/lecturer/attendance"
+                  className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs font-semibold text-[var(--foreground)]"
+                >
                   Take attendance
                 </Link>
-                <Link href="/lecturer/messages" className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white">
+                <Link
+                  href="/lecturer/messages"
+                  className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white"
+                >
                   Message the class
                 </Link>
               </div>
@@ -254,7 +235,8 @@ export default function LecturerClassesPage() {
 
             {(data?.roster.length ?? 0) === 0 ? (
               <p className="mt-4 text-sm text-[var(--muted)]">
-                No students in this class yet. They appear here as soon as they enrol at this branch and level.
+                No students in this class yet. They appear here as soon as they enrol at a branch and level you are
+                assigned to — nobody has to add them.
               </p>
             ) : (
               <div className="mt-4 overflow-x-auto">
@@ -263,7 +245,8 @@ export default function LecturerClassesPage() {
                     <tr>
                       <th className="py-2 pr-4">Student</th>
                       <th className="py-2 pr-4">Student code</th>
-                      <th className="py-2 pr-4">Email</th>
+                      <th className="py-2 pr-4">Branch</th>
+                      <th className="py-2 pr-4">Level</th>
                       <th className="py-2">Session</th>
                     </tr>
                   </thead>
@@ -272,7 +255,8 @@ export default function LecturerClassesPage() {
                       <tr key={student.id} className="border-b border-[var(--border)]/60 last:border-0">
                         <td className="py-2.5 pr-4 font-medium text-[var(--foreground)]">{student.name}</td>
                         <td className="py-2.5 pr-4 text-[var(--muted)]">{student.studentCode || "—"}</td>
-                        <td className="py-2.5 pr-4 text-[var(--muted)]">{student.email}</td>
+                        <td className="py-2.5 pr-4 text-[var(--muted)]">{student.branchName || "—"}</td>
+                        <td className="py-2.5 pr-4 text-[var(--muted)]">{student.level}</td>
                         <td className="py-2.5 capitalize text-[var(--muted)]">{student.sessionSlot}</td>
                       </tr>
                     ))}

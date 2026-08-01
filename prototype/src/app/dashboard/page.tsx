@@ -141,7 +141,7 @@ function DashboardContent() {
           const paymentsData = await paymentsResponse.json();
           const completed = (paymentsData.payments || []).filter((payment: any) => payment.status === "completed");
           const totalPaid = completed.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
-          const feeLookup = { level: data.level, branch: data.branchName ?? null };
+          const feeLookup = { level: data.level, branch: data.branchName ?? null, classType: data.classType ?? null };
           const tuitionFee = tuitionFeeFor(feeLookup);
           const requiredDeposit = requiredDepositFor(feeLookup);
           setPaymentUnlock({ requiredDeposit, totalPaid, tuitionFee });
@@ -244,13 +244,22 @@ function DashboardContent() {
         credentials: "include",
       }, "paystack-verify");
 
-      if (verifyResponse.ok) {
+      // `ok` only means Paystack answered — a pending bank transfer answers
+      // too. Clearing the stored reference on that would abandon a payment
+      // that had not settled yet, and nothing would ever check it again.
+      const verifyData = await verifyResponse.json().catch(() => null);
+
+      if (verifyResponse.ok && verifyData?.paid) {
         window.localStorage.removeItem("pendingPaystackReference");
         window.localStorage.removeItem("pendingPaystackAmount");
         window.localStorage.removeItem("pendingPaystackPathwayName");
         setPendingPayment(null);
       } else {
-        console.warn("Paystack verification response not OK for pending reference", { pendingReference, status: verifyResponse.status });
+        console.warn("Pending Paystack reference has not cleared yet", {
+          pendingReference,
+          status: verifyResponse.status,
+          transactionStatus: verifyData?.transactionStatus,
+        });
       }
     } catch (error) {
       console.error("Unable to verify pending Paystack payment", error);

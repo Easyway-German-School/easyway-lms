@@ -74,6 +74,7 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     select: {
       id: true,
       level: true,
+      classType: true,
       createdAt: true,
       branch: { select: { name: true } },
       user: { select: { id: true, name: true } },
@@ -84,7 +85,7 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
   const run: WarningRun = { checked: students.length, atRisk: 0, created: [], skipped: 0 };
 
   for (const student of students) {
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const requiredDeposit = requiredDepositFor(feeLookup);
     const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);

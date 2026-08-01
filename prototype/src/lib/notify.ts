@@ -68,7 +68,20 @@ export type NotifyTarget =
    * Every student matching. Both fields optional — omitting them both reaches
    * every active student, which is what a school-wide announcement wants.
    */
-  | { students: { branchId?: string | null; level?: string | null; tutorId?: string | null } }
+  | {
+      students: {
+        branchId?: string | null;
+        level?: string | null;
+        tutorId?: string | null;
+        /**
+         * Which sitting. A branch runs the same level morning, afternoon and
+         * evening as three separate classes, so a message about one of them
+         * must not reach the other two — postponing the morning class and
+         * buzzing the evening students trains everybody to ignore the bell.
+         */
+        sessionSlot?: string | null;
+      };
+    }
   /**
    * Everyone holding a role. For admins, `capability` narrows it to the ones
    * cleared for that area, so the bursar is not woken for a community report.
@@ -125,6 +138,7 @@ async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
         ...(to.students.branchId ? { branchId: to.students.branchId } : {}),
         ...(to.students.level ? { level: to.students.level } : {}),
         ...(to.students.tutorId ? { tutorId: to.students.tutorId } : {}),
+        ...(to.students.sessionSlot ? { sessionSlot: to.students.sessionSlot } : {}),
       },
       select: { userId: true },
     });

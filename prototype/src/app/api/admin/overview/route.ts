@@ -114,7 +114,7 @@ export async function GET() {
   const byBranch: Record<string, { name: string; students: number; collected: number; expected: number }> = {};
 
   for (const student of students) {
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const fee = tuitionFeeFor(feeLookup);
     const deposit = requiredDepositFor(feeLookup);
     const paid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);

@@ -24,6 +24,7 @@ export async function GET() {
     where: { userId: session.user.id as string },
     select: {
       level: true,
+      classType: true,
       // The fee depends on the branch as well as the level — leaving it out
       // would compute an Abuja student's gate at the cheaper Lagos price.
       branch: { select: { name: true } },
@@ -39,7 +40,7 @@ export async function GET() {
   }
 
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
-  const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
 
   return NextResponse.json(
     deriveStudentAccess({

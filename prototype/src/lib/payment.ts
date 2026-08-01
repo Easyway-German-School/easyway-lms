@@ -73,6 +73,22 @@ const FEE_TABLE: Record<FeeTier, Record<string, number>> = {
 export const ONLINE_PRICES_ARE_PLACEHOLDER = true;
 
 /**
+ * PRIVATE (one-to-one) TUITION — PLACEHOLDER MULTIPLIER.
+ *
+ * A private student takes a tutor's whole session rather than a seat in it, so
+ * the fee is a multiple of the group price at the same branch and level rather
+ * than its own table — one number to change when a group price moves, instead
+ * of six per branch tier that quietly drift apart.
+ *
+ * 2× is a placeholder, NOT a decision. Nobody has signed off on it. Change the
+ * constant here and every quote in the app follows.
+ */
+export const PRIVATE_CLASS_MULTIPLIER = 2;
+
+/** True while private tuition is still carrying the placeholder multiplier. */
+export const PRIVATE_PRICES_ARE_PLACEHOLDER = true;
+
+/**
  * Levels a student may buy through the portal. C1 and C2 are quoted by the
  * branch office for now, so they are priced in FEE_TABLE (the paywall still
  * needs a number for a C1 student who was enrolled by hand) but kept out of
@@ -107,11 +123,21 @@ export type FeeLookup = {
   level?: string | null;
   /** Branch name. Pass `null` explicitly when the caller truly has no branch. */
   branch?: string | null;
+  /**
+   * group | private. Optional, and omitting it means group — so every call
+   * site written before private tuition existed keeps quoting what it did.
+   */
+  classType?: string | null;
 };
 
-export function tuitionFeeFor({ level, branch }: FeeLookup): number {
+export function isPrivateClassType(classType?: string | null): boolean {
+  return String(classType ?? "").trim().toLowerCase() === "private";
+}
+
+export function tuitionFeeFor({ level, branch, classType }: FeeLookup): number {
   const tier = FEE_TABLE[feeTierForBranch(branch)];
-  return tier[normaliseLevel(level)] ?? tier.A1;
+  const base = tier[normaliseLevel(level)] ?? tier.A1;
+  return isPrivateClassType(classType) ? base * PRIVATE_CLASS_MULTIPLIER : base;
 }
 
 export function requiredDepositFor(lookup: FeeLookup): number {
@@ -119,15 +145,19 @@ export function requiredDepositFor(lookup: FeeLookup): number {
 }
 
 /** Every level and its price at one branch — for checkout and admin price lists. */
-export function priceListForBranch(branchName?: string | null) {
+export function priceListForBranch(branchName?: string | null, classType?: string | null) {
   const tier = feeTierForBranch(branchName);
-  return Object.entries(FEE_TABLE[tier]).map(([level, fee]) => ({
-    level,
-    tuitionFee: fee,
-    requiredDeposit: Math.round(fee * DEPOSIT_RATE),
-    sellable: isLevelSellable(level),
-    tier,
-  }));
+  const multiplier = isPrivateClassType(classType) ? PRIVATE_CLASS_MULTIPLIER : 1;
+  return Object.entries(FEE_TABLE[tier]).map(([level, groupFee]) => {
+    const fee = groupFee * multiplier;
+    return {
+      level,
+      tuitionFee: fee,
+      requiredDeposit: Math.round(fee * DEPOSIT_RATE),
+      sellable: isLevelSellable(level),
+      tier,
+    };
+  });
 }
 
 export function derivePaymentStatus({

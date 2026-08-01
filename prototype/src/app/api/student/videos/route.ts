@@ -32,7 +32,7 @@ export async function GET() {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const totalPaid = student.payments
       .filter((payment) => payment.status === "completed")
       .reduce((sum, payment) => sum + payment.amount, 0);

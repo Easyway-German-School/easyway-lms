@@ -90,6 +90,20 @@ model Student {
    * comes from PrivateClass rows instead.
    */
   classType     String @default("group")
+  /**
+   * physical | hybrid | online — how this student attends.
+   *
+   *   physical  campus only. No live-class tab: there is no video lesson to
+   *             join, and showing them one they can never use is the fastest
+   *             way to make the portal look broken.
+   *   hybrid    registered at a campus but may join that same branch's class
+   *             over video. Gets both the campus features and the live room.
+   *   online    the Online branch. Video only, no campus.
+   *
+   * Defaulted to physical so every student who registered before this existed
+   * keeps the portal they already had.
+   */
+  deliveryMode  String @default("physical")
   pathway       String @default("Goethe exam mastery")
   examReadiness Int    @default(0)
   outcome       String @default("Goethe C1 readiness + German work placement support")
@@ -689,13 +703,36 @@ model Lecturer {
   bio            String?
   phone          String?
 
+  photoUrl String?
+
   /**
-   * Which class a tutor takes: branch + level + session.
+   * The tutor's PRIMARY class: branch + level + session. Kept because a large
+   * amount of existing code — the live room name, the community space, the
+   * timetable editor's opening state — needs one concrete answer to "which
+   * class is this?". Always mirrors the first entry of the arrays below, so
+   * these three never disagree with the assignment.
    */
   branchId    String?
   branch      Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
   level       String?
   sessionSlot String?
+
+  /**
+   * The full assignment, set by an ADMIN and only by an admin. One tutor can
+   * teach at several branches, several levels, several sittings and several
+   * batches, so each of these is a list rather than a column.
+   *
+   * Stored as JSON string arrays rather than join tables: they are always read
+   * as a whole, never queried across rows, and every one of them is a short
+   * closed vocabulary. Null means "never assigned" and falls back to the three
+   * primary columns above, so every tutor created before this existed keeps
+   * exactly the class they had.
+   */
+  branchIds    Json? // Branch ids
+  levels       Json? // ["A1", "A2"]
+  sessionSlots Json? // ["morning", "evening"]
+  classTypes   Json? // ["physical", "online", "private"]
+  batches      Json? // ["January", … "December"]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

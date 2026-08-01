@@ -214,7 +214,7 @@ export default function LecturerPage() {
               </Link>
               {(session as any)?.user?.role === "ADMIN" ? (
                 <Link href="/admin/lecturer-invite" className="inline-flex items-center justify-center rounded-lg border border-[var(--accent)] bg-[var(--accent)]/10 px-5 py-3 text-sm font-semibold text-[var(--accent)] hover:bg-[var(--accent)]/20">
-                  <ShieldIcon className="mr-2 h-4 w-4" /> Invite Lecturers
+                  <ShieldIcon className="mr-2 h-4 w-4" /> Manage tutors
                 </Link>
               ) : null}
             </div>

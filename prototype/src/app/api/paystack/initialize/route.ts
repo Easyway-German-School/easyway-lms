@@ -37,6 +37,7 @@ export async function POST(request: Request) {
       select: {
         id: true,
         level: true,
+        classType: true,
         branch: { select: { name: true } },
         payments: { where: { status: "completed" }, select: { amount: true } },
       },
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No student record to bill" }, { status: 404 });
     }
 
-    const feeLookup = { level: studentRecord.level, branch: studentRecord.branch?.name ?? null };
+    const feeLookup = { level: studentRecord.level, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType };
     const normalizedTuitionFee = tuitionFeeFor(feeLookup);
     const requiredDeposit = requiredDepositFor(feeLookup);
     const alreadyPaid = studentRecord.payments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -92,7 +93,14 @@ export async function POST(request: Request) {
       },
     });
 
-    const resolvedPathwayId = resolvedPathway?.id ?? null;
+    // `pathwayId` in the metadata must be a REAL Pathway row id or nothing at
+    // all. It used to fall back to whatever the client sent — and the client
+    // sends a display name ("Nursing career path"), three of which have no
+    // Pathway row. That name then travelled to Paystack and came back on the
+    // callback, where enrolling the student blew up on the foreign key and took
+    // the whole verification down with it: money charged, "Unable to verify
+    // payment" on screen. The enrolment is optional; a wrong id is not.
+    const resolvedPathwayId = resolvedPathway?.id ?? "";
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
     const callbackUrlBase = process.env.PAYSTACK_CALLBACK_URL || `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/enrollment/success`;
     const callbackUrl = `${callbackUrlBase}${callbackUrlBase.includes("?") ? "&" : "?"}source=paystack`;
@@ -140,8 +148,10 @@ export async function POST(request: Request) {
         metadata: {
           userId: session.user.id,
           studentId,
-          pathwayId: resolvedPathwayId || pathwayId || "",
-          pathwayName: pathwayName || "",
+          pathwayId: resolvedPathwayId,
+          // The name is free text and only ever used for wording the receipt,
+          // so it keeps the client's value even when no row matched.
+          pathwayName: pathwayName || String(pathwayId || ""),
           totalAmount: String(normalizedTuitionFee),
           depositAmount: String(amountToCharge),
           tuitionFee: String(normalizedTuitionFee),

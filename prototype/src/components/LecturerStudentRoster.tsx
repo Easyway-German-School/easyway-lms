@@ -151,9 +151,12 @@ export default function LecturerStudentRoster({ compact = false }: { compact?: b
     return (
       <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
         <p className="font-semibold">You have no class assigned yet</p>
-        <p className="mt-1">Set your branch, level and session and your students appear here automatically.</p>
+        <p className="mt-1">
+          The school office sets which branch and level you take. Once they do, your students appear here
+          automatically — you never add them yourself.
+        </p>
         <Link href="/lecturer/classes" className="mt-3 inline-flex rounded-full bg-[var(--accent)] px-5 py-2 text-xs font-semibold text-white">
-          Customise my classes
+          See my classes
         </Link>
       </div>
     );

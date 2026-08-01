@@ -57,7 +57,7 @@ export async function GET(request: Request) {
     // paywall on the page is the polite version of this; this is the one that
     // matters, because a token is a key to the room.
     if (student && !lecturer) {
-      const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+      const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
       const totalPaid = student.payments
         .filter((payment) => payment.status === "completed")
         .reduce((sum, payment) => sum + payment.amount, 0);

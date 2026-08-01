@@ -80,7 +80,7 @@ export async function GET() {
       take: 8,
     });
 
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null };
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const registrationFee = REGISTRATION_FEE;
     const requiredDeposit = requiredDepositFor(feeLookup);
@@ -106,6 +106,8 @@ export async function GET() {
       studentCode: student.studentCode,
       level: student.level,
       branchName: student.branch?.name ?? null,
+      classType: student.classType,
+      deliveryMode: student.deliveryMode,
       pathway: student.pathway,
       nextLive: student.nextLive,
       examReadiness: student.examReadiness,
