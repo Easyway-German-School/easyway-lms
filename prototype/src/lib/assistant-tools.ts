@@ -96,7 +96,14 @@ export type ToolOutcome = {
 /* Filters                                                                    */
 /* -------------------------------------------------------------------------- */
 
-type Filters = {
+/**
+ * Exported so the ACTION tools resolve their cohort through exactly this code
+ * path — see assistant-actions.ts. If "Lagos B1 unpaid" means one set of people
+ * when the assistant lists them and a slightly different set when it messages
+ * them, the confirm card is describing a group nobody reviewed. One filter
+ * implementation, used by both halves.
+ */
+export type Filters = {
   branch?: string;
   level?: string;
   status?: string;
@@ -111,7 +118,7 @@ type Filters = {
   registeredWithinDays?: number;
 };
 
-function readFilters(args: Record<string, unknown>): Filters {
+export function readFilters(args: Record<string, unknown>): Filters {
   const str = (key: string) => {
     const value = args[key];
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -188,7 +195,7 @@ function whereFor(filters: Filters, branchIdByName: Map<string, string>) {
 /* Loading                                                                    */
 /* -------------------------------------------------------------------------- */
 
-async function loadStudents(filters: Filters, admin: AdminContext): Promise<StudentRow[]> {
+export async function loadStudents(filters: Filters, admin: AdminContext): Promise<StudentRow[]> {
   const canSeeMoney = admin.can("payments");
   const canSeeAttendance = admin.can("attendance");
 
@@ -282,7 +289,11 @@ async function loadStudents(filters: Filters, admin: AdminContext): Promise<Stud
  * more overdue for a phone call than somebody last seen four weeks ago, not
  * less.
  */
-function applyDerivedFilters(rows: StudentRow[], filters: Filters, admin: AdminContext): StudentRow[] {
+export function applyDerivedFilters(
+  rows: StudentRow[],
+  filters: Filters,
+  admin: AdminContext,
+): StudentRow[] {
   let result = rows;
 
   if (filters.paymentState) {
@@ -304,7 +315,7 @@ function applyDerivedFilters(rows: StudentRow[], filters: Filters, admin: AdminC
 /* The tools                                                                  */
 /* -------------------------------------------------------------------------- */
 
-const FILTER_PROPERTIES = {
+export const FILTER_PROPERTIES = {
   branch: { type: "string", description: "Campus name, e.g. Lagos or Abuja. Use list_options to see valid names." },
   level: { type: "string", enum: [...LEVELS], description: "CEFR level: A1, A2, B1, B2, C1 or C2." },
   status: { type: "string", enum: ["active", "inactive", "graduated", "withdrawn"], description: "Enrolment status." },
@@ -728,7 +739,7 @@ function summarise(rows: StudentRow[]): Record<string, unknown> | undefined {
 }
 
 /** A human label for the cohort a filter set describes. */
-function describeFilters(filters: Filters): string {
+export function describeFilters(filters: Filters): string {
   const parts: string[] = [];
   if (filters.branch) parts.push(filters.branch);
   if (filters.level) parts.push(filters.level);

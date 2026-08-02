@@ -3,15 +3,17 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveAdmin } from "@/lib/admin-roles";
-import {
-  ollamaChatStream,
-  ollamaStatus,
-  ollamaSupportsTools,
-  ollamaWarm,
-  toolArguments,
-  type ChatMessage,
-} from "@/lib/ollama";
+import { ollamaWarm } from "@/lib/ollama";
 import { runTool, toolSpecsFor, type ToolOutcome } from "@/lib/assistant-tools";
+import { actionSpecsFor, isActionName } from "@/lib/assistant-actions";
+import { createPlan, type StoredPlan } from "@/lib/action-plans";
+import {
+  brainProvider,
+  brainStatus,
+  brainTurn,
+  canBrainAct,
+  type BrainMessage,
+} from "@/lib/assistant-brain";
 import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 export const dynamic = "force-dynamic";
@@ -229,7 +231,7 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
   return briefing;
 }
 
-const SYSTEM_PROMPT = `You are the assistant for the office of Easyway German Language School in Nigeria.
+const LOOKUP_RULES = `You are the assistant for the office of Easyway German Language School in Nigeria.
 
 You have TOOLS that query the school's live database. Use them.
 
@@ -258,14 +260,50 @@ Rules, in order of importance:
    and nothing else — no preamble, no "here is a draft".`;
 
 /**
+ * The half of the prompt that only exists when the brain can act.
+ *
+ * Kept separate rather than written into one long string because a local model
+ * that will never be offered these tools should not be told about them: every
+ * token of instruction for a capability it does not have is a token spent
+ * making it worse at the ones it does.
+ */
+const ACTION_RULES = `
+YOU CAN ALSO DO THINGS, NOT JUST LOOK THEM UP.
+
+The action tools — message_students, send_fee_reminders, mark_attendance,
+promote_students, postpone_class, invite_leads — do NOT happen when you call
+them. Calling one prepares a plan and shows the admin a card with the exact
+number of people it affects and a Confirm button. You are drafting; they decide.
+
+10. Be willing. If the admin asks you to chase the unpaid B1 students, propose
+    the action — do not answer with instructions for how they could do it
+    themselves. Doing the work is the job.
+11. Propose ONE action per answer. If they asked for two things, do the first
+    and say what the second would be.
+12. Write the copy yourself. When an action needs a message, compose it in the
+    school's voice — warm, plain, direct — rather than asking the admin what to
+    write. They will read it on the card before anything is sent.
+13. After proposing, say in ONE sentence what you are about to do and what it
+    affects. Never say it is done, sent, marked or moved — it has not happened.
+    Do not mention buttons, cards or confirming; the admin can see those.
+14. If an action tool returns an error, it is telling you how to fix the
+    proposal. Fix it and propose again, or ask the admin the one thing you are
+    missing.
+15. Anything irreversible or wide — messaging the whole school, promoting a
+    cohort — deserves one plain sentence about what it covers. Not a warning
+    paragraph.`;
+
+/**
  * How many times the model may ask for tools before it must answer.
  *
- * Three is enough for list_options → find_students → answer, which is the
- * longest legitimate chain. Without a ceiling a confused model will call the
- * same tool forever, and on a local CPU each round is twenty seconds of a
- * front-desk worker watching a spinner.
+ * Four rather than three now that actions exist: list_options → find_students →
+ * propose an action → answer is a legitimate chain, and cutting it at three
+ * would strand the useful case where the model checks who it is about to
+ * message before offering to message them. Without any ceiling a confused model
+ * calls the same tool forever, and on a local CPU each round is twenty seconds
+ * of a front-desk worker watching a spinner.
  */
-const MAX_TOOL_ROUNDS = 3;
+const MAX_TOOL_ROUNDS = 4;
 
 async function requireAssistantAdmin() {
   const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
@@ -281,21 +319,20 @@ export async function GET() {
   if (auth.error) return auth.error;
 
   const [status, briefing] = await Promise.all([
-    ollamaStatus(),
+    brainStatus(),
     cachedBriefing(auth.admin as unknown as AdminLike),
   ]);
 
-  // Only worth asking when the model is actually there; /api/show on a missing
-  // model is a wasted round trip on every page load. Cached after the first.
-  const supportsTools = status.modelReady ? await ollamaSupportsTools() : false;
-
   // Opening the page is the signal that a question is coming. Start loading the
-  // model now, so the several-second load overlaps with the admin reading the
-  // briefing instead of landing on top of their first question.
-  if (status.modelReady) ollamaWarm();
+  // local model now, so the several-second load overlaps with the admin reading
+  // the briefing instead of landing on top of their first question. Pointless
+  // on the hosted brain, which has nothing to warm.
+  if (status.provider === "ollama" && status.ready) ollamaWarm();
+
+  const canAct = canBrainAct();
 
   return NextResponse.json({
-    status: { ...status, supportsTools },
+    status,
     briefing,
     capabilities: auth.admin.capabilities,
     // Named so the page can show what this admin's assistant may look up —
@@ -305,6 +342,15 @@ export async function GET() {
       name: spec.function.name,
       description: spec.function.description,
     })),
+    // Separate from `tools` on purpose: "what it can find out" and "what it can
+    // do on your behalf" are different questions, and an admin deciding whether
+    // to trust this thing is asking the second one.
+    actions: canAct
+      ? actionSpecsFor(auth.admin).map((spec) => ({
+          name: spec.function.name,
+          description: spec.function.description,
+        }))
+      : [],
   });
 }
 
@@ -314,16 +360,21 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const question = typeof body.question === "string" ? body.question.trim() : "";
-  const history: ChatMessage[] = Array.isArray(body.history)
+  type HistoryTurn = { role: "user" | "assistant"; content: string };
+  const history: HistoryTurn[] = Array.isArray(body.history)
     ? (body.history as unknown[])
-        .filter(
-          (m): m is ChatMessage =>
-            typeof m === "object" &&
-            m !== null &&
-            (("role" in m && (m as ChatMessage).role === "user") ||
-              (m as ChatMessage).role === "assistant") &&
-            typeof (m as ChatMessage).content === "string",
-        )
+        .filter((m): m is HistoryTurn => {
+          if (typeof m !== "object" || m === null) return false;
+          const turn = m as Partial<HistoryTurn>;
+          return (
+            (turn.role === "user" || turn.role === "assistant") &&
+            typeof turn.content === "string" &&
+            // An empty assistant turn is what a failed question leaves behind,
+            // and replaying one to Anthropic is a hard validation error rather
+            // than a bad answer — the API rejects a message with no content.
+            turn.content.trim().length > 0
+          );
+        })
         // Enough for the model to follow a thread, short enough that a long
         // session does not slow every reply to a crawl on a local model.
         .slice(-6)
@@ -356,8 +407,10 @@ export async function POST(request: Request) {
    */
   const { generatedAt: _ignored, ...briefingForModel } = briefing;
 
-  const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+  const canAct = canBrainAct();
+
+  const messages: BrainMessage[] = [
+    { role: "system", content: canAct ? `${LOOKUP_RULES}\n${ACTION_RULES}` : LOOKUP_RULES },
     {
       role: "system",
       content:
@@ -368,8 +421,14 @@ export async function POST(request: Request) {
     { role: "user", content: question },
   ];
 
-  const supportsTools = await ollamaSupportsTools();
-  const specs = toolSpecsFor(auth.admin);
+  const status = await brainStatus();
+  const readSpecs = toolSpecsFor(auth.admin);
+  /**
+   * Read tools always; action tools only when the brain is one that can be
+   * trusted to fill in their arguments. See canBrainAct() — this is the line
+   * that keeps a 3B local model out of the write path.
+   */
+  const specs = canAct ? [...readSpecs, ...actionSpecsFor(auth.admin)] : readSpecs;
 
   /**
    * From here the answer is STREAMED, as newline-delimited JSON frames.
@@ -412,11 +471,12 @@ export async function POST(request: Request) {
 
       try {
         /**
-         * No tool support (falcon does not have it) — a briefing-only reply is
-         * worth more than an error, and the page says which mode it got.
+         * The brain is not there at all — a local model that is not running, or
+         * one that cannot call tools. A briefing-only reply is worth more than
+         * an error, and the page says which mode it got.
          */
-        if (!supportsTools || specs.length === 0) {
-          const result = await ollamaChatStream(messages, (text) => send({ type: "delta", text }));
+        if (!status.ready || specs.length === 0) {
+          const result = await brainTurn(messages, (text) => send({ type: "delta", text }));
           if (!result.ok) {
             send({ type: "error", error: result.reason });
             return finish();
@@ -428,25 +488,36 @@ export async function POST(request: Request) {
             briefing,
             toolsUsed: [],
             cohort: null,
-            degraded: !supportsTools
-              ? `${result.model} cannot call tools, so this answer comes from the summary only. Switch OLLAMA_MODEL to qwen2.5:3b for live lookups.`
-              : undefined,
+            proposal: null,
+            degraded:
+              status.reason ??
+              "This answer comes from the summary only — no live lookups were available.",
           });
           return finish();
         }
 
         const toolsUsed: Array<{ name: string; arguments: Record<string, unknown> }> = [];
-        /** The last cohort any tool produced — what the table below shows. */
+        /** The last cohort any lookup produced — what the table below shows. */
         let cohort: ToolOutcome["cohort"] | null = null;
+        /**
+         * The action awaiting a human, if the model proposed one.
+         *
+         * Singular, and the last one wins. A model that proposes two actions in
+         * one answer has produced a screen with two Confirm buttons and no
+         * ordering between them, which is how somebody sends the second thing
+         * while meaning to send the first. The prompt asks for one; this makes
+         * it true regardless.
+         */
+        let proposal: StoredPlan | null = null;
 
         /**
-         * The tool loop, unchanged in substance.
+         * The tool loop.
          *
          * The model is asked, it may reply with tool calls instead of an
-         * answer, the SERVER runs them, the results go back as `tool`
-         * messages, and it is asked again. The model never touches the
-         * database — it names a tool and fills in arguments, and `runTool`
-         * re-checks the caller's capability before doing anything, because a
+         * answer, the SERVER runs them, the results go back as tool messages,
+         * and it is asked again. The model never touches the database — it
+         * names a tool and fills in arguments, and both runTool and createPlan
+         * re-check the caller's capability before doing anything, because a
          * model that hallucinates `money_summary` at a Secretary has to be
          * refused rather than obeyed.
          *
@@ -456,54 +527,94 @@ export async function POST(request: Request) {
          * arrive.
          */
         for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-          const turn = await ollamaChatStream(messages, (text) => send({ type: "delta", text }), {
-            tools: specs,
-          });
+          const turn = await brainTurn(messages, (text) => send({ type: "delta", text }), specs);
           if (!turn.ok) {
             send({ type: "error", error: turn.reason });
             return finish();
           }
 
           if (turn.toolCalls.length === 0) {
-            send({ type: "done", answer: turn.text, model: turn.model, briefing, toolsUsed, cohort });
+            send({
+              type: "done",
+              answer: turn.text,
+              model: turn.model,
+              briefing,
+              toolsUsed,
+              cohort,
+              proposal,
+            });
             return finish();
           }
 
           // Record the assistant's own turn before the results, or the model
           // loses track of what it asked for and asks again.
-          messages.push({ role: "assistant", content: turn.text, tool_calls: turn.toolCalls });
+          messages.push({ role: "assistant", content: turn.text, toolCalls: turn.toolCalls });
 
           for (const call of turn.toolCalls) {
-            const name = call.function?.name ?? "";
-            const args = toolArguments(call);
-            toolsUsed.push({ name, arguments: args });
-            // Told to the page as it happens, so the lookup stretch reads as
+            toolsUsed.push({ name: call.name, arguments: call.arguments });
+            // Told to the page as it happens, so the silent stretch reads as
             // "checking the register" rather than as the app having frozen.
-            send({ type: "tool", name, arguments: args });
+            send({ type: "tool", name: call.name, arguments: call.arguments });
 
-            const outcome = await runTool(name, args, auth.admin);
+            /**
+             * The fork that matters. A lookup runs; an action is only WRITTEN
+             * DOWN. `createPlan` never touches the thing being planned — it
+             * resolves who would be affected, saves the frozen payload, and
+             * hands back a preview for a person to read.
+             */
+            if (isActionName(call.name)) {
+              const outcome = await createPlan(call.name, call.arguments, auth.admin);
+              if (outcome.ok) {
+                proposal = outcome.stored;
+                send({ type: "proposal", proposal: outcome.stored });
+              }
+              messages.push({
+                role: "tool",
+                toolCallId: call.id,
+                name: call.name,
+                content: JSON.stringify(outcome.forModel),
+              });
+              continue;
+            }
+
+            const outcome = await runTool(call.name, call.arguments, auth.admin);
             if (outcome.cohort) cohort = outcome.cohort;
 
             messages.push({
               role: "tool",
-              tool_name: name,
+              toolCallId: call.id,
+              name: call.name,
               content: JSON.stringify(outcome.forModel),
             });
           }
         }
 
-        // Out of rounds. Rather than return nothing, ask once more with the
-        // tool results already in hand and no tools offered, which forces an
-        // answer.
-        const final = await ollamaChatStream(
+        /**
+         * Out of rounds. Rather than return nothing, ask once more with the
+         * tool results already in hand, which forces an answer.
+         *
+         * Two details that look like they could be simplified and cannot:
+         *
+         *   The nudge is a USER turn, not a system one. System messages become
+         *   Anthropic's top-level `system` parameter, so writing it as a system
+         *   message would move it to the FRONT of the prompt — the opposite of
+         *   "answer now" — and change the cached prefix on the way past.
+         *
+         *   The tools are still passed. A conversation whose history contains
+         *   tool_use blocks is not valid without the tool definitions that
+         *   explain them, so dropping them here trades a missing answer for a
+         *   400. Any tool call this round asks for is simply ignored instead.
+         */
+        const final = await brainTurn(
           [
             ...messages,
             {
-              role: "system",
+              role: "user",
               content: "Answer now using the tool results above. Do not ask for more tools.",
             },
           ],
           (text) => send({ type: "delta", text }),
+          specs,
         );
 
         if (!final.ok) {
@@ -511,7 +622,15 @@ export async function POST(request: Request) {
           return finish();
         }
 
-        send({ type: "done", answer: final.text, model: final.model, briefing, toolsUsed, cohort });
+        send({
+          type: "done",
+          answer: final.text,
+          model: final.model,
+          briefing,
+          toolsUsed,
+          cohort,
+          proposal,
+        });
         return finish();
       } catch (error) {
         console.error("Assistant stream failed", error);

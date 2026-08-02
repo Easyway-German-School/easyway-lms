@@ -5,27 +5,34 @@ export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import CohortResult, { type Cohort } from "@/components/admin/CohortResult";
+import ActionProposal, { type Proposal } from "@/components/admin/ActionProposal";
 import {
   AlertIcon,
   ArrowRightIcon,
   PulseIcon,
   RobotIcon,
+  ToolboxIcon,
   UsersIcon,
   WalletIcon,
 } from "@/components/icons";
 
 /**
- * The office's assistant, running on Ollama on the office's own machine.
+ * The office's assistant.
  *
- * Two things share this page, and the order matters. The BRIEFING at the top
- * is computed from the database and is always right; the CHAT below it is a
- * language model reading that briefing out loud. When Ollama is not installed
- * the briefing is still there and still useful — the page degrades to a live
- * dashboard rather than to an error.
+ * Three things share this page, and the order is the argument. The BRIEFING at
+ * the top is computed from the database and is always right. The CHAT below it
+ * is a language model reading that briefing out loud. The PROPOSAL under that
+ * is the model asking permission to do something — never the model reporting
+ * that it has.
  *
- * The model is never asked to count. Everything it is allowed to state is in
- * the briefing the route hands it, because a fee chased from a hallucinated
- * balance is worse than no assistant at all.
+ * When no brain is available at all the briefing is still there and still
+ * useful: the page degrades to a live dashboard rather than to an error.
+ *
+ * The model is never asked to count, and it is never allowed to act. Everything
+ * it may state comes from a tool result, and everything it may DO arrives here
+ * as a card with a number on it and a button underneath — because a fee chased
+ * from a hallucinated balance is bad, and two hundred fees chased from one is
+ * worse.
  */
 
 type Briefing = {
@@ -52,11 +59,11 @@ type Briefing = {
 };
 
 type Status = {
-  reachable: boolean;
-  url: string;
+  provider: "claude" | "ollama";
   model: string;
-  installedModels: string[];
-  modelReady: boolean;
+  ready: boolean;
+  canAct: boolean;
+  note: string;
   reason?: string;
 };
 
@@ -65,17 +72,27 @@ type Turn = { role: "user" | "assistant"; content: string };
 const naira = (value: number) => `NGN ${value.toLocaleString()}`;
 
 /**
- * Written as the compound questions the office actually asks, not as the
- * single-filter ones the old briefing could handle. They are the fastest way
- * to teach somebody that they can now stack four conditions in one sentence
- * and get a list back they can select and message.
+ * What to try first, split by what it costs you to be wrong.
+ *
+ * The lookup prompts teach that filters stack; the action prompts teach the
+ * thing people do not believe until they see it, which is that you can ask this
+ * to DO the work rather than to tell you how. They are only offered when the
+ * brain can actually act — suggesting "chase the unpaid students" to an
+ * assistant that will then explain how to do it by hand is worse than
+ * suggesting nothing.
  */
-const SUGGESTIONS = [
+const LOOKUP_SUGGESTIONS = [
   "Which students haven't paid and haven't been seen in 3 weeks?",
   "List everyone at B1 who still hasn't started classes.",
   "How many students do we have per branch, broken down by level?",
   "Who registered in the last 14 days and is going for an Ausbildung?",
-  "Draft a warm message chasing outstanding tuition.",
+];
+
+const ACTION_SUGGESTIONS = [
+  "Chase everyone in Lagos who still owes tuition.",
+  "Mark the Lagos A1 morning class present today.",
+  "Move the A1 students who finished this batch up to A2.",
+  "Send enrolment links to everyone who enquired this month.",
 ];
 
 function Stat({
@@ -115,6 +132,8 @@ export default function AdminAssistantPage() {
   const [cohort, setCohort] = useState<Cohort | null>(null);
   const [toolsUsed, setToolsUsed] = useState<Array<{ name: string }>>([]);
   const [capabilities, setCapabilities] = useState<string[]>([]);
+  /** The action awaiting confirmation, if the last answer proposed one. */
+  const [proposal, setProposal] = useState<Proposal | null>(null);
 
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -147,6 +166,11 @@ export default function AdminAssistantPage() {
 
     setError("");
     setQuestion("");
+    // Cleared before the request, not after it. A card left on screen while the
+    // next answer streams in belongs to the previous question, and a Confirm
+    // button under the wrong question is the one mistake this whole design
+    // exists to prevent.
+    setProposal(null);
     const history = turns.slice(-6);
     setTurns((current) => [...current, { role: "user", content: trimmed }]);
     setThinking(true);
@@ -204,6 +228,7 @@ export default function AdminAssistantPage() {
           briefing?: Briefing;
           cohort?: Cohort | null;
           toolsUsed?: Array<{ name: string }>;
+          proposal?: Proposal | null;
           degraded?: string;
         };
         try {
@@ -224,6 +249,11 @@ export default function AdminAssistantPage() {
           // while it is deciding. Naming the tool turns that gap into visible
           // progress rather than an application that appears to have frozen.
           setToolsUsed((current) => [...current, { name: frame.name ?? "lookup" }]);
+        } else if (frame.type === "proposal") {
+          // Shown the moment it is planned rather than at the end, so the card
+          // is already there to read while the model writes its sentence about
+          // it. On a slow answer that is several seconds of head start.
+          if (frame.proposal) setProposal(frame.proposal);
         } else if (frame.type === "error") {
           failed = frame.error ?? "The assistant could not answer.";
         } else if (frame.type === "done") {
@@ -237,6 +267,10 @@ export default function AdminAssistantPage() {
           // cohort from two questions ago can never be mistaken for this one's.
           setCohort(frame.cohort ?? null);
           setToolsUsed(frame.toolsUsed ?? []);
+          // Only overwrite from `done` when it carries one: the proposal frame
+          // arrived earlier in the same stream, and a done frame without the
+          // field would otherwise wipe a card the admin is already reading.
+          if (frame.proposal !== undefined) setProposal(frame.proposal);
           if (frame.degraded) setError(frame.degraded);
         }
       };
@@ -266,8 +300,8 @@ export default function AdminAssistantPage() {
     }
   }
 
-  const offline = status && !status.reachable;
-  const modelMissing = status?.reachable && !status.modelReady;
+  const offline = Boolean(status && !status.ready);
+  const canAct = Boolean(status?.canAct);
 
   return (
     <AdminShell>
@@ -278,25 +312,33 @@ export default function AdminAssistantPage() {
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-bold sm:text-3xl">Assistant</h1>
+            {/* The privacy posture is a sentence, not an inference. Which brain
+                is running decides whether student names leave the building, and
+                that is not something an admin should have to work out from a
+                model name in a badge. */}
             <p className="mt-1 text-sm text-slate-500">
-              Runs on this machine. Student names, balances and attendance never leave the building.
+              {status?.note ?? "Checking which assistant is available…"}
             </p>
           </div>
           {status && (
-            <span
-              className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
-                status.reachable && status.modelReady
-                  ? "bg-emerald-500/10 text-emerald-600"
-                  : "bg-amber-500/10 text-amber-600"
-              }`}
-            >
+            <div className="flex flex-wrap items-center gap-2">
+              {canAct && (
+                <span className="flex items-center gap-1.5 rounded-full bg-[var(--accent)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--accent)]">
+                  <ToolboxIcon className="h-3.5 w-3.5" />
+                  Can act, with your confirmation
+                </span>
+              )}
               <span
-                className={`h-2 w-2 rounded-full ${
-                  status.reachable && status.modelReady ? "bg-emerald-500" : "bg-amber-500"
+                className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
+                  status.ready ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600"
                 }`}
-              />
-              {status.reachable && status.modelReady ? status.model : "Assistant offline"}
-            </span>
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${status.ready ? "bg-emerald-500" : "bg-amber-500"}`}
+                />
+                {status.ready ? status.model : "Assistant offline"}
+              </span>
+            </div>
           )}
         </div>
 
@@ -374,19 +416,23 @@ export default function AdminAssistantPage() {
           </div>
         )}
 
-        {(offline || modelMissing) && (
+        {offline && (
           <div className="mt-5 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
             <AlertIcon className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <p className="font-semibold">
-                {offline ? "The assistant is not running" : `The model ${status?.model} is not pulled yet`}
-              </p>
+            <div className="min-w-0">
+              <p className="font-semibold">The assistant is not running</p>
               <p className="mt-1">{status?.reason}</p>
-              <pre className="mt-2 overflow-x-auto rounded-lg bg-amber-100/70 p-3 font-mono text-xs">
-                {offline
-                  ? `# once, to install: https://ollama.com/download\nollama serve\nollama pull ${status?.model ?? "llama3.1"}`
-                  : `ollama pull ${status?.model}`}
-              </pre>
+              {status?.provider === "ollama" && (
+                <>
+                  <pre className="mt-2 overflow-x-auto rounded-lg bg-amber-100/70 p-3 font-mono text-xs">
+                    {`# once, to install: https://ollama.com/download\nollama serve\nollama pull ${status.model}`}
+                  </pre>
+                  <p className="mt-2 text-xs">
+                    Or set ANTHROPIC_API_KEY to use the hosted assistant, which answers in seconds and
+                    can carry out actions you confirm.
+                  </p>
+                </>
+              )}
               <p className="mt-2 text-xs">
                 Everything above this box is read straight from the database and is correct either way.
               </p>
@@ -419,12 +465,16 @@ export default function AdminAssistantPage() {
           <div className="max-h-[26rem] overflow-y-auto p-5">
             {turns.length === 0 ? (
               <div className="py-6 text-center">
-                <p className="text-sm font-semibold text-slate-700">Ask about the school</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  Every figure it gives you comes from the numbers above, not from the model.
+                <p className="text-sm font-semibold text-slate-700">
+                  {canAct ? "Ask about the school, or ask it to do something" : "Ask about the school"}
                 </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Every figure it gives you comes from a live lookup, not from the model.
+                  {canAct ? " Anything it would change, it shows you first." : ""}
+                </p>
+
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  {SUGGESTIONS.map((suggestion) => (
+                  {LOOKUP_SUGGESTIONS.map((suggestion) => (
                     <button
                       key={suggestion}
                       onClick={() => ask(suggestion)}
@@ -435,6 +485,26 @@ export default function AdminAssistantPage() {
                     </button>
                   ))}
                 </div>
+
+                {canAct && (
+                  <>
+                    <p className="mt-5 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                      Or hand it the job
+                    </p>
+                    <div className="mt-2.5 flex flex-wrap justify-center gap-2">
+                      {ACTION_SUGGESTIONS.map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          onClick={() => ask(suggestion)}
+                          disabled={thinking}
+                          className="rounded-full border border-[var(--accent)]/30 bg-[var(--accent)]/5 px-3.5 py-2 text-xs font-semibold text-[var(--accent)] transition hover:bg-[var(--accent)]/10 disabled:opacity-40"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -499,7 +569,13 @@ export default function AdminAssistantPage() {
             <input
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
-              placeholder={offline ? "Start Ollama to ask questions" : "Ask about students, fees, attendance…"}
+              placeholder={
+                offline
+                  ? "The assistant is offline"
+                  : canAct
+                    ? "Ask about students and fees — or ask it to chase, mark, move…"
+                    : "Ask about students, fees, attendance…"
+              }
               className="min-w-0 flex-1 rounded-xl bg-slate-50 px-4 py-3 text-sm outline-none transition focus:bg-white focus:ring-2 focus:ring-[var(--accent)]/30"
             />
             <button
@@ -531,6 +607,19 @@ export default function AdminAssistantPage() {
               </span>
             ))}
           </p>
+        )}
+
+        {/* The proposal sits ABOVE the cohort table on purpose. It is the only
+            thing on this page with consequences attached, and burying it under
+            five hundred rows of register would be a design that hopes nobody
+            scrolls. */}
+        {proposal && (
+          <ActionProposal
+            proposal={proposal}
+            // The figures at the top of the page are now stale — the action
+            // just changed the thing they describe.
+            onDone={() => void load()}
+          />
         )}
 
         {/* The rows themselves, straight from the query — never the model's

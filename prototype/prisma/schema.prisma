@@ -52,6 +52,8 @@ model User {
   examRegistrations ExamRegistration[]
   notifications     Notification[]     @relation("NotificationRecipient")
   sentNotifications Notification[]     @relation("NotificationSender")
+  proposedActions   AdminAction[]      @relation("AdminActionCreator")
+  executedActions   AdminAction[]      @relation("AdminActionExecutor")
 }
 
 model Session {
@@ -1446,4 +1448,88 @@ model Certificate {
   // One certificate per student per level. Re-running the issuer is safe.
   @@unique([studentId, level])
   @@index([issuedAt])
+}
+
+/**
+ * Something the assistant proposed, and what happened to it.
+ *
+ * THE MODEL DOES NOT WRITE TO THE DATABASE. It writes a ROW HERE, describing
+ * what it would do, and that row is inert until a named human presses Confirm.
+ * Executing is a second, separate request that carries only this row's id — so
+ * the thing that runs is the thing that was reviewed, not a re-derivation of it
+ * from a conversation that has since moved on.
+ *
+ * That split is the whole safety story. A model that misreads "not paid" as
+ * "not fully paid" produces a plan that says, in the admin's own screen, "this
+ * will message 214 students" — and 214 is visibly wrong where "I have messaged
+ * the unpaid students" is not. The preview is the review surface, and the
+ * frozen payload is what makes the preview binding.
+ *
+ * It doubles as the audit log, which is not a coincidence: the record of what
+ * was proposed, by whom, on whose account, and whether it ran, is the same
+ * record either way. Rows are never deleted — a cancelled plan is evidence too.
+ */
+model AdminAction {
+  id String @id @default(cuid())
+
+  /**
+   * Which action, e.g. message_students, mark_attendance, promote_students.
+   * Matched back to the registry in src/lib/assistant-actions.ts at execute
+   * time; an action that no longer exists refuses to run rather than guessing.
+   */
+  kind String
+
+  /**
+   * The capability the executing admin must hold. Stored rather than looked up
+   * so a later change to the registry cannot silently widen an old plan.
+   */
+  capability String
+
+  /** One line, as shown on the confirm card. */
+  summary String
+  /**
+   * The frozen arguments, exactly as validated when the plan was made. This is
+   * what executes — never the model's later retelling.
+   */
+  payload Json
+  /**
+   * The preview the human actually approved: counts, sample rows, warnings.
+   * Kept so the audit trail records what was on screen, not just what ran.
+   */
+  preview Json?
+
+  /** How many records this would touch, for the list view. */
+  affectedCount Int @default(0)
+
+  /** pending | executed | cancelled | expired | failed */
+  status String @default("pending")
+
+  /** The admin whose question produced it. */
+  createdById String
+  createdBy   User   @relation("AdminActionCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  /**
+   * The admin who pressed Confirm. Usually the same person, deliberately not
+   * assumed to be: a plan left open on a shared front-desk machine and executed
+   * by whoever sat down next is exactly the event this column exists to record.
+   */
+  executedById String?
+  executedBy   User?   @relation("AdminActionExecutor", fields: [executedById], references: [id], onDelete: SetNull)
+
+  /** What running it actually did — delivered counts, ids touched, errors. */
+  result Json?
+  error  String?
+
+  /**
+   * Plans go stale. A fee-chase list assembled an hour ago may have had three
+   * of its students pay since, so a plan past this is refused and must be
+   * re-asked rather than executed against a world that has moved.
+   */
+  expiresAt  DateTime
+  executedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([createdById, status])
+  @@index([createdAt])
 }
