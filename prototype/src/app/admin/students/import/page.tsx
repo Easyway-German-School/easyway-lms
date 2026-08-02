@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowLeftIcon } from "@/components/icons";
 import { useMemo, useState } from "react";
 import AdminShell from "@/components/AdminShell";
+import { SpreadsheetError, parseXlsx, rowsToCsv } from "@/lib/spreadsheet";
 
 type ImportResult = {
   row: number;
@@ -163,14 +164,44 @@ export default function ImportStudentsPage() {
                 Fill in an example
               </button>
               <label className="cursor-pointer rounded-lg border border-[var(--border)] px-4 py-2 text-xs font-semibold text-[var(--foreground)]">
-                Choose a .csv file
+                Choose a .xlsx or .csv file
                 <input
                   type="file"
-                  accept=".csv,text/csv"
+                  accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   className="hidden"
                   onChange={async (event) => {
                     const file = event.target.files?.[0];
-                    if (file) setCsv(await file.text());
+                    if (!file) return;
+                    setError("");
+                    setPreviewed(false);
+                    setImported(false);
+                    try {
+                      // Excel is what offices actually keep lists in. Reading
+                      // it here rather than telling somebody to "save as CSV
+                      // first" removes a step that gets skipped, or done wrong
+                      // — a Nigerian-locale Excel writes semicolons, and CSV
+                      // export eats the leading zero off every phone number.
+                      if (/\.xlsx$/i.test(file.name)) {
+                        const rows = parseXlsx(await file.arrayBuffer());
+                        if (rows.length === 0) {
+                          setError("That spreadsheet has no rows under its header.");
+                          return;
+                        }
+                        setCsv(rowsToCsv(rows));
+                      } else {
+                        setCsv(await file.text());
+                      }
+                    } catch (readError) {
+                      setError(
+                        readError instanceof SpreadsheetError
+                          ? readError.message
+                          : "That file could not be read.",
+                      );
+                    } finally {
+                      // Clearing the input lets the same file be re-picked
+                      // after a fix, which otherwise fires no change event.
+                      event.target.value = "";
+                    }
                   }}
                 />
               </label>
@@ -179,7 +210,8 @@ export default function ImportStudentsPage() {
 
           <p className="mt-2 text-xs text-[var(--muted)]">
             Columns: <code>{TEMPLATE_HEADERS.join(", ")}</code>. Only name and email are required; everything else
-            improves what the account can do.
+            improves what the account can do. An .xlsx file is read from its first sheet and shown below as text, so
+            you can check it before anything is written.
           </p>
 
           <textarea
