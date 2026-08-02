@@ -239,9 +239,12 @@ export default function AdminHomePage() {
             <div>
               <p className="text-sm font-bold text-amber-900">No email provider is configured</p>
               <p className="mt-1 text-sm text-amber-800">
-                Registration alerts, fee reminders and enrolment invites are being queued but never delivered. Set
-                <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">MAILERSEND_API_KEY</code>
-                in both <code className="font-mono text-xs">.env</code> and{" "}
+                Registration alerts, fee reminders and enrolment invites are being queued but never delivered. Either set
+                <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">MAILERSEND_API_KEY</code>, or
+                use any ordinary mailbox over SMTP with
+                <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">EMAIL_PROVIDER=zoho</code>
+                plus <code className="font-mono text-xs">SMTP_USER</code> and{" "}
+                <code className="font-mono text-xs">SMTP_PASS</code> in{" "}
                 <code className="font-mono text-xs">.env.local</code>.
               </p>
             </div>

@@ -55,6 +55,21 @@ export function deriveMaterialKind(fileType?: string | null): "video" | "documen
   return isPlayableVideo(fileType) ? "video" : "document";
 }
 
+/**
+ * Turn a stored path into something the player can request.
+ *
+ * Uploaded material is stored as a site-relative path (`/uploads/...`), but a
+ * class recording lives in an object bucket and is stored as a full URL. The
+ * naive `startsWith("/")` check turned the latter into `/https://...`, so every
+ * auto-captured class would have rendered a tile that could never play.
+ */
+export function toPlayableUrl(path?: string | null): string {
+  const value = String(path ?? "").trim();
+  if (!value) return "";
+  if (/^(https?:|blob:|data:)/i.test(value)) return value;
+  return value.startsWith("/") ? value : `/${value}`;
+}
+
 export function formatDuration(seconds?: number | null): string {
   const total = Math.max(0, Math.round(Number(seconds) || 0));
   if (!total) return "";

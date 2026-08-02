@@ -180,6 +180,7 @@ export async function PATCH(request: Request) {
   const sessionSlot = ["morning", "afternoon", "evening"].includes(String(body.sessionSlot))
     ? String(body.sessionSlot)
     : undefined;
+  const newPassword = typeof body.password === "string" ? body.password : "";
 
   if (!studentId) {
     return NextResponse.json({ error: "Student ID is required" }, { status: 400 });
@@ -198,9 +199,28 @@ export async function PATCH(request: Request) {
       }
     }
 
-    const updateUser = {} as { name?: string; email?: string };
+    const updateUser = {} as { name?: string; email?: string; password?: string };
     if (name) updateUser.name = name;
     if (email) updateUser.email = email;
+
+    /**
+     * Resetting a student's password from the office.
+     *
+     * There is no self-service "forgot password" flow, and a locked-out student
+     * cannot be sent a reset link by an app with no email configured — so
+     * without this the only cure was editing the database by hand. A school
+     * secretary sets a temporary password and reads it to the student over the
+     * phone or WhatsApp, which is how the branches already work.
+     *
+     * Gated the same as every other admin write on this route: the `students`
+     * capability plus a confirmed admin account.
+     */
+    if (newPassword) {
+      if (newPassword.length < 8) {
+        return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
+      }
+      updateUser.password = await bcryptjs.hash(newPassword, 10);
+    }
 
     const updateStudent = {} as {
       level?: string;

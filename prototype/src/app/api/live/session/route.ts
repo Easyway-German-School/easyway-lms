@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { canAttendLive, deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { isOnlineBranch, initialVideoQualityFor, readOnlineProfile } from "@/lib/online-branch";
+import { ensureRecordingStarted } from "@/lib/class-recorder";
 import {
   cohortRoomName,
   liveKitConfigured,
@@ -39,11 +40,11 @@ export async function GET(request: Request) {
     const [student, lecturer] = await Promise.all([
       prisma.student.findUnique({
         where: { userId: session.user.id },
-        include: { payments: true, branch: { select: { name: true, mode: true } } },
+        include: { payments: true, branch: { select: { id: true, name: true, mode: true } } },
       }),
       prisma.lecturer.findUnique({
         where: { userId: session.user.id },
-        include: { branch: { select: { name: true, mode: true } } },
+        include: { branch: { select: { id: true, name: true, mode: true } } },
       }),
     ]);
 
@@ -161,6 +162,34 @@ export async function GET(request: Request) {
       // Only a tutor can mute others, remove a participant, or end the class.
       roomAdmin: role === "tutor",
     });
+
+    /**
+     * The tutor arriving is what starts the recording.
+     *
+     * Not a button, because the one class a tutor forgets to record is the one
+     * a student needed. Not a student arriving either — students turn up early
+     * to an empty room, and we would capture ten minutes of nobody.
+     *
+     * Deliberately not awaited: a slow or failing egress service must not delay
+     * the tutor's own token by so much as a round trip. `ensureRecordingStarted`
+     * swallows its errors and is idempotent, so a reload does not start a
+     * second capture.
+     *
+     * Private one-to-one classes are excluded. Recording a cohort lesson is a
+     * service to the cohort; silently recording a private conversation is a
+     * consent question the school should answer explicitly, not something to
+     * switch on by default.
+     */
+    if (role === "tutor" && !privateClassId) {
+      void ensureRecordingStarted({
+        roomName,
+        branchId: branch?.id ?? null,
+        branchName: branch?.name ?? null,
+        level,
+        sessionSlot,
+        startedByUserId: session.user.id,
+      });
+    }
 
     return NextResponse.json({
       ...context,

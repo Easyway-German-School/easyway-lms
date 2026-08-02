@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
-import { isPlayableVideo, type LibraryVideo, type VideoKind } from "@/lib/video-library";
+import { isPlayableVideo, toPlayableUrl, type LibraryVideo, type VideoKind } from "@/lib/video-library";
 
 export const dynamic = "force-dynamic";
 
@@ -83,12 +83,8 @@ export async function GET() {
           id: record.id,
           title: record.title,
           description: record.description,
-          fileUrl: record.filePath.startsWith("/") ? record.filePath : `/${record.filePath}`,
-          thumbnailUrl: record.thumbnailPath
-            ? record.thumbnailPath.startsWith("/")
-              ? record.thumbnailPath
-              : `/${record.thumbnailPath}`
-            : null,
+          fileUrl: toPlayableUrl(record.filePath),
+          thumbnailUrl: record.thumbnailPath ? toPlayableUrl(record.thumbnailPath) : null,
           durationSeconds: record.durationSeconds,
           kind: record.kind as VideoKind,
           level: record.level ?? record.course?.level ?? null,

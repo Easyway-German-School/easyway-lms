@@ -7,13 +7,17 @@
     "build": "next build --webpack",
     "start": "next start --hostname 0.0.0.0",
     "lint": "eslint",
-    "check:actions": "tsx --tsconfig tsconfig.json scripts/check-assistant-actions.ts"
+    "check:actions": "tsx --tsconfig tsconfig.json scripts/check-assistant-actions.ts",
+    "bench:brain": "tsx --tsconfig tsconfig.json scripts/bench-local-brain.ts",
+    "check:livekit": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/check-livekit.ts",
+    "test:retention": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/test-retention.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@prisma/client": "^6.19.3",
     "@tanstack/react-query": "^5.101.4",
     "@tldraw/tldraw": "^5.1.1",
+    "aws4fetch": "^1.0.20",
     "bcryptjs": "^3.0.3",
     "docx": "^9.7.1",
     "fflate": "^0.8.3",

@@ -151,7 +151,34 @@ export function brainProvider(): Provider {
  * approves.
  */
 export function canBrainAct(): boolean {
-  return brainProvider() === "claude";
+  if (brainProvider() === "claude") return true;
+  // The school's override. Off unless deliberately set — see below.
+  return process.env.ASSISTANT_LOCAL_ACTIONS === "true";
+}
+
+/**
+ * ASSISTANT_LOCAL_ACTIONS=true — let the LOCAL model propose actions.
+ *
+ * Off by default, and the default is a measurement rather than an opinion:
+ * `npm run bench:brain` runs the real action tools against the installed local
+ * models with the phrasings the office actually uses, and scores whether the
+ * right tool was picked AND the filters that decide who it lands on survived.
+ * Run it before turning this on, and run it again after changing OLLAMA_MODEL.
+ *
+ * The failure it guards against is specific. A model that picks
+ * `mark_attendance` correctly and drops `branch` marks the wrong campus
+ * present. One that picks `message_students` and drops `level` writes to the
+ * whole school. Both produce a confirm card that looks entirely reasonable —
+ * the count is the only tell, and the count is only a tell to somebody who
+ * knows what it should have been.
+ *
+ * So this is a real switch, not a discouraged one: with a model that scores
+ * clean on the bench, local actions are free, private and fast, which is
+ * strictly better than paying. It is off by default because "the office's
+ * records" is the wrong place to find out that the model was close enough.
+ */
+export function localActionsEnabled(): boolean {
+  return process.env.ASSISTANT_LOCAL_ACTIONS === "true";
 }
 
 export async function brainStatus(): Promise<BrainStatus> {
@@ -167,14 +194,16 @@ export async function brainStatus(): Promise<BrainStatus> {
 
   const status = await ollamaStatus();
   const supportsTools = status.modelReady ? await ollamaSupportsTools() : false;
+  const acting = localActionsEnabled();
 
   return {
     provider: "ollama",
     model: status.model,
     ready: status.reachable && status.modelReady && supportsTools,
-    // Deliberately false even when Ollama is perfectly healthy.
-    canAct: false,
-    note: "Runs on this machine — nothing leaves the building. Looks things up, but cannot carry out actions.",
+    canAct: acting,
+    note: acting
+      ? "Runs on this machine — nothing leaves the building. Check every plan before confirming: a local model is more likely to drop a filter."
+      : "Runs on this machine — nothing leaves the building. Looks things up, but cannot carry out actions.",
     reason: status.reachable
       ? status.modelReady
         ? supportsTools

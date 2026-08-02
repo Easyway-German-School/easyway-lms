@@ -310,6 +310,7 @@ model Branch {
   exams         Exam[]
   lecturers     Lecturer[]
   leads         Lead[]
+  recordings    ClassRecording[]
 }
 
 model ExamRegistration {
@@ -502,8 +503,82 @@ model Material {
   classSessions  ClassSession[]
   privateClasses PrivateClass[]
   videoProgress  VideoProgress[]
+  recording      ClassRecording?
 
   @@index([kind, level])
+}
+
+/**
+ * One captured live class.
+ *
+ * This row exists because the file does not arrive when the class ends — the
+ * egress service finishes encoding and uploading a few minutes later, and tells
+ * us over a webhook. Something has to remember which room that job belonged to
+ * in the meantime, and has to be there for the reconciler to find if the
+ * webhook never arrives (it cannot reach a laptop, for one).
+ *
+ * It is also the audit trail for a class that failed to record, which is worth
+ * more than it sounds: "was Tuesday recorded?" should be answerable without
+ * reading logs.
+ */
+model ClassRecording {
+  id String @id @default(cuid())
+
+  /** LiveKit's id for the capture job. The join key for webhooks. */
+  egressId String @unique
+  roomName String
+
+  /** Denormalised so a recording is filable even if the cohort later changes. */
+  branchId    String?
+  branch      Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  level       String?
+  sessionSlot String?
+
+  /** Which tutor's join started it, for the audit trail. */
+  startedByUserId String?
+
+  /**
+   * active | completed | failed | aborted | purged
+   * `aborted` is a capture we stopped deliberately (an empty room), which is
+   * not a failure and should not be alarmed on. `purged` means retention
+   * reclaimed the file — the row survives so "was Tuesday recorded?" stays
+   * answerable after the video itself is gone.
+   */
+  status String @default("active")
+
+  /**
+   * video | audio — which capture profile was used. An audio recording is
+   * roughly a seventh the size and is the right default for a language class,
+   * where the payload is speech.
+   */
+  variant String @default("video")
+
+  /**
+   * Set by a tutor or admin on a class worth keeping: a landmark lesson, an
+   * exam briefing. Retention never touches these, whatever the policy says.
+   */
+  keepForever Boolean @default(false)
+
+  /** When retention reclaimed the file. Null while the video still exists. */
+  purgedAt DateTime?
+
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+
+  /** Where it landed in the bucket, and what the player should request. */
+  objectKey String?
+  fileUrl   String?
+
+  durationSeconds Int?
+  sizeBytes       Int?
+  error           String?
+
+  /** The library row, created once the file is safely uploaded. */
+  materialId String?   @unique
+  material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  @@index([status, startedAt])
+  @@index([roomName, status])
 }
 
 /**

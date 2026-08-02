@@ -37,6 +37,18 @@ function buildTransport() {
   const host = preset?.host ?? process.env.SMTP_HOST;
   if (!host) return null;
 
+  /**
+   * A preset supplies a host but never a mailbox, so `EMAIL_PROVIDER=zoho` with
+   * no SMTP_USER produced a transport that looked configured and failed at
+   * authentication on every send — `isEmailConfigured()` returning true while
+   * nothing could actually be delivered. Zoho and Gmail always require
+   * credentials, so treat their absence as "not configured".
+   *
+   * An explicit SMTP_HOST is left alone: a relay on the same box legitimately
+   * accepts unauthenticated mail.
+   */
+  if (preset && !process.env.SMTP_USER) return null;
+
   const port = preset?.port ?? Number(process.env.SMTP_PORT || 587);
   // An explicit SMTP_SECURE still wins over the preset when it is set.
   const secure =
