@@ -4,8 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveAdmin } from "@/lib/admin-roles";
 import {
-  ollamaChat,
-  ollamaChatWithTools,
+  ollamaChatStream,
   ollamaStatus,
   ollamaSupportsTools,
   ollamaWarm,
@@ -369,93 +368,166 @@ export async function POST(request: Request) {
     { role: "user", content: question },
   ];
 
-  /**
-   * The tool loop.
-   *
-   * The model is asked, it may reply with tool calls instead of an answer, the
-   * SERVER runs them, the results go back as `tool` messages, and it is asked
-   * again. The model never touches the database — it names a tool and fills in
-   * arguments, and `runTool` re-checks the caller's capability before doing
-   * anything, because a model that hallucinates `money_summary` at a Secretary
-   * has to be refused rather than obeyed.
-   *
-   * Falls straight through to a plain answer when the configured model has no
-   * tool support (falcon does not) — a briefing-only reply is worth more than
-   * an error, and the page says which mode it got.
-   */
   const supportsTools = await ollamaSupportsTools();
   const specs = toolSpecsFor(auth.admin);
 
-  if (!supportsTools || specs.length === 0) {
-    const result = await ollamaChat(messages);
-    if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 503 });
-    return NextResponse.json({
-      answer: result.text,
-      model: result.model,
-      briefing,
-      toolsUsed: [],
-      cohort: null,
-      degraded: !supportsTools
-        ? `${result.model} cannot call tools, so this answer comes from the summary only. Switch OLLAMA_MODEL to qwen2.5:3b for live lookups.`
-        : undefined,
-    });
-  }
+  /**
+   * From here the answer is STREAMED, as newline-delimited JSON frames.
+   *
+   * The model's total thinking time did not change and cannot be argued down —
+   * on the office machine, generating five sentences is most of half a minute
+   * whatever we do. What changed is that the admin now sees the first words in
+   * about three seconds instead of a spinner for thirty. That is not a
+   * cosmetic difference to somebody holding a queue at a front desk.
+   *
+   * Frames, one JSON object per line:
+   *   {type:"tool",  name, arguments}  — a lookup started (the silent stretch)
+   *   {type:"delta", text}             — more of the answer
+   *   {type:"done",  answer, model, briefing, toolsUsed, cohort, degraded?}
+   *   {type:"error", error}
+   *
+   * NDJSON rather than SSE because this is a plain `fetch` from our own page,
+   * not an EventSource — there is no reason to pay for `data:` framing that
+   * the client would only have to strip again.
+   *
+   * The one real constraint: once the first byte is written the HTTP status is
+   * fixed at 200, so every failure past this point must travel as an `error`
+   * FRAME rather than a 503. Auth and validation are checked above, before the
+   * stream opens, and those still return honest status codes.
+   */
+  const encoder = new TextEncoder();
 
-  const toolsUsed: Array<{ name: string; arguments: Record<string, unknown> }> = [];
-  /** The last cohort any tool produced — what the table below the answer shows. */
-  let cohort: ToolOutcome["cohort"] | null = null;
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let closed = false;
+      const send = (frame: Record<string, unknown>) => {
+        if (closed) return;
+        controller.enqueue(encoder.encode(`${JSON.stringify(frame)}\n`));
+      };
+      const finish = () => {
+        if (closed) return;
+        closed = true;
+        controller.close();
+      };
 
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-    const turn = await ollamaChatWithTools(messages, specs);
-    if (!turn.ok) return NextResponse.json({ error: turn.reason }, { status: 503 });
+      try {
+        /**
+         * No tool support (falcon does not have it) — a briefing-only reply is
+         * worth more than an error, and the page says which mode it got.
+         */
+        if (!supportsTools || specs.length === 0) {
+          const result = await ollamaChatStream(messages, (text) => send({ type: "delta", text }));
+          if (!result.ok) {
+            send({ type: "error", error: result.reason });
+            return finish();
+          }
+          send({
+            type: "done",
+            answer: result.text,
+            model: result.model,
+            briefing,
+            toolsUsed: [],
+            cohort: null,
+            degraded: !supportsTools
+              ? `${result.model} cannot call tools, so this answer comes from the summary only. Switch OLLAMA_MODEL to qwen2.5:3b for live lookups.`
+              : undefined,
+          });
+          return finish();
+        }
 
-    if (turn.toolCalls.length === 0) {
-      return NextResponse.json({
-        answer: turn.text,
-        model: turn.model,
-        briefing,
-        toolsUsed,
-        cohort,
-      });
-    }
+        const toolsUsed: Array<{ name: string; arguments: Record<string, unknown> }> = [];
+        /** The last cohort any tool produced — what the table below shows. */
+        let cohort: ToolOutcome["cohort"] | null = null;
 
-    // Record the assistant's own turn before the results, or the model loses
-    // track of what it asked for and asks again.
-    messages.push({ role: "assistant", content: turn.text, tool_calls: turn.toolCalls });
+        /**
+         * The tool loop, unchanged in substance.
+         *
+         * The model is asked, it may reply with tool calls instead of an
+         * answer, the SERVER runs them, the results go back as `tool`
+         * messages, and it is asked again. The model never touches the
+         * database — it names a tool and fills in arguments, and `runTool`
+         * re-checks the caller's capability before doing anything, because a
+         * model that hallucinates `money_summary` at a Secretary has to be
+         * refused rather than obeyed.
+         *
+         * Every round streams, which is safe precisely because a round that
+         * decides to call a tool produces no text at all — the tool rounds are
+         * silent and the round that answers is the one the admin watches
+         * arrive.
+         */
+        for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+          const turn = await ollamaChatStream(messages, (text) => send({ type: "delta", text }), {
+            tools: specs,
+          });
+          if (!turn.ok) {
+            send({ type: "error", error: turn.reason });
+            return finish();
+          }
 
-    for (const call of turn.toolCalls) {
-      const name = call.function?.name ?? "";
-      const args = toolArguments(call);
-      toolsUsed.push({ name, arguments: args });
+          if (turn.toolCalls.length === 0) {
+            send({ type: "done", answer: turn.text, model: turn.model, briefing, toolsUsed, cohort });
+            return finish();
+          }
 
-      const outcome = await runTool(name, args, auth.admin);
-      if (outcome.cohort) cohort = outcome.cohort;
+          // Record the assistant's own turn before the results, or the model
+          // loses track of what it asked for and asks again.
+          messages.push({ role: "assistant", content: turn.text, tool_calls: turn.toolCalls });
 
-      messages.push({
-        role: "tool",
-        tool_name: name,
-        content: JSON.stringify(outcome.forModel),
-      });
-    }
-  }
+          for (const call of turn.toolCalls) {
+            const name = call.function?.name ?? "";
+            const args = toolArguments(call);
+            toolsUsed.push({ name, arguments: args });
+            // Told to the page as it happens, so the lookup stretch reads as
+            // "checking the register" rather than as the app having frozen.
+            send({ type: "tool", name, arguments: args });
 
-  // Out of rounds. Rather than return nothing, ask once more with the tool
-  // results already in hand and no tools offered, which forces an answer.
-  const final = await ollamaChat([
-    ...messages,
-    {
-      role: "system",
-      content: "Answer now using the tool results above. Do not ask for more tools.",
+            const outcome = await runTool(name, args, auth.admin);
+            if (outcome.cohort) cohort = outcome.cohort;
+
+            messages.push({
+              role: "tool",
+              tool_name: name,
+              content: JSON.stringify(outcome.forModel),
+            });
+          }
+        }
+
+        // Out of rounds. Rather than return nothing, ask once more with the
+        // tool results already in hand and no tools offered, which forces an
+        // answer.
+        const final = await ollamaChatStream(
+          [
+            ...messages,
+            {
+              role: "system",
+              content: "Answer now using the tool results above. Do not ask for more tools.",
+            },
+          ],
+          (text) => send({ type: "delta", text }),
+        );
+
+        if (!final.ok) {
+          send({ type: "error", error: final.reason });
+          return finish();
+        }
+
+        send({ type: "done", answer: final.text, model: final.model, briefing, toolsUsed, cohort });
+        return finish();
+      } catch (error) {
+        console.error("Assistant stream failed", error);
+        send({ type: "error", error: "The assistant stopped unexpectedly. Try asking again." });
+        return finish();
+      }
     },
-  ]);
+  });
 
-  if (!final.ok) return NextResponse.json({ error: final.reason }, { status: 503 });
-
-  return NextResponse.json({
-    answer: final.text,
-    model: final.model,
-    briefing,
-    toolsUsed,
-    cohort,
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      // Nginx and friends will happily buffer a streamed response into one
+      // lump, which would undo the entire point of this.
+      "X-Accel-Buffering": "no",
+    },
   });
 }

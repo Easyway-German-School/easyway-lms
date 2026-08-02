@@ -157,23 +157,108 @@ export default function AdminAssistantPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: trimmed, history }),
       });
-      const data = await response.json();
 
+      // Auth and validation still fail as honest status codes, because they
+      // happen before the stream opens. Everything after arrives as frames.
       if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
         setError(data.error ?? "The assistant could not answer.");
         return;
       }
+      if (!response.body) {
+        setError("The assistant returned nothing.");
+        return;
+      }
 
-      setTurns((current) => [
-        ...current,
-        { role: "assistant", content: data.answer || "(the model returned nothing)" },
-      ]);
-      if (data.briefing) setBriefing(data.briefing);
-      // Null clears the table on a question that looked nothing up, so a
-      // cohort from two questions ago can never be mistaken for this answer's.
-      setCohort(data.cohort ?? null);
-      setToolsUsed(data.toolsUsed ?? []);
-      if (data.degraded) setError(data.degraded);
+      /**
+       * The answer arrives a few words at a time.
+       *
+       * An empty assistant turn is pushed first and then grown in place, so
+       * the admin reads the reply as the model writes it instead of watching a
+       * spinner for half a minute. `streamed` is the source of truth for the
+       * text; React state is only ever caught up to it.
+       */
+      let streamed = "";
+      let opened = false;
+      const appendToLastTurn = (content: string) =>
+        setTurns((current) => {
+          const next = [...current];
+          next[next.length - 1] = { role: "assistant", content };
+          return next;
+        });
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let failed = "";
+
+      const handle = (line: string) => {
+        const trimmedLine = line.trim();
+        if (!trimmedLine) return;
+        let frame: {
+          type?: string;
+          text?: string;
+          name?: string;
+          error?: string;
+          answer?: string;
+          briefing?: Briefing;
+          cohort?: Cohort | null;
+          toolsUsed?: Array<{ name: string }>;
+          degraded?: string;
+        };
+        try {
+          frame = JSON.parse(trimmedLine);
+        } catch {
+          return;
+        }
+
+        if (frame.type === "delta" && frame.text) {
+          if (!opened) {
+            opened = true;
+            setTurns((current) => [...current, { role: "assistant", content: "" }]);
+          }
+          streamed += frame.text;
+          appendToLastTurn(streamed);
+        } else if (frame.type === "tool") {
+          // The lookup stretch is silent by nature — the model emits no words
+          // while it is deciding. Naming the tool turns that gap into visible
+          // progress rather than an application that appears to have frozen.
+          setToolsUsed((current) => [...current, { name: frame.name ?? "lookup" }]);
+        } else if (frame.type === "error") {
+          failed = frame.error ?? "The assistant could not answer.";
+        } else if (frame.type === "done") {
+          // The streamed text is authoritative; `answer` is the same string and
+          // is used only when nothing streamed at all.
+          const finalText = streamed || frame.answer || "";
+          if (!opened) setTurns((current) => [...current, { role: "assistant", content: "" }]);
+          appendToLastTurn(finalText || "(the model returned nothing)");
+          if (frame.briefing) setBriefing(frame.briefing);
+          // Null clears the table on a question that looked nothing up, so a
+          // cohort from two questions ago can never be mistaken for this one's.
+          setCohort(frame.cohort ?? null);
+          setToolsUsed(frame.toolsUsed ?? []);
+          if (frame.degraded) setError(frame.degraded);
+        }
+      };
+
+      // Ollama's frames are newline-delimited JSON and a network read can
+      // split one down the middle, so the tail waits for its newline.
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) handle(line);
+      }
+      handle(buffer);
+
+      if (failed) {
+        setError(failed);
+        // A failure part-way through leaves a stub turn behind; drop it so the
+        // transcript does not keep an empty bubble the admin cannot act on.
+        if (opened && !streamed) setTurns((current) => current.slice(0, -1));
+      }
     } catch {
       setError("Could not reach the server.");
     } finally {

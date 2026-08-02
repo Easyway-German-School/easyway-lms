@@ -315,6 +315,123 @@ export async function ollamaChatWithTools(
 }
 
 /**
+ * The same turn, streamed.
+ *
+ * Identical contract to `ollamaChatWithTools` — same arguments, same result —
+ * except that text arrives at `onDelta` as the model produces it instead of
+ * all at once at the end.
+ *
+ * This is the difference between a front desk watching a spinner for half a
+ * minute and watching an answer appear in three seconds. It does not make the
+ * model faster; the total time is unchanged. It makes the wait legible, which
+ * for somebody standing at a counter with a student in front of them is the
+ * thing that actually matters.
+ *
+ * SAFE TO USE FOR EVERY ROUND OF THE TOOL LOOP. A round where the model
+ * decides to call a tool emits NO content chunks at all — verified against
+ * Ollama directly: the entire reply arrives as `tool_calls` with empty text.
+ * So the caller can stream every round without risking half-formed tool
+ * chatter reaching the page: the tool rounds are silent, and the round that
+ * finally answers is the one that streams.
+ *
+ * Ollama streams newline-delimited JSON, one object per line, NOT SSE — there
+ * are no `data:` prefixes to strip. Chunks can split mid-line across TCP
+ * reads, so the tail of each read is held back until its newline arrives.
+ */
+export async function ollamaChatStream(
+  messages: ChatMessage[],
+  onDelta: (text: string) => void,
+  options?: { temperature?: number; model?: string; tools?: ToolSpec[] },
+): Promise<OllamaToolResult> {
+  const url = ollamaUrl();
+  const model = options?.model ?? ollamaModel();
+  const tools = options?.tools;
+
+  try {
+    const response = await fetchWithTimeout(
+      `${url}/api/chat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages,
+          ...(tools && tools.length > 0 ? { tools } : {}),
+          stream: true,
+          keep_alive: KEEP_ALIVE,
+          options: {
+            temperature: options?.temperature ?? 0,
+            num_predict: NUM_PREDICT,
+          },
+        }),
+      },
+      TIMEOUT_MS,
+    );
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      if (response.status === 404) {
+        return {
+          ok: false,
+          reason: `The model ${model} is not installed. Run \`ollama pull ${model}\` and try again.`,
+        };
+      }
+      return { ok: false, reason: `Ollama returned ${response.status}. ${detail.slice(0, 200)}` };
+    }
+    if (!response.body) return { ok: false, reason: "Ollama returned an empty stream." };
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    let toolCalls: ToolCall[] = [];
+
+    const consume = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let parsed: { message?: { content?: string; tool_calls?: ToolCall[] }; error?: string };
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        // A malformed line is not worth killing a good answer over.
+        return;
+      }
+      if (parsed.error) throw new Error(parsed.error);
+      const chunk = parsed.message?.content;
+      if (chunk) {
+        text += chunk;
+        onDelta(chunk);
+      }
+      if (parsed.message?.tool_calls?.length) {
+        toolCalls = toolCalls.concat(parsed.message.tool_calls);
+      }
+    };
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      // The last element is whatever came after the final newline — possibly a
+      // half-written object. It waits for the next read.
+      buffer = lines.pop() ?? "";
+      for (const line of lines) consume(line);
+    }
+    consume(buffer);
+
+    return { ok: true, text: text.trim(), toolCalls, model };
+  } catch (error) {
+    const aborted = error instanceof Error && error.name === "AbortError";
+    return {
+      ok: false,
+      reason: aborted
+        ? "The model took too long. Try a shorter question, or a smaller model."
+        : "Could not reach Ollama. Start it with `ollama serve`.",
+    };
+  }
+}
+
+/**
  * Does the configured model support tool calling?
  *
  * Read from Ollama's own `capabilities` list rather than from a hardcoded name
