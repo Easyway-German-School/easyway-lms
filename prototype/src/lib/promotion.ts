@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { monthNameToIndex } from "@/lib/schedule";
+import { resolveBatchAbsolute } from "@/lib/batch";
 import { nextLevelAfter, SESSION_MONTHS } from "@/lib/levels";
 import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
@@ -53,22 +53,25 @@ export type PromotionCandidate = {
  * Two implementations would eventually disagree, and then the portal would be
  * congratulating a student the office still has mid-level.
  */
-export function monthsSinceBatchStart(batch: string | null, now: Date = new Date()): number | null {
-  const startAbsolute = batchStartAbsolute(batch, now);
+export function monthsSinceBatchStart(
+  batch: string | null,
+  now: Date = new Date(),
+  registeredAt: Date | null = null,
+): number | null {
+  const startAbsolute = batchStartAbsolute(batch, now, registeredAt);
   if (startAbsolute === null) return null;
   return now.getFullYear() * 12 + now.getMonth() - startAbsolute;
 }
 
-function batchStartAbsolute(batch: string | null, now: Date): number | null {
-  const monthIndex = monthNameToIndex(batch);
-  if (monthIndex === null) return null;
-
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-  // Same rule as the schedule engine: the most recent occurrence at or before
-  // now, so a "May" batch read in July started this May, not next May.
-  const year = monthIndex <= currentMonth ? currentYear : currentYear - 1;
-  return year * 12 + monthIndex;
+/**
+ * One shared rule, in lib/batch.ts, for which calendar month a batch name
+ * points at. Passing the registration date matters here more than anywhere:
+ * without it a student who registered for a batch still ahead of them read as
+ * having started a year ago, and this list would put them up for promotion
+ * before their first lesson.
+ */
+function batchStartAbsolute(batch: string | null, now: Date, registeredAt: Date | null = null): number | null {
+  return resolveBatchAbsolute(batch, { registeredAt, now });
 }
 
 export async function findPromotionCandidates(opts: {
@@ -101,7 +104,7 @@ export async function findPromotionCandidates(opts: {
         : {};
     const batch = typeof admission.batch === "string" && admission.batch.trim() ? admission.batch : null;
 
-    const startAbsolute = batchStartAbsolute(batch, now);
+    const startAbsolute = batchStartAbsolute(batch, now, student.createdAt);
     // No usable batch means no way to know the session ended. Reporting those
     // as overdue would bury the real ones in false positives.
     if (startAbsolute === null) continue;

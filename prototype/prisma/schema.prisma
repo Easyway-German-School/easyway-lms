@@ -130,6 +130,60 @@ model Student {
    */
   welcomeTourSeenAt DateTime?
 
+  // ---------------------------------------------------------------------
+  // The journey to Germany. See src/lib/germany-journey.ts.
+  // ---------------------------------------------------------------------
+
+  /**
+   * The day this student actually walked into their first class.
+   *
+   * THE COUNTDOWN RUNS FROM HERE, not from the batch month. A student who paid
+   * in August but only started on 12 September has a level that ends in
+   * November, and a portal that told them otherwise would be wrong on the one
+   * date they care about most. Null until they confirm it (or until an
+   * attendance row proves it, which confirms it for them).
+   */
+  classesStartedAt DateTime?
+
+  /** When they pressed the button. Separate from the date they reported. */
+  startConfirmedAt DateTime?
+
+  /**
+   * How the start was established: "student" (they confirmed it), "attendance"
+   * (their first register entry proved it), or "admin" (the office set it).
+   */
+  startConfirmedVia String?
+
+  /** "Not yet" pushes the daily prompt to tomorrow rather than killing it. */
+  startPromptSnoozedUntil DateTime?
+
+  /**
+   * How many times they have answered "not yet", and the last reason given.
+   * A student on their sixth "not yet" is a student the branch should call —
+   * this is the churn signal the office never had.
+   */
+  notStartedCount  Int     @default(0)
+  notStartedReason String?
+
+  /**
+   * When the OFFICE marked this student's level finished, and which level that
+   * was. The "your level is complete, here is the next one" offer fires off
+   * this and nothing else. It used to be derived from the batch month, which
+   * congratulated students who had not attended a single lesson.
+   */
+  levelCompletedAt  DateTime?
+  levelCompletedFor String?
+
+  /**
+   * Stages after the classroom — documents, visa, arrival — which no database
+   * of ours can observe. The student reports them and the office may verify
+   * them: { "visa": { "status": "claimed", "at": "...", "note": "..." } }
+   */
+  journeyStages Json?
+
+  /** Last time the once-a-day journey moment was shown. Per account, not per device. */
+  journeySeenAt DateTime?
+
   // Email tracking for scheduled reminders
   feeRemindersScheduled Json? // tracks which reminders (7d, 14d, 30d) have been sent
   emailPreferences      Json? // user preferences for notification types
@@ -152,6 +206,48 @@ model Student {
   certificates          Certificate[]
   videoProgress         VideoProgress[]
   convertedFromLead     Lead?
+  journeyEvents         JourneyEvent[]
+}
+
+/**
+ * One line in a student's story.
+ *
+ * Every milestone they reach, every "not yet", every level the office closes.
+ * It exists for two readers: the student, whose map shows their own history
+ * back to them ("12 August — you walked into your first class"), and the
+ * office, which can see that a whole batch has confirmed starting except four
+ * people worth ringing.
+ *
+ * Append-only by convention. Nothing here is the source of truth for state —
+ * the Student columns are — so a lost row costs a line of narrative, never a
+ * countdown.
+ */
+model JourneyEvent {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /**
+   * started | not-yet | stage-claimed | level-completed | level-advanced |
+   * registered | paid
+   */
+  type String
+
+  /** The stage this concerns, e.g. "firstDay", "A1", "visa". */
+  stage String?
+
+  /** One line, written for the student to read. */
+  label  String
+  detail String?
+
+  /** student | attendance | admin | system — who caused it. */
+  source String @default("student")
+
+  /** When it happened in the real world, which is not always when it was recorded. */
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([studentId, occurredAt])
 }
 
 model Branch {

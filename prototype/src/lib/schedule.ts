@@ -1,7 +1,8 @@
 // Personalized class-schedule engine.
 //
 // A student's timetable is driven by two things from their profile:
-//   1. their BATCH  (the month their cohort starts, e.g. "August")
+//   1. their BATCH  (the FIRST of the level's teaching months, e.g. "August"
+//                    means August + September — see lib/batch.ts)
 //   2. their LEVEL  (A1, A2, B1, B2, C1, C2)
 //
 // The weekday pattern ROTATES month-by-month from the batch start month:
@@ -34,22 +35,17 @@ export type ScheduleMonth = {
   sessions: ScheduleSession[];
 };
 
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
+import { MONTH_NAMES, monthNameToIndex, resolveBatchAbsolute } from "@/lib/batch";
+
+// Re-exported: `monthNameToIndex` used to live here, and several modules
+// import it from this path.
+export { monthNameToIndex };
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // Rotating weekday patterns (JS getDay(): 0=Sun … 6=Sat).
 const PATTERN_EVEN = [1, 5, 6]; // Mon, Fri, Sat
 const PATTERN_ODD = [2, 3, 4]; // Tue, Wed, Thu
-
-export function monthNameToIndex(name: unknown): number | null {
-  if (typeof name !== "string") return null;
-  const idx = MONTH_NAMES.findIndex((m) => m.toLowerCase() === name.trim().toLowerCase());
-  return idx >= 0 ? idx : null;
-}
 
 function patternForOffset(offset: number): number[] {
   return offset % 2 === 0 ? PATTERN_EVEN : PATTERN_ODD;
@@ -94,7 +90,14 @@ function sessionFor(level: string, weekday: string): { slot: string; focus: stri
 
 export type GenerateScheduleArgs = {
   level?: string | null;
-  batch?: string | null; // month name e.g. "August"
+  batch?: string | null; // month name e.g. "August" — the FIRST teaching month
+  /**
+   * When this student registered. Anchors WHICH occurrence of the batch month
+   * is meant, so a student who signs up in August for the September batch is
+   * placed in the September ahead of them rather than the one last year. See
+   * lib/batch.ts.
+   */
+  registeredAt?: Date | null;
   /** Reference "now" — pass the request time so output is stable within a request. */
   now?: Date;
   /** How many months of timetable to generate. */
@@ -104,31 +107,31 @@ export type GenerateScheduleArgs = {
 export function generatePersonalizedSchedule({
   level,
   batch,
+  registeredAt = null,
   now = new Date(),
   months = 2,
 }: GenerateScheduleArgs): { level: string; batchMonth: string; batchYear: number; months: ScheduleMonth[] } {
   const normalizedLevel = (typeof level === "string" && level.trim() ? level : "A1").toUpperCase();
 
-  // Resolve the batch start month. Default to the current month if unset.
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
-  const batchMonthIndex = monthNameToIndex(batch) ?? currentMonth;
-
-  // The batch month is the most recent occurrence at or before now. A student
-  // whose batch is "May", looking in July, started this May — not next May.
-  const batchYear = batchMonthIndex <= currentMonth ? currentYear : currentYear - 1;
-
-  // Absolute month index (months since year 0) makes the arithmetic below
-  // wrap across year boundaries without special cases.
-  const batchAbsolute = batchYear * 12 + batchMonthIndex;
   const currentAbsolute = currentYear * 12 + currentMonth;
 
-  // Show the months the student is actually in: start at the current month
-  // once the batch is under way, but never before the batch begins. The
-  // weekday rotation still counts from the true batch start, so a cohort
-  // three months in keeps the correct pattern.
-  const firstAbsolute = Math.max(batchAbsolute, currentAbsolute);
-  const startOffset = firstAbsolute - batchAbsolute;
+  // One shared rule for which calendar month a batch name points at. Falls
+  // back to the current month when the batch is missing or unreadable.
+  const batchAbsolute = resolveBatchAbsolute(batch, { registeredAt, now }) ?? currentAbsolute;
+  const batchYear = Math.floor(batchAbsolute / 12);
+  const batchMonthIndex = batchAbsolute % 12;
+
+  // The timetable IS the batch window — August + September for an August
+  // batch — so it starts at the batch month, full stop.
+  //
+  // This used to start at the CURRENT month once the batch was under way,
+  // which quietly invented a third month of classes: an August student
+  // looking in September was shown September and October, and October is
+  // after their level has ended. The month they are standing in is found by
+  // the calendar UI scrolling to it, not by cropping the course.
+  const startOffset = 0;
 
   const out: ScheduleMonth[] = [];
 

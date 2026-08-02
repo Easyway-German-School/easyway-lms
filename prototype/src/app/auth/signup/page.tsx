@@ -1,5 +1,5 @@
 import SignUpForm from "@/app/auth/signup/SignUpForm";
 
 export default function SignUpPage() {
-  return <SignUpForm pageTitle="Student Signin" />;
+  return <SignUpForm pageTitle="Student Sign In" />;
 }

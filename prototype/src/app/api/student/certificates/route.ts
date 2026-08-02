@@ -35,6 +35,7 @@ export async function GET() {
       classType: true,
       admission: true,
       studentCode: true,
+      createdAt: true,
       branch: { select: { name: true } },
       // The name and tutor are here for the LOCKED preview, not for any
       // certificate that exists: a student with nothing issued yet is still
@@ -66,6 +67,7 @@ export async function GET() {
     batch,
     totalPaid,
     requiredDeposit: requiredDepositFor(feeLookup),
+    registeredAt: student.createdAt,
   });
 
   if (eligibility.eligible) {

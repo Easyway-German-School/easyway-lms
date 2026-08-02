@@ -381,8 +381,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
       <div className="mx-auto w-full max-w-5xl space-y-10">
         <div className="rounded-[32px] bg-gradient-to-br from-[#0D7C7E] via-[#FF6600] to-[#FF8533] px-8 py-8 text-white shadow-[0_30px_90px_-30px_rgba(13,124,126,0.25)] sm:px-12">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-sky-100">EASYWAY LMS STUDENT SIGNIN</p>
-            <h1 className="mt-4 text-4xl font-semibold leading-tight sm:text-5xl">{pageTitle || "Student Signin"}</h1>
+            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-sky-100">EASYWAY LMS STUDENT SIGN IN</p>
+            <h1 className="mt-4 text-4xl font-semibold leading-tight sm:text-5xl">{pageTitle || "Student Sign In"}</h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-sky-100/90">
               Secure your place, choose your pathway, and launch your learning progress with a simpler signin experience.
             </p>

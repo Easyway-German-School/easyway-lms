@@ -72,6 +72,8 @@ export async function getMergedSchedule(args: {
   branchId: string | null;
   level: string;
   batch?: string | null;
+  /** When the student registered — decides WHICH occurrence of the batch month. */
+  registeredAt?: Date | null;
   sessionSlot?: string | null;
   now?: Date;
   months?: number;
@@ -81,6 +83,7 @@ export async function getMergedSchedule(args: {
   const generated = generatePersonalizedSchedule({
     level: args.level,
     batch: args.batch ?? null,
+    registeredAt: args.registeredAt ?? null,
     now: args.now,
     months: args.months ?? 2,
   });

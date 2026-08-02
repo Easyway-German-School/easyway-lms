@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { awardFor, hasPassed, type Award } from "@/lib/grading";
 import { SESSION_MONTHS } from "@/lib/levels";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
-import { monthNameToIndex } from "@/lib/schedule";
+import { resolveBatchWindow } from "@/lib/batch";
 
 /**
  * Certificates.
@@ -67,30 +67,21 @@ export function citationFor(kind: CertificateKind, level: string, award: Award):
 export function courseWindow(
   batch: string | null,
   now = new Date(),
+  registeredAt: Date | null = null,
 ): { start: Date | null; end: Date | null } {
-  const monthIndex = monthNameToIndex(batch);
-  if (monthIndex === null) return { start: null, end: null };
-
-  // Same rule as sessionIsComplete: the batch is the most recent occurrence at
-  // or before now, so a "May" batch read in July started this May, not next.
-  const year = monthIndex <= now.getMonth() ? now.getFullYear() : now.getFullYear() - 1;
-
-  const start = new Date(year, monthIndex, 1);
-  // Day 0 of the following month is the last day of the one before it.
-  const end = new Date(year, monthIndex + SESSION_MONTHS, 0);
-  return { start, end };
+  const window = resolveBatchWindow(batch, { registeredAt, now });
+  if (!window) return { start: null, end: null };
+  return { start: window.startsOn, end: window.endsOn };
 }
 
-export function sessionIsComplete(batch: string | null, now = new Date()): boolean {
-  const monthIndex = monthNameToIndex(batch);
-  if (monthIndex === null) return false;
-
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-  const year = monthIndex <= currentMonth ? currentYear : currentYear - 1;
-  const monthsElapsed = currentYear * 12 + currentMonth - (year * 12 + monthIndex);
-
-  return monthsElapsed >= SESSION_MONTHS;
+export function sessionIsComplete(
+  batch: string | null,
+  now = new Date(),
+  registeredAt: Date | null = null,
+): boolean {
+  const window = resolveBatchWindow(batch, { registeredAt, now });
+  if (!window) return false;
+  return window.monthsElapsed >= SESSION_MONTHS;
 }
 
 export type Eligibility =
@@ -110,8 +101,10 @@ export function certificateEligibility(input: {
   totalPaid: number;
   requiredDeposit: number;
   now?: Date;
+  /** When the student registered — decides which occurrence of the batch month. */
+  registeredAt?: Date | null;
 }): Eligibility {
-  if (!sessionIsComplete(input.batch, input.now)) {
+  if (!sessionIsComplete(input.batch, input.now, input.registeredAt ?? null)) {
     return {
       eligible: false,
       reason: `Your ${SESSION_MONTHS}-month session is still running. Certificates are issued at the end of it.`,
@@ -182,6 +175,9 @@ export async function issueCertificateForStudent(
       classType: true,
       studentCode: true,
       admission: true,
+      // Anchors which occurrence of the batch month this student's course ran
+      // in — see lib/batch.ts.
+      createdAt: true,
       user: { select: { name: true } },
       branch: { select: { name: true } },
       tutor: { select: { user: { select: { name: true } } } },
@@ -207,6 +203,7 @@ export async function issueCertificateForStudent(
     totalPaid,
     requiredDeposit: requiredDepositFor(feeLookup),
     now,
+    registeredAt: student.createdAt,
   });
   if (!eligibility.eligible) return { issued: false, reason: eligibility.reason };
 
@@ -241,8 +238,8 @@ export async function issueCertificateForStudent(
       // Snapshotted like every other field here: a student who repeats the
       // level or moves batch must not change the dates on a document already
       // printed and in somebody's hand.
-      courseStart: courseWindow(batch, now).start,
-      courseEnd: courseWindow(batch, now).end,
+      courseStart: courseWindow(batch, now, student.createdAt).start,
+      courseEnd: courseWindow(batch, now, student.createdAt).end,
       issuedAt: now,
     },
     select: { id: true },

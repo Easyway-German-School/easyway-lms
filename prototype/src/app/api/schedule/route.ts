@@ -61,6 +61,10 @@ export async function GET(req: NextRequest) {
       branchId: student.branchId,
       level,
       batch,
+      // Anchors which occurrence of the batch month is meant — a student who
+      // signed up in August for the September batch belongs to the September
+      // ahead of them, not the one a year behind.
+      registeredAt: student.createdAt,
       sessionSlot: student.sessionSlot,
       now: new Date(),
       months: 2,
