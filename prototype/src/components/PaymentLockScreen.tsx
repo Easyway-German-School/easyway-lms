@@ -335,7 +335,8 @@ export default function PaymentLockScreen({
         <p className="mb-5 text-center text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
           While you are here — this is where it goes
         </p>
-        <GermanyJourney />
+        {/* Inline, not behind a button: on this screen the map IS the pitch. */}
+        <GermanyJourney variant="inline" />
       </div>
     </section>
     </>

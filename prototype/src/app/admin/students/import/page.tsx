@@ -19,6 +19,8 @@ type ImportResult = {
   amountPaid: number;
   status: "ready" | "created" | "skipped" | "error";
   note: string;
+  /** "portharcourt → Port Harcourt" — what the importer read differently. */
+  corrections?: string[];
   password?: string;
   studentCode?: string | null;
 };
@@ -314,7 +316,27 @@ export default function ImportStudentsPage() {
                           {result.status}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-xs text-[var(--muted)]">{result.note}</td>
+                      <td className="px-3 py-2 text-xs text-[var(--muted)]">
+                        {result.note}
+                        {/* Every spelling the importer read differently, shown
+                            on the row it happened to. A file that says
+                            "portharcourt" now imports — but the admin is told
+                            it was read as Port Harcourt, because an importer
+                            that quietly reinterprets your data is worse than
+                            one that rejects it: the rejection you notice. */}
+                        {result.corrections?.length ? (
+                          <span className="mt-1 flex flex-wrap gap-1">
+                            {result.corrections.map((correction) => (
+                              <span
+                                key={correction}
+                                className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                              >
+                                {correction}
+                              </span>
+                            ))}
+                          </span>
+                        ) : null}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

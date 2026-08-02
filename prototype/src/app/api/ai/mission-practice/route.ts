@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { generateMissionPracticeFeedback } from "@/lib/ai";
+import { requireAiUser } from "@/lib/ai-guard";
 
 export async function POST(req: Request) {
+  // A student feature, so any signed-in account — but not the whole internet.
+  const gate = await requireAiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const body = await req.json();
     const missionTitle = String(body?.missionTitle || "practice mission");

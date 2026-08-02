@@ -184,16 +184,18 @@ function generateMissionPracticeFeedbackMock(input: {
 }
 
 export async function generateCourseOutline(courseInfo: any): Promise<{ modules: Array<{ title: string; description: string; lessons: Array<{ title: string; description: string; duration: number; type: string }> }> }> {
-  const provider = getAIProvider();
-  if (provider === "ollama") {
+  const provider = getAIProvider("backoffice");
+  // Either local runner: callLocalModel tries AnythingLLM before Ollama.
+  if (provider === "ollama" || provider === "anythingllm") {
     return generateCourseOutlineWithOllama(courseInfo);
   }
   return generateCourseOutlineMock(courseInfo);
 }
 
 export async function generateLessonPackage(lessonData: any): Promise<{ summary: string; objectives: string[]; grammarFocus: string[]; vocabulary: string[]; quizQuestions?: Array<{ question: string; type: string; options?: string[]; answer: string }>; modules: Array<{ title: string; description: string; lessons: Array<{ title: string; description: string; type: string; duration: number }> }>; missions: Array<{ title: string; description: string; reward: string }> }> {
-  const provider = getAIProvider();
-  if (provider === "ollama") {
+  const provider = getAIProvider("backoffice");
+  // Either local runner: callLocalModel tries AnythingLLM before Ollama.
+  if (provider === "ollama" || provider === "anythingllm") {
     return generateLessonPackageWithOllama(lessonData);
   }
   return generateLessonPackageMock(lessonData);
@@ -208,16 +210,18 @@ export async function parseUploadedContent(content: string): Promise<{
   keyTopics: string[];
   suggestedLevel: string;
 }> {
-  const provider = getAIProvider();
-  if (provider === "ollama") {
+  const provider = getAIProvider("backoffice");
+  // Either local runner: callLocalModel tries AnythingLLM before Ollama.
+  if (provider === "ollama" || provider === "anythingllm") {
     return parseUploadedContentWithOllama(content);
   }
   return parseUploadedContentMock(content);
 }
 
 export async function summarizeText(text: string): Promise<string> {
-  const provider = getAIProvider();
-  if (provider === "ollama") {
+  const provider = getAIProvider("backoffice");
+  // Either local runner: callLocalModel tries AnythingLLM before Ollama.
+  if (provider === "ollama" || provider === "anythingllm") {
     return summarizeTextWithOllama(text);
   }
   return summarizeTextMock(text);
@@ -749,12 +753,76 @@ function generateLessonPackageMock(lessonData: any) {
   };
 }
 
-function getAIProvider(): "claude" | "ollama" | "deepseek" | "anythingllm" | "mock" {
-  if (process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_API_KEY.startsWith("sk-placeholder")) return "claude";
-  if (process.env.DEEPSEEK_API_KEY && !process.env.DEEPSEEK_API_KEY.startsWith("sk-placeholder")) return "deepseek";
+/**
+ * Which model answers, and why it depends on who is waiting.
+ *
+ * ---------------------------------------------------------------------------
+ * THE SPLIT
+ *
+ * There is no single right provider for this product, because the two kinds of
+ * AI work here have opposite requirements.
+ *
+ *   INTERACTIVE — a student has tapped something and is watching a spinner:
+ *   pronunciation, essay grading, missions, practice feedback. On this
+ *   school's hardware a local 7B model takes the better part of a minute per
+ *   answer. A teenager on a phone does not wait fifty seconds; they conclude
+ *   it is broken and stop using the feature. These go to the hosted model.
+ *
+ *   BACK OFFICE — nobody is watching, or the wait is expected: parsing an
+ *   uploaded PDF into a lesson, drafting a course outline. These are slow
+ *   anyway, they are the most expensive calls (whole documents), and they run
+ *   on material the school already owns. These prefer LOCAL, so the school's
+ *   own teaching material never leaves the building and the bill does not
+ *   scale with how much a tutor uploads.
+ *
+ * The old function had no notion of this — one global race, hosted first — so
+ * every call went to Anthropic the moment a key existed, including document
+ * parsing, and Ollama was fourth in a queue it never reached. The school had
+ * installed Ollama specifically to keep this work local.
+ *
+ * ---------------------------------------------------------------------------
+ * OVERRIDE
+ *
+ * `AI_PROVIDER` forces one provider for everything, which is what you want
+ * when testing that a fallback path still works, or when the office is
+ * offline and everything must run locally. Otherwise the workload decides.
+ */
+export type AiWorkload =
+  /** Somebody is watching a spinner. Speed wins. */
+  | "interactive"
+  /** Nobody is waiting. Privacy and cost win. */
+  | "backoffice";
+
+type Provider = "claude" | "ollama" | "deepseek" | "anythingllm" | "mock";
+
+function hasKey(value: string | undefined): boolean {
+  return Boolean(value && !value.startsWith("sk-placeholder"));
+}
+
+function hostedProvider(): Provider | null {
+  if (hasKey(process.env.ANTHROPIC_API_KEY)) return "claude";
+  if (hasKey(process.env.DEEPSEEK_API_KEY)) return "deepseek";
+  return null;
+}
+
+function localProvider(): Provider | null {
   if (process.env.ANYTHINGLLM_BASE_URL) return "anythingllm";
   if (process.env.OLLAMA_BASE_URL) return "ollama";
-  return "mock";
+  return null;
+}
+
+function getAIProvider(workload: AiWorkload = "interactive"): Provider {
+  const forced = String(process.env.AI_PROVIDER ?? "").toLowerCase();
+  if (forced === "claude" || forced === "ollama" || forced === "deepseek" || forced === "anythingllm" || forced === "mock") {
+    return forced;
+  }
+
+  // Each preference falls back to the other rather than to mock: a school with
+  // only one of the two configured still gets working features everywhere.
+  const preferred = workload === "backoffice" ? localProvider() : hostedProvider();
+  const fallback = workload === "backoffice" ? hostedProvider() : localProvider();
+
+  return preferred ?? fallback ?? "mock";
 }
 
 async function callLocalModel(model: string, prompt: string, temperature = 0.2) {

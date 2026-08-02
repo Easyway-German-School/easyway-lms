@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseUploadedContent, summarizeText } from "@/lib/ai";
+import { requireAiStaff } from "@/lib/ai-guard";
 import mammoth from "mammoth";
 import { pathToFileURL } from "node:url";
 import fs from "node:fs";
@@ -129,6 +130,11 @@ async function extractTextFromDOCX(buffer: Buffer): Promise<string> {
 }
 
 export async function POST(request: NextRequest) {
+  // The worst of the five: it took FILE UPLOADS from anonymous callers and ran
+  // whole documents through the model. Staff only.
+  const gate = await requireAiStaff();
+  if (!gate.ok) return gate.response;
+
   try {
     const contentType = request.headers.get("content-type") || "";
     let extractedText = "";

@@ -20,6 +20,7 @@ import {
   buildJourney,
   buildStartPrompt,
   journeyMomentDue,
+  normaliseMomentPreference,
   nextAskAfter,
   targetLevelFor,
   NOT_STARTED_ESCALATION_THRESHOLD,
@@ -38,6 +39,8 @@ export type JourneyPayload = Journey & {
   startPrompt: StartPrompt;
   /** Open the map by itself today? */
   momentDue: boolean;
+  /** How often they have asked for it: daily, less (every 3rd day), never. */
+  momentPreference: "daily" | "less" | "never";
   /**
    * Nobody has asked them why yet.
    *
@@ -95,6 +98,7 @@ const JOURNEY_SELECT = {
   levelCompletedFor: true,
   journeyStages: true,
   journeySeenAt: true,
+  journeyMomentPreference: true,
   germanyGoal: true,
   germanyGoalNote: true,
   germanyGoalSetAt: true,
@@ -242,7 +246,8 @@ export async function loadJourney(
     ...journey,
     registeredAt: student.createdAt.toISOString(),
     startPrompt,
-    momentDue: journeyMomentDue(student.journeySeenAt, now),
+    momentDue: journeyMomentDue(student.journeySeenAt, student.journeyMomentPreference, now),
+    momentPreference: normaliseMomentPreference(student.journeyMomentPreference),
     goalAskDue: !student.germanyGoal,
     tribeStanding,
     stamps,
@@ -653,8 +658,24 @@ export async function setGermanyGoal(
 /* The once-a-day moment                                                      */
 /* -------------------------------------------------------------------------- */
 
-export async function markMomentSeen(userId: string, now = new Date()): Promise<void> {
-  await prisma.student.updateMany({ where: { userId }, data: { journeySeenAt: now } });
+export async function markMomentSeen(
+  userId: string,
+  preference?: unknown,
+  now = new Date(),
+): Promise<void> {
+  // The stamp and the preference are written together, because they are set by
+  // the same tap: closing the map IS the answer to "how often should this
+  // open?". Two round trips would let a student pick "show less" and still
+  // meet it tomorrow if the second one failed.
+  await prisma.student.updateMany({
+    where: { userId },
+    data: {
+      journeySeenAt: now,
+      ...(preference === undefined
+        ? {}
+        : { journeyMomentPreference: normaliseMomentPreference(preference) }),
+    },
+  });
 }
 
 /* -------------------------------------------------------------------------- */

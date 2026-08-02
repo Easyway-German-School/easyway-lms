@@ -217,7 +217,30 @@ export default function StudentShell({ children }: { children: React.ReactNode }
         </div>
       </aside>
 
-      <main className={`flex-1 transition-all duration-300 ${collapsed ? "lg:ml-20" : "lg:ml-72"}`}>
+      {/*
+        `min-w-0` IS THE WHOLE MOBILE FIX, and it is not obvious.
+
+        A flex child defaults to `min-width: auto`, which means it refuses to
+        shrink below the intrinsic width of its widest content. One table, one
+        long unbroken email address or one grid with a fixed column anywhere in
+        the student portal was therefore able to push this element wider than
+        the phone — measured at 416px inside a 375px viewport — and everything
+        laid out against it spilled off the right edge. The page did not even
+        scroll sideways to reveal it, because the body clips: content was
+        simply gone.
+
+        That is why the symptom looked like a dozen unrelated "this page is too
+        wide" bugs on a dozen different pages. There was one bug, here.
+
+        `overflow-x-clip` is the second line of defence: a future page with a
+        genuinely un-shrinkable element gets clipped locally instead of
+        dragging the whole layout sideways.
+      */}
+      <main
+        className={`min-w-0 flex-1 overflow-x-clip transition-all duration-300 ${
+          collapsed ? "lg:ml-20" : "lg:ml-72"
+        }`}
+      >
         {/* The only chrome on a phone: the way back to the menu, and the bell.
             On desktop it keeps the bell reachable from every page, which it
             was not before — the component existed but nothing rendered it. */}

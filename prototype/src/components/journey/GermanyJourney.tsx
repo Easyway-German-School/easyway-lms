@@ -77,6 +77,8 @@ type Journey = {
   subheadline: string;
   startPrompt: import("@/lib/germany-journey").StartPrompt;
   momentDue: boolean;
+  /** daily · less (every 3rd day) · never. Chosen in the moment's footer. */
+  momentPreference: "daily" | "less" | "never";
   goalAskDue: boolean;
   tribeStanding: { tribe: string; cohortSize: number; atOrBeyond: number; line: string } | null;
   stamps: Array<{ id: string; label: string; detail: string | null; at: string; source: string }>;
@@ -316,13 +318,150 @@ function JourneyBody({
 /* The component                                                              */
 /* -------------------------------------------------------------------------- */
 
-export default function GermanyJourney({ className = "" }: { className?: string }) {
+/**
+ * The button the map now lives behind.
+ *
+ * It is not a bare "open map" link. It carries the two numbers that make
+ * somebody want to open it — how far along they are, and what is next — so it
+ * works as a glance even when they never tap it. A launcher that says nothing
+ * is a launcher nobody presses.
+ */
+function JourneyLauncher({ journey, onOpen }: { journey: Journey; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group relative w-full overflow-hidden rounded-[28px] bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] p-px text-left transition hover:brightness-105"
+    >
+      <span className="flex flex-col gap-3 rounded-[27px] bg-[var(--surface)] px-4 py-4 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
+        <span className="flex min-w-0 flex-1 items-center gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-[#0D7C7E] to-[#FF6600] text-white">
+            <MapIcon className="h-5 w-5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-sm font-bold text-[var(--foreground)]">
+              {journey.percentToGermany}% of the way to {journey.goalUnset ? "Germany" : journey.goal.destination}
+            </span>
+            <span className="mt-0.5 block truncate text-xs text-[var(--muted)]">
+              {journey.countdown?.headline ?? journey.subheadline}
+            </span>
+          </span>
+        </span>
+
+        {/* The bar repeats on the button so the progress is readable without
+            opening anything — the goal-gradient effect works at a glance or
+            not at all. */}
+        <span className="flex items-center gap-3 sm:w-48">
+          <span className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--border)]">
+            <span
+              className="block h-full rounded-full bg-gradient-to-r from-[#0D7C7E] to-[#FF6600]"
+              style={{ width: `${journey.percentToGermany}%` }}
+            />
+          </span>
+          <span className="shrink-0 text-xs font-bold text-[var(--accent-ink)] group-hover:underline">Open</span>
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/**
+ * How often the road should open by itself, asked at the only moment it makes
+ * sense to ask: as they close it.
+ *
+ * THREE OPTIONS, NOT TWO. A dialog offering only "fine" and "never again" gets
+ * turned off permanently by anyone it catches at a bad moment — and then the
+ * best thing in the portal is gone over one mistimed Tuesday. "Show less" is
+ * what most people actually mean by "not now", and it costs the school three
+ * days instead of forever.
+ *
+ * The wording is plain about what each one does. "Show less" secretly meaning
+ * every third day would be a small dishonesty, and this map's whole argument
+ * with the student is that it does not lie to them.
+ */
+function MomentFrequency({
+  current,
+  onChoose,
+}: {
+  current: "daily" | "less" | "never";
+  onChoose: (preference: "daily" | "less" | "never") => void;
+}) {
+  const options = [
+    { id: "daily" as const, label: "Every day", hint: "Once, on your first visit" },
+    { id: "less" as const, label: "Show less", hint: "Every third day" },
+    { id: "never" as const, label: "Don't open it", hint: "Button only" },
+  ];
+
+  return (
+    <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-3">
+      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+        Open this by itself
+      </p>
+      <div className="mt-2 grid gap-1.5 sm:grid-cols-3">
+        {options.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => onChoose(option.id)}
+            aria-pressed={current === option.id}
+            className={`rounded-xl px-3 py-2.5 text-left transition ${
+              current === option.id
+                ? "bg-[var(--accent)] text-white"
+                : "bg-[var(--surface)] text-[var(--foreground)] hover:bg-[var(--border)]/40"
+            }`}
+          >
+            <span className="block text-xs font-bold">{option.label}</span>
+            <span
+              className={`mt-0.5 block text-[11px] ${
+                current === option.id ? "text-white/80" : "text-[var(--muted)]"
+              }`}
+            >
+              {option.hint}
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] leading-4 text-[var(--muted)]">
+        Whichever you pick, the button on your dashboard always opens it.
+      </p>
+    </div>
+  );
+}
+
+export default function GermanyJourney({
+  className = "",
+  /**
+   * How the map sits on the page.
+   *
+   * "launcher" — a slim button; the map opens as a moment. This is the
+   *   dashboard. A paid student checking their timetable should not have to
+   *   scroll past two thousand pixels of road to reach it.
+   *
+   * "inline" — the whole map, always open, no button. This is the PAYMENT LOCK
+   *   SCREEN, where the map is not a feature of the dashboard but the argument
+   *   for paying at all: it is the only thing on that page showing somebody
+   *   what their money buys. Hiding it behind a tap there would be hiding the
+   *   pitch.
+   */
+  variant = "launcher",
+}: {
+  className?: string;
+  variant?: "launcher" | "inline";
+}) {
   const [journey, setJourney] = useState<Journey | null>(null);
   const [busy, setBusy] = useState(false);
   const [reply, setReply] = useState<string | null>(null);
   const [claimingStage, setClaimingStage] = useState<string | null>(null);
   /** Opened from the ribbon rather than by the queue. Always allowed. */
   const [changingGoal, setChangingGoal] = useState(false);
+  /**
+   * Opened by tapping the launcher.
+   *
+   * Separate from the queue's turn: a student who deliberately reaches for the
+   * map is not being interrupted, so it must open whatever the daily stamp
+   * says and whether or not two modals have already been spent this visit.
+   */
+  const [manualMoment, setManualMoment] = useState(false);
 
   const queue = useMomentQueue();
 
@@ -341,10 +480,12 @@ export default function GermanyJourney({ className = "" }: { className?: string 
    * the version of it that is trying to sell them something.
    */
   const { open: goalOpen, close: releaseGoal } = useMoment("goal", Boolean(journey?.goalAskDue));
-  const { open: moment, close: releaseMoment } = useMoment(
+  const { open: queuedMoment, close: releaseMoment } = useMoment(
     "journey",
     Boolean(journey?.momentDue) && !journey?.previewOnly,
   );
+  /** Either the queue gave it a turn, or the student asked for it. */
+  const moment = queuedMoment || manualMoment;
 
   useEffect(() => {
     let cancelled = false;
@@ -367,13 +508,34 @@ export default function GermanyJourney({ className = "" }: { className?: string 
     };
   }, []);
 
-  const closeMoment = useCallback(() => {
-    // Stamped server-side so a student who saw it on a laptop at 9am does not
-    // meet it again on their phone at noon.
-    setJourney((current) => (current ? { ...current, momentDue: false } : current));
-    releaseMoment();
-    fetch("/api/student/journey/seen", { method: "POST", credentials: "include" }).catch(() => {});
-  }, [releaseMoment]);
+  /**
+   * Closing the map, and saying how often it should come back.
+   *
+   * `preference` is undefined for an ordinary close — that just stamps today.
+   * The three buttons in the footer pass one, and it is written in the SAME
+   * request as the stamp so a student cannot pick "show less" and still meet
+   * it tomorrow because the second call failed.
+   */
+  const closeMoment = useCallback(
+    (preference?: "daily" | "less" | "never") => {
+      // Stamped server-side so a student who saw it on a laptop at 9am does not
+      // meet it again on their phone at noon.
+      setJourney((current) =>
+        current
+          ? { ...current, momentDue: false, momentPreference: preference ?? current.momentPreference }
+          : current,
+      );
+      setManualMoment(false);
+      releaseMoment();
+      fetch("/api/student/journey/seen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(preference ? { preference } : {}),
+      }).catch(() => {});
+    },
+    [releaseMoment],
+  );
 
   /**
    * The answer, and the handover.
@@ -452,14 +614,30 @@ export default function GermanyJourney({ className = "" }: { className?: string 
 
   return (
     <div className={className}>
-      {/* ONE MAP AT A TIME. The same `body` used to render inline AND inside
-          the moment, which React mounts as two independent component trees —
-          two full worlds, each a couple of thousand pixels of SVG with its own
-          clouds, flag and walking guide, animating simultaneously behind a
-          backdrop blur. Harmless when the map was a list of cards; not harmless
-          now, and worst on exactly the mid-range phones most of this school's
-          students use. The inline copy comes back when the moment closes. */}
-      {moment ? null : body}
+      {/*
+        THE MAP IS NOT PART OF THE DASHBOARD ANY MORE.
+
+        It used to render inline, above everything, permanently — which meant a
+        student who had paid and just wanted to check their timetable had to
+        scroll past two thousand pixels of animated road every single visit. A
+        thing that important stops being important when it is unavoidable; it
+        becomes the wall you scroll past, and the dashboard the student came for
+        starts below the fold.
+
+        So the dashboard gets a BUTTON, and the map is a moment: it opens by
+        itself on the first visit of the day (or every third day, or never —
+        the student decides, in the footer of the map itself), and any time
+        they tap the button. Same content, one tap away, chosen rather than
+        imposed.
+
+        It also fixes the performance problem the inline copy caused: the map
+        is only ever mounted while it is actually being looked at.
+      */}
+      {variant === "inline" ? (
+        moment ? null : body
+      ) : (
+        <JourneyLauncher journey={journey} onOpen={() => setManualMoment(true)} />
+      )}
 
       <AnimatePresence>
         {goalOpen || changingGoal ? (
@@ -508,7 +686,7 @@ export default function GermanyJourney({ className = "" }: { className?: string 
                 </div>
                 <button
                   type="button"
-                  onClick={closeMoment}
+                  onClick={() => closeMoment()}
                   aria-label="Close"
                   className="grid h-9 w-9 place-items-center rounded-full border border-[var(--border)] text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
                 >
@@ -518,15 +696,21 @@ export default function GermanyJourney({ className = "" }: { className?: string 
 
               {body}
 
+              {/* The frequency choice sits AFTER the map, not before it. Asked
+                  first it is a barrier between the student and the thing they
+                  came to see; asked here it is a reasonable question about
+                  something they have just finished looking at. */}
+              <MomentFrequency current={journey.momentPreference} onChoose={(p) => closeMoment(p)} />
+
               <button
                 type="button"
-                onClick={closeMoment}
-                className="mt-4 w-full rounded-full bg-[var(--accent)] px-6 py-3.5 text-sm font-bold text-white transition hover:brightness-110"
+                onClick={() => closeMoment()}
+                className="mt-3 w-full rounded-full bg-[var(--accent)] px-6 py-3.5 text-sm font-bold text-white transition hover:brightness-110"
               >
                 Back to my dashboard
               </button>
               <p className="mt-2 pb-1 text-center text-[11px] text-[var(--muted)]">
-                Your map stays on your dashboard — closing this does not lose your place.
+                The button on your dashboard opens this any time.
               </p>
             </motion.div>
           </motion.div>

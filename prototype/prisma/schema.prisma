@@ -185,6 +185,22 @@ model Student {
   journeySeenAt DateTime?
 
   /**
+   * How often the student wants the road to open by itself.
+   *
+   * "daily" (the default), "less" — every third day — or "never".
+   *
+   * WHY THERE IS A MIDDLE OPTION. A popup with only "show me" and "never
+   * again" is a popup most people turn off the first time it lands at a bad
+   * moment, and then the best thing in the portal is gone forever over one
+   * mistimed Tuesday. "Show less" is the answer to "not right now" that does
+   * not cost the school the feature, and for the student it is the honest
+   * version of what they meant. It is stored per ACCOUNT rather than per
+   * device for the same reason journeySeenAt is: turning it off on a laptop
+   * and meeting it again on a phone would read as the portal ignoring them.
+   */
+  journeyMomentPreference String @default("daily")
+
+  /**
    * WHY they are learning German — one of the eight roads in
    * src/lib/germany-goals.ts ("study", "ausbildung", "care", "family", …).
    *

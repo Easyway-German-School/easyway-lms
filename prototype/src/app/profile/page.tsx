@@ -126,14 +126,22 @@ function StatPill({
       initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.1 + index * 0.07, type: "spring", stiffness: 120, damping: 16 }}
-      className="flex-1 rounded-3xl border border-white/10 bg-white/[0.06] px-4 py-4 text-center backdrop-blur-xl"
+      // `min-w-0` so a pill can shrink inside the flex row from `sm` up; the
+      // grid handles the phone. Without it the row is un-shrinkable again and
+      // the clipping comes straight back on a narrow tablet.
+      className="min-w-0 flex-1 rounded-3xl border border-white/10 bg-white/[0.06] px-3 py-4 text-center backdrop-blur-xl sm:px-4"
     >
       <p className="flex justify-center text-white/80">{icon}</p>
       <p className="mt-1 text-2xl font-bold text-white sm:text-3xl">
         <CountUp value={value} />
         {suffix}
       </p>
-      <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">{label}</p>
+      {/* Tracking that wide turns "Attendance" into an overflow on a 160px
+          pill. It keeps the look where there is room and gives it up where
+          there is not. */}
+      <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] sm:tracking-[0.22em]">
+        {label}
+      </p>
     </motion.div>
   );
 }
@@ -385,24 +393,34 @@ export default function ProfilePage() {
           />
           <div className="absolute inset-0 bg-[linear-gradient(to_top,_rgba(2,6,23,0.95),_transparent_70%)]" />
 
-          <div className="relative flex h-full items-start justify-between px-6 py-6 sm:px-10">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/60">Student profile</p>
+          {/* `gap-3` and `min-w-0`, because on a 375px phone the tier pill and
+              the Edit button were fighting for the same row: the pill's blurb
+              wrapped underneath its own label and the button broke across two
+              lines. The eyebrow and the pill now shrink, and the button never
+              does — it is the only thing here anybody taps. */}
+          <div className="relative flex h-full items-start justify-between gap-3 px-4 py-5 sm:px-10 sm:py-6">
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-white/60 sm:tracking-[0.4em]">
+                Student profile
+              </p>
               {tier && (
                 <div
-                  className="mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold text-white shadow-lg"
+                  className="mt-3 inline-flex max-w-full items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold text-white shadow-lg"
                   style={{ background: ring }}
                 >
-                  <StarIcon className="h-3.5 w-3.5" />
-                  {tier.name}
-                  <span className="font-medium opacity-80">· {tier.blurb}</span>
+                  <StarIcon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{tier.name}</span>
+                  {/* The blurb is the first thing to go when there is no room:
+                      "Anfänger" is the badge, "Just getting started" is the
+                      footnote to it. */}
+                  <span className="hidden truncate font-medium opacity-80 sm:inline">· {tier.blurb}</span>
                 </div>
               )}
             </div>
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="rounded-full border border-white/25 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white backdrop-blur transition hover:bg-white/20"
+              className="shrink-0 whitespace-nowrap rounded-full border border-white/25 bg-white/10 px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-white backdrop-blur transition hover:bg-white/20 sm:px-4 sm:text-xs sm:tracking-[0.18em]"
             >
               Edit profile
             </button>
@@ -512,8 +530,14 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* Stat strip */}
-              <div className="mt-8 flex gap-3">
+              {/* Stat strip.
+                  TWO BY TWO ON A PHONE, four across from `sm` up. As a single
+                  flex row these four pills needed about 430px and the viewport
+                  is 375, so the fourth — attendance — was sliced down the
+                  middle and rendered as a stray digit. A grid wraps instead of
+                  clipping, which is the difference between a small screen and
+                  a broken one. */}
+              <div className="mt-8 grid grid-cols-2 gap-3 sm:flex">
                 <StatPill index={0} icon={<SparklesIcon className="h-5 w-5" />} label="XP" value={game?.xp ?? 0} />
                 <StatPill index={1} icon={<FlameIcon className="h-5 w-5" />} label="Streak" value={game?.streak ?? 0} />
                 <StatPill index={2} icon={<MedalIcon className="h-5 w-5" />} label="Badges" value={game?.badgesEarned ?? 0} />

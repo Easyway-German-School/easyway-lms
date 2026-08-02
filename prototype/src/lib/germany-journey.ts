@@ -825,11 +825,40 @@ export function nextAskAfter(now = new Date()): Date {
  * Student.journeySeenAt and not in localStorage, unlike the first version of
  * the level poster.
  */
-export function journeyMomentDue(seenAt: Date | string | null, now = new Date()): boolean {
+export type JourneyMomentPreference = "daily" | "less" | "never";
+
+export function normaliseMomentPreference(value: unknown): JourneyMomentPreference {
+  const v = String(value ?? "daily").toLowerCase();
+  return v === "less" || v === "never" ? v : "daily";
+}
+
+/** How many days must pass before the road opens by itself again. */
+const MOMENT_INTERVAL_DAYS: Record<JourneyMomentPreference, number> = {
+  daily: 1,
+  // "Show less" is three days, not seven. A week is long enough that the
+  // countdown on the map has moved by a tenth of the level and the student has
+  // lost the thread; three days keeps it a habit while making it clearly rarer
+  // than before, which is what they asked for.
+  less: 3,
+  never: Infinity,
+};
+
+export function journeyMomentDue(
+  seenAt: Date | string | null,
+  preference: unknown = "daily",
+  now = new Date(),
+): boolean {
+  const wanted = normaliseMomentPreference(preference);
+  if (wanted === "never") return false;
   if (!seenAt) return true;
+
   const seen = new Date(seenAt);
   if (Number.isNaN(seen.getTime())) return true;
-  return startOfDay(seen).getTime() < startOfDay(now).getTime();
+
+  const daysSince = Math.floor(
+    (startOfDay(now).getTime() - startOfDay(seen).getTime()) / MS_PER_DAY,
+  );
+  return daysSince >= MOMENT_INTERVAL_DAYS[wanted];
 }
 
 export { SESSION_MONTHS, nextLevelAfter };

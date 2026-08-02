@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { assignStudentCode } from "@/lib/student-code";
 import { LEVELS } from "@/lib/levels";
+import { bestMatch, matchBatch, matchLevel, matchSessionSlot } from "@/lib/fuzzy-match";
 
 import { requireCapability } from "@/lib/admin-roles";
 export const dynamic = "force-dynamic";
@@ -85,7 +86,18 @@ export async function POST(request: NextRequest) {
     }
 
     const branches = await prisma.branch.findMany({ select: { id: true, name: true } });
-    const branchByName = new Map(branches.map((branch) => [branch.name.toLowerCase(), branch]));
+    /**
+     * Branch aliases the office actually writes.
+     *
+     * "PH" for Port Harcourt is the one that matters — it is shorter than the
+     * containment floor in `bestMatch` and a hundred edit-distances away from
+     * the real name, so nothing but an explicit alias will ever catch it.
+     */
+    const branchCandidates = branches.map((branch) => ({
+      value: branch,
+      label: branch.name,
+      aliases: /port\s*harcourt/i.test(branch.name) ? ["ph", "phc"] : [],
+    }));
 
     const results: Array<{
       row: number;
@@ -98,6 +110,8 @@ export async function POST(request: NextRequest) {
       amountPaid: number;
       status: "ready" | "created" | "skipped" | "error";
       note: string;
+      /** "portharcourt → Port Harcourt". Shown in the preview, never hidden. */
+      corrections?: string[];
       password?: string;
       studentCode?: string | null;
     }> = [];
@@ -106,12 +120,39 @@ export async function POST(request: NextRequest) {
       const row = rows[index];
       const name = str(row, "name", "full_name", "fullname", "student_name");
       const email = str(row, "email", "email_address").toLowerCase();
-      const levelRaw = str(row, "level", "class", "current_level").toUpperCase();
-      const level = (LEVELS as readonly string[]).includes(levelRaw) ? levelRaw : "A1";
-      const branchName = str(row, "branch", "campus", "location");
-      const batch = str(row, "batch", "start_month", "started");
-      const slotRaw = str(row, "session", "session_slot", "slot", "time").toLowerCase();
-      const sessionSlot = SLOTS.includes(slotRaw) ? slotRaw : "morning";
+      /**
+       * SPELLING IS NOT DATA ENTRY'S JOB.
+       *
+       * Every one of these was an exact match before, and a spreadsheet
+       * reading `portharcourt` for `Port Harcourt` failed fifteen of twenty
+       * rows with "no branch called portharcourt". Nobody typed anything
+       * wrong; they just did not type it the way the database stores it.
+       *
+       * Each field now resolves through `bestMatch`, and every correction is
+       * collected so the preview can show the admin exactly what was read as
+       * what. Silent reinterpretation would be worse than the original bug.
+       */
+      const corrections: string[] = [];
+      // Generic so it passes the match through unchanged — typing the
+      // parameter as the structural shape erased `value` from every caller.
+      const note = <M extends { input: string; label: string; corrected: boolean } | null>(match: M): M => {
+        if (match?.corrected) corrections.push(`${match.input} → ${match.label}`);
+        return match;
+      };
+
+      const levelMatch = note(matchLevel(str(row, "level", "class", "current_level"), LEVELS));
+      const level = levelMatch?.value ?? "A1";
+
+      const branchInput = str(row, "branch", "campus", "location");
+      const branchMatch = branchInput ? note(bestMatch(branchInput, branchCandidates)) : null;
+      const branchName = branchMatch?.label ?? branchInput;
+
+      const batchInput = str(row, "batch", "start_month", "started");
+      const batchMatch = batchInput ? note(matchBatch(batchInput)) : null;
+      const batch = batchMatch?.value ?? batchInput;
+
+      const slotMatch = note(matchSessionSlot(str(row, "session", "session_slot", "slot", "time")));
+      const sessionSlot = slotMatch?.value ?? "morning";
       const phone = str(row, "phone", "phone_number", "mobile");
       const amountPaid = money(str(row, "amount_paid", "paid", "amountpaid", "payment"));
 
@@ -124,6 +165,7 @@ export async function POST(request: NextRequest) {
         batch: batch || null,
         sessionSlot,
         amountPaid,
+        corrections: corrections.length ? corrections : undefined,
       };
 
       if (!name || !email) {
@@ -135,12 +177,12 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      const branch = branchName ? branchByName.get(branchName.toLowerCase()) : undefined;
-      if (branchName && !branch) {
+      const branch = branchMatch?.value;
+      if (branchInput && !branch) {
         results.push({
           ...base,
           status: "error",
-          note: `No branch called "${branchName}". Use one of: ${branches.map((b) => b.name).join(", ")}`,
+          note: `No branch close to "${branchInput}". Use one of: ${branches.map((b) => b.name).join(", ")}`,
         });
         continue;
       }

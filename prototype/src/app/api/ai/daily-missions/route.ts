@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { generateDailyMissions } from "@/lib/ai";
+import { requireAiUser } from "@/lib/ai-guard";
 
 type Profile = {
   level?: string;
@@ -77,6 +78,9 @@ function buildAdaptiveMissions(profile: Profile, aiMissions: Array<any>) {
 }
 
 export async function POST(req: Request) {
+  const gate = await requireAiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const body = await req.json();
     const profile = (body.profile || {}) as Profile;
