@@ -4,8 +4,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
 import BrandLogo from "@/components/BrandLogo";
+import MomentDock from "@/components/MomentDock";
 import NotificationCenter from "@/components/NotificationCenter";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
+import { MomentQueueProvider } from "@/lib/moment-queue";
 import { canAttendLive, isLiveOnlyRoute, isTuitionGatedRoute } from "@/lib/access";
 import { useStudentAccess } from "@/lib/useStudentAccess";
 import {
@@ -122,8 +124,13 @@ export default function StudentShell({ children }: { children: React.ReactNode }
   const wrongDeliveryMode = access !== null && !showsLiveClass && isLiveOnlyRoute(pathname);
 
   return (
-    // Was a hardcoded blue gradient, which is why the portal stayed daylight-
-    // blue whatever theme was chosen. The themed canvas is the page's job now.
+    // The queue lives in the shell rather than on the dashboard, so every
+    // student page shares one director. Six components each deciding for
+    // themselves when to open is how a first login came to mean five stacked
+    // overlays — see lib/moment-queue.tsx.
+    <MomentQueueProvider>
+    {/* Was a hardcoded blue gradient, which is why the portal stayed daylight-
+        blue whatever theme was chosen. The themed canvas is the page's job. */}
     <div className="app-canvas flex min-h-screen text-[var(--foreground)]">
       {/* Scrim, phones only. Tapping anywhere off the drawer closes it. */}
       {drawerOpen && (
@@ -262,6 +269,11 @@ export default function StudentShell({ children }: { children: React.ReactNode }
           badge) is one tap away from anywhere in the portal. The community is
           itself a paid feature, so it goes away entirely while locked. */}
       {pathname !== "/community" && hasAccess && <CommunityLauncher />}
+
+      {/* Whatever the queue held back. Bottom left, because the community
+          launcher and the theme switch already own the other corner. */}
+      <MomentDock />
     </div>
+    </MomentQueueProvider>
   );
 }

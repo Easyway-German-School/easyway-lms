@@ -3,7 +3,8 @@ import { ArrowRightIcon, CheckIcon } from "@/components/icons";
 
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useMoment } from "@/lib/moment-queue";
 import {
   advanceHeadline,
   advanceSubheading,
@@ -289,7 +290,15 @@ function AdvanceCard({ offer, onOpen }: { offer: LevelAdvanceOffer; onOpen: () =
 
 export default function LevelAdvance({ className = "" }: { className?: string }) {
   const [offer, setOffer] = useState<LevelAdvanceOffer | null>(null);
-  const [showModal, setShowModal] = useState(false);
+  const [due, setDue] = useState(false);
+  /** Opened by tapping the card. A deliberate open jumps every queue there is. */
+  const [manual, setManual] = useState(false);
+
+  // Fourth in the moment queue. It is news about THEM, which outranks anything
+  // about us — but it sits behind orientation, because a celebration you
+  // cannot place is confusing rather than pleasant.
+  const { open: queued, close: releaseTurn } = useMoment("level-advance", due);
+  const showModal = queued || manual;
 
   useEffect(() => {
     let cancelled = false;
@@ -306,10 +315,8 @@ export default function LevelAdvance({ className = "" }: { className?: string })
 
         // Once per level per device. Keyed on the level so the celebration
         // returns — earned again — when they finish the next one.
-        const seenKey = `ew-advance-seen-${loaded.currentLevel}`;
-        if (!window.localStorage.getItem(seenKey)) {
-          setShowModal(true);
-          window.localStorage.setItem(seenKey, new Date().toISOString());
+        if (!window.localStorage.getItem(`ew-advance-seen-${loaded.currentLevel}`)) {
+          setDue(true);
         }
       } catch {
         // A dashboard must still render when this lookup fails. The office's
@@ -323,13 +330,30 @@ export default function LevelAdvance({ className = "" }: { className?: string })
     };
   }, []);
 
+  const dismiss = useCallback(() => {
+    setManual(false);
+    setDue(false);
+    releaseTurn();
+    // STAMPED ON CLOSE, NOT ON LOAD. It used to be written the moment the
+    // offer arrived, which meant a celebration the queue held back for a
+    // quieter moment was marked "seen" without ever having been on screen —
+    // the student would simply never be told their level had ended.
+    if (offer) {
+      try {
+        window.localStorage.setItem(`ew-advance-seen-${offer.currentLevel}`, new Date().toISOString());
+      } catch {
+        // Private browsing. One repeat beats a crash.
+      }
+    }
+  }, [offer, releaseTurn]);
+
   if (!offer) return null;
 
   return (
     <div className={className}>
-      <AdvanceCard offer={offer} onOpen={() => setShowModal(true)} />
+      <AdvanceCard offer={offer} onOpen={() => setManual(true)} />
       <AnimatePresence>
-        {showModal ? <CelebrationModal offer={offer} onClose={() => setShowModal(false)} /> : null}
+        {showModal ? <CelebrationModal offer={offer} onClose={dismiss} /> : null}
       </AnimatePresence>
     </div>
   );

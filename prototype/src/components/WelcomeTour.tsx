@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import TourGuide from "@/components/TourGuide";
 import { CheckIcon } from "@/components/icons";
+import { useMoment } from "@/lib/moment-queue";
 
 /**
  * The first sixty seconds in the portal, as a guided walk.
@@ -226,7 +227,12 @@ function useTargetRect(selector: string | undefined, step: number): Rect | null 
 export default function WelcomeTour() {
   const reduceMotion = useReducedMotion();
   const [profile, setProfile] = useState<Onboarding | null>(null);
-  const [open, setOpen] = useState(false);
+  const [due, setDue] = useState(false);
+  // Second in the moment queue, behind the payment toast only. Orientation
+  // outranks every other interruption because somebody who does not know
+  // where they are cannot evaluate anything else you show them — and it is the
+  // one interruption allowed to be long, for the same reason.
+  const { open, close: releaseTurn } = useMoment("welcome-tour", due);
   const [index, setIndex] = useState(0);
   const [walking, setWalking] = useState(false);
   const [viewport, setViewport] = useState({ width: 1024, height: 768 });
@@ -255,7 +261,7 @@ export default function WelcomeTour() {
         const data: Onboarding = await res.json();
         if (cancelled || data.tourSeen) return;
         setProfile(data);
-        setOpen(true);
+        setDue(true);
       } catch {
         // The tour is a nicety. A dashboard that renders without it is fine;
         // one that fails to render because of it is not.
@@ -286,17 +292,17 @@ export default function WelcomeTour() {
   }, [open]);
 
   const finish = useCallback(() => {
-    setOpen(false);
+    setDue(false);
+    // Hands the turn back to the queue, which waits out the handover gap and
+    // then lets the next moment in. The bespoke `easyway:tour-finished` event
+    // that used to do this by hand is gone: it only ever told ONE listener
+    // (the journey map), and the queue now tells whoever is next.
+    releaseTurn();
     window.dispatchEvent(new CustomEvent("easyway:tour-drawer", { detail: { open: false } }));
-    // The journey map holds its once-a-day moment back while the tour is
-    // running — on a brand-new account both are due at once, and two stacked
-    // full-screen overlays on somebody's very first visit is how a warm welcome
-    // becomes an obstacle course. This is the handover.
-    window.dispatchEvent(new CustomEvent("easyway:tour-finished"));
     // Fire and forget: the tour is already gone from the screen, and a failed
     // write costs the student one repeat, not their session.
     void fetch("/api/student/onboarding", { method: "POST" }).catch(() => {});
-  }, []);
+  }, [releaseTurn]);
 
   const go = useCallback(
     (next: number) => {

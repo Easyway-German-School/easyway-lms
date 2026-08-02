@@ -36,16 +36,23 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  CompassIcon,
   CrossIcon,
+  ListIcon,
   MapIcon,
   SparklesIcon,
   TrendingUpIcon,
   UsersIcon,
 } from "@/components/icons";
 import type { JourneyStage } from "@/lib/germany-journey";
+import type { GermanyGoal } from "@/lib/germany-goals";
 import JourneyRoad from "@/components/journey/JourneyRoad";
+import JourneyWorld from "@/components/journey/JourneyWorld";
 import JourneyCountdown from "@/components/journey/JourneyCountdown";
 import StartClassesPrompt from "@/components/journey/StartClassesPrompt";
+import GoalPicker from "@/components/journey/GoalPicker";
+import GermanFlag from "@/components/journey/GermanFlag";
+import { useMoment, useMomentQueue } from "@/lib/moment-queue";
 
 /* The payload shape, mirrored from germany-journey-server.ts. */
 type Journey = {
@@ -59,6 +66,9 @@ type Journey = {
   percentToGermany: number;
   countdown: import("@/lib/germany-journey").LevelCountdown | null;
   arrival: import("@/lib/germany-journey").ArrivalEstimate;
+  goal: GermanyGoal;
+  goalNote: string | null;
+  goalUnset: boolean;
   awaitingStart: boolean;
   previewOnly: boolean;
   tribe: string | null;
@@ -67,6 +77,7 @@ type Journey = {
   subheadline: string;
   startPrompt: import("@/lib/germany-journey").StartPrompt;
   momentDue: boolean;
+  goalAskDue: boolean;
   tribeStanding: { tribe: string; cohortSize: number; atOrBeyond: number; line: string } | null;
   stamps: Array<{ id: string; label: string; detail: string | null; at: string; source: string }>;
   registeredAt?: string | null;
@@ -76,12 +87,18 @@ type Journey = {
 /* The banner at the top of the map                                           */
 /* -------------------------------------------------------------------------- */
 
-function ProgressRibbon({ journey }: { journey: Journey }) {
+function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeGoal: () => void }) {
   return (
     <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] px-5 py-5 text-white sm:px-7 sm:py-6">
       <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
+      {/* The real flag, flying, rather than a flag-shaped icon. It is the
+          picture at the end of the road and it belongs at the top of the card
+          about that road. */}
+      <div className="pointer-events-none absolute -right-4 -top-6 hidden opacity-90 sm:block">
+        <GermanFlag className="h-32 w-auto" pole={false} amplitude={6} period={5} />
+      </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="relative flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur">
           <MapIcon className="h-3.5 w-3.5" />
           Your road to Germany
@@ -93,10 +110,31 @@ function ProgressRibbon({ journey }: { journey: Journey }) {
         ) : null}
       </div>
 
-      <h2 className="mt-3 text-2xl font-bold leading-tight sm:text-3xl">{journey.headline}</h2>
-      <p className="mt-1.5 max-w-xl text-sm leading-6 text-white/85">{journey.subheadline}</p>
+      <h2 className="relative mt-3 text-2xl font-bold leading-tight sm:text-3xl">{journey.headline}</h2>
+      <p className="relative mt-1.5 max-w-xl text-sm leading-6 text-white/85">{journey.subheadline}</p>
 
-      <div className="mt-4">
+      {/* The reason, and the way to change it. A stated goal that cannot be
+          corrected turns into a stale goal, and a map built on a stale goal is
+          worse than one built on none. */}
+      <button
+        type="button"
+        onClick={onChangeGoal}
+        className="relative mt-3 inline-flex max-w-full items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-left text-[11px] font-bold backdrop-blur transition hover:bg-white/20"
+      >
+        <CompassIcon className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">
+          {journey.goalUnset ? "Tell us why you are learning German" : journey.goal.label}
+        </span>
+        <span className="shrink-0 text-white/60">{journey.goalUnset ? "" : "· change"}</span>
+      </button>
+
+      {journey.goalNote ? (
+        <p className="relative mt-2 max-w-xl text-[11px] italic leading-5 text-white/70">
+          &ldquo;{journey.goalNote}&rdquo;
+        </p>
+      ) : null}
+
+      <div className="relative mt-4">
         <div className="h-3 overflow-hidden rounded-full bg-white/20">
           <motion.div
             initial={{ width: 0 }}
@@ -169,6 +207,7 @@ function JourneyBody({
   onAnswer,
   onClaim,
   claimingStage,
+  onChangeGoal,
 }: {
   journey: Journey;
   busy: boolean;
@@ -176,10 +215,22 @@ function JourneyBody({
   onAnswer: (answer: { started: true; startedOn: string } | { started: false; reason: string }) => void;
   onClaim: (stage: JourneyStage, undo: boolean) => void;
   claimingStage: string | null;
+  onChangeGoal: () => void;
 }) {
+  /**
+   * The map, or the list.
+   *
+   * The world is the default because it is the thing people come back to look
+   * at. The list is not a fallback or an accessibility afterthought — it is the
+   * dense read: every stage's full copy, the echo lines, the stamps, all
+   * visible at once without tapping anything. Some students want the picture
+   * and some want the ledger, and the two are one toggle apart.
+   */
+  const [view, setView] = useState<"world" | "list">("world");
+
   return (
     <div className="space-y-4">
-      <ProgressRibbon journey={journey} />
+      <ProgressRibbon journey={journey} onChangeGoal={onChangeGoal} />
 
       {journey.previewOnly ? (
         <div className="rounded-[28px] border border-[var(--accent)]/40 bg-[var(--accent-soft)] p-5">
@@ -211,12 +262,47 @@ function JourneyBody({
 
       {journey.countdown ? <JourneyCountdown countdown={journey.countdown} /> : null}
 
-      <JourneyRoad
-        stages={journey.stages}
-        percentToGermany={journey.percentToGermany}
-        onClaim={onClaim}
-        claimingStage={claimingStage}
-      />
+      <div className="flex items-center justify-end gap-1 rounded-full bg-[var(--surface-alt)] p-1 text-[11px] font-bold sm:w-fit sm:self-end">
+        {(
+          [
+            { id: "world" as const, label: "Map", icon: <MapIcon className="h-3.5 w-3.5" /> },
+            { id: "list" as const, label: "List", icon: <ListIcon className="h-3.5 w-3.5" /> },
+          ]
+        ).map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => setView(option.id)}
+            aria-pressed={view === option.id}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-4 py-2 transition sm:flex-none ${
+              view === option.id
+                ? "bg-[var(--surface)] text-[var(--accent-ink)] shadow-sm"
+                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            {option.icon}
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      {view === "world" ? (
+        <JourneyWorld
+          stages={journey.stages}
+          percentToGermany={journey.percentToGermany}
+          goal={journey.goal}
+          firstName={journey.firstName}
+          onClaim={onClaim}
+          claimingStage={claimingStage}
+        />
+      ) : (
+        <JourneyRoad
+          stages={journey.stages}
+          percentToGermany={journey.percentToGermany}
+          onClaim={onClaim}
+          claimingStage={claimingStage}
+        />
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <ArrivalCard journey={journey} />
@@ -232,41 +318,44 @@ function JourneyBody({
 
 export default function GermanyJourney({ className = "" }: { className?: string }) {
   const [journey, setJourney] = useState<Journey | null>(null);
-  const [moment, setMoment] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reply, setReply] = useState<string | null>(null);
   const [claimingStage, setClaimingStage] = useState<string | null>(null);
+  /** Opened from the ribbon rather than by the queue. Always allowed. */
+  const [changingGoal, setChangingGoal] = useState(false);
+
+  const queue = useMomentQueue();
+
+  /**
+   * Two turns in the queue, at two different priorities.
+   *
+   * The GOAL question outranks the daily map because it is asked once and it
+   * changes what the map is; the map is shown every day and can always wait.
+   * Neither of them races the welcome tour any more — the queue holds them
+   * both behind it, which is what the hand-rolled `easyway:tour-finished`
+   * event used to do for exactly one of the two.
+   *
+   * The map's own turn is withheld from somebody who has not paid: a browsing
+   * registrant meeting a full-screen takeover is how a hook becomes an
+   * annoyance. They still get the map on the dashboard, permanently, which is
+   * the version of it that is trying to sell them something.
+   */
+  const { open: goalOpen, close: releaseGoal } = useMoment("goal", Boolean(journey?.goalAskDue));
+  const { open: moment, close: releaseMoment } = useMoment(
+    "journey",
+    Boolean(journey?.momentDue) && !journey?.previewOnly,
+  );
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        // The welcome tour is asked about first because on a brand-new account
-        // both are due, and two stacked full-screen overlays on a first visit
-        // is an obstacle course. The tour goes first and hands over when it
-        // finishes; on every later day there is no tour and this resolves
-        // instantly to "not pending".
-        const [journeyRes, tourRes] = await Promise.all([
-          fetch("/api/student/journey", { cache: "no-store", credentials: "include" }),
-          fetch("/api/student/onboarding", { cache: "no-store", credentials: "include" }).catch(() => null),
-        ]);
-
-        if (!journeyRes.ok) return;
-        const data = await journeyRes.json();
+        const res = await fetch("/api/student/journey", { cache: "no-store", credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
         if (cancelled || !data?.journey) return;
-
         setJourney(data.journey);
-
-        const tour = tourRes && tourRes.ok ? await tourRes.json().catch(() => null) : null;
-        const tourPending = Boolean(tour) && tour.tourSeen === false;
-
-        // Opens by itself once a day — but only for somebody who has actually
-        // bought a seat. Ambushing a browsing registrant with a full-screen
-        // takeover is how a hook becomes an annoyance.
-        if (data.journey.momentDue && !data.journey.previewOnly && !tourPending) {
-          setMoment(true);
-        }
       } catch {
         // The dashboard must render without this. It is the best thing on the
         // page, not a load-bearing part of it.
@@ -278,26 +367,33 @@ export default function GermanyJourney({ className = "" }: { className?: string 
     };
   }, []);
 
-  // The tour's handover. A student who has just been walked round the portal is
-  // the most receptive audience the map will ever get, so it opens the instant
-  // the tour steps aside rather than waiting for tomorrow.
-  useEffect(() => {
-    const onTourFinished = () => {
-      setJourney((current) => {
-        if (current?.momentDue && !current.previewOnly) setMoment(true);
-        return current;
-      });
-    };
-    window.addEventListener("easyway:tour-finished", onTourFinished);
-    return () => window.removeEventListener("easyway:tour-finished", onTourFinished);
-  }, []);
-
   const closeMoment = useCallback(() => {
-    setMoment(false);
     // Stamped server-side so a student who saw it on a laptop at 9am does not
     // meet it again on their phone at noon.
+    setJourney((current) => (current ? { ...current, momentDue: false } : current));
+    releaseMoment();
     fetch("/api/student/journey/seen", { method: "POST", credentials: "include" }).catch(() => {});
-  }, []);
+  }, [releaseMoment]);
+
+  /**
+   * The answer, and the handover.
+   *
+   * Saving a goal leads STRAIGHT into the map rather than closing and leaving
+   * them on the dashboard. Somebody who has just declared what Germany is for
+   * is the single most receptive audience this map will ever have, and making
+   * them find it themselves thirty seconds later throws that away. The queue
+   * is told to summon the map so this stays one continuous moment rather than
+   * two interruptions in a row.
+   */
+  const onGoalSaved = useCallback(
+    (updated: unknown) => {
+      if (updated && typeof updated === "object") setJourney(updated as Journey);
+      setChangingGoal(false);
+      releaseGoal();
+      if (!(updated as Journey | null)?.previewOnly) queue?.summon("journey");
+    },
+    [releaseGoal, queue],
+  );
 
   const answer = useCallback(
     async (payload: { started: true; startedOn: string } | { started: false; reason: string }) => {
@@ -350,12 +446,38 @@ export default function GermanyJourney({ className = "" }: { className?: string 
       onAnswer={answer}
       onClaim={claim}
       claimingStage={claimingStage}
+      onChangeGoal={() => setChangingGoal(true)}
     />
   );
 
   return (
     <div className={className}>
-      {body}
+      {/* ONE MAP AT A TIME. The same `body` used to render inline AND inside
+          the moment, which React mounts as two independent component trees —
+          two full worlds, each a couple of thousand pixels of SVG with its own
+          clouds, flag and walking guide, animating simultaneously behind a
+          backdrop blur. Harmless when the map was a list of cards; not harmless
+          now, and worst on exactly the mid-range phones most of this school's
+          students use. The inline copy comes back when the moment closes. */}
+      {moment ? null : body}
+
+      <AnimatePresence>
+        {goalOpen || changingGoal ? (
+          <GoalPicker
+            key="goal-picker"
+            firstName={journey.firstName}
+            current={journey.goalUnset ? null : journey.goal.id}
+            onSaved={onGoalSaved}
+            onDismiss={() => {
+              setChangingGoal(false);
+              releaseGoal();
+            }}
+            // Changing an answer you already gave has a close button, not an
+            // "I will decide later" — there is nothing left to decide later.
+            allowLater={!changingGoal}
+          />
+        ) : null}
+      </AnimatePresence>
 
       <AnimatePresence>
         {moment ? (

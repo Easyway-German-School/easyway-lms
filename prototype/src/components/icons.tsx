@@ -784,3 +784,89 @@ export const BroadcastMessageIcon = icon("BroadcastMessageIcon", (
     <path d="M19.4 6.4a8 8 0 0 1 0 11.2" />
   </>
 ));
+
+/* --------------------------------------------------------- the eight roads */
+
+/**
+ * One glyph per reason somebody learns German — see lib/germany-goals.ts.
+ *
+ * These are the only place in the portal where an icon has to carry a whole
+ * life plan, so they are drawn as the OBJECT of the goal (a mortarboard, a
+ * ward, a front door) rather than as an abstraction of it. A student picking
+ * their road scans nine cards in about two seconds and the picture is what
+ * they scan.
+ */
+
+/** University. */
+export const GraduationCapIcon = icon("GraduationCapIcon", (
+  <>
+    <path d="M12 4 2.5 8.5 12 13l9.5-4.5z" />
+    <path d="M6.5 10.8v4.4c0 1.7 2.5 3 5.5 3s5.5-1.3 5.5-3v-4.4" />
+    <path d="M21.5 8.5v5" />
+  </>
+));
+
+/** Ausbildung: a toolbox, because the trade is the point of it. */
+export const ToolboxIcon = icon("ToolboxIcon", (
+  <>
+    <rect x="2.5" y="8.5" width="19" height="11" rx="2" />
+    <path d="M9 8.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2.5" />
+    <path d="M2.5 13h19" />
+    <path d="M9.5 11.5v3M14.5 11.5v3" />
+  </>
+));
+
+/** Skilled work. */
+export const BriefcaseIcon = icon("BriefcaseIcon", (
+  <>
+    <rect x="2.5" y="7.5" width="19" height="12" rx="2" />
+    <path d="M8.5 7.5V6a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v1.5" />
+    <path d="M2.5 12.5h19" />
+    <path d="M10.5 12.5h3" />
+  </>
+));
+
+/** Nursing and care: a heart on a monitor line. */
+export const CareIcon = icon("CareIcon", (
+  <>
+    <path d="M12 20s-7-4.4-7-9.2A3.9 3.9 0 0 1 12 8a3.9 3.9 0 0 1 7 2.8c0 1.2-.44 2.3-1.1 3.3" />
+    <path d="M3 15.5h4l1.5-3 2 5 1.6-3.4H16" />
+  </>
+));
+
+/** Au pair, and anything chosen out of affection rather than paperwork. */
+export const HeartIcon = icon("HeartIcon", (
+  <path d="M12 20s-7.5-4.7-7.5-9.8A4.2 4.2 0 0 1 12 7.4a4.2 4.2 0 0 1 7.5 2.8C19.5 15.3 12 20 12 20" />
+));
+
+/** Family reunification: two adults and a child, together. */
+export const FamilyIcon = icon("FamilyIcon", (
+  <>
+    <circle cx="7" cy="7" r="2.6" />
+    <circle cx="17" cy="7" r="2.6" />
+    <circle cx="12" cy="13.5" r="2" />
+    <path d="M2.5 19c0-2.6 2-4.4 4.5-4.4S11.5 16.4 11.5 19" />
+    <path d="M12.5 19c0-2.6 2-4.4 4.5-4.4s4.5 1.8 4.5 4.4" />
+  </>
+));
+
+/** Settling: a door of your own. */
+export const HomeIcon = icon("HomeIcon", (
+  <>
+    <path d="M3.5 10.5 12 4l8.5 6.5V19a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19z" />
+    <path d="M9.5 20.5v-6h5v6" />
+  </>
+));
+
+/** The dense read: the same journey as a list rather than a map. */
+export const ListIcon = icon("ListIcon", (
+  <>
+    <path d="M9 6.5h11M9 12h11M9 17.5h11" />
+    <path d="M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01" strokeWidth="2.6" />
+  </>
+));
+
+/** The trip itself — and the flight at the top of the journey map. */
+export const PlaneIcon = icon("PlaneIcon", (
+  <path d="M10.5 19.5 12 15l7.5-2.2a1.8 1.8 0 0 0 0-3.4L4 4.5l2.5 6L11 12l-4.5 1.5L4 12.2l.8 3.3-.8 3.3 3.2-1.6z" />
+));

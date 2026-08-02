@@ -184,6 +184,22 @@ model Student {
   /** Last time the once-a-day journey moment was shown. Per account, not per device. */
   journeySeenAt DateTime?
 
+  /**
+   * WHY they are learning German — one of the eight roads in
+   * src/lib/germany-goals.ts ("study", "ausbildung", "care", "family", …).
+   *
+   * The whole destination half of the map is generated from this: a nurse's
+   * road ends in Anerkennung and a first shift, a student's in a blocked
+   * account and a first lecture. Null means nobody has asked them yet, which
+   * is a real and different state from "custom" — an unasked student gets the
+   * generic road AND the question; a `custom` student has answered and does
+   * not get asked again.
+   */
+  germanyGoal      String?
+  /** Their own words, when they chose "Something else". Read by the branch. */
+  germanyGoalNote  String?
+  germanyGoalSetAt DateTime?
+
   // Email tracking for scheduled reminders
   feeRemindersScheduled Json? // tracks which reminders (7d, 14d, 30d) have been sent
   emailPreferences      Json? // user preferences for notification types

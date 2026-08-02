@@ -36,6 +36,7 @@
  */
 
 import { LEVELS, SESSION_MONTHS, nextLevelAfter } from "@/lib/levels";
+import { CUSTOM_GOAL, goalFor, levelForGoal, type GermanyGoal } from "@/lib/germany-goals";
 
 /* -------------------------------------------------------------------------- */
 /* Stages                                                                     */
@@ -182,54 +183,29 @@ const LEVEL_VOICE: Record<string, { voice: string; echo: string; teaser: string;
 /**
  * After the classroom.
  *
- * These are the stages no table of ours can observe — we do not run the
- * embassy. The student claims them and the office may confirm them, which is
- * exactly how it works in the branch already. Leaving them off the map because
- * we cannot verify them would end the road at a certificate, and the road does
- * not end at a certificate.
+ * THESE COME FROM THE STUDENT'S GOAL, not from a fixed list — see
+ * `lib/germany-goals.ts`. A nurse's road ends with Anerkennung and a first
+ * shift; a student's ends with a blocked account and a first lecture. Showing
+ * both of them the same four grey boxes marked "documents / visa / arrival" is
+ * how the old map managed to be about Germany without being about anybody.
+ *
+ * They are all self-reported: we do not run the embassy. The student claims
+ * them and the office may confirm them, exactly as happens in the branch
+ * already. Leaving them off because we cannot verify them would end the road at
+ * a certificate, and the road does not end at a certificate.
  */
-const DESTINATION: Array<Omit<JourneyStage, "step" | "status" | "percent" | "clearedAt">> = [
-  {
-    id: "exam",
-    kind: "destination",
-    voice: "I sat the exam and I passed.",
-    label: "Goethe / telc",
-    echo: "The certificate is now a document with your name on it, not a plan.",
-    teaser: "The paper the embassy actually reads.",
-    tribe: "The Certified",
-    selfReported: true,
-  },
-  {
-    id: "documents",
-    kind: "destination",
-    voice: "My file is complete. Interview done, documents in.",
-    label: "Interview & documents",
-    echo: "The paperwork stage ends more journeys than the language does. Not yours.",
-    teaser: "Transcripts, contracts, the interview. The quiet stage that stops most people.",
-    tribe: null,
-    selfReported: true,
-  },
-  {
-    id: "visa",
-    kind: "destination",
-    voice: "I have my visa. I have a date.",
-    label: "Visa & travel",
-    echo: "There is a date on a page now. That is the whole thing becoming real.",
-    teaser: "An appointment, a stamp, and a departure date.",
-    tribe: "The Departing",
-    selfReported: true,
-  },
-  {
-    id: "arrival",
-    kind: "destination",
-    voice: "I made it. I am in Germany.",
-    label: "Deutschland",
-    echo: "You said it, and then you did it. Send us the photo.",
-    teaser: "The end of this road and the start of the next one.",
-    tribe: "The Arrived",
-    selfReported: true,
-  },
-];
+function destinationStagesFor(goal: GermanyGoal): Array<Omit<JourneyStage, "step" | "status" | "percent" | "clearedAt">> {
+  return goal.stages.map((stage) => ({
+    id: stage.id,
+    kind: "destination" as const,
+    voice: stage.voice,
+    label: stage.label,
+    echo: stage.echo,
+    teaser: stage.teaser,
+    tribe: stage.tribe,
+    selfReported: stage.selfReported,
+  }));
+}
 
 /* -------------------------------------------------------------------------- */
 /* Target level                                                               */
@@ -248,6 +224,8 @@ export function targetLevelFor(input: {
   pathway?: string | null;
   admissionTarget?: string | null;
   currentLevel?: string | null;
+  /** The goal they picked themselves. Beats everything the office guessed. */
+  goalId?: string | null;
 }): string {
   /** Highest level named in a string: "B1 then B2" means B2. */
   const highestIn = (text: string | null | undefined): string | null => {
@@ -271,8 +249,17 @@ export function targetLevelFor(input: {
   const foundIndex = found ? (LEVELS as readonly string[]).indexOf(found) : -1;
 
   // A goal below where they already are is a stale goal, not a goal.
-  if (foundIndex >= 0 && foundIndex >= currentIndex) return LEVELS[foundIndex];
-  return LEVELS[Math.max(currentIndex, (LEVELS as readonly string[]).indexOf("B2"))] ?? "B2";
+  const fromFile =
+    foundIndex >= 0 && foundIndex >= currentIndex
+      ? LEVELS[foundIndex]
+      : LEVELS[Math.max(currentIndex, (LEVELS as readonly string[]).indexOf("B2"))] ?? "B2";
+
+  // The goal they chose can only ever LENGTHEN the road, never shorten it —
+  // see levelForGoal. Someone who tells us they are joining a spouse (A1) does
+  // not get their B2 course quietly cut in half; someone heading to university
+  // gets told about the C1 before they finish B2 and find out the hard way.
+  if (!input.goalId) return fromFile;
+  return levelForGoal(goalFor(input.goalId), fromFile);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -493,6 +480,11 @@ export type JourneyInput = {
   /** Self-reported stages: { visa: { at, note } }. */
   claimedStages: Record<string, { at?: string | null; note?: string | null }>;
 
+  /** Which of the eight roads they said they are on. Null until they answer. */
+  goalId?: string | null;
+  /** Their own words, when they picked "Something else". */
+  goalNote?: string | null;
+
   now?: Date;
 };
 
@@ -511,6 +503,16 @@ export type Journey = {
 
   countdown: LevelCountdown | null;
   arrival: ArrivalEstimate;
+
+  /** The road they are on, resolved. Always present — see goalFor. */
+  goal: GermanyGoal;
+  /** Their own words, if they gave any. */
+  goalNote: string | null;
+  /**
+   * True when nobody has asked them yet. The map still draws — the generic
+   * road is a real road — but the portal owes them the question.
+   */
+  goalUnset: boolean;
 
   /** True before they have confirmed their first day. */
   awaitingStart: boolean;
@@ -535,6 +537,8 @@ function toIso(value: Date | string | null | undefined): string | null {
 
 export function buildJourney(input: JourneyInput): Journey {
   const now = input.now ?? new Date();
+  const goal = input.goalId ? goalFor(input.goalId) : CUSTOM_GOAL;
+  const goalUnset = !input.goalId;
   const currentLevel = String(input.currentLevel ?? "A1").toUpperCase();
   const targetLevel = String(input.targetLevel ?? "B2").toUpperCase();
   const levels = LEVELS as readonly string[];
@@ -573,7 +577,7 @@ export function buildJourney(input: JourneyInput): Journey {
   }
 
   // ---- Destination ------------------------------------------------------
-  for (const stage of DESTINATION) {
+  for (const stage of destinationStagesFor(goal)) {
     const claim = input.claimedStages[stage.id];
     raw.push({
       ...stage,
@@ -627,15 +631,19 @@ export function buildJourney(input: JourneyInput): Journey {
     ? `${firstName}, this is your road to Germany`
     : awaitingStart
       ? `${firstName}, your road is ready. One step to start the clock.`
-      : `You are ${percentToGermany}% of the way to Germany`;
+      : `You are ${percentToGermany}% of the way to ${goalUnset ? "Germany" : goal.destination}`;
 
+  // Once they have told us WHY, the second line is their own reason read back
+  // to them rather than a status. A countdown says what the school is doing; a
+  // dream says what they are doing, and only one of those gets somebody out of
+  // bed for a 7am class.
   const subheadline = previewOnly
     ? "Everything below is yours the moment your seat is paid for."
     : awaitingStart
       ? "Your two months begin the day you walk into class — not the day you paid."
-      : countdown
-        ? countdown.headline
-        : "Your branch will open the next stage when this one is signed off.";
+      : goalUnset
+        ? countdown?.headline ?? "Your branch will open the next stage when this one is signed off."
+        : goal.dream;
 
   return {
     studentName: input.studentName,
@@ -647,7 +655,19 @@ export function buildJourney(input: JourneyInput): Journey {
     currentIndex,
     percentToGermany,
     countdown,
-    arrival: estimateArrival({ currentLevel, targetLevel, countdown, now }),
+    // The paperwork allowance is the goal's, not a flat four months. A family
+    // visa and a nursing recognition are not the same wait, and quoting the
+    // same arrival month to both is the kind of small lie that gets found out.
+    arrival: estimateArrival({
+      currentLevel,
+      targetLevel,
+      countdown,
+      paperworkMonths: goal.paperworkMonths,
+      now,
+    }),
+    goal,
+    goalNote: input.goalNote?.trim() || null,
+    goalUnset,
     awaitingStart,
     previewOnly,
     tribe,

@@ -13,6 +13,7 @@
 import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notify";
 import { LEVELS, nextLevelAfter } from "@/lib/levels";
+import { goalFor, isKnownGoal } from "@/lib/germany-goals";
 import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import {
   buildCountdown,
@@ -37,6 +38,15 @@ export type JourneyPayload = Journey & {
   startPrompt: StartPrompt;
   /** Open the map by itself today? */
   momentDue: boolean;
+  /**
+   * Nobody has asked them why yet.
+   *
+   * Deliberately NOT gated on payment, unlike the once-a-day moment. The
+   * question costs one tap, it is the cheapest commitment the portal ever asks
+   * for, and a registrant who has just told us they are going for an
+   * Ausbildung is a warmer lead than one who has only been shown a fee.
+   */
+  goalAskDue: boolean;
   /** How many people are standing where this student is standing. Real counts. */
   tribeStanding: TribeStanding | null;
   /** Stamps in the order they were earned — the passport page. */
@@ -85,6 +95,9 @@ const JOURNEY_SELECT = {
   levelCompletedFor: true,
   journeyStages: true,
   journeySeenAt: true,
+  germanyGoal: true,
+  germanyGoalNote: true,
+  germanyGoalSetAt: true,
   user: { select: { name: true } },
   branch: { select: { name: true } },
   payments: { select: { amount: true, status: true } },
@@ -192,6 +205,7 @@ export async function loadJourney(
     pathway: student.pathway,
     admissionTarget: typeof admission.targetLevel === "string" ? admission.targetLevel : null,
     currentLevel: student.level,
+    goalId: student.germanyGoal,
   });
 
   const journey = buildJourney({
@@ -205,6 +219,8 @@ export async function loadJourney(
     classesStartedAt,
     levelsCompleted,
     claimedStages,
+    goalId: student.germanyGoal,
+    goalNote: student.germanyGoalNote,
     now,
   });
 
@@ -227,6 +243,7 @@ export async function loadJourney(
     registeredAt: student.createdAt.toISOString(),
     startPrompt,
     momentDue: journeyMomentDue(student.journeySeenAt, now),
+    goalAskDue: !student.germanyGoal,
     tribeStanding,
     stamps,
   };
@@ -489,7 +506,18 @@ export async function deferStart(
 /* Self-reported stages                                                       */
 /* -------------------------------------------------------------------------- */
 
-const CLAIMABLE_STAGES = new Set(["exam", "documents", "visa", "arrival"]);
+/**
+ * Which stage ids a student is allowed to stamp.
+ *
+ * Derived from THEIR OWN goal, not from a fixed list of four. When the roads
+ * became personal this was `new Set(["exam","documents","visa","arrival"])`,
+ * which would have refused a nurse's "my licence is recognised" and a student's
+ * "my blocked account is funded" — the two stages those people care about most
+ * — with "that stage is not yours to mark".
+ */
+function claimableStagesFor(goalId: string | null | undefined): Set<string> {
+  return new Set(goalFor(goalId).stages.map((stage) => stage.id));
+}
 
 /**
  * The student telling us they got their visa.
@@ -504,13 +532,24 @@ export async function claimStage(
   input: { stage: string; note?: string | null; undo?: boolean; now?: Date },
 ): Promise<{ ok: boolean; error?: string }> {
   const now = input.now ?? new Date();
-  if (!CLAIMABLE_STAGES.has(input.stage)) return { ok: false, error: "That stage is not yours to mark" };
 
   const student = await prisma.student.findUnique({
     where: { userId },
-    select: { id: true, journeyStages: true, branchId: true, level: true, user: { select: { name: true } } },
+    select: {
+      id: true,
+      journeyStages: true,
+      branchId: true,
+      level: true,
+      germanyGoal: true,
+      user: { select: { name: true } },
+    },
   });
   if (!student) return { ok: false, error: "Student not found" };
+
+  const goal = goalFor(student.germanyGoal);
+  if (!claimableStagesFor(student.germanyGoal).has(input.stage)) {
+    return { ok: false, error: "That stage is not yours to mark" };
+  }
 
   const stages = readJson(student.journeyStages);
 
@@ -529,7 +568,7 @@ export async function claimStage(
     await recordEvent(student.id, {
       type: "stage-claimed",
       stage: input.stage,
-      label: STAGE_STAMP_LABEL[input.stage] ?? input.stage,
+      label: goal.stages.find((stage) => stage.id === input.stage)?.label ?? input.stage,
       detail: input.note ?? null,
       source: "student",
       occurredAt: now,
@@ -553,12 +592,62 @@ export async function claimStage(
   return { ok: true };
 }
 
-const STAGE_STAMP_LABEL: Record<string, string> = {
-  exam: "Passed the exam",
-  documents: "Interview and documents complete",
-  visa: "Visa granted",
-  arrival: "Arrived in Germany",
-};
+/* -------------------------------------------------------------------------- */
+/* Why they are learning German                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The answer to the one question, saved.
+ *
+ * Validated against the catalogue rather than trusted: an unrecognised id would
+ * fall silently back to the generic road, and a student who had just told us
+ * they are going into nursing would open their map to somebody else's steps and
+ * conclude the portal does not listen.
+ *
+ * Changing a goal does NOT erase stamps. Their ids overlap across roads —
+ * "exam" and "visa" mean the same thing on all of them — and a student who
+ * switches from au pair to Ausbildung after passing B1 should keep the exam
+ * stamp they earned. The stages that no longer exist simply stop being drawn,
+ * and come back if they switch back.
+ */
+export async function setGermanyGoal(
+  userId: string,
+  input: { goalId: string; note?: string | null; now?: Date },
+): Promise<{ ok: boolean; error?: string }> {
+  const now = input.now ?? new Date();
+  if (!isKnownGoal(input.goalId)) return { ok: false, error: "We do not know that goal" };
+
+  const goal = goalFor(input.goalId);
+  const note = input.note?.trim() ? input.note.trim().slice(0, 400) : null;
+
+  const student = await prisma.student.findUnique({
+    where: { userId },
+    select: { id: true, germanyGoal: true },
+  });
+  if (!student) return { ok: false, error: "Student not found" };
+
+  const changed = student.germanyGoal !== goal.id;
+
+  await prisma.student.update({
+    where: { id: student.id },
+    data: { germanyGoal: goal.id, germanyGoalNote: note, germanyGoalSetAt: now },
+  });
+
+  // Worth a line in their story: the day they said out loud what this is for.
+  // Not on every save, though — re-confirming the same goal is not an event.
+  if (changed) {
+    await recordEvent(student.id, {
+      type: "goal-set",
+      stage: null,
+      label: goal.label,
+      detail: note,
+      source: "student",
+      occurredAt: now,
+    });
+  }
+
+  return { ok: true };
+}
 
 /* -------------------------------------------------------------------------- */
 /* The once-a-day moment                                                      */

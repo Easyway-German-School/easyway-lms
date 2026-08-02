@@ -7,6 +7,7 @@ import {
   journeyReminderDue,
   markJourneyReminderSeen,
 } from "@/lib/journey-map";
+import { useMoment } from "@/lib/moment-queue";
 
 /**
  * The German Journey Map on the dashboard, and its once-a-day reminder.
@@ -31,7 +32,10 @@ export default function JourneyMapPoster({
 }) {
   const src = journeyMapSrc(level);
   const [available, setAvailable] = useState<boolean | null>(null);
-  const [reminderOpen, setReminderOpen] = useState(false);
+  const [due, setDue] = useState(false);
+  // Last in the moment queue. Lovely, never urgent — so on a busy first visit
+  // it goes to the dock instead of being the third modal in a row.
+  const { open: reminderOpen, close: releaseTurn } = useMoment("poster", due);
 
   // Probe rather than trust: an <img onError> would still flash the broken
   // icon, and this decides whether the card exists at all.
@@ -55,14 +59,15 @@ export default function JourneyMapPoster({
     if (!journeyReminderDue(level)) return;
     // A beat after load, so it does not race the dashboard's own rendering and
     // does not greet somebody before their name has appeared on the screen.
-    const timer = window.setTimeout(() => setReminderOpen(true), 1200);
+    const timer = window.setTimeout(() => setDue(true), 1200);
     return () => window.clearTimeout(timer);
   }, [available, withDailyReminder, level]);
 
   const dismiss = useCallback(() => {
-    setReminderOpen(false);
+    setDue(false);
+    releaseTurn();
     markJourneyReminderSeen(level);
-  }, [level]);
+  }, [level, releaseTurn]);
 
   // Escape closes it, like every other dialog in the portal.
   useEffect(() => {
