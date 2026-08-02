@@ -99,7 +99,23 @@ export type BrainStatus = {
   reason?: string;
 };
 
-const CLAUDE_MODEL = "claude-opus-5";
+/**
+ * Which hosted model, and why it is a knob rather than a constant.
+ *
+ * The default is Opus because this assistant fills in arguments that decide
+ * who gets messaged and whose level changes, and that is the job worth paying
+ * for. But it is the school's money, and the cheaper models are not toys:
+ *
+ *   claude-opus-5    $5 / $25 per million tokens   the default
+ *   claude-sonnet-5  $3 / $15                      most of the quality
+ *   claude-haiku-4-5 $1 / $5                       fine for lookups
+ *
+ * Set ANTHROPIC_ASSISTANT_MODEL to move between them without touching code.
+ * Roughly two US cents a question at the default, and less after the first
+ * one — the system prompt and tool list are cached, so the repeated part of
+ * every question bills at a tenth of the rate.
+ */
+const CLAUDE_MODEL = process.env.ANTHROPIC_ASSISTANT_MODEL || "claude-opus-5";
 
 /**
  * Ceiling on one reply.
