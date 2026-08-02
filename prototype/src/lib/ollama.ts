@@ -137,7 +137,171 @@ export async function ollamaStatus(): Promise<OllamaStatus> {
   }
 }
 
-export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+export type ChatMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  /** Only on assistant turns that asked for tools. */
+  tool_calls?: ToolCall[];
+  /** Only on `tool` turns: which tool produced this. Ollama wants the name. */
+  tool_name?: string;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Tools                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Tool calling, which is what turns the assistant from a narrator into
+ * something an office can actually use.
+ *
+ * The briefing version of this assistant could only read a fixed summary
+ * aloud. Ask it "which Lagos B1 students have not paid and have not attended in
+ * three weeks" and it had no way to find out, so it either refused or — far
+ * worse — produced a confident list of names that do not exist.
+ *
+ * With tools the model does not answer the question at all. It chooses WHICH
+ * QUERY TO RUN and with what arguments; the server runs it against Postgres,
+ * checks the caller's capabilities, and hands back real rows. The model's only
+ * remaining job is to phrase what came back. That keeps the one rule this
+ * assistant has always had — the model never counts anything — while removing
+ * the ceiling on what it can be asked.
+ *
+ * Not every local model can do this. `qwen2.5` (every size) and
+ * `mistral:latest` report the `tools` capability; `falcon` does not. The route
+ * checks before it tries and falls back to the briefing if the configured
+ * model cannot.
+ */
+export type ToolCall = {
+  function: {
+    name: string;
+    /** Ollama sends an object; some builds send a JSON string. Both handled. */
+    arguments: Record<string, unknown> | string;
+  };
+};
+
+export type ToolSpec = {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: {
+      type: "object";
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+  };
+};
+
+export type OllamaToolResult =
+  | { ok: true; text: string; toolCalls: ToolCall[]; model: string }
+  | OllamaFailure;
+
+/** Ollama is inconsistent about whether arguments arrive parsed. */
+export function toolArguments(call: ToolCall): Record<string, unknown> {
+  const raw = call.function?.arguments;
+  if (!raw) return {};
+  if (typeof raw !== "string") return raw;
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * One turn that may come back asking for tools instead of answering.
+ *
+ * The caller runs the loop: execute what was asked for, append the results as
+ * `tool` messages, call again. Kept here rather than inside this function
+ * because only the caller knows which tools exist and who is allowed to run
+ * them — putting the execution in this file would mean the transport layer
+ * holds the permission model, which is how permission models get bypassed.
+ */
+export async function ollamaChatWithTools(
+  messages: ChatMessage[],
+  tools: ToolSpec[],
+  options?: { temperature?: number; model?: string },
+): Promise<OllamaToolResult> {
+  const url = ollamaUrl();
+  const model = options?.model ?? ollamaModel();
+
+  try {
+    const response = await fetchWithTimeout(
+      `${url}/api/chat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages,
+          tools,
+          stream: false,
+          // Zero, not 0.3. Choosing a filter is not a creative act, and a
+          // model that gets imaginative about which branch you meant is worse
+          // than one that asks.
+          options: { temperature: options?.temperature ?? 0 },
+        }),
+      },
+      TIMEOUT_MS,
+    );
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      if (response.status === 404) {
+        return {
+          ok: false,
+          reason: `The model ${model} is not installed. Run \`ollama pull ${model}\` and try again.`,
+        };
+      }
+      return { ok: false, reason: `Ollama returned ${response.status}. ${detail.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as {
+      message?: { content?: string; tool_calls?: ToolCall[] };
+    };
+
+    return {
+      ok: true,
+      text: data.message?.content?.trim() ?? "",
+      toolCalls: data.message?.tool_calls ?? [],
+      model,
+    };
+  } catch (error) {
+    const aborted = error instanceof Error && error.name === "AbortError";
+    return {
+      ok: false,
+      reason: aborted
+        ? "The model took too long. Try a shorter question, or a smaller model."
+        : "Could not reach Ollama. Start it with `ollama serve`.",
+    };
+  }
+}
+
+/**
+ * Does the configured model support tool calling?
+ *
+ * Read from Ollama's own `capabilities` list rather than from a hardcoded name
+ * list, which would be wrong the week somebody pulls a new model.
+ */
+export async function ollamaSupportsTools(model?: string): Promise<boolean> {
+  const target = model ?? ollamaModel();
+  try {
+    const response = await fetchWithTimeout(
+      `${ollamaUrl()}/api/show`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: target }),
+      },
+      HEALTH_TIMEOUT_MS * 3,
+    );
+    if (!response.ok) return false;
+    const data = (await response.json()) as { capabilities?: string[] };
+    return (data.capabilities ?? []).includes("tools");
+  } catch {
+    return false;
+  }
+}
 
 /**
  * One turn of chat.

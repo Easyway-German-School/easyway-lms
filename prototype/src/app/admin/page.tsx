@@ -47,7 +47,18 @@ type Overview = {
   } | null;
   actionQueue: {
     atRiskCount: number;
-    atRisk: Array<{ name: string; email: string; level: string; branch: string; paid: number; owed: number; daysEnrolled: number }>;
+    // `paid` and `owed` are absent for an admin without the payments
+    // capability — the route drops the fields rather than sending zeros, so
+    // there is nothing to accidentally render.
+    atRisk: Array<{
+      name: string;
+      email: string;
+      level: string;
+      branch: string;
+      paid?: number;
+      owed?: number;
+      daysEnrolled: number;
+    }>;
     pendingExamRegistrations: number;
     ungradedSubmissions: number;
     leadsAwaitingInvite: number;
@@ -169,6 +180,14 @@ export default function AdminHomePage() {
     ? cohorts.unpaid + cohorts.registeredOnly + cohorts.depositPaid + cohorts.fullPaid
     : 0;
   const trendMax = finance ? Math.max(1, ...finance.revenueTrend.map((point) => point.amount)) : 1;
+  /**
+   * Whether this admin sees money anywhere on this page.
+   *
+   * Read off the DATA, not off a second capability lookup: `finance` is null
+   * for exactly the people whose at-risk rows arrive without balances, so one
+   * flag governs both and they cannot disagree.
+   */
+  const showsMoney = finance !== null;
 
   return (
     <AdminShell>
@@ -391,8 +410,12 @@ export default function AdminHomePage() {
                     <th className="pb-2 font-bold">Student</th>
                     <th className="pb-2 font-bold">Branch</th>
                     <th className="pb-2 font-bold">Level</th>
-                    <th className="pb-2 text-right font-bold">Paid</th>
-                    <th className="pb-2 text-right font-bold">Owed</th>
+                    {/* The route strips `paid`/`owed` for anyone without the
+                        payments capability, so the columns follow the data
+                        rather than being hidden separately — two places
+                        deciding this is how they drift apart again. */}
+                    {showsMoney && <th className="pb-2 text-right font-bold">Paid</th>}
+                    {showsMoney && <th className="pb-2 text-right font-bold">Owed</th>}
                     <th className="pb-2 text-right font-bold">Enrolled</th>
                   </tr>
                 </thead>
@@ -405,8 +428,16 @@ export default function AdminHomePage() {
                       </td>
                       <td className="py-2.5 text-[var(--muted)]">{student.branch}</td>
                       <td className="py-2.5 text-[var(--muted)]">{student.level}</td>
-                      <td className="py-2.5 text-right text-[var(--muted)]">₦{student.paid.toLocaleString("en-NG")}</td>
-                      <td className="py-2.5 text-right font-bold text-red-600">₦{student.owed.toLocaleString("en-NG")}</td>
+                      {showsMoney && (
+                        <td className="py-2.5 text-right text-[var(--muted)]">
+                          ₦{(student.paid ?? 0).toLocaleString("en-NG")}
+                        </td>
+                      )}
+                      {showsMoney && (
+                        <td className="py-2.5 text-right font-bold text-red-600">
+                          ₦{(student.owed ?? 0).toLocaleString("en-NG")}
+                        </td>
+                      )}
                       <td className="py-2.5 text-right text-[var(--muted)]">{student.daysEnrolled}d</td>
                     </tr>
                   ))}

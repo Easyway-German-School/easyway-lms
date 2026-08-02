@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import AdminShell from "@/components/AdminShell";
+import CohortResult, { type Cohort } from "@/components/admin/CohortResult";
 import {
   AlertIcon,
   ArrowRightIcon,
@@ -63,11 +64,18 @@ type Turn = { role: "user" | "assistant"; content: string };
 
 const naira = (value: number) => `NGN ${value.toLocaleString()}`;
 
+/**
+ * Written as the compound questions the office actually asks, not as the
+ * single-filter ones the old briefing could handle. They are the fastest way
+ * to teach somebody that they can now stack four conditions in one sentence
+ * and get a list back they can select and message.
+ */
 const SUGGESTIONS = [
-  "What should the office deal with first today?",
-  "Which students are furthest behind on their fees?",
-  "Draft a WhatsApp message chasing outstanding tuition, warm but clear.",
-  "How did enrolment this month compare with the level spread we already have?",
+  "Which students haven't paid and haven't been seen in 3 weeks?",
+  "List everyone at B1 who still hasn't started classes.",
+  "How many students do we have per branch, broken down by level?",
+  "Who registered in the last 14 days and is going for an Ausbildung?",
+  "Draft a warm message chasing outstanding tuition.",
 ];
 
 function Stat({
@@ -102,6 +110,11 @@ export default function AdminAssistantPage() {
   const [question, setQuestion] = useState("");
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState("");
+  /** The rows the last lookup returned. Replaced, not appended: the table
+      always shows the cohort belonging to the question on screen. */
+  const [cohort, setCohort] = useState<Cohort | null>(null);
+  const [toolsUsed, setToolsUsed] = useState<Array<{ name: string }>>([]);
+  const [capabilities, setCapabilities] = useState<string[]>([]);
 
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -112,6 +125,7 @@ export default function AdminAssistantPage() {
       const data = await response.json();
       setStatus(data.status ?? null);
       setBriefing(data.briefing ?? null);
+      setCapabilities(data.capabilities ?? []);
     } catch {
       /* The chat will report its own failure if it comes to it. */
     } finally {
@@ -150,8 +164,16 @@ export default function AdminAssistantPage() {
         return;
       }
 
-      setTurns((current) => [...current, { role: "assistant", content: data.answer }]);
+      setTurns((current) => [
+        ...current,
+        { role: "assistant", content: data.answer || "(the model returned nothing)" },
+      ]);
       if (data.briefing) setBriefing(data.briefing);
+      // Null clears the table on a question that looked nothing up, so a
+      // cohort from two questions ago can never be mistaken for this answer's.
+      setCohort(data.cohort ?? null);
+      setToolsUsed(data.toolsUsed ?? []);
+      if (data.degraded) setError(data.degraded);
     } catch {
       setError("Could not reach the server.");
     } finally {
@@ -405,6 +427,32 @@ export default function AdminAssistantPage() {
             </button>
           </form>
         </section>
+
+        {/* What it actually looked up. Shown because an assistant that queries
+            your student records in the background without saying which query it
+            ran is one nobody should trust — and because seeing "find_students:
+            branch Lagos, level B1, unpaid" is how an admin learns what else
+            they can ask for. */}
+        {toolsUsed.length > 0 && (
+          <p className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+            <PulseIcon className="h-3.5 w-3.5" />
+            Looked up:
+            {toolsUsed.map((tool, index) => (
+              <span
+                key={`${tool.name}-${index}`}
+                className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600"
+              >
+                {tool.name}
+              </span>
+            ))}
+          </p>
+        )}
+
+        {/* The rows themselves, straight from the query — never the model's
+            retelling of them. See CohortResult. */}
+        {cohort && cohort.rows.length > 0 && (
+          <CohortResult cohort={cohort} canMessage={capabilities.includes("emails")} />
+        )}
       </div>
     </AdminShell>
   );

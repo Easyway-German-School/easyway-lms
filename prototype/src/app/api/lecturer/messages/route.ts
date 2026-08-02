@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  isAssigned,
+  readAssignment,
+  studentWhereForAssignment,
+  type AssignmentSource,
+} from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
 
@@ -36,15 +42,29 @@ async function requireLecturer() {
   return { lecturer };
 }
 
-async function cohortStudents(lecturer: { branchId: string | null; level: string | null; sessionSlot: string | null }) {
-  if (!lecturer.branchId || !lecturer.level) return [];
+/**
+ * Everyone this tutor teaches.
+ *
+ * READ THROUGH THE SHARED HELPER, like the roster, attendance, grading and the
+ * timetable already do. This route was the last one still on the old model —
+ * one branch, one level, one sitting, read straight off the Lecturer row — and
+ * that model was replaced precisely because it cannot describe a real tutor. A
+ * tutor who takes A1 and A2 at Lagos and Port Harcourt has one branchId and one
+ * level on their record, so this query reached exactly one of their four
+ * classes and silently dropped the rest.
+ *
+ * The effect was quiet and bad: a tutor sends "no class on Thursday", it goes
+ * to a quarter of the people it was meant for, and the other three quarters
+ * turn up to a locked room. Nothing errored, so nobody would have found it
+ * until somebody complained.
+ */
+async function cohortStudents(lecturer: AssignmentSource) {
+  const assignment = readAssignment(lecturer);
+  const where = studentWhereForAssignment(assignment);
+  if (!where || !isAssigned(assignment)) return [];
+
   return prisma.student.findMany({
-    where: {
-      branchId: lecturer.branchId,
-      level: lecturer.level,
-      ...(lecturer.sessionSlot ? { sessionSlot: lecturer.sessionSlot } : {}),
-      status: "active",
-    },
+    where: { ...(where as Record<string, unknown>), status: "active" } as never,
     select: { id: true, user: { select: { name: true, email: true } } },
   });
 }

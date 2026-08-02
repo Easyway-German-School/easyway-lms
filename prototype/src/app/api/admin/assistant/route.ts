@@ -3,7 +3,15 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveAdmin } from "@/lib/admin-roles";
-import { ollamaChat, ollamaStatus, type ChatMessage } from "@/lib/ollama";
+import {
+  ollamaChat,
+  ollamaChatWithTools,
+  ollamaStatus,
+  ollamaSupportsTools,
+  toolArguments,
+  type ChatMessage,
+} from "@/lib/ollama";
+import { runTool, toolSpecsFor, type ToolOutcome } from "@/lib/assistant-tools";
 import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 export const dynamic = "force-dynamic";
@@ -183,19 +191,41 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
 
 const SYSTEM_PROMPT = `You are the assistant for the office of Easyway German Language School in Nigeria.
 
-You are given a BRIEFING containing the school's real, current figures.
+You have TOOLS that query the school's live database. Use them.
 
 Rules, in order of importance:
-1. Every number you state must come from the briefing. If a figure is not
-   there, say plainly that you do not have it and name the page in the admin
-   portal where it can be found. Never estimate, never extrapolate.
-2. If the briefing has no section for what was asked, say so — it means the
-   person asking does not have access to that area.
-3. Money is Nigerian naira. Write it as NGN 150,000.
-4. Answer in at most six sentences unless asked for more. The reader is at a
+1. NEVER state a number you were not given by a tool or by the briefing. Do not
+   count, estimate, add up or extrapolate anything yourself. If you need a
+   figure, call a tool for it.
+2. Use ONLY the filters the question actually mentions. Omit every other
+   parameter completely — do not pass it as null, and never add a condition
+   nobody asked for. Adding "startedClasses" to a question about unpaid fees
+   silently answers a different question, and the admin will act on it.
+3. Put every filter the question DOES mention into ONE tool call. "Lagos B1 who
+   have not paid" is a single find_students call with branch, level and
+   paymentState — not three calls you combine afterwards.
+4. Call list_options first whenever the question names a campus or a batch, so
+   you filter on a real value instead of guessing the spelling.
+5. NEVER list students by name. The admin already has every matching row in a
+   table under your answer. Give the count and what stands out about the group
+   — the levels, the branches, the worst balance — and stop.
+6. If a tool returns an error saying the role does not cover something, tell the
+   person plainly that it is outside their access. Do not try another route to it.
+7. Money is Nigerian naira. Write it as NGN 150,000.
+8. Answer in at most five sentences unless asked for more. The reader is at a
    front desk with somebody waiting.
-5. When asked to draft a message to students or staff, write the message
-   itself and nothing else — no preamble, no "here is a draft".`;
+9. When asked to draft a message to students or staff, write the message itself
+   and nothing else — no preamble, no "here is a draft".`;
+
+/**
+ * How many times the model may ask for tools before it must answer.
+ *
+ * Three is enough for list_options → find_students → answer, which is the
+ * longest legitimate chain. Without a ceiling a confused model will call the
+ * same tool forever, and on a local CPU each round is twenty seconds of a
+ * front-desk worker watching a spinner.
+ */
+const MAX_TOOL_ROUNDS = 3;
 
 async function requireAssistantAdmin() {
   const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
@@ -215,7 +245,22 @@ export async function GET() {
     buildBriefing(auth.admin.can as (c: never) => boolean),
   ]);
 
-  return NextResponse.json({ status, briefing, capabilities: auth.admin.capabilities });
+  // Only worth asking when the model is actually there; /api/show on a missing
+  // model is a wasted round trip on every page load.
+  const supportsTools = status.modelReady ? await ollamaSupportsTools() : false;
+
+  return NextResponse.json({
+    status: { ...status, supportsTools },
+    briefing,
+    capabilities: auth.admin.capabilities,
+    // Named so the page can show what this admin's assistant may look up —
+    // a Secretary should be able to see that money is absent by design rather
+    // than wonder why their question came back empty.
+    tools: toolSpecsFor(auth.admin).map((spec) => ({
+      name: spec.function.name,
+      description: spec.function.description,
+    })),
+  });
 }
 
 export async function POST(request: Request) {
@@ -252,17 +297,101 @@ export async function POST(request: Request) {
     { role: "system", content: SYSTEM_PROMPT },
     {
       role: "system",
-      content: `BRIEFING (generated ${briefing.generatedAt}):\n${JSON.stringify(briefing, null, 2)}`,
+      content:
+        `BRIEFING — the school at a glance, already computed (generated ${briefing.generatedAt}). ` +
+        `Use it for broad questions; use the tools for anything specific:\n${JSON.stringify(briefing, null, 2)}`,
     },
     ...history,
     { role: "user", content: question },
   ];
 
-  const result = await ollamaChat(messages);
+  /**
+   * The tool loop.
+   *
+   * The model is asked, it may reply with tool calls instead of an answer, the
+   * SERVER runs them, the results go back as `tool` messages, and it is asked
+   * again. The model never touches the database — it names a tool and fills in
+   * arguments, and `runTool` re-checks the caller's capability before doing
+   * anything, because a model that hallucinates `money_summary` at a Secretary
+   * has to be refused rather than obeyed.
+   *
+   * Falls straight through to a plain answer when the configured model has no
+   * tool support (falcon does not) — a briefing-only reply is worth more than
+   * an error, and the page says which mode it got.
+   */
+  const supportsTools = await ollamaSupportsTools();
+  const specs = toolSpecsFor(auth.admin);
 
-  if (!result.ok) {
-    return NextResponse.json({ error: result.reason }, { status: 503 });
+  if (!supportsTools || specs.length === 0) {
+    const result = await ollamaChat(messages);
+    if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 503 });
+    return NextResponse.json({
+      answer: result.text,
+      model: result.model,
+      briefing,
+      toolsUsed: [],
+      cohort: null,
+      degraded: !supportsTools
+        ? `${result.model} cannot call tools, so this answer comes from the summary only. Switch OLLAMA_MODEL to qwen2.5:3b for live lookups.`
+        : undefined,
+    });
   }
 
-  return NextResponse.json({ answer: result.text, model: result.model, briefing });
+  const toolsUsed: Array<{ name: string; arguments: Record<string, unknown> }> = [];
+  /** The last cohort any tool produced — what the table below the answer shows. */
+  let cohort: ToolOutcome["cohort"] | null = null;
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+    const turn = await ollamaChatWithTools(messages, specs);
+    if (!turn.ok) return NextResponse.json({ error: turn.reason }, { status: 503 });
+
+    if (turn.toolCalls.length === 0) {
+      return NextResponse.json({
+        answer: turn.text,
+        model: turn.model,
+        briefing,
+        toolsUsed,
+        cohort,
+      });
+    }
+
+    // Record the assistant's own turn before the results, or the model loses
+    // track of what it asked for and asks again.
+    messages.push({ role: "assistant", content: turn.text, tool_calls: turn.toolCalls });
+
+    for (const call of turn.toolCalls) {
+      const name = call.function?.name ?? "";
+      const args = toolArguments(call);
+      toolsUsed.push({ name, arguments: args });
+
+      const outcome = await runTool(name, args, auth.admin);
+      if (outcome.cohort) cohort = outcome.cohort;
+
+      messages.push({
+        role: "tool",
+        tool_name: name,
+        content: JSON.stringify(outcome.forModel),
+      });
+    }
+  }
+
+  // Out of rounds. Rather than return nothing, ask once more with the tool
+  // results already in hand and no tools offered, which forces an answer.
+  const final = await ollamaChat([
+    ...messages,
+    {
+      role: "system",
+      content: "Answer now using the tool results above. Do not ask for more tools.",
+    },
+  ]);
+
+  if (!final.ok) return NextResponse.json({ error: final.reason }, { status: 503 });
+
+  return NextResponse.json({
+    answer: final.text,
+    model: final.model,
+    briefing,
+    toolsUsed,
+    cohort,
+  });
 }

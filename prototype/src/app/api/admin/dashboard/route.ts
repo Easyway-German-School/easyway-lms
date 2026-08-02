@@ -1,25 +1,22 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { requireCapability } from "@/lib/admin-roles";
 
-async function isAdmin(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  console.log(`[isAdmin] Checking user ${userId}:`, { role: user?.role, normalized: user?.role?.toLowerCase(), isAdmin: user?.role?.toLowerCase() === "admin" });
-  return user?.role?.toLowerCase() === "admin";
-}
-
+/**
+ * Counts across every area of the school.
+ *
+ * Gated on `reports` rather than on `role === "admin"`, which is all it used to
+ * check — one of the last two places where the sub-roles were still decorative.
+ * It leaks no names and no money, only totals, but "any admin" is not a
+ * permission model and a route that answers to it is one somebody will copy.
+ *
+ * The two console.logs that printed the session user id and role on every
+ * request are gone with it. Request-scoped identifiers do not belong in a log
+ * that gets shipped to a shared server.
+ */
 export async function GET() {
-  const session = await getServerSession(authOptions as any) as any;
-  console.log(`[admin/dashboard] Session:`, { userId: session?.user?.id, role: session?.user?.role });
-  
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!(await isAdmin(session.user.id))) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const gate = await requireCapability("reports");
+  if (!gate.ok) return gate.response;
 
   const branches = await prisma.branch.count();
   const students = await prisma.student.count();

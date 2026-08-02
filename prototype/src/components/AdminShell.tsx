@@ -79,7 +79,9 @@ const navItems: NavItem[] = [
   { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <BellIcon />, group: 'Settings' },
   { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <ShieldIcon />, group: 'Settings' },
   { label: 'Integrations', href: '/admin/integrations', capability: 'integrations' as const, icon: <IntegrationIcon />, group: 'Settings' },
-  { label: 'Personalization', href: '/admin/personalization', icon: <PaletteIcon />, group: 'Settings' },
+  // Matches the capability its API now requires. A nav entry that leads
+  // somewhere its own endpoint refuses is worse than no nav entry.
+  { label: 'Personalization', href: '/admin/personalization', capability: 'reports' as const, icon: <PaletteIcon />, group: 'Settings' },
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
@@ -130,6 +132,44 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   if (status === 'unauthenticated' || session?.user?.role?.toLowerCase() !== 'admin') {
     return <div className="flex min-h-screen items-center justify-center bg-[#fffbf8] text-slate-700">Redirecting to admin sign-in...</div>;
   }
+
+  /**
+   * THE DOOR, not just the signpost.
+   *
+   * Hiding a nav item is presentation; it is not access control, and it was
+   * the only thing standing between a Secretary and `/admin/payments` if they
+   * typed the URL, followed an old bookmark, or hit browser history. The APIs
+   * behind those pages do refuse them — which is why nothing leaked — but what
+   * the person actually saw was the full payments screen with every panel
+   * empty or spinning, indistinguishable from the portal being broken. On a
+   * Monday full-test that is a bug report, and the person filing it is right
+   * to file it.
+   *
+   * So the shell renders a plain refusal instead. `capabilities === null`
+   * means the lookup has not answered yet and nothing is blocked — a network
+   * hiccup must not lock an admin out of their own portal, and the routes are
+   * still the real enforcement either way.
+   */
+  /**
+   * THE LONGEST MATCH WINS, and that is not a detail.
+   *
+   * The obvious `navItems.find(item => pathname.startsWith(item.href + '/'))`
+   * is wrong here because the very first entry is Dashboard at `/admin`, and
+   * every admin path in the product starts with `/admin/`. So the lookup
+   * matched Dashboard for `/admin/payments`, Dashboard carries no capability,
+   * and the gate silently passed everything — a Secretary got the full
+   * payments screen reading "No payments recorded yet", which is worse than
+   * no gate at all because it states something false about the school.
+   */
+  const currentArea = navItems
+    .filter((item) => pathname === item.href || pathname.startsWith(item.href + '/'))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+
+  const blocked = Boolean(
+    currentArea?.capability &&
+      capabilities !== null &&
+      !capabilities.includes(currentArea.capability),
+  );
 
   return (
     <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.08),_transparent_40%),linear-gradient(135deg,_#f9f7f5_0%,_#fffbf8_100%)] text-[var(--foreground)]">
@@ -256,7 +296,37 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         </header>
 
         <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.08),_transparent_40%),linear-gradient(135deg,_#f9f7f5_0%,_#fffbf8_100%)] p-4 sm:p-6 lg:p-8">
-          <div className="mx-auto max-w-7xl">{children}</div>
+          <div className="mx-auto max-w-7xl">
+            {blocked ? (
+              <div className="mx-auto mt-10 max-w-lg rounded-[28px] border border-slate-200 bg-white p-8 text-center shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
+                <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                  <ShieldIcon className="h-7 w-7" />
+                </span>
+                <h1 className="mt-4 text-xl font-bold text-slate-900">Not your area</h1>
+                {/* Not `${label}s do not cover` — that renders "Secretarys",
+                    and a permissions screen that cannot spell the role is not
+                    one anybody trusts. The label goes in parentheses instead,
+                    which works for every role name including future ones. */}
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Your admin role{adminRoleLabel ? ` (${adminRoleLabel})` : ''} does not cover{' '}
+                  <strong className="font-semibold text-slate-800">{currentArea?.label}</strong>. Nothing is broken —
+                  this is simply not part of your role.
+                </p>
+                <p className="mt-3 text-xs leading-5 text-slate-500">
+                  A super admin can hand you this one from Admin roles, without changing anybody else&rsquo;s access.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => router.push('/admin')}
+                  className="mt-5 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white transition hover:brightness-110"
+                >
+                  Back to my dashboard
+                </button>
+              </div>
+            ) : (
+              children
+            )}
+          </div>
         </div>
       </main>
     </div>

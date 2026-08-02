@@ -1,14 +1,12 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { requireCapability } from "@/lib/admin-roles";
 
 export async function GET() {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const user = await prisma.user.findUnique({ where: { id: session.user.id as string } });
-  if (user?.role?.toLowerCase() !== "admin") return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  // The other half of the same fix as /api/admin/dashboard: this checked only
+  // `role === "admin"`, so every sub-role reached it regardless of preset.
+  const gate = await requireCapability("reports");
+  if (!gate.ok) return gate.response;
 
   const cachedPlans = await prisma.personalizedPlan.count();
   const strategies = ["deterministic", "fewshot", "hybrid"];

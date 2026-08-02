@@ -5,6 +5,7 @@ import AdminShell from "@/components/AdminShell";
 import { type StudentWithUser } from "@/types/admin";
 import PasswordInput from "@/components/PasswordInput";
 import BulkStudentAdd from "@/components/BulkStudentAdd";
+import { goalFor } from "@/lib/germany-goals";
 
 type BranchOption = {
   id: string;
@@ -669,6 +670,12 @@ export default function AdminStudentsPage() {
                 <th className="px-6 py-4">Branch</th>
                 <th className="px-6 py-4">Starting class</th>
                 <th className="px-6 py-4">Batch</th>
+                {/* What the student said Germany is FOR. It is the single most
+                    useful thing about them at a front desk — the conversation
+                    with somebody chasing an Ausbildung place is not the
+                    conversation with somebody joining a spouse — and until now
+                    it lived only inside the student's own journey map. */}
+                <th className="px-6 py-4">Goal</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4">Payment</th>
                 <th className="px-6 py-4">Balance</th>
@@ -678,11 +685,11 @@ export default function AdminStudentsPage() {
             <tbody className="divide-y divide-[var(--border)] bg-[var(--background)]">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-10 text-center text-sm text-[var(--muted)]">Loading students…</td>
+                  <td colSpan={10} className="px-6 py-10 text-center text-sm text-[var(--muted)]">Loading students…</td>
                 </tr>
               ) : students.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No students found yet.</td>
+                  <td colSpan={10} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No students found yet.</td>
                 </tr>
               ) : (
                 students.map((student) => (
@@ -692,6 +699,18 @@ export default function AdminStudentsPage() {
                     <td className="px-6 py-4">{student.branch?.name || "—"}</td>
                     <td className="px-6 py-4">{student.admission && typeof student.admission === "object" && (student.admission as any).classApplied ? String((student.admission as any).classApplied) : (student.level || "—")}</td>
                     <td className="px-6 py-4">{typeof student.admission === "object" && student.admission && !Array.isArray(student.admission) && (student.admission as Record<string, unknown>).batch ? String((student.admission as Record<string, unknown>).batch) : "—"}</td>
+                    <td className="px-6 py-4">
+                      {student.germanyGoal ? (
+                        <span
+                          className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--accent-ink)]"
+                          title={student.germanyGoalNote ?? undefined}
+                        >
+                          {goalFor(student.germanyGoal).label.replace(/^I am (going )?/i, "")}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-[var(--muted)]">Not asked yet</span>
+                      )}
+                    </td>
                     <td className="px-6 py-4">{student.status || "active"}</td>
                     <td className="px-6 py-4">{student.payments?.[0]?.status || "none"}</td>
                     <td className="px-6 py-4 font-semibold">{student._paymentSummary ? `₦${student._paymentSummary.balance}` : "—"}</td>

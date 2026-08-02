@@ -193,6 +193,11 @@ export async function GET() {
     recentAttendance.length > 0 ? Math.round((attendedCount / recentAttendance.length) * 100) : null;
 
   // ---- Activity feed ---------------------------------------------------
+  //
+  // `canSeeMoney` is computed further down for the finance block; the feed
+  // needs it too, so it is read here rather than duplicated.
+  const feedShowsMoney = admin.can("payments");
+
   const activity = [
     ...recentStudents.map((student) => ({
       kind: "signup" as const,
@@ -202,7 +207,13 @@ export async function GET() {
     ...recentPayments.slice(0, 5).map((payment) => ({
       kind: "payment" as const,
       at: payment.createdAt.toISOString(),
-      text: `${payment.student?.user?.name ?? "A student"} paid ₦${payment.amount.toLocaleString("en-NG")}${payment.method ? ` via ${payment.method}` : ""}`,
+      // THE THIRD PLACE THE SAME LEAK LIVED. Headline finance was gated, the
+      // at-risk balances were not, and neither was this — a running feed of
+      // "Running Student paid ₦180,000 via manual" on the front page of a
+      // Secretary's dashboard. The event is theirs to see; the amount is not.
+      text: feedShowsMoney
+        ? `${payment.student?.user?.name ?? "A student"} paid ₦${payment.amount.toLocaleString("en-NG")}${payment.method ? ` via ${payment.method}` : ""}`
+        : `${payment.student?.user?.name ?? "A student"} made a payment`,
     })),
     ...recentSubmissions.map((submission) => ({
       kind: "submission" as const,
@@ -289,7 +300,32 @@ export async function GET() {
 
     actionQueue: {
       atRiskCount: atRisk.length,
-      atRisk: atRisk.slice(0, 8),
+      /**
+       * THE BALANCES COME OFF FOR ANYONE WITHOUT `payments`.
+       *
+       * The `finance` block above was gated from the day sub-roles landed, and
+       * that was mistaken for the whole job. It was not: this queue carries a
+       * per-student `paid` and `owed`, and it was rendering both to a Secretary
+       * on the front page of their dashboard — "₦150,000 paid, ₦30,000 owed",
+       * by name, in a table headed PAID and OWED. Every headline figure was
+       * correctly hidden while the actual balances sat underneath them.
+       *
+       * The row itself stays, because "this student is behind and has been for
+       * a fortnight" is exactly what a front desk should chase. What they lose
+       * is the amount, which is the part the school decided belongs to whoever
+       * runs it. `daysEnrolled` is what makes the row actionable, not the sum.
+       */
+      atRisk: atRisk.slice(0, 8).map((student) =>
+        canSeeMoney
+          ? student
+          : {
+              name: student.name,
+              email: student.email,
+              level: student.level,
+              branch: student.branch,
+              daysEnrolled: student.daysEnrolled,
+            },
+      ),
       pendingExamRegistrations,
       ungradedSubmissions,
       leadsAwaitingInvite: leadCounts.new ?? 0,
