@@ -86,6 +86,7 @@ export async function GET() {
       name: lecturer.user.name,
       email: lecturer.user.email,
       phone: lecturer.phone,
+      photoUrl: lecturer.photoUrl,
       bio: lecturer.bio,
       specialization: lecturer.specialization,
       branchId: lecturer.branchId,

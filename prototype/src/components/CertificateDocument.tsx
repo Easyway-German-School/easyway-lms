@@ -80,11 +80,24 @@ export default function CertificateDocument({
   verifyBaseUrl?: string;
 }) {
   const cert = certificate;
-  const issued = new Date(cert.issuedAt).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  const longDate = (value: string) =>
+    new Date(value).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const shortDate = (value: string) =>
+    new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+  const issued = longDate(cert.issuedAt);
+
+  /**
+   * The dates the course actually ran. An employer or a consulate reading this
+   * needs to know WHEN the study happened, not only when the paper was printed
+   * — "issued 12 August" says nothing about whether that was eight weeks of
+   * study or one. Omitted rather than guessed on certificates issued before
+   * these were recorded.
+   */
+  const courseDates =
+    cert.courseStart && cert.courseEnd
+      ? `${shortDate(cert.courseStart)} — ${shortDate(cert.courseEnd)}`
+      : null;
   const verifyUrl = `${verifyBaseUrl}/verify/${cert.verifyCode}`;
 
   return (
@@ -162,6 +175,7 @@ export default function CertificateDocument({
               <Field de="Gesamtergebnis" en="Overall" value={`${cert.averageScore}%`} />
             ) : null}
             {cert.studentCode ? <Field de="Matrikelnummer" en="Student ID" value={cert.studentCode} /> : null}
+            {courseDates ? <Field de="Kursdauer" en="Course dates" value={courseDates} /> : null}
           </div>
 
           {/* The seal sits between the citation and the signatures rather than

@@ -52,6 +52,35 @@ export function citationFor(kind: CertificateKind, level: string, award: Award):
  * way would let the certificate disagree with the calendar about whether
  * classes have finished.
  */
+/**
+ * The two dates a certificate states: when this student started the level and
+ * when they finished it.
+ *
+ * Derived from the batch month and SESSION_MONTHS — the same pair the
+ * timetable, the promotion report and `sessionIsComplete` all derive from, so
+ * the certificate cannot disagree with the calendar about when the course ran.
+ *
+ * The start is the first of the batch month; the end is the last day of the
+ * month the session finishes in. Returns nulls for a student with no batch
+ * recorded, and the document then omits the line rather than printing a guess.
+ */
+export function courseWindow(
+  batch: string | null,
+  now = new Date(),
+): { start: Date | null; end: Date | null } {
+  const monthIndex = monthNameToIndex(batch);
+  if (monthIndex === null) return { start: null, end: null };
+
+  // Same rule as sessionIsComplete: the batch is the most recent occurrence at
+  // or before now, so a "May" batch read in July started this May, not next.
+  const year = monthIndex <= now.getMonth() ? now.getFullYear() : now.getFullYear() - 1;
+
+  const start = new Date(year, monthIndex, 1);
+  // Day 0 of the following month is the last day of the one before it.
+  const end = new Date(year, monthIndex + SESSION_MONTHS, 0);
+  return { start, end };
+}
+
 export function sessionIsComplete(batch: string | null, now = new Date()): boolean {
   const monthIndex = monthNameToIndex(batch);
   if (monthIndex === null) return false;
@@ -209,6 +238,11 @@ export async function issueCertificateForStudent(
       tutorName: student.tutor?.user?.name ?? null,
       batch,
       outstandingAtIssue: Math.max(0, tuitionFeeFor(feeLookup) - totalPaid),
+      // Snapshotted like every other field here: a student who repeats the
+      // level or moves batch must not change the dates on a document already
+      // printed and in somebody's hand.
+      courseStart: courseWindow(batch, now).start,
+      courseEnd: courseWindow(batch, now).end,
       issuedAt: now,
     },
     select: { id: true },
@@ -234,6 +268,9 @@ export type CertificateView = {
   branchName: string | null;
   tutorName: string | null;
   issuedAt: string;
+  /** When the student started and finished this level. Null on old records. */
+  courseStart: string | null;
+  courseEnd: string | null;
   revoked: boolean;
   /** Live, not a snapshot — see the note at the top of this file. */
   provisional: boolean;
@@ -259,6 +296,8 @@ export function toCertificateView(
     branchName: string | null;
     tutorName: string | null;
     issuedAt: Date;
+    courseStart?: Date | null;
+    courseEnd?: Date | null;
     revokedAt: Date | null;
   },
   liveOutstanding: number,
@@ -290,6 +329,8 @@ export function toCertificateView(
     branchName: row.branchName,
     tutorName: row.tutorName,
     issuedAt: row.issuedAt.toISOString(),
+    courseStart: row.courseStart?.toISOString() ?? null,
+    courseEnd: row.courseEnd?.toISOString() ?? null,
     revoked: row.revokedAt !== null,
     provisional: liveOutstanding > 0,
     outstanding: Math.max(0, liveOutstanding),

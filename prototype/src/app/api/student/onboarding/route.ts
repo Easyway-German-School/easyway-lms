@@ -36,6 +36,13 @@ export async function GET() {
       level: student.level,
       branchName: student.branch?.name ?? null,
       isOnlineBranch: isOnlineBranch(student.branch),
+      /**
+       * physical | hybrid | online. The tour introduces a different portal for
+       * each — splitting on the branch alone was wrong for a hybrid student,
+       * who is at a campus AND has a live room, and was shown only the campus
+       * half of their own product.
+       */
+      deliveryMode: student.deliveryMode,
       sessionSlot: student.sessionSlot,
       tourSeen: Boolean(student.welcomeTourSeenAt),
     });

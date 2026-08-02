@@ -104,9 +104,9 @@ model Student {
    * keeps the portal they already had.
    */
   deliveryMode  String @default("physical")
-  pathway       String @default("Goethe exam mastery")
+  pathway       String @default("Language training")
   examReadiness Int    @default(0)
-  outcome       String @default("Goethe C1 readiness + German work placement support")
+  outcome       String @default("C1 readiness + German work placement support")
   nextLive      String @default("No live session scheduled")
   // Arbitrary admission form payload saved as JSON
   admission     Json?
@@ -235,7 +235,7 @@ model ExamRegistration {
 
 model Pathway {
   id          String @id @default(cuid())
-  name        String @unique // "Goethe exam mastery", "Nursing career path", etc
+  name        String @unique // "Language training", "Nursing career path", etc
   headline    String
   description String
   duration    String // "12 weeks", "6 months"
@@ -1286,6 +1286,21 @@ model Certificate {
   branchName  String?
   tutorName   String?
   batch       String?
+
+  /**
+   * The course dates the certificate states: when this student started the
+   * level and when they finished it.
+   *
+   * Snapshots like everything else here. Derived from the batch month and the
+   * session length at issue rather than read back later, because a student who
+   * repeats a level or moves batch would otherwise change the dates printed on
+   * a document already in somebody's hand.
+   *
+   * Nullable for certificates issued before this existed; the document simply
+   * omits the line rather than printing a guess.
+   */
+  courseStart DateTime?
+  courseEnd   DateTime?
 
   /**
    * Tuition still owed when the certificate was issued, kept for the record.

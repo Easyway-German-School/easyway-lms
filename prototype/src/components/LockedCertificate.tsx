@@ -63,6 +63,11 @@ function previewCertificate(identity: LockedIdentity, level: string): Certificat
     branchName: identity.branchName,
     tutorName: identity.tutorName,
     issuedAt: new Date().toISOString(),
+    // Null on the preview: this is a picture of what they will get, and
+    // inventing course dates for a session still running would be the one
+    // fabricated fact on an otherwise honest mock-up.
+    courseStart: null,
+    courseEnd: null,
     revoked: false,
     provisional: false,
     outstanding: 0,

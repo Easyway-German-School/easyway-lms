@@ -36,6 +36,8 @@ type Onboarding = {
   level: string;
   branchName: string | null;
   isOnlineBranch: boolean;
+  /** physical | hybrid | online — see /api/student/onboarding. */
+  deliveryMode?: string;
   sessionSlot: string;
   tourSeen: boolean;
 };
@@ -59,11 +61,19 @@ const PAD = 8;
 const CARD_GAP = 18;
 
 function buildSteps(profile: Onboarding): Step[] {
-  const where = profile.isOnlineBranch
+  // Three products, not two. A hybrid student is at a campus and has a live
+  // room; introducing them as one or the other describes half their portal.
+  const mode = profile.deliveryMode ?? (profile.isOnlineBranch ? "online" : "physical");
+  const isOnline = mode === "online";
+  const isHybrid = mode === "hybrid";
+
+  const where = isOnline
     ? "You study online, so your classroom travels with you."
-    : profile.branchName
-      ? `You are at our ${profile.branchName} campus.`
-      : "";
+    : isHybrid && profile.branchName
+      ? `You are at our ${profile.branchName} campus, and you can join the same class live over video when you cannot get in.`
+      : profile.branchName
+        ? `You are at our ${profile.branchName} campus.`
+        : "";
 
   return [
     {
@@ -75,13 +85,15 @@ function buildSteps(profile: Onboarding): Step[] {
     },
     {
       id: "classes",
-      target: profile.isOnlineBranch ? '[data-tour="nav:/live"]' : '[data-tour="nav:/calendar"]',
+      target: isOnline ? '[data-tour="nav:/live"]' : '[data-tour="nav:/calendar"]',
       inSidebar: true,
       eyebrow: "Every week",
-      title: profile.isOnlineBranch ? "Your class opens here" : "Your timetable lives here",
-      body: profile.isOnlineBranch
+      title: isOnline ? "Your class opens here" : "Your timetable lives here",
+      body: isOnline
         ? `Your ${profile.sessionSlot} session runs live over video. Pick your video quality before you join — on mobile data, Data saver keeps the lesson steady instead of frozen.`
-        : `Your ${profile.sessionSlot} session, the topic for each day, and anything your tutor attaches are all on this calendar.`,
+        : isHybrid
+          ? `Your ${profile.sessionSlot} session, the topic for each day, and anything your tutor attaches are all on this calendar. If a class is postponed it turns pink here with the new date. Live class, just below, is the same lesson over video.`
+          : `Your ${profile.sessionSlot} session, the topic for each day, and anything your tutor attaches are all on this calendar. If a class is postponed it turns pink here with the new date.`,
       stamp: "Class",
     },
     {

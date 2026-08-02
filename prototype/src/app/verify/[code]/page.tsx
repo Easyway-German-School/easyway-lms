@@ -35,6 +35,8 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
           studentCode: true,
           branchName: true,
           issuedAt: true,
+          courseStart: true,
+          courseEnd: true,
           revokedAt: true,
         },
       })
@@ -89,6 +91,24 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
                   year: "numeric",
                 })}
               />
+              {/* The one thing an employer checking a certificate most wants
+                  and could not get here: when the study actually happened.
+                  Omitted on records issued before the dates were kept, rather
+                  than shown as a blank row that reads like missing data. */}
+              {certificate.courseStart && certificate.courseEnd ? (
+                <Row
+                  label="Course dates"
+                  value={`${certificate.courseStart.toLocaleDateString("en-GB", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })} — ${certificate.courseEnd.toLocaleDateString("en-GB", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}`}
+                />
+              ) : null}
             </dl>
           </>
         )}
