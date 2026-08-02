@@ -24,6 +24,7 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
 export const CAPABILITIES = [
   "students",     // enrol, edit, move, graduate
   "attendance",
+  "classes",      // timetables, sittings, postponements — coordinating classes
   "exams",        // exams and exam registrations
   "payments",     // fees, invoices, financial reporting
   "materials",
@@ -36,17 +37,37 @@ export const CAPABILITIES = [
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
+/**
+ * PAYMENTS IS SUPER-ONLY, and is not in any other preset.
+ *
+ * It was on `data_comm` on the reasoning that whoever owns the reporting owns
+ * the numbers. The school's decision is that the payment dashboard — every
+ * student's balance, every transaction, the collected totals — belongs to the
+ * person who runs the school and nobody else. `reports` still gives the data
+ * manager the shape of things without the money in it.
+ *
+ * It can still be handed to a named person one at a time through the
+ * per-person `grant` override below. That is a deliberate act by a super admin
+ * against one account, which is a different thing from a whole preset carrying
+ * it by default.
+ */
 const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   // Runs the school: everything, including who else is an admin.
   super: "all",
 
   // Front desk: the student lifecycle and the paperwork around it. No access
   // to money, staffing or bulk communications.
-  secretary: ["students", "attendance", "exams", "materials", "branches"],
+  secretary: ["students", "attendance", "classes", "exams", "materials", "branches"],
 
-  // Owns communications and the numbers, not the student records.
-  data_comm: ["community", "emails", "reports", "integrations", "payments"],
+  // Owns communications and the numbers, not the student records or the money.
+  data_comm: ["community", "emails", "reports", "integrations"],
 };
+
+/**
+ * Capabilities no preset may carry, however the presets are edited later.
+ * Reaching one takes a deliberate per-person grant from a super admin.
+ */
+export const SUPER_ONLY_CAPABILITIES: Capability[] = ["payments"];
 
 /** An admin with no sub-role set is treated as super — nobody loses access. */
 export function normalizeAdminRole(value: unknown): AdminRole {

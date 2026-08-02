@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
+import LecturerGradeEntry from '@/components/LecturerGradeEntry';
 import { ExamIcon, ResultsIcon } from '@/components/icons';
 
 interface StudentGrade {
@@ -166,8 +167,8 @@ export default function LecturerGrades() {
         {/* Header */}
         <div className="bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6 border-b border-[var(--border)]">
           <div className="max-w-7xl mx-auto">
-            <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]"><ExamIcon className="h-7 w-7 text-[var(--accent)]" />Enter Exam/Test Results</h1>
-            <p className="text-[var(--muted)] mt-2">Record and manage student exam and test scores</p>
+            <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]"><ExamIcon className="h-7 w-7 text-[var(--accent)]" />Enter results</h1>
+            <p className="text-[var(--muted)] mt-2">Record classwork marks for your students, and scores for exam sittings</p>
           </div>
         </div>
 
@@ -178,6 +179,20 @@ export default function LecturerGrades() {
               {error}
             </div>
           )}
+
+          {/* Marking the class comes first. The exam grid below only reaches
+              students who have BOOKED a sitting, which almost nobody has —
+              that is why there was previously no way to record the classwork
+              and speaking marks a tutor actually gives out every week. */}
+          <div className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6">
+            <h2 className="mb-1 text-lg font-bold text-[var(--foreground)]">Mark my class</h2>
+            <p className="mb-4 text-sm text-[var(--muted)]">
+              Everyone the office assigned you. Scores here go straight onto the student&apos;s results page.
+            </p>
+            <LecturerGradeEntry />
+          </div>
+
+          <h2 className="mb-4 text-lg font-bold text-[var(--foreground)]">Exam sittings</h2>
 
           {/* Exam Selection */}
           <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">

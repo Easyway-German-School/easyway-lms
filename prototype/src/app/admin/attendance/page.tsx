@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import { StudentWithUser } from "@/types/admin";
 import BrandLoader from "@/components/BrandLoader";
+import AttendanceRegister from "@/components/admin/AttendanceRegister";
 
 interface AttendanceRecord {
   id: string;
@@ -155,6 +156,14 @@ export default function AttendancePage() {
             {error}
           </div>
         )}
+
+        {/* The register goes first, because it answers the question whoever
+            monitors attendance actually has: who is missing from this class
+            today. Everything below it is a log of marks already made, which
+            by definition cannot show you an absent student nobody recorded. */}
+        <div className="mb-8">
+          <AttendanceRegister />
+        </div>
 
         {/* Form */}
         <div className="bg-white rounded-lg border p-6 mb-8">
