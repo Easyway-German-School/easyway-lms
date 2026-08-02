@@ -5,6 +5,100 @@
  * - OLLAMA_BASE_URL: For local Ollama (e.g., http://localhost:11434)
  */
 
+/**
+ * The hosted model, in one place.
+ *
+ * This used to be `claude-3-5-sonnet-20241022`, written out four times. That
+ * model was RETIRED in October 2025, so every one of those four calls had been
+ * quietly 404ing and falling through to the mock grader — students were being
+ * marked by the hardcoded fallback and nobody could tell, because the fallback
+ * is deliberately plausible.
+ *
+ * One constant now, so the next model change is one line and cannot go
+ * half-applied.
+ */
+const CLAUDE_MODEL = "claude-opus-5";
+
+/**
+ * One Claude call, shared by the four features that make one.
+ *
+ * Tuned for a student waiting on a page, not for depth:
+ *
+ *   thinking disabled + effort low — every one of these calls is short
+ *   structured extraction (grade this, transcribe that), which is precisely
+ *   the shape that does not benefit from reasoning. It matters more than it
+ *   looks: on current models thinking is ON unless you say otherwise, and
+ *   `max_tokens` caps thinking AND the answer together — so a 256-token budget
+ *   would be spent thinking and return an empty string. Disabling it is what
+ *   makes these budgets mean what they appear to mean.
+ *
+ * Returns null rather than throwing, because every caller's answer to a
+ * failure is the same: fall back to the mock and let the page render.
+ */
+async function callClaude(prompt: string, maxTokens: number): Promise<string | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: maxTokens,
+        thinking: { type: "disabled" },
+        output_config: { effort: "low" },
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Claude API error:", response.status, await response.text().catch(() => ""));
+      return null;
+    }
+
+    const data = (await response.json()) as {
+      content?: Array<{ type?: string; text?: string }>;
+    };
+    // Take the first TEXT block by type rather than by position: a response can
+    // lead with a non-text block, and content[0].text would then be undefined.
+    const text = data.content?.find((block) => block.type === "text")?.text;
+    return text?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pull JSON out of a model reply.
+ *
+ * Asked for JSON and told not to wrap it, models still occasionally wrap it —
+ * so strip fences and take the outermost {...} rather than trusting the whole
+ * string to parse.
+ */
+function parseJsonReply<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  const cleaned = raw
+    .replace(/^\s*```(?:json)?/i, "")
+    .replace(/```\s*$/, "")
+    .trim();
+  const start = cleaned.search(/[[{]/);
+  const end = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
+  const candidate = start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned;
+  try {
+    return JSON.parse(candidate) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** Appended to every prompt that wants JSON back. Cheap, and it works. */
+const JSON_ONLY = "\n\nReturn only the JSON object. No prose, no code fences, no XML tags.";
+
 export async function gradeEssay(essay: string): Promise<{
   score: number;
   feedback: Array<{ category: string; comment: string; score: number }>;
@@ -88,42 +182,25 @@ async function generateMissionPracticeFeedbackWithClaude(input: {
   description: string;
   response: string;
 }) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return generateMissionPracticeFeedbackMock(input);
+  const raw = await callClaude(
+    `You are an expert German tutor. A student submitted the following mission response.\n\nMission: ${input.title}\nDescription: ${input.description}\nResponse: ${input.response}\n\nGive output as JSON with fields: prompt, feedback, score, suggestion.${JSON_ONLY}`,
+    512,
+  );
 
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-3-5-sonnet-20241022",
-        max_tokens: 256,
-        messages: [
-          {
-            role: "user",
-            content: `You are an expert German tutor. A student submitted the following mission response.\n\nMission: ${input.title}\nDescription: ${input.description}\nResponse: ${input.response}\n\nGive output as valid JSON only with fields: prompt, feedback, score, suggestion.`,
-          },
-        ],
-      }),
-    });
+  const parsed = parseJsonReply<{
+    prompt?: string;
+    feedback?: string;
+    score?: number | string;
+    suggestion?: string;
+  }>(raw);
+  if (!parsed) return generateMissionPracticeFeedbackMock(input);
 
-    if (!response.ok) return generateMissionPracticeFeedbackMock(input);
-    const data = await response.json() as any;
-    const text = data?.content?.[0]?.text || "{}";
-    const parsed = JSON.parse(text);
-    return {
-      prompt: parsed.prompt || `Practice this mission: ${input.title}\n\n${input.description}`,
-      feedback: parsed.feedback || "Nice effort. Keep improving your answer with more detail.",
-      score: Number(parsed.score) || 70,
-      suggestion: parsed.suggestion || "Try adding one detail or example to strengthen your response.",
-    };
-  } catch {
-    return generateMissionPracticeFeedbackMock(input);
-  }
+  return {
+    prompt: parsed.prompt || `Practice this mission: ${input.title}\n\n${input.description}`,
+    feedback: parsed.feedback || "Nice effort. Keep improving your answer with more detail.",
+    score: Number(parsed.score) || 70,
+    suggestion: parsed.suggestion || "Try adding one detail or example to strengthen your response.",
+  };
 }
 
 async function generateMissionPracticeFeedbackWithLocalModel(input: {
@@ -969,35 +1046,11 @@ function getOllamaModel() {
 }
 
 async function generateNextStepsWithClaude(score: number, feedback: Array<{ category: string; comment: string; score: number }>, essay: string): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return generateNextStepsMock(score, feedback);
-
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-3-5-sonnet-20241022",
-        max_tokens: 256,
-        messages: [
-          {
-            role: "user",
-            content: `Based on a German essay scored at ${score}/100 with these feedback categories: ${feedback.map((f) => `${f.category}: ${f.score}/100`).join(", ")}, provide ONE specific, actionable next step to improve from ${score} to ${score + 10} points. Keep it to one concise sentence.`,
-          },
-        ],
-      }),
-    });
-
-    if (!response.ok) return generateNextStepsMock(score, feedback);
-    const data = (await response.json()) as any;
-    return data.content[0]?.text || generateNextStepsMock(score, feedback);
-  } catch {
-    return generateNextStepsMock(score, feedback);
-  }
+  const text = await callClaude(
+    `Based on a German essay scored at ${score}/100 with these feedback categories: ${feedback.map((f) => `${f.category}: ${f.score}/100`).join(", ")}, provide ONE specific, actionable next step to improve from ${score} to ${score + 10} points. Keep it to one concise sentence. Reply with the sentence and nothing else.`,
+    256,
+  );
+  return text || generateNextStepsMock(score, feedback);
 }
 
 async function generateNextStepsWithDeepSeek(score: number, feedback: Array<{ category: string; comment: string; score: number }>, essay: string): Promise<string> {
@@ -1089,23 +1142,8 @@ function generateNextStepsMock(score: number, feedback: Array<{ category: string
 
 // Claude Implementation
 async function gradeEssayWithClaude(essay: string) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: `Grade this German essay for a Goethe B2 exam. Return JSON with:
+  const raw = await callClaude(
+    `Grade this German essay for a Goethe B2 exam. Return JSON with:
 {
   "score": (0-100),
   "feedback": [
@@ -1118,50 +1156,27 @@ async function gradeEssayWithClaude(essay: string) {
 }
 
 Essay to grade:
-${essay}`,
-        },
-      ],
-    }),
-  });
+${essay}${JSON_ONLY}`,
+    1024,
+  );
 
-  if (!response.ok) {
-    console.error("Claude API error:", await response.text());
-    return gradeEssayMock(essay);
-  }
+  const parsed = parseJsonReply<{
+    score?: number;
+    feedback?: Array<{ category: string; comment: string; score: number }>;
+    summary?: string;
+  }>(raw);
+  if (!parsed) return gradeEssayMock(essay);
 
-  const data = await response.json() as any;
-  const content = data.content[0]?.text || "{}";
-
-  try {
-    const parsed = JSON.parse(content);
-    return {
-      score: parsed.score || 75,
-      feedback: parsed.feedback || [],
-      summary: parsed.summary || "Essay graded by Claude AI.",
-    };
-  } catch {
-    return gradeEssayMock(essay);
-  }
+  return {
+    score: parsed.score || 75,
+    feedback: parsed.feedback || [],
+    summary: parsed.summary || "Essay graded by Claude AI.",
+  };
 }
 
 async function analyzePronunciationWithClaude(phrase: string) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 512,
-      messages: [
-        {
-          role: "user",
-          content: `Analyze this German phrase for pronunciation coaching. Return JSON:
+  const raw = await callClaude(
+    `Analyze this German phrase for pronunciation coaching. Return JSON:
 {
   "transcription": "correct spelling/transcription",
   "issues": ["issue1", "issue2"],
@@ -1169,30 +1184,24 @@ async function analyzePronunciationWithClaude(phrase: string) {
   "confidence": (0-100)
 }
 
-Phrase: ${phrase}`,
-        },
-      ],
-    }),
-  });
+Phrase: ${phrase}${JSON_ONLY}`,
+    512,
+  );
 
-  if (!response.ok) {
-    return analyzePronunciationMock(phrase);
-  }
+  const parsed = parseJsonReply<{
+    transcription?: string;
+    issues?: string[];
+    corrections?: string[];
+    confidence?: number;
+  }>(raw);
+  if (!parsed) return analyzePronunciationMock(phrase);
 
-  const data = await response.json() as any;
-  const content = data.content[0]?.text || "{}";
-
-  try {
-    const parsed = JSON.parse(content);
-    return {
-      transcription: parsed.transcription || phrase,
-      issues: parsed.issues || [],
-      corrections: parsed.corrections || [],
-      confidence: parsed.confidence || 85,
-    };
-  } catch {
-    return analyzePronunciationMock(phrase);
-  }
+  return {
+    transcription: parsed.transcription || phrase,
+    issues: parsed.issues || [],
+    corrections: parsed.corrections || [],
+    confidence: parsed.confidence || 85,
+  };
 }
 
 // Ollama Implementation (local)

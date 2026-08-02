@@ -8,6 +8,7 @@ import {
   ollamaChatWithTools,
   ollamaStatus,
   ollamaSupportsTools,
+  ollamaWarm,
   toolArguments,
   type ChatMessage,
 } from "@/lib/ollama";
@@ -59,6 +60,46 @@ type Briefing = {
 };
 
 const DAY = 86_400_000;
+
+/**
+ * The briefing is expensive twice over, so it is cached for a minute.
+ *
+ * The obvious cost is the database: building it reads every student and every
+ * completed payment, and it ran on page load AND on every question asked.
+ *
+ * The larger cost is one the code could not see. Ollama reuses the evaluated
+ * prompt cache when a request's prefix is byte-identical to the last one, and
+ * the briefing sits near the front of the prompt — so any difference in it
+ * forces the model to re-evaluate everything after it. Measured on the
+ * development machine, that is the difference between 0.2 seconds and
+ * 37 SECONDS for a ~900-token prompt.
+ *
+ * The old code lost that cache every single time, because the briefing carried
+ * `generatedAt: new Date().toISOString()` — a fresh timestamp, right at the
+ * front, guaranteeing a full re-evaluation on every question. Thirty seconds
+ * of an admin's life, spent so the model could be told the current time and
+ * then not use it.
+ *
+ * A minute of staleness on "how many students are in Lagos" is not a number
+ * anybody is going to act differently on; thirty seconds of spinner is.
+ *
+ * Keyed by capability set, because a Secretary and a Director get genuinely
+ * different briefings and must never be served each other's.
+ */
+const BRIEFING_TTL_MS = 60_000;
+const briefingCache = new Map<string, { at: number; briefing: Briefing }>();
+
+async function cachedBriefing(admin: AdminLike): Promise<Briefing> {
+  const key = [...admin.capabilities].sort().join(",");
+  const hit = briefingCache.get(key);
+  if (hit && Date.now() - hit.at < BRIEFING_TTL_MS) return hit.briefing;
+
+  const briefing = await buildBriefing(admin.can as (c: never) => boolean);
+  briefingCache.set(key, { at: Date.now(), briefing });
+  return briefing;
+}
+
+type AdminLike = { can: (c: never) => boolean; capabilities: readonly string[] };
 
 async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
   const now = new Date();
@@ -242,12 +283,17 @@ export async function GET() {
 
   const [status, briefing] = await Promise.all([
     ollamaStatus(),
-    buildBriefing(auth.admin.can as (c: never) => boolean),
+    cachedBriefing(auth.admin as unknown as AdminLike),
   ]);
 
   // Only worth asking when the model is actually there; /api/show on a missing
-  // model is a wasted round trip on every page load.
+  // model is a wasted round trip on every page load. Cached after the first.
   const supportsTools = status.modelReady ? await ollamaSupportsTools() : false;
+
+  // Opening the page is the signal that a question is coming. Start loading the
+  // model now, so the several-second load overlaps with the admin reading the
+  // briefing instead of landing on top of their first question.
+  if (status.modelReady) ollamaWarm();
 
   return NextResponse.json({
     status: { ...status, supportsTools },
@@ -291,15 +337,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "That question is too long" }, { status: 400 });
   }
 
-  const briefing = await buildBriefing(auth.admin.can as (c: never) => boolean);
+  const briefing = await cachedBriefing(auth.admin as unknown as AdminLike);
+
+  /**
+   * The prompt is assembled most-stable-first, and that ordering is load
+   * bearing rather than tidy: Ollama reuses its evaluated prompt cache only
+   * for the prefix that has not changed, so everything constant belongs ahead
+   * of everything that varies.
+   *
+   * `generatedAt` is stripped for the same reason. The model was never asked
+   * to do anything with the timestamp, and carrying it made the briefing
+   * different on every request, which threw away the cache for the whole
+   * prompt behind it. The page still receives the real `briefing` object with
+   * the timestamp intact — this trimming applies only to the model's copy.
+   *
+   * Compact JSON, not indented: the pretty-printed version measured 1012
+   * tokens against 890 for the same data, and the model does not read the
+   * whitespace.
+   */
+  const { generatedAt: _ignored, ...briefingForModel } = briefing;
 
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
     {
       role: "system",
       content:
-        `BRIEFING — the school at a glance, already computed (generated ${briefing.generatedAt}). ` +
-        `Use it for broad questions; use the tools for anything specific:\n${JSON.stringify(briefing, null, 2)}`,
+        "BRIEFING — the school at a glance, already computed. " +
+        `Use it for broad questions; use the tools for anything specific:\n${JSON.stringify(briefingForModel)}`,
     },
     ...history,
     { role: "user", content: question },

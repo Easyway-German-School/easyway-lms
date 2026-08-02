@@ -25,16 +25,49 @@ const DEFAULT_MODEL = "mistral:latest";
  * How long to wait before giving up.
  *
  * Generous, because a local model on a machine without a GPU is genuinely
- * slow: measured on the development machine, mistral:latest answers a briefing
- * question in about 135 seconds and qwen2.5:3b in about 27. A small model is
- * worth far more here than a clever one — the assistant reads figures that
- * have already been computed, it does not reason about them.
- *
- * Still a ceiling, though. An admin page that hangs forever is worse than one
- * that says the model is taking too long.
+ * slow. Still a ceiling, though: an admin page that hangs forever is worse
+ * than one that says the model is taking too long.
  */
 const TIMEOUT_MS = 180_000;
 const HEALTH_TIMEOUT_MS = 2_000;
+
+/**
+ * How long Ollama should hold the model in memory after a request.
+ *
+ * This is the cheapest speed fix in the file, and it buys two separate things:
+ *
+ *   1. THE MODEL ITSELF. Ollama's default is to unload after five minutes.
+ *      Reloading qwen2.5:3b from disk costs several seconds — measured at 7.5s
+ *      for a 1.5B model on the development machine — and a front desk asks
+ *      questions in bursts with long gaps, which is exactly the pattern that
+ *      pays that cost on every single burst.
+ *
+ *   2. THE PROMPT CACHE, which matters far more. Ollama keeps the evaluated
+ *      key/value cache for the prompt PREFIX it last saw, and reuses it when
+ *      the next prompt starts with the same bytes. Prompt evaluation is the
+ *      dominant cost here — measured at 37 SECONDS for a ~900-token prompt on
+ *      qwen2.5:3b, against 0.2s when the prefix hits the cache. Unloading the
+ *      model throws that cache away.
+ *
+ * Thirty minutes covers a working session. The cost is a few hundred MB of RAM
+ * sitting idle on the office machine, which is a trade worth making.
+ *
+ * The whole prefix-cache win depends on callers keeping their prompt prefix
+ * BYTE-IDENTICAL between questions — see the briefing cache in the assistant
+ * route, which exists for exactly this reason.
+ */
+const KEEP_ALIVE = "30m";
+
+/**
+ * Ceiling on generated tokens.
+ *
+ * The assistant is told to answer in at most five sentences, and generation is
+ * the slow half of a warm request (~7 tokens/second on the development
+ * machine). Without a ceiling, one confused rambling answer is a minute of a
+ * front-desk worker watching a spinner. Four hundred tokens is comfortably
+ * more than five sentences and firmly less than a monologue.
+ */
+const NUM_PREDICT = 400;
 
 export function ollamaUrl(): string {
   return (process.env.OLLAMA_BASE_URL ?? DEFAULT_URL).replace(/\/$/, "");
@@ -236,10 +269,14 @@ export async function ollamaChatWithTools(
           messages,
           tools,
           stream: false,
-          // Zero, not 0.3. Choosing a filter is not a creative act, and a
-          // model that gets imaginative about which branch you meant is worse
-          // than one that asks.
-          options: { temperature: options?.temperature ?? 0 },
+          keep_alive: KEEP_ALIVE,
+          options: {
+            // Zero, not 0.3. Choosing a filter is not a creative act, and a
+            // model that gets imaginative about which branch you meant is
+            // worse than one that asks.
+            temperature: options?.temperature ?? 0,
+            num_predict: NUM_PREDICT,
+          },
         }),
       },
       TIMEOUT_MS,
@@ -282,9 +319,19 @@ export async function ollamaChatWithTools(
  *
  * Read from Ollama's own `capabilities` list rather than from a hardcoded name
  * list, which would be wrong the week somebody pulls a new model.
+ *
+ * Cached per model name, because the answer cannot change without someone
+ * editing .env.local and restarting the server. This used to be an /api/show
+ * round trip on every page load AND every question asked — pure latency in
+ * front of an admin who is already waiting.
  */
+const toolSupportCache = new Map<string, boolean>();
+
 export async function ollamaSupportsTools(model?: string): Promise<boolean> {
   const target = model ?? ollamaModel();
+  const cached = toolSupportCache.get(target);
+  if (cached !== undefined) return cached;
+
   try {
     const response = await fetchWithTimeout(
       `${ollamaUrl()}/api/show`,
@@ -297,10 +344,39 @@ export async function ollamaSupportsTools(model?: string): Promise<boolean> {
     );
     if (!response.ok) return false;
     const data = (await response.json()) as { capabilities?: string[] };
-    return (data.capabilities ?? []).includes("tools");
+    const supported = (data.capabilities ?? []).includes("tools");
+    // Only a definite answer is cached. A failed probe is usually "Ollama is
+    // not running yet", and that must not be remembered as "no tools" for the
+    // life of the process.
+    toolSupportCache.set(target, supported);
+    return supported;
   } catch {
     return false;
   }
+}
+
+/**
+ * Load the model into memory without asking it anything.
+ *
+ * An empty `messages` array is Ollama's documented way to say "just load it".
+ * Called when the assistant page opens, so the several-second model load
+ * happens while the admin is reading the briefing rather than after they have
+ * typed their first question and hit enter.
+ *
+ * Deliberately fire-and-forget: nothing depends on it, and a failure here is
+ * simply the old behaviour of loading on first use.
+ */
+export function ollamaWarm(model?: string): void {
+  const target = model ?? ollamaModel();
+  void fetchWithTimeout(
+    `${ollamaUrl()}/api/chat`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: target, messages: [], keep_alive: KEEP_ALIVE }),
+    },
+    HEALTH_TIMEOUT_MS * 10,
+  ).catch(() => {});
 }
 
 /**
@@ -326,7 +402,11 @@ export async function ollamaChat(
           model,
           messages,
           stream: false,
-          options: { temperature: options?.temperature ?? 0.3 },
+          keep_alive: KEEP_ALIVE,
+          options: {
+            temperature: options?.temperature ?? 0.3,
+            num_predict: NUM_PREDICT,
+          },
         }),
       },
       TIMEOUT_MS,
