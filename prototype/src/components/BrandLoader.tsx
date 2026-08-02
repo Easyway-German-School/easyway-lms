@@ -20,6 +20,18 @@ import { useEffect, useState } from "react";
 
 const MARK_SRC = "/logo-mark.png";
 
+/**
+ * The school's name, under the emblem, on every loading screen.
+ *
+ * The mark alone is not a brand to somebody who has seen it twice — a student
+ * waiting for their dashboard on a slow Nigerian connection is looking at this
+ * screen for several seconds, and those seconds should tell them whose school
+ * they are in. The rotating German phrase sits below it and keeps doing its
+ * job; this replaces nothing, it just stops the wordless emblem being the only
+ * thing on the screen.
+ */
+const SCHOOL_NAME = "EasyWay Language School";
+
 /** German first, gloss second. Kept short so they don't wrap on mobile. */
 const PHRASES: ReadonlyArray<{ de: string; en: string }> = [
   { de: "Einen Moment, bitte…", en: "One moment, please" },
@@ -177,6 +189,10 @@ export default function BrandLoader({
       <BrandLoaderMark size={size} />
 
       <div className="space-y-1.5">
+        <p className="text-[0.7rem] font-bold uppercase tracking-[0.28em] text-[var(--accent)] sm:text-xs">
+          {SCHOOL_NAME}
+        </p>
+
         {/* key on the phrase so each swap re-triggers the fade-up. */}
         <p
           key={title ?? phrase.de}

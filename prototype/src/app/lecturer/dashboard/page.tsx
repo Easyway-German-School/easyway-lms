@@ -76,12 +76,44 @@ function MessageIcon({ className }: { className?: string }) {
   );
 }
 
+interface ActivityEntry {
+  id: string;
+  kind: string;
+  title: string;
+  detail: string;
+  at: string;
+}
+
 interface DashboardStats {
+  assigned: boolean;
+  assignmentLabel: string;
   totalClasses: number;
   totalStudents: number;
   totalMaterials: number;
-  averageAttendance: number;
+  /** Null when nobody has taken a register yet — which is not the same as 0%. */
+  averageAttendance: number | null;
+  activity: ActivityEntry[];
+  message?: string;
 }
+
+/** "2 hours ago". Relative, because "when did that happen" is the question. */
+function timeAgo(iso: string): string {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+const ACTIVITY_ICON: Record<string, (props: { className?: string }) => React.ReactElement> = {
+  material: (props) => <BookOpenIcon {...props} />,
+  recording: (props) => <BookOpenIcon {...props} />,
+  grade: (props) => <GradebookIcon {...props} />,
+  postponed: (props) => <AttendanceIcon {...props} />,
+  cancelled: (props) => <AttendanceIcon {...props} />,
+};
 
 export default function LecturerDashboard() {
   const { data: session, status } = useSession();
@@ -202,12 +234,14 @@ export default function LecturerDashboard() {
                   <div>
                     <p className="text-[var(--muted)] text-sm">Avg Attendance</p>
                     <h3 className="text-3xl font-bold text-[var(--foreground)] mt-2">
-                      {stats.averageAttendance}%
+                      {stats.averageAttendance === null ? "—" : `${stats.averageAttendance}%`}
                     </h3>
                   </div>
                   <StatIcon><AttendanceRateIcon className="h-5 w-5" /></StatIcon>
                 </div>
-                <p className="text-xs text-[var(--muted)] mt-3">Student average</p>
+                <p className="text-xs text-[var(--muted)] mt-3">
+                  {stats.averageAttendance === null ? "No register taken yet" : "Student average"}
+                </p>
               </div>
             </div>
 
@@ -246,33 +280,44 @@ export default function LecturerDashboard() {
               </div>
             </div>
 
-            {/* Recent Activity */}
+            {/* Recent Activity — the last things that actually happened to
+                this tutor's class. These three cards were hardcoded: a
+                JavaScript course this school does not teach, an attendance
+                figure nobody recorded, and grades for an exam that did not
+                exist. A dashboard that invents its own history is worse than
+                one that admits it is empty. */}
             <div className="mt-8">
-              <h2 className="text-xl font-bold text-[var(--foreground)] mb-4">Recent Activity</h2>
+              <h2 className="text-xl font-bold text-[var(--foreground)] mb-4">Recent activity</h2>
               <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3 pb-4 border-b border-[var(--border)]">
-                    <BookOpenIcon className="h-6 w-6 shrink-0 text-[var(--accent)]" />
-                    <div>
-                      <p className="font-semibold text-[var(--foreground)]">New material uploaded</p>
-                      <p className="text-sm text-[var(--muted)]">JavaScript Fundamentals - 2 hours ago</p>
-                    </div>
+                {stats.activity.length === 0 ? (
+                  <p className="text-sm text-[var(--muted)]">
+                    {stats.assigned
+                      ? "Nothing yet. Upload a material, take a register or enter some marks and it appears here."
+                      : "Nothing to show until the office assigns you a class."}
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {stats.activity.map((entry, index) => {
+                      const Icon = ACTIVITY_ICON[entry.kind] ?? BookOpenIcon;
+                      return (
+                        <div
+                          key={entry.id}
+                          className={`flex items-start gap-3 ${
+                            index < stats.activity.length - 1 ? "border-b border-[var(--border)] pb-4" : ""
+                          }`}
+                        >
+                          <Icon className="h-6 w-6 shrink-0 text-[var(--accent)]" />
+                          <div className="min-w-0">
+                            <p className="font-semibold text-[var(--foreground)]">{entry.title}</p>
+                            <p className="truncate text-sm text-[var(--muted)]">
+                              {entry.detail} — {timeAgo(entry.at)}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="flex items-start gap-3 pb-4 border-b border-[var(--border)]">
-                    <AttendanceIcon className="h-6 w-6 shrink-0 text-emerald-600" />
-                    <div>
-                      <p className="font-semibold text-[var(--foreground)]">Attendance marked</p>
-                      <p className="text-sm text-[var(--muted)]">15 students present - 4 hours ago</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <GradebookIcon className="h-6 w-6 shrink-0 text-indigo-600" />
-                    <div>
-                      <p className="font-semibold text-[var(--foreground)]">Grades submitted</p>
-                      <p className="text-sm text-[var(--muted)]">Exam A1 scores entered - 1 day ago</p>
-                    </div>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
