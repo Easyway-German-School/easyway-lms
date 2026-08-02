@@ -509,6 +509,15 @@ export async function POST(request: Request) {
          * it true regardless.
          */
         let proposal: StoredPlan | null = null;
+        /**
+         * Which brain is actually answering, once we know.
+         *
+         * Set the moment a round comes back from the local model, and pinned
+         * for the rest of the loop — see the `force` option on brainTurn. One
+         * question is answered by one model; re-deciding per round produces a
+         * conversation half of which the answering model never saw.
+         */
+        let pinned: "ollama" | undefined;
 
         /**
          * The tool loop.
@@ -527,11 +536,25 @@ export async function POST(request: Request) {
          * arrive.
          */
         for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-          const turn = await brainTurn(messages, (text) => send({ type: "delta", text }), specs);
+          const turn = await brainTurn(
+            messages,
+            (text) => send({ type: "delta", text }),
+            // Once pinned to the local brain, the action tools are gone for the
+            // rest of the question too — not just for the round that fell back.
+            pinned ? readSpecs : specs,
+            {
+              // Only the lookups travel to the fallback. If the hosted brain is
+              // down, the local one answers questions — it does not inherit the
+              // right to propose actions it was never trusted with.
+              fallbackTools: readSpecs,
+              force: pinned,
+            },
+          );
           if (!turn.ok) {
             send({ type: "error", error: turn.reason });
             return finish();
           }
+          if (turn.provider === "ollama") pinned = "ollama";
 
           if (turn.toolCalls.length === 0) {
             send({
@@ -542,6 +565,13 @@ export async function POST(request: Request) {
               toolsUsed,
               cohort,
               proposal,
+              // Said out loud, because an admin who asked it to DO something and
+              // got an answer instead needs to know why, not wonder whether it
+              // quietly did it.
+              degraded:
+                canAct && turn.provider === "ollama"
+                  ? "The fast assistant was unavailable, so this was answered by the local model — which can look things up but cannot carry out actions."
+                  : undefined,
             });
             return finish();
           }
@@ -614,7 +644,8 @@ export async function POST(request: Request) {
             },
           ],
           (text) => send({ type: "delta", text }),
-          specs,
+          pinned ? readSpecs : specs,
+          { fallbackTools: readSpecs, force: pinned },
         );
 
         if (!final.ok) {

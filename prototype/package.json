@@ -6,7 +6,8 @@
     "dev": "next dev --webpack --hostname 0.0.0.0",
     "build": "next build --webpack",
     "start": "next start --hostname 0.0.0.0",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check:actions": "tsx --tsconfig tsconfig.json scripts/check-assistant-actions.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -44,6 +45,7 @@
     "playwright": "^1.61.1",
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
+    "tsx": "^4.23.4",
     "typescript": "^5"
   }
 }

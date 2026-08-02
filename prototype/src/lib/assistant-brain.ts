@@ -330,15 +330,38 @@ async function claudeTurn(
     return { ok: true, text, toolCalls, model: CLAUDE_MODEL, provider: "claude" };
   } catch (error) {
     console.error("Claude turn failed", error);
-    const status = (error as { status?: number }).status;
-    if (status === 401) {
-      return { ok: false, reason: "The AI key was rejected. Check ANTHROPIC_API_KEY." };
-    }
-    if (status === 429) {
-      return { ok: false, reason: "The assistant is rate limited right now. Try again in a moment." };
-    }
-    return { ok: false, reason: "The assistant could not be reached. Try again." };
+    return { ok: false, reason: describeClaudeFailure(error) };
   }
+}
+
+/**
+ * Say what actually went wrong, in words that name the fix.
+ *
+ * This function exists because the first end-to-end run of this code returned
+ * "The assistant could not be reached", which sent us to check the network, the
+ * key and the model name — when the real answer was in the response body all
+ * along: the Anthropic account was out of credit. A generic message on a
+ * specific failure costs somebody twenty minutes, and the office has no server
+ * log to go and read.
+ */
+function describeClaudeFailure(error: unknown): string {
+  const status = (error as { status?: number }).status;
+  const detail =
+    (error as { error?: { error?: { message?: string } } }).error?.error?.message ?? "";
+
+  // Billing comes back as a 400, not a 402, so it has to be matched on the
+  // message rather than the status or it reads as a malformed request.
+  if (/credit balance/i.test(detail)) {
+    return "The Anthropic account is out of credit, so the fast assistant is unavailable. Top it up, or unset ANTHROPIC_API_KEY to fall back to the local one.";
+  }
+  if (status === 401) return "The AI key was rejected. Check ANTHROPIC_API_KEY.";
+  if (status === 403) return "That AI key is not allowed to use this model.";
+  if (status === 429) return "The assistant is rate limited right now. Try again in a moment.";
+  if (status === 400 && detail) return `The assistant refused that request: ${detail}`;
+  if (typeof status === "number" && status >= 500) {
+    return "Anthropic is having trouble right now. Try again in a moment.";
+  }
+  return "The assistant could not be reached. Check the internet connection.";
 }
 
 /* -------------------------------------------------------------------------- */
@@ -412,8 +435,73 @@ export async function brainTurn(
   messages: BrainMessage[],
   onDelta: (text: string) => void,
   tools: ToolSpec[] = [],
+  options?: {
+    /**
+     * The narrower tool set to retry with locally if the hosted brain fails.
+     * The route passes the READ tools only — a fallback is not the moment to
+     * hand write access to a model that was never trusted with it.
+     */
+    fallbackTools?: ToolSpec[];
+    /**
+     * Skip the choice and use this brain.
+     *
+     * The caller sets this to "ollama" for every round AFTER a fallback has
+     * happened, and that stickiness is not a nicety. Without it the loop
+     * re-tries the hosted brain on the next round, fails the same way, and
+     * finds the conversation is now mid-tool-call — so the fallback is refused
+     * and the whole question dies holding a half-finished local answer. A
+     * fallback that only survives one round is a fallback that only works for
+     * questions needing no lookups, which is not the interesting case.
+     */
+    force?: Provider;
+  },
 ): Promise<BrainTurn> {
-  return brainProvider() === "claude"
-    ? claudeTurn(messages, onDelta, tools)
-    : ollamaTurn(messages, onDelta, tools);
+  if (options?.force === "ollama") return ollamaTurn(messages, onDelta, tools);
+  if (brainProvider() === "ollama") return ollamaTurn(messages, onDelta, tools);
+
+  const hosted = await claudeTurn(messages, onDelta, tools);
+  if (hosted.ok) return hosted;
+
+  /**
+   * The hosted brain failed. Rather than hand the office an error, drop to the
+   * local one — which is exactly the assistant they had before this feature
+   * existed, and is more useful than nothing when the card runs out of credit
+   * on a Tuesday morning.
+   *
+   * TWO CONDITIONS, both load bearing:
+   *
+   *   Nothing may have streamed yet. If half an answer is already on screen,
+   *   a second model continuing it produces one reply written by two authors
+   *   in two voices, spliced at an arbitrary word.
+   *
+   *   No tool calls may have happened yet. A conversation carrying Anthropic
+   *   tool_use ids means the failure came mid-loop; replaying that history to a
+   *   local model that never issued those ids is asking it to answer for work
+   *   it did not do.
+   *
+   * Neither holds after the first round, and in practice the first round is
+   * where an out-of-credit or unreachable API fails anyway.
+   */
+  const midConversation = messages.some(
+    (message) => message.role === "tool" || (message.role === "assistant" && message.toolCalls?.length),
+  );
+  if (midConversation) return hosted;
+
+  const local = await ollamaStatus();
+  if (!local.reachable || !local.modelReady) return hosted;
+
+  let streamed = false;
+  const fallback = await ollamaTurn(
+    messages,
+    (text) => {
+      streamed = true;
+      onDelta(text);
+    },
+    options?.fallbackTools ?? [],
+  );
+
+  // The local model failed too — report the ORIGINAL problem, because that is
+  // the one the admin can do something about.
+  if (!fallback.ok) return streamed ? fallback : hosted;
+  return fallback;
 }
