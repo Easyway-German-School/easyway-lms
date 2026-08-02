@@ -35,7 +35,12 @@ export async function GET(req: NextRequest) {
         ...(status ? { status } : {}),
         ...(branchId ? { branchId } : {}),
         ...(search
-          ? { OR: [{ name: { contains: search } }, { email: { contains: search } }] }
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" as const } },
+                { email: { contains: search, mode: "insensitive" as const } },
+              ],
+            }
           : {}),
       },
       include: { branch: { select: { name: true } } },

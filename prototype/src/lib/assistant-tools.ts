@@ -182,9 +182,9 @@ function whereFor(filters: Filters, branchIdByName: Map<string, string>) {
   }
   if (filters.search) {
     where.OR = [
-      { user: { name: { contains: filters.search } } },
-      { user: { email: { contains: filters.search } } },
-      { studentCode: { contains: filters.search } },
+      { user: { name: { contains: filters.search, mode: "insensitive" } } },
+      { user: { email: { contains: filters.search, mode: "insensitive" } } },
+      { studentCode: { contains: filters.search, mode: "insensitive" } },
     ];
   }
 

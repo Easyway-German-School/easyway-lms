@@ -32,8 +32,8 @@ export async function GET(request: Request) {
     // the whole query, so every payment search returned a 500. SQLite's LIKE is
     // already case-insensitive for ASCII.
     where.OR = [
-      { student: { user: { name: { contains: search } } } },
-      { student: { user: { email: { contains: search } } } },
+      { student: { user: { name: { contains: search, mode: "insensitive" as const } } } },
+      { student: { user: { email: { contains: search, mode: "insensitive" as const } } } },
     ];
   }
 

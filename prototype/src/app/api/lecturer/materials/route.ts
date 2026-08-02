@@ -6,10 +6,6 @@ import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
 import { isAssigned, matchesBatch, readAssignment, studentWhereForAssignment } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
-import { mkdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
-
-const UPLOAD_DIR = join(process.cwd(), 'public', 'uploads', 'materials');
 
 function serialise(material: {
   id: string;
@@ -88,28 +84,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
     }
 
-    const formData = await req.formData();
-    const title = String(formData.get('title') ?? '').trim();
-    const description = String(formData.get('description') ?? '').trim();
-    const courseId = String(formData.get('courseId') ?? '').trim();
-    const file = formData.get('file') as File | null;
+    /**
+     * The file arrived in the bucket before this request did.
+     *
+     * The browser uploads it directly (see lib/upload.ts) and posts only the
+     * metadata here, so a 300 MB recording never passes through a serverless
+     * function that would cap it at 4.5 MB and time out well before that.
+     */
+    const body = await req.json().catch(() => ({}));
+    const title = String(body.title ?? '').trim();
+    const description = String(body.description ?? '').trim();
+    const courseId = String(body.courseId ?? '').trim();
+
+    const fileUrl = String(body.fileUrl ?? '').trim();
+    const fileName = String(body.fileName ?? '').trim();
+    const fileType = String(body.fileType ?? '').trim() || 'application/octet-stream';
+    const fileSize = Number(body.fileSize) || 0;
 
     // Video-library metadata. All optional — a plain document upload sends none
     // of it and behaves exactly as it did before.
-    const level = String(formData.get('level') ?? '').trim().toUpperCase();
-    const series = String(formData.get('series') ?? '').trim();
-    const episodeRaw = String(formData.get('episodeNumber') ?? '').trim();
-    const recordedAtRaw = String(formData.get('recordedAt') ?? '').trim();
-    const durationRaw = String(formData.get('durationSeconds') ?? '').trim();
-    const isRecording = String(formData.get('isRecording') ?? '') === 'true';
+    const level = String(body.level ?? '').trim().toUpperCase();
+    const series = String(body.series ?? '').trim();
+    const episodeRaw = String(body.episodeNumber ?? '').trim();
+    const recordedAtRaw = String(body.recordedAt ?? '').trim();
+    const durationRaw = String(body.durationSeconds ?? '').trim();
+    const isRecording = String(body.isRecording ?? '') === 'true';
 
-    if (!title || !file) {
+    if (!title || !fileUrl || !fileName) {
       return NextResponse.json({ error: 'A title and a file are required' }, { status: 400 });
     }
 
     // A recording belongs to a level, not a course. Everything else still
     // needs a course so it lands somewhere students can find it.
-    const kind = isRecording ? 'recording' : deriveMaterialKind(file.type);
+    const kind = isRecording ? 'recording' : deriveMaterialKind(fileType);
     if (kind !== 'recording' && !courseId) {
       return NextResponse.json({ error: 'Please choose a course for this material' }, { status: 400 });
     }
@@ -124,24 +131,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // The directory was previously assumed to exist, so the very first upload
-    // on a fresh clone failed with an unhelpful ENOENT.
-    mkdirSync(UPLOAD_DIR, { recursive: true });
-
-    const buffer = await file.arrayBuffer();
-    const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    writeFileSync(join(UPLOAD_DIR, safeName), Buffer.from(buffer));
-
     const material = await prisma.material.create({
       data: {
         title,
         description: description || null,
         courseId: courseId || null,
         lecturerId,
-        fileName: file.name,
-        filePath: `/uploads/materials/${safeName}`,
-        fileType: file.type || 'application/octet-stream',
-        fileSize: file.size,
+        fileName,
+        filePath: fileUrl,
+        fileType,
+        fileSize,
         kind,
         level: level || null,
         series: series || null,

@@ -5,6 +5,7 @@ import { ArrowLeftIcon } from "@/components/icons";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
+import { uploadFile } from "@/lib/upload";
 
 export default function CourseEditorPage() {
   const { data: session, status } = useSession();
@@ -432,35 +433,21 @@ export default function CourseEditorPage() {
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = async () => {
-                      const base64 = (reader.result as string).split(",")[1];
-                      try {
-                        const res = await fetch("/api/media/upload", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ filename: file.name, contentType: file.type, data: base64 }),
-                        });
-                        const json = await res.json();
-                        if (res.ok) {
-                          const mediaTag = file.type.startsWith("image")
-                            ? `![](${json.url})`
-                            : `\n<video controls src="${json.url}"></video>\n`;
-                          setLessonContent((prev) => prev ? prev + "\n\n" + mediaTag : mediaTag);
-                          setMessage("Media uploaded and attached to lesson content.");
-                        } else {
-                          setMessage(json.error || "Upload failed.");
-                        }
-                      } catch (err) {
-                        console.error("Upload error", err);
-                        setMessage("Upload failed.");
-                      }
-                    };
-                    reader.readAsDataURL(file);
+                    try {
+                      const uploaded = await uploadFile(file, "materials");
+                      const mediaTag = file.type.startsWith("image")
+                        ? `![](${uploaded.url})`
+                        : `\n<video controls src="${uploaded.url}"></video>\n`;
+                      setLessonContent((prev) => prev ? prev + "\n\n" + mediaTag : mediaTag);
+                      setMessage("Media uploaded and attached to lesson content.");
+                    } catch (err) {
+                      console.error("Upload error", err);
+                      setMessage(err instanceof Error ? err.message : "Upload failed.");
+                    }
                   }}
                   className="w-full text-sm rounded-lg border border-[var(--border)] px-3 py-2"
                 />
-                <p className="text-xs text-[var(--muted)] mt-2">Supported: images, video, audio. Files will be stored in /public/uploads.</p>
+                <p className="text-xs text-[var(--muted)] mt-2">Supported: images, video, audio.</p>
               </div>
               <div className="grid gap-4 md:grid-cols-3">
                 <div>

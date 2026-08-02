@@ -50,7 +50,12 @@ export async function GET(req: NextRequest) {
       where: {
         ...(Object.keys(spaceWhere).length ? { channel: { space: spaceWhere } } : {}),
         ...(search
-          ? { OR: [{ title: { contains: search } }, { body: { contains: search } }] }
+          ? {
+              OR: [
+                { title: { contains: search, mode: "insensitive" as const } },
+                { body: { contains: search, mode: "insensitive" as const } },
+              ],
+            }
           : {}),
       },
       orderBy: [{ pinned: "desc" }, { lastActivityAt: "desc" }],

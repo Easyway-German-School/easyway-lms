@@ -33,9 +33,9 @@ export async function GET(request: NextRequest) {
       ...(query
         ? {
             OR: [
-              { studentCode: { contains: query } },
-              { user: { name: { contains: query } } },
-              { user: { email: { contains: query } } },
+              { studentCode: { contains: query, mode: "insensitive" as const } },
+              { user: { name: { contains: query, mode: "insensitive" as const } } },
+              { user: { email: { contains: query, mode: "insensitive" as const } } },
             ],
           }
         : {}),

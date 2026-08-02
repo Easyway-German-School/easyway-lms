@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
 import BrandLoader from "@/components/BrandLoader";
 import { BookOpenIcon, CalendarIcon, DocumentIcon, EmptyIcon, LecturerIcon, PackageIcon, VideoIcon } from '@/components/icons';
+import { uploadFile } from '@/lib/upload';
 
 interface Course {
   id: string;
@@ -141,22 +142,31 @@ export default function LecturerMaterials() {
     }
 
     setIsUploading(true);
-    const formDataToSend = new FormData();
-    formDataToSend.append('title', formData.title);
-    formDataToSend.append('description', formData.description);
-    formDataToSend.append('courseId', formData.isRecording ? '' : courseId);
-    formDataToSend.append('file', formData.file);
-    formDataToSend.append('isRecording', String(formData.isRecording));
-    formDataToSend.append('level', formData.level);
-    formDataToSend.append('series', formData.series);
-    formDataToSend.append('episodeNumber', formData.episodeNumber);
-    formDataToSend.append('recordedAt', formData.recordedAt);
-    formDataToSend.append('durationSeconds', formData.durationSeconds);
 
     try {
+      // The file goes to storage first and only its URL is posted here — a
+      // lesson PDF or a recorded class is well past what a request body may
+      // carry in production.
+      const uploaded = await uploadFile(formData.file, 'materials');
+
       const res = await fetch('/api/lecturer/materials', {
         method: 'POST',
-        body: formDataToSend,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: formData.title,
+          description: formData.description,
+          courseId: formData.isRecording ? '' : courseId,
+          fileUrl: uploaded.url,
+          fileName: uploaded.filename,
+          fileType: uploaded.contentType,
+          fileSize: uploaded.size,
+          isRecording: String(formData.isRecording),
+          level: formData.level,
+          series: formData.series,
+          episodeNumber: formData.episodeNumber,
+          recordedAt: formData.recordedAt,
+          durationSeconds: formData.durationSeconds,
+        }),
       });
 
       if (!res.ok) {

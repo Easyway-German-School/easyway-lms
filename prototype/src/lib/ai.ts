@@ -882,9 +882,39 @@ function hostedProvider(): Provider | null {
   return null;
 }
 
+/**
+ * Is this a local model URL that cannot possibly resolve from where we run?
+ *
+ * `localhost` on a laptop is the office machine. `localhost` on Vercel is the
+ * serverless container, which has no Ollama in it and never will. The two are
+ * indistinguishable from the string alone, so the deployment target decides.
+ *
+ * This exists because the obvious thing to do when deploying is to paste
+ * `.env.local` into the hosting dashboard, and `OLLAMA_BASE_URL` comes along
+ * with everything else. Without this check the back-office workloads would keep
+ * choosing a model at an address that refuses every connection, and essay
+ * grading would fail in a way that looks like the grader being broken rather
+ * than like a setting that came along for the ride.
+ */
+function isUnreachableLocalUrl(url: string | undefined): boolean {
+  if (!url) return true;
+  const serverless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  if (!serverless) return false;
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:|\/|$)/i.test(url.trim());
+}
+
+/** True when a local model runtime could actually be spoken to from here. */
+export function localModelAvailable(): boolean {
+  return localProvider() !== null;
+}
+
 function localProvider(): Provider | null {
-  if (process.env.ANYTHINGLLM_BASE_URL) return "anythingllm";
-  if (process.env.OLLAMA_BASE_URL) return "ollama";
+  if (process.env.ANYTHINGLLM_BASE_URL && !isUnreachableLocalUrl(process.env.ANYTHINGLLM_BASE_URL)) {
+    return "anythingllm";
+  }
+  if (process.env.OLLAMA_BASE_URL && !isUnreachableLocalUrl(process.env.OLLAMA_BASE_URL)) {
+    return "ollama";
+  }
   return null;
 }
 
@@ -986,6 +1016,10 @@ async function callLocalModel(model: string, prompt: string, temperature = 0.2) 
 // the model output from the CLI JSON.
 async function callOllamaCli(model: string, prompt: string) {
   try {
+    // There is no `ollama` binary in a serverless container, and spawnSync
+    // blocks the event loop for its full 20s timeout finding that out.
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) return null;
+
     // Use spawnSync via child_process to run the CLI synchronously
     const { spawnSync } = await import('child_process');
     const args = ['run', model, prompt, '--format', 'json', '--nowordwrap'];

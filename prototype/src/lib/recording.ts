@@ -45,6 +45,7 @@
  */
 
 import { EgressClient, EncodedFileOutput, EncodedFileType, EncodingOptions, S3Upload } from "livekit-server-sdk";
+import { objectStorage } from "@/lib/storage";
 
 /**
  * Tuned for a classroom rather than a film set.
@@ -110,20 +111,16 @@ export type RecordingStorage = {
  * class. A tutor must always be able to teach.
  */
 export function recordingStorage(): RecordingStorage | null {
-  const bucket = process.env.RECORDING_S3_BUCKET;
-  const accessKey = process.env.RECORDING_S3_ACCESS_KEY;
-  const secret = process.env.RECORDING_S3_SECRET;
-  if (!bucket || !accessKey || !secret) return null;
+  // Same bucket resolver the uploads use, so one set of credentials serves
+  // both. The public base is the one difference: recordings are streamed and
+  // carry no personal documents, so they are served from a CDN rather than
+  // through the app's own auth-checked /api/files route.
+  const storage = objectStorage();
+  if (!storage) return null;
 
   return {
-    bucket,
-    // R2 ignores region but the S3 protocol requires one, so "auto" is the
-    // documented value to send it.
-    region: process.env.RECORDING_S3_REGION || "auto",
-    endpoint: process.env.RECORDING_S3_ENDPOINT || undefined,
-    accessKey,
-    secret,
-    publicBaseUrl: process.env.RECORDING_PUBLIC_BASE_URL || undefined,
+    ...storage,
+    publicBaseUrl: process.env.RECORDING_PUBLIC_BASE_URL || storage.publicBaseUrl,
   };
 }
 

@@ -2,10 +2,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile, unlink } from "fs/promises";
-import { join } from "path";
-import { existsSync } from "fs";
 import { adminHasCapability } from "@/lib/admin-roles";
+import { deleteFile, keyFromUrl } from "@/lib/storage";
 
 async function isAdmin(userId: string) {
   // Admin AND cleared for this area — see src/lib/admin-roles.ts.
@@ -59,13 +57,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
 
-    const formData = await req.formData();
-    const file = formData.get("file") as File;
-    const courseId = formData.get("courseId") as string;
-    const title = formData.get("title") as string;
-    const description = formData.get("description") as string;
+    /**
+     * The browser has already put the file in the bucket (see lib/upload.ts)
+     * and sends only the metadata, because a request body through Vercel is
+     * capped at 4.5 MB and course material routinely is not.
+     */
+    const body = await req.json().catch(() => ({}));
+    const courseId = String(body.courseId ?? "").trim();
+    const title = String(body.title ?? "").trim();
+    const description = String(body.description ?? "").trim();
+    const fileUrl = String(body.fileUrl ?? "").trim();
+    const fileName = String(body.fileName ?? "").trim();
+    const fileType = String(body.fileType ?? "").trim();
+    const fileSize = Number(body.fileSize) || 0;
 
-    if (!file || !courseId || !title) {
+    if (!fileUrl || !fileName || !courseId || !title) {
       return NextResponse.json(
         { error: "file, courseId, and title are required" },
         { status: 400 }
@@ -84,27 +90,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Get file extension
-    const fileExtension = file.name.split(".").pop() || "bin";
-    const fileName = `${Date.now()}-${file.name}`;
-    const uploadDir = join(process.cwd(), "public", "materials");
-
-    // Ensure directory exists
-    if (!existsSync(uploadDir)) {
-      const fs = await import("fs/promises");
-      await fs.mkdir(uploadDir, { recursive: true });
-    }
-
-    // Save file
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    const filePath = join(uploadDir, fileName);
-    
-    await writeFile(filePath, buffer);
-
-    const fileUrl = `/materials/${fileName}`;
-    const fileSize = buffer.length;
-
     // Create database record
     const material = await prisma.material.create({
       data: {
@@ -113,7 +98,7 @@ export async function POST(req: NextRequest) {
         description: description || null,
         filePath: fileUrl,
         fileName,
-        fileType: fileExtension,
+        fileType: fileType || fileName.split(".").pop() || "bin",
         fileSize,
         uploadedBy: session.user.id,
       },
@@ -165,15 +150,11 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    // Delete file from filesystem
-    try {
-      const filePath = join(process.cwd(), "public", material.filePath.replace(/^\//, ""));
-      if (existsSync(filePath)) {
-        await unlink(filePath);
-      }
-    } catch (err) {
-      console.error("Error deleting file:", err);
-    }
+    // Reclaim the stored file. A failure here is logged and ignored: an
+    // orphaned object costs pennies, a row that will not delete blocks the
+    // admin who asked.
+    const key = keyFromUrl(material.filePath);
+    if (key) await deleteFile(key);
 
     // Delete database record
     await prisma.material.delete({

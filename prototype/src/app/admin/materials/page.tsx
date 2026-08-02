@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import BrandLoader from "@/components/BrandLoader";
+import { uploadFile } from "@/lib/upload";
 
 interface Course {
   id: string;
@@ -88,15 +89,22 @@ export default function MaterialsPage() {
 
     setUploading(true);
     try {
-      const uploadFormData = new FormData();
-      uploadFormData.append("file", file);
-      uploadFormData.append("courseId", selectedCourseId);
-      uploadFormData.append("title", formData.title);
-      uploadFormData.append("description", formData.description);
+      // Straight to storage, then post the metadata — course material is
+      // routinely larger than a request body may be in production.
+      const uploaded = await uploadFile(file, "materials");
 
       const res = await fetch("/api/admin/materials", {
         method: "POST",
-        body: uploadFormData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courseId: selectedCourseId,
+          title: formData.title,
+          description: formData.description,
+          fileUrl: uploaded.url,
+          fileName: uploaded.filename,
+          fileType: uploaded.contentType,
+          fileSize: uploaded.size,
+        }),
       });
 
       if (!res.ok) throw new Error("Failed to upload material");

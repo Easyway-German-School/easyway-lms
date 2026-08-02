@@ -47,8 +47,12 @@ export async function GET(request: Request) {
     // already case-insensitive for ASCII, which is what these columns hold.
     whereClause.AND.push({
       OR: [
-        { user: { name: { contains: search } } },
-        { user: { email: { contains: search } } },
+        // `mode: "insensitive"` throughout: on SQLite a LIKE was already
+        // case-blind, so nobody ever typed a capital letter and lost a student.
+        // Postgres is not, and without this the office would search "chidi" and
+        // be told there is no such person.
+        { user: { name: { contains: search, mode: "insensitive" } } },
+        { user: { email: { contains: search, mode: "insensitive" } } },
       ],
     });
   }
