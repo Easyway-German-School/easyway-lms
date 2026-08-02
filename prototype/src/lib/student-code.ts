@@ -3,17 +3,34 @@ import { prisma } from "@/lib/prisma";
 /**
  * Official Easyway student identifiers.
  *
- * Format:  EW/yyyy/LEVEL/BATCHMONTH/NNNN     e.g. EW/2026/A1/JUL/0007
+ * Format:  EW/yyyy/LEVEL/BATCHMONTH/BNNN     e.g. EW/2026/A1/JAN/L001
  *
  *   EW          fixed school prefix
  *   yyyy        year the student enrolled
  *   LEVEL       the class they entered at (A1…C2)
- *   BATCHMONTH  three-letter month of their batch, e.g. JUL
- *   NNNN        enrolment number, sequential within the year
+ *   BATCHMONTH  three-letter month of their batch, e.g. JAN
+ *   B           block letter — see below
+ *   NNN         enrolment number within that block
+ *
+ * THE BLOCK LETTER exists for scale. The old format was a flat four-digit
+ * counter, so at a few thousand students a year the last four characters were
+ * an undifferentiated run of digits: "0847" and "8047" look alike on a printed
+ * form and read alike over a phone, and neither says anything about the
+ * student. Blocking the sequence in hundreds gives every code a letter that
+ * narrows a search to a hundred people before a single digit is read.
+ *
+ * The letters run A…Z and then double (AA, AB …), so the scheme does not run
+ * out; at 100 students per block that is 2,600 in single letters alone, per
+ * level per batch per year.
  *
  * The code is assigned once at signup and never regenerated. It appears on
  * certificates and exam entries, so a student moving from A1 to A2 keeps the
  * code they were issued — it records where they started, not where they are.
+ *
+ * Codes issued under the old flat format are still valid and are NOT rewritten:
+ * they are printed on certificates and exam entries that already exist, and a
+ * student's identifier changing under them would be worse than two formats
+ * coexisting. `scripts/backfill-student-codes.mjs` only fills in missing ones.
  */
 
 const MONTHS = [
@@ -36,6 +53,23 @@ export function toBatchMonth(batch: unknown, fallback: Date = new Date()): strin
   return MONTHS[fallback.getMonth()];
 }
 
+/** How many students share one block letter. */
+export const BLOCK_SIZE = 100;
+
+/**
+ * Turn a zero-based block index into its letter: 0→A, 25→Z, 26→AA, 27→AB.
+ * Spreadsheet-column numbering, which people already read without being told.
+ */
+export function blockLetter(index: number): string {
+  let n = Math.max(0, Math.floor(index));
+  let out = "";
+  do {
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return out;
+}
+
 export function formatStudentCode(parts: {
   year: number;
   level: string;
@@ -43,8 +77,11 @@ export function formatStudentCode(parts: {
   sequence: number;
 }): string {
   const level = (parts.level || "A1").toUpperCase();
-  const seq = String(parts.sequence).padStart(4, "0");
-  return `EW/${parts.year}/${level}/${parts.batchMonth}/${seq}`;
+  // Sequence is 1-based; student 1 is L…001 of block A, student 101 opens B.
+  const zeroBased = Math.max(0, parts.sequence - 1);
+  const letter = blockLetter(Math.floor(zeroBased / BLOCK_SIZE));
+  const withinBlock = String((zeroBased % BLOCK_SIZE) + 1).padStart(3, "0");
+  return `EW/${parts.year}/${level}/${parts.batchMonth}/${letter}${withinBlock}`;
 }
 
 /**

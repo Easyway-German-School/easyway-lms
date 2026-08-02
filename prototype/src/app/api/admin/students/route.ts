@@ -143,7 +143,7 @@ export async function POST(request: Request) {
             branchId,
             status,
             tutorId,
-            pathway: "Goethe exam mastery",
+            pathway: "Language training",
           },
         },
       },

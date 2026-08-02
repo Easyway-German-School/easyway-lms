@@ -142,7 +142,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
               {naira(offer.tuitionFee)}
             </p>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              About {naira(offer.perWeek)} a week across {offer.weeksOfTeaching} weeks of teaching.
+              {offer.weeksOfTeaching} weeks of teaching.
             </p>
           </div>
           <ProgressRing percent={offer.progressPercent} />

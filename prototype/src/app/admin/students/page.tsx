@@ -717,14 +717,6 @@ export default function AdminStudentsPage() {
                           Re-admit
                         </button>
                       )}
-                      {student.admission ? (
-                        <button
-                          className="rounded-lg border border-slate-400 text-slate-700 px-3 py-2 text-sm"
-                          onClick={() => viewAdmission(student)}
-                        >
-                          View admission
-                        </button>
-                      ) : null}
                       <button
                         className="rounded-lg border border-red-500 text-red-600 px-3 py-2 text-sm"
                         onClick={() => handleDeleteStudent(student.id)}

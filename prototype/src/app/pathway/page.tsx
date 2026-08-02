@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 const programs: Record<string, { title: string; headline: string; details: string; stats: string[]; modules: string[] }> = {
-  "Goethe exam mastery": {
-    title: "Goethe Exam Mastery",
-    headline: "A full Goethe preparation pathway for A1–C1 exam success.",
-    details: "This pathway includes structured writing practice, speaking drills, mock exams, and AI-backed feedback tailored to Goethe scoring.",
+  "Language training": {
+    title: "Language Training",
+    headline: "A full language-training pathway for A1–C1 exam success.",
+    details: "This pathway includes structured writing practice, speaking drills, mock exams, and AI-backed feedback tailored to exam scoring.",
     stats: ["Mock exams every week", "AI essay scoring", "Pronunciation drills", "Live exam strategy sessions"],
     modules: ["Mock B2 essay simulation", "Pronunciation lab", "Grammar drill set", "Exam vocabulary workshop"],
   },
@@ -37,8 +37,8 @@ const programs: Record<string, { title: string; headline: string; details: strin
 
 function PathwayContent() {
   const searchParams = useSearchParams();
-  const pathway = searchParams.get("pathway") || "Goethe exam mastery";
-  const program = programs[pathway] || programs["Goethe exam mastery"];
+  const pathway = searchParams.get("pathway") || "Language training";
+  const program = programs[pathway] || programs["Language training"];
 
   return (
     <div className="min-h-screen bg-[var(--surface-alt)] py-10 text-slate-950">

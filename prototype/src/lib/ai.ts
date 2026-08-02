@@ -290,7 +290,7 @@ export async function generatePersonalizedPlan(studentProfile: any, candidateLes
 
   const profile = {
     level: studentProfile.level || 'A2',
-    pathway: studentProfile.pathway || 'Goethe exam mastery',
+    pathway: studentProfile.pathway || 'Language training',
     examReadiness: Number(studentProfile.examReadiness || 0),
     completedLessonsCount: Array.isArray(studentProfile.completedLessons) ? studentProfile.completedLessons.length : 0,
     averageScore: Number(studentProfile.averageScore || 0),

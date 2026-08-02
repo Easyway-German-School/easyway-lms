@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
   const baseScore = Math.min(90, Math.max(55, 70 + Math.round((wordCount - 120) / 20)));
 
   return NextResponse.json({
-    summary: `Mock Goethe score: ${baseScore}/100 — strong structure with room to tighten grammar.`,
+    summary: `Mock exam score: ${baseScore}/100 — strong structure with room to tighten grammar.`,
     score: baseScore,
     feedback: [
       "Good use of transition phrases, but check subordinate clause word order.",

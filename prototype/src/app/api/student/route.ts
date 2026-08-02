@@ -33,7 +33,7 @@ export async function GET() {
         return NextResponse.json({
           name: (session.user as any)?.name || "Learner",
           level: "A1",
-          pathway: "Goethe exam mastery",
+          pathway: "Language training",
           nextLive: null,
           examReadiness: 0,
           averageGrade: null,
@@ -54,7 +54,7 @@ export async function GET() {
         data: {
           userId: session.user.id as string,
           level: "A1",
-          pathway: "Goethe exam mastery",
+          pathway: "Language training",
           examReadiness: 0,
         },
         include: {
@@ -133,14 +133,14 @@ export async function GET() {
     return NextResponse.json({
       name: "Learner",
       level: "A1",
-      pathway: "Goethe exam mastery",
+      pathway: "Language training",
       nextLive: "No live session scheduled",
       examReadiness: 0,
       averageGrade: null,
       gradeCount: 0,
       recentGrades: [],
       activePrograms: [],
-      outcome: "Goethe C1 readiness + German work placement support",
+      outcome: "C1 readiness + German work placement support",
       branchName: null,
       paymentSummary: {
         totalPaid: 0,

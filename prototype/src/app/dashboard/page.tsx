@@ -86,7 +86,7 @@ function DashboardContent() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [personalizedPlan, setPersonalizedPlan] = useState<any>(null);
   const [plannerStrategy, setPlannerStrategy] = useState<string>('hybrid');
-  const [pathway, setPathway] = useState("Goethe exam mastery");
+  const [pathway, setPathway] = useState("Language training");
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [phrase, setPhrase] = useState("Ich möchte ein Visum beantragen.");
   const [feedback, setFeedback] = useState<string[]>(["Type a phrase and press Analyze."]);
@@ -152,7 +152,7 @@ function DashboardContent() {
       const fallbackStudent: Student = {
         name: session?.user?.name || "Learner",
         level: "A1",
-        pathway: "Goethe exam mastery",
+        pathway: "Language training",
         examReadiness: 0,
         averageGrade: null,
         gradeCount: 0,
@@ -171,7 +171,7 @@ function DashboardContent() {
       };
       setStudent(fallbackStudent);
       setPaymentSummary(fallbackStudent.paymentSummary ?? null);
-      setPathway(fallbackStudent.pathway || "Goethe exam mastery");
+      setPathway(fallbackStudent.pathway || "Language training");
       setDashboardError(null);
     }
   }, [session?.user?.name]);
@@ -431,7 +431,7 @@ function DashboardContent() {
   const fallbackStudent: Student = {
     name: session?.user?.name || "Learner",
     level: "A1",
-    pathway: "Goethe exam mastery",
+    pathway: "Language training",
     examReadiness: 0,
     averageGrade: null,
     gradeCount: 0,

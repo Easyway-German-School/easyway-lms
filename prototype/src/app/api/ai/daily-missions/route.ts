@@ -14,7 +14,7 @@ function buildAdaptiveMissions(profile: Profile, aiMissions: Array<any>) {
   const readiness = Number(profile.examReadiness ?? 0);
   const streak = Number(profile.streak ?? 0);
   const completedLessons = Number(profile.completedLessons ?? 0);
-  const pathway = profile.pathway || "Goethe exam mastery";
+  const pathway = profile.pathway || "Language training";
 
   const base = (Array.isArray(aiMissions) ? aiMissions : []).map((mission, index) => ({
     id: mission.id || `mission-${index}`,

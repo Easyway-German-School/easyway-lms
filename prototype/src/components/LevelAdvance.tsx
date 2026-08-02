@@ -45,12 +45,14 @@ function LevelBadge({ level, tone = "next" }: { level: string; tone?: "current" 
 function PriceBlock({ offer }: { offer: LevelAdvanceOffer }) {
   if (offer.atTopOfLadder) return null;
 
+  // Two figures, not three. The third was a per-week breakdown ("₦18,750/wk"),
+  // which EasyWay does not sell — nobody can pay weekly, so quoting a weekly
+  // number invites a question the office has to talk students back out of.
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2">
       {[
         { label: `${offer.nextLevel} tuition`, value: naira(offer.tuitionFee), hint: `at ${offer.branchName || "your branch"}` },
         { label: "To start class", value: naira(offer.requiredDeposit), hint: "the deposit, not the full fee" },
-        { label: "Works out at", value: `${naira(offer.perWeek)}/wk`, hint: `over ${offer.weeksOfTeaching} weeks` },
       ].map((item) => (
         <div key={item.label} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
           <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">{item.label}</p>

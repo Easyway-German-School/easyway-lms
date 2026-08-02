@@ -5,7 +5,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { mayAutoCreateStudent } from "@/lib/candidates";
 
 const defaultCoursesByPathway: Record<string, Array<{ title: string; description: string; duration: number; level: string; content: string }>> = {
-  "Goethe exam mastery": [
+  "Language training": [
     {
       title: "German A1 Foundations",
       description: "Build the core grammar, listening, and speaking habits for exam success.",
@@ -148,7 +148,7 @@ async function ensureSeedCourses(pathwayName: string) {
     },
   });
 
-  const templates = defaultCoursesByPathway[pathwayName] || defaultCoursesByPathway["Goethe exam mastery"];
+  const templates = defaultCoursesByPathway[pathwayName] || defaultCoursesByPathway["Language training"];
 
   for (const [index, course] of templates.entries()) {
     const createdCourse = await prisma.course.create({
@@ -261,7 +261,7 @@ export async function GET(request: NextRequest) {
     if (!student) {
       const userRole = (session.user as any)?.role;
       if (userRole === "LECTURER" || userRole === "ADMIN") {
-        return NextResponse.json({ pathway: "Goethe exam mastery", courses: [] });
+        return NextResponse.json({ pathway: "Language training", courses: [] });
       }
       // Candidates see no courses, and must not be given a Student record.
       if (!(await mayAutoCreateStudent(session.user.id as string))) {
@@ -272,13 +272,13 @@ export async function GET(request: NextRequest) {
         data: {
           userId: session.user.id as string,
           level: "A1",
-          pathway: "Goethe exam mastery",
+          pathway: "Language training",
           examReadiness: 0,
         },
       });
     }
 
-    const pathwayName = student.pathway || "Goethe exam mastery";
+    const pathwayName = student.pathway || "Language training";
     const pathway = await ensureSeedCourses(pathwayName);
 
     if (!pathway) {
@@ -352,7 +352,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Courses API fallback triggered:", error);
     return NextResponse.json({
-      pathway: "Goethe exam mastery",
+      pathway: "Language training",
       nextLive: "No live session scheduled",
       courses: [
         {

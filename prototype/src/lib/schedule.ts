@@ -86,7 +86,7 @@ function sessionFor(level: string, weekday: string): { slot: string; focus: stri
     },
     Sat: {
       slot: "Exam Workshop",
-      focus: band === "A" ? "Goethe A-level prep" : band === "B" ? "Goethe B-level mock" : "C-level mastery mock",
+      focus: band === "A" ? "A-level exam prep" : band === "B" ? "B-level mock exam" : "C-level mastery mock",
     },
   };
   return table[weekday] ?? { slot: "Live Class", focus: "Guided practice" };

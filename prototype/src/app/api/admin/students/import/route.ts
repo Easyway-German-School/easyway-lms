@@ -176,7 +176,7 @@ export async function POST(request: NextRequest) {
                 level,
                 sessionSlot,
                 branchId: branch?.id ?? null,
-                pathway: str(row, "pathway", "program") || "Goethe exam mastery",
+                pathway: str(row, "pathway", "program") || "Language training",
                 // The batch month is what the timetable generator and the
                 // promotion engine both read, so a mid-course student is
                 // useless without it.

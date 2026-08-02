@@ -4,8 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 
 function pathwayOutcome(pathway: string) {
-  if (pathway === "Goethe exam mastery") {
-    return "Goethe C1 readiness + German work placement support";
+  if (pathway === "Language training") {
+    return "C1 readiness + German work placement support";
   }
   if (pathway === "Nursing career path") {
     return "Medical German competency for nursing career success";
@@ -18,7 +18,7 @@ function pathwayOutcome(pathway: string) {
 
 function pathwayReadiness(pathway: string) {
   switch (pathway) {
-    case "Goethe exam mastery":
+    case "Language training":
       return 72;
     case "Nursing career path":
       return 64;
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const selectedPathway = normalizeString(body.currentCourse) || "Goethe exam mastery";
+  const selectedPathway = normalizeString(body.currentCourse) || "Language training";
   const fullName = normalizeString(body.fullName);
   const email = normalizeString(body.email);
   const phone = normalizeString(body.phone);

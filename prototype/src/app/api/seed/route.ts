@@ -10,7 +10,7 @@ const courseStructure: Record<string, Array<{
     lessons: Array<{ title: string; type: string; content: string; duration: number }>
   }>
 }>> = {
-  "Goethe exam mastery": [
+  "Language training": [
     {
       title: "German A1 Foundations",
       description: "Build the core grammar, listening, and speaking habits for exam success.",
@@ -119,7 +119,7 @@ export async function GET() {
       where: { userId: studentUser.id },
       update: {
         level: "A1",
-        pathway: "Goethe exam mastery",
+        pathway: "Language training",
         examReadiness: 0,
         admission: {
           batch: "August",
@@ -130,7 +130,7 @@ export async function GET() {
       create: {
         userId: studentUser.id,
         level: "A1",
-        pathway: "Goethe exam mastery",
+        pathway: "Language training",
         examReadiness: 0,
         admission: {
           batch: "August",

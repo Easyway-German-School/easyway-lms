@@ -101,7 +101,7 @@ export async function GET() {
               ? `Congratulations. You have finished ${currentLevel}, the highest level we teach. Speak to your branch about registering for your final exam and collecting your certificate.`
               : currentLevelOutstanding > 0
                 ? `Congratulations on finishing ${currentLevel}. There is ₦${currentLevelOutstanding.toLocaleString()} still open on it — clear that and your place in ${nextLevel} is confirmed. ${nextLevel} runs for ${SESSION_MONTHS} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"}.`
-                : `Congratulations on finishing ${currentLevel}. ${nextLevel} runs for ${SESSION_MONTHS} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"} — about ₦${perWeekCost(nextFee).toLocaleString()} a week. Continue now to keep your tutor, your class and your streak.`,
+                : `Congratulations on finishing ${currentLevel}. ${nextLevel} runs for ${SESSION_MONTHS} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"}. Continue now to keep your tutor, your class and your streak.`,
             channel: "in-app",
             studentId: student.id,
             branchId: student.branchId,

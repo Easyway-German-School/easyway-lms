@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const programs: Record<string, { nextAction: string; focus: string; score: number; overview: string; path: string[] }> = {
-  "Goethe exam mastery": {
-    overview: "A focused Goethe exam path with writing, speaking, listening, and grammar readiness for A1–C1.",
-    nextAction: "Complete the Goethe writing drill for B2.",
+  "Language training": {
+    overview: "A focused exam-preparation path with writing, speaking, listening, and grammar readiness for A1–C1.",
+    nextAction: "Complete the B2 writing drill.",
     focus: "Sentence structure and exam vocabulary.",
     score: 82,
     path: [
@@ -52,7 +52,7 @@ const programs: Record<string, { nextAction: string; focus: string; score: numbe
 };
 
 function normalizePathway(pathway: string | null) {
-  return (pathway || "Goethe exam mastery").trim();
+  return (pathway || "Language training").trim();
 }
 
 function computeScore(base: number, progress: number) {
@@ -63,7 +63,7 @@ function computeScore(base: number, progress: number) {
 export async function GET(request: NextRequest) {
   const pathway = normalizePathway(request.nextUrl.searchParams.get("pathway"));
   const progress = Number(request.nextUrl.searchParams.get("progress") || "72");
-  const program = programs[pathway] || programs["Goethe exam mastery"];
+  const program = programs[pathway] || programs["Language training"];
   const score = computeScore(program.score, progress);
 
   return NextResponse.json({

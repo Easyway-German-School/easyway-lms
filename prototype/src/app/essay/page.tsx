@@ -64,7 +64,7 @@ export default function EssayGrader() {
       >
       <div className="mx-auto max-w-5xl space-y-8 px-6 md:px-10">
         <header className="rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-700 p-8 text-white shadow-2xl">
-          <p className="text-sm uppercase tracking-[0.2em] text-emerald-200">Goethe challenge lab</p>
+          <p className="text-sm uppercase tracking-[0.2em] text-emerald-200">Writing challenge lab</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight">Essay mastery quest</h1>
           <p className="mt-4 max-w-2xl text-slate-200">Submit your writing, unlock feedback, and turn every essay into a level-up moment.</p>
         </header>

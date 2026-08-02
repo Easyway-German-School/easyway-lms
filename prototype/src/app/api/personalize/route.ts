@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       if (!(await mayAutoCreateStudent(session.user.id as string))) {
         return NextResponse.json({ error: 'Not a student account' }, { status: 403 });
       }
-      student = await prisma.student.create({ data: { userId: session.user.id as string, level: 'A1', pathway: 'Goethe exam mastery' } });
+      student = await prisma.student.create({ data: { userId: session.user.id as string, level: 'A1', pathway: 'Language training' } });
     }
 
     // Build candidate lessons from pathway + lecturer courses

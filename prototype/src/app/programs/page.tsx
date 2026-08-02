@@ -25,7 +25,7 @@ const programs = [
     // The display title above changed; this key deliberately did not. It is the
     // value stored on Student.pathway for everyone already enrolled, so
     // renaming it would orphan their records.
-    pathwayName: "Goethe exam mastery",
+    pathwayName: "Language training",
     description: "Targeted A1–C1 exam training with structured writing, speaking, and mock evaluation.",
     benefits: ["Exam-level feedback", "Grammar drills", "Mock exam score tracking"],
     color: "from-slate-950 to-slate-800",

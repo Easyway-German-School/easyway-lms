@@ -112,5 +112,7 @@ export function advanceSubheading(offer: LevelAdvanceOffer): string {
   if (offer.currentLevelOutstanding > 0) {
     return `Clear the ${naira(offer.currentLevelOutstanding)} still open on ${offer.currentLevel}, and your place in ${offer.nextLevel} is confirmed.`;
   }
-  return `${offer.nextLevel} runs for ${offer.sessionMonths} months — that is ${offer.weeksOfTeaching} weeks of teaching at ${naira(offer.perWeek)} a week.`;
+  // No per-week figure. EasyWay does not take weekly payments, so quoting one
+  // sets an expectation the office then has to argue somebody out of.
+  return `${offer.nextLevel} runs for ${offer.sessionMonths} months — ${offer.weeksOfTeaching} weeks of teaching.`;
 }
