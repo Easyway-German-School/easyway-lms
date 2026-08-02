@@ -68,6 +68,7 @@ import StudentShell from "@/components/StudentShell";
 import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
 import JourneyMapPoster from "@/components/JourneyMapPoster";
+import GermanyJourney from "@/components/journey/GermanyJourney";
 
 export default function DashboardPage() {
   return (
@@ -578,12 +579,18 @@ function DashboardContent() {
           <TuitionNudge className="mb-6" />
           {/* Sits above the hero for the same reason the nudge does: a student
               whose level has just ended needs to meet that before their
-              streak. Renders nothing at all until the level actually ends. */}
+              streak. Fires ONLY when a super admin has signed the level off —
+              never off the batch month, which used to congratulate people who
+              had not attended a lesson. */}
           <LevelAdvance className="mb-6" />
-          {/* The printed journey map for this student's level, plus its
-              once-a-day reminder. Renders nothing at all until the artwork for
-              their level is dropped into public/journey/ — see
-              lib/journey-map.ts. */}
+          {/* The road to Germany: the map, the running two-month clock, and the
+              once-a-day moment. Above the hero deliberately — the streak and
+              the XP are about this week, and this is about the reason they
+              enrolled at all. */}
+          <GermanyJourney className="mb-8" />
+          {/* The printed poster for this student's level, if the artwork exists.
+              A different thing from the map above: this is the picture the
+              school prints, the same for everybody at that level. */}
           <div className="mb-6">
             <JourneyMapPoster level={resolvedStudent.level} />
           </div>

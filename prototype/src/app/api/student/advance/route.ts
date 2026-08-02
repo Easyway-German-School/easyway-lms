@@ -12,11 +12,26 @@ export const dynamic = "force-dynamic";
 /**
  * Does this student's dashboard need to show the "next level" offer?
  *
- * The notification is written here, on read, rather than by a scheduled job.
- * A cron that fires at 3am is one more thing to deploy and to notice has
- * stopped; writing it the first time the finished student opens their
- * dashboard reaches exactly the same person at a moment they are already
- * paying attention. `Student.advanceOfferedFor` makes it fire once per level.
+ * THE SCHOOL DECIDES THIS, NOT THE CALENDAR.
+ *
+ * This used to be derived from the batch month: two months after the batch
+ * name on the admission payload, the portal declared the level finished. That
+ * was wrong in the one direction that costs the school money. A student
+ * signing up in August for the September batch was read as having started the
+ * previous September, so the very first dashboard they ever opened
+ * congratulated them on finishing A1 and tried to sell them A2 — before they
+ * had attended a single lesson. Nothing else on the screen recovers from that.
+ *
+ * So the offer now fires off `Student.levelCompletedFor`, which is set in one
+ * place only: a super admin marking a batch finished in the cohort console. A
+ * human being who was in the building says the level ended, and only then does
+ * the student hear about it.
+ *
+ * The notification is still written here, on read, rather than by a scheduled
+ * job — a cron that fires at 3am is one more thing to deploy and to notice has
+ * stopped, and writing it when the student opens their dashboard reaches the
+ * same person at a moment they are already paying attention.
+ * `Student.advanceOfferedFor` makes it fire once per level.
  */
 export async function GET() {
   try {
@@ -40,14 +55,17 @@ export async function GET() {
         : {};
     const batch = typeof admission.batch === "string" && admission.batch.trim() ? admission.batch : null;
 
-    const monthsElapsed = monthsSinceBatchStart(batch);
+    // Registration date anchored — see lib/batch.ts. Only used for the "how
+    // long have you been at this" figures below, never to decide eligibility.
+    const monthsElapsed = monthsSinceBatchStart(batch, new Date(), student.createdAt);
     const currentLevel = student.level;
     const nextLevel = nextLevelAfter(currentLevel);
     const branchName = student.branch?.name ?? null;
 
-    // No usable batch means no way to know the level ended. Guessing would
-    // congratulate students who are two weeks into A1.
-    const eligible = monthsElapsed !== null && monthsElapsed >= SESSION_MONTHS;
+    // One condition, and a person put it there. The countdown on the journey
+    // map is what a student watches while a level runs; this is what they see
+    // when the school says it is over.
+    const eligible = student.levelCompletedFor === currentLevel && student.levelCompletedAt !== null;
 
     const totalPaid = student.payments
       .filter((payment) => payment.status === "completed")
@@ -65,7 +83,16 @@ export async function GET() {
       branchName,
       batch,
       monthsElapsed: monthsElapsed ?? 0,
-      monthsSinceFinishing: Math.max(0, (monthsElapsed ?? 0) - SESSION_MONTHS),
+      // Measured from the day the school signed the level off, not from the
+      // batch month — those are different dates whenever a batch runs late,
+      // and this one drives how hard the copy pushes.
+      monthsSinceFinishing: student.levelCompletedAt
+        ? Math.max(
+            0,
+            (new Date().getFullYear() * 12 + new Date().getMonth()) -
+              (student.levelCompletedAt.getFullYear() * 12 + student.levelCompletedAt.getMonth()),
+          )
+        : 0,
       sessionMonths: SESSION_MONTHS,
       weeksOfTeaching: WEEKS_OF_TEACHING,
       tuitionFee: nextFee,
