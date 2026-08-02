@@ -67,6 +67,7 @@ type PendingPayment = {
 import StudentShell from "@/components/StudentShell";
 import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
+import JourneyMapPoster from "@/components/JourneyMapPoster";
 
 export default function DashboardPage() {
   return (
@@ -579,6 +580,13 @@ function DashboardContent() {
               whose level has just ended needs to meet that before their
               streak. Renders nothing at all until the level actually ends. */}
           <LevelAdvance className="mb-6" />
+          {/* The printed journey map for this student's level, plus its
+              once-a-day reminder. Renders nothing at all until the artwork for
+              their level is dropped into public/journey/ — see
+              lib/journey-map.ts. */}
+          <div className="mb-6">
+            <JourneyMapPoster level={resolvedStudent.level} />
+          </div>
           <section className="relative overflow-hidden rounded-[36px] border border-white/60 bg-gradient-to-r from-[var(--accent-strong)] via-[var(--accent)] to-[#FF8533] p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.16)]">
             <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/15 blur-3xl" />
             <div className="pointer-events-none absolute bottom-0 left-0 h-32 w-32 rounded-full bg-slate-950/10 blur-3xl" />
