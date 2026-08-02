@@ -249,13 +249,22 @@ export function targetLevelFor(input: {
   admissionTarget?: string | null;
   currentLevel?: string | null;
 }): string {
-  const haystack = `${input.admissionTarget ?? ""} ${input.outcome ?? ""} ${input.pathway ?? ""}`.toUpperCase();
+  /** Highest level named in a string: "B1 then B2" means B2. */
+  const highestIn = (text: string | null | undefined): string | null => {
+    const haystack = String(text ?? "").toUpperCase();
+    let found: string | null = null;
+    for (const level of LEVELS) {
+      if (haystack.includes(level)) found = level;
+    }
+    return found;
+  };
 
-  // Highest level mentioned wins: "B1 then B2" means B2.
-  let found: string | null = null;
-  for (const level of LEVELS) {
-    if (haystack.includes(level)) found = level;
-  }
+  // A goal the student actually stated beats one inferred from the pathway
+  // blurb. `outcome` defaults to "C1 readiness + German work placement
+  // support" on every account ever created, so reading the two together made
+  // every student's target C1 and drew them a road half again as long as the
+  // one they signed up for.
+  const found = highestIn(input.admissionTarget) ?? highestIn(`${input.outcome ?? ""} ${input.pathway ?? ""}`);
 
   const current = String(input.currentLevel ?? "A1").toUpperCase();
   const currentIndex = (LEVELS as readonly string[]).indexOf(current);

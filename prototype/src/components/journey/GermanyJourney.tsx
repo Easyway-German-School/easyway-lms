@@ -242,17 +242,29 @@ export default function GermanyJourney({ className = "" }: { className?: string 
 
     (async () => {
       try {
-        const res = await fetch("/api/student/journey", { cache: "no-store", credentials: "include" });
-        if (!res.ok) return;
-        const data = await res.json();
+        // The welcome tour is asked about first because on a brand-new account
+        // both are due, and two stacked full-screen overlays on a first visit
+        // is an obstacle course. The tour goes first and hands over when it
+        // finishes; on every later day there is no tour and this resolves
+        // instantly to "not pending".
+        const [journeyRes, tourRes] = await Promise.all([
+          fetch("/api/student/journey", { cache: "no-store", credentials: "include" }),
+          fetch("/api/student/onboarding", { cache: "no-store", credentials: "include" }).catch(() => null),
+        ]);
+
+        if (!journeyRes.ok) return;
+        const data = await journeyRes.json();
         if (cancelled || !data?.journey) return;
 
         setJourney(data.journey);
 
+        const tour = tourRes && tourRes.ok ? await tourRes.json().catch(() => null) : null;
+        const tourPending = Boolean(tour) && tour.tourSeen === false;
+
         // Opens by itself once a day — but only for somebody who has actually
         // bought a seat. Ambushing a browsing registrant with a full-screen
         // takeover is how a hook becomes an annoyance.
-        if (data.journey.momentDue && !data.journey.previewOnly) {
+        if (data.journey.momentDue && !data.journey.previewOnly && !tourPending) {
           setMoment(true);
         }
       } catch {
@@ -264,6 +276,20 @@ export default function GermanyJourney({ className = "" }: { className?: string 
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // The tour's handover. A student who has just been walked round the portal is
+  // the most receptive audience the map will ever get, so it opens the instant
+  // the tour steps aside rather than waiting for tomorrow.
+  useEffect(() => {
+    const onTourFinished = () => {
+      setJourney((current) => {
+        if (current?.momentDue && !current.previewOnly) setMoment(true);
+        return current;
+      });
+    };
+    window.addEventListener("easyway:tour-finished", onTourFinished);
+    return () => window.removeEventListener("easyway:tour-finished", onTourFinished);
   }, []);
 
   const closeMoment = useCallback(() => {

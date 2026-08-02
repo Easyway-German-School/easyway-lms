@@ -45,17 +45,21 @@ import type { JourneyStage, StageStatus } from "@/lib/germany-journey";
  * month six than it did in week one, and they notice without noticing. The
  * reference designs did this and it is the best idea in them after the
  * first-person voice.
+ *
+ * The stops are TRANSLUCENT and layered over `--surface-alt` rather than being
+ * opaque colours. A fixed 96%-lightness sky is a white slab in Nacht and
+ * Dämmerung, and this school ships three themes — so the hue is the school's
+ * and the lightness is the theme's.
  */
-function skyFor(percent: number): { from: string; via: string; to: string } {
+function skyFor(percent: number): string {
   const p = Math.max(0, Math.min(100, percent)) / 100;
   // Hue travels 265° (cold violet) → 38° (gold) the short way round the wheel.
   const hue = 265 - p * 227;
   const sat = 46 + p * 26;
-  return {
-    from: `hsl(${hue.toFixed(0)} ${sat.toFixed(0)}% 96%)`,
-    via: `hsl(${(hue - 14).toFixed(0)} ${(sat - 8).toFixed(0)}% 93%)`,
-    to: `hsl(${(hue - 30).toFixed(0)} ${(sat - 16).toFixed(0)}% 97%)`,
-  };
+  const stop = (shift: number, alpha: number) =>
+    `hsl(${(hue - shift).toFixed(0)} ${(sat - shift / 2).toFixed(0)}% 62% / ${alpha})`;
+
+  return `linear-gradient(160deg, ${stop(0, 0.24)}, ${stop(14, 0.16)} 55%, ${stop(30, 0.26)}), var(--surface-alt)`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -265,6 +269,15 @@ function StageCard({
                 You are here
               </span>
             ) : null}
+            {/* The next stage keeps its first-person line — reading the sentence
+                you are about to earn is the point of showing it early. But
+                without this pill an unearned "I finished A2" sits on the card
+                looking exactly like the four above it that are true. */}
+            {stage.status === "next" ? (
+              <span className="rounded-full border border-[var(--border-strong)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                Next up
+              </span>
+            ) : null}
             {stage.tribe && stage.status === "done" ? (
               <span className="rounded-full bg-[var(--success-soft)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--success)]">
                 {stage.tribe}
@@ -272,15 +285,24 @@ function StageCard({
             ) : null}
           </div>
 
-          {/* The first-person line IS the card. A sealed stage does not get one
-              — you cannot have said a thing you have not done, and printing it
-              greyed-out early spends the sentence before it is earned. */}
+          {/* THE SENTENCE IS THE PRIZE, and it is only in quotation marks once
+              it is true.
+
+              A stage they have cleared says "I paid. My seat is mine." in their
+              own voice, as a fact. A stage they have NOT cleared shows the same
+              sentence as the thing waiting for them — because printing an
+              unearned claim as though it were said is not just weak
+              psychology, it is wrong: "I paid. My seat is mine." was appearing
+              on the payment lock screen of somebody being asked to pay.
+
+              A sealed stage gets no sentence at all. You cannot preview a line
+              about a level you have not reached without spending it. */}
           {sealed ? (
             <>
               <p className="mt-1.5 text-base font-bold text-[var(--muted)]">{stage.label}</p>
               <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{stage.teaser}</p>
             </>
-          ) : (
+          ) : stage.status === "done" ? (
             <>
               <p className="mt-1.5 text-[15px] font-bold leading-6 text-[var(--foreground)]">
                 &ldquo;{stage.voice}&rdquo;
@@ -288,6 +310,18 @@ function StageCard({
               <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
                 {stage.label}
               </p>
+            </>
+          ) : (
+            <>
+              <p className="mt-1.5 text-base font-bold text-[var(--foreground)]">{stage.label}</p>
+              <div className="mt-2 border-l-2 border-[var(--accent)]/40 pl-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Clear this and you get to say
+                </p>
+                <p className="mt-0.5 text-sm font-semibold italic leading-5 text-[var(--foreground-soft)]">
+                  {stage.voice}
+                </p>
+              </div>
             </>
           )}
 
@@ -389,18 +423,14 @@ export default function JourneyRoad({
 }) {
   const reduced = useReducedMotion() ?? false;
   const [openId, setOpenId] = useState<string | null>(null);
-  const sky = skyFor(percentToGermany);
 
   return (
-    <div
-      className="relative overflow-hidden rounded-[28px] p-4 sm:p-6"
-      style={{ background: `linear-gradient(160deg, ${sky.from}, ${sky.via} 55%, ${sky.to})` }}
-    >
+    <div className="relative overflow-hidden rounded-[28px] p-4 sm:p-6" style={{ background: skyFor(percentToGermany) }}>
       {/* Landmarks sit behind the road and get slightly bolder as the sky warms,
           so the destination literally comes into focus. */}
       <div
-        className="pointer-events-none absolute inset-0 text-[#0D7C7E]"
-        style={{ opacity: 0.05 + (percentToGermany / 100) * 0.07 }}
+        className="pointer-events-none absolute inset-0 text-[var(--accent-strong)]"
+        style={{ opacity: 0.08 + (percentToGermany / 100) * 0.1 }}
         aria-hidden
       >
         <Landmark kind="gate" className="right-2 top-10 w-28 sm:w-36" />

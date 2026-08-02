@@ -7,6 +7,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import type { StudentAccess } from "@/lib/access";
 import TuitionMascot from "@/components/TuitionMascot";
+import GermanyJourney from "@/components/journey/GermanyJourney";
 
 /** Fixed, not random — random positions would differ between server and client. */
 const EMBERS = [
@@ -82,6 +83,7 @@ export default function PaymentLockScreen({
   const registrationPaid = access?.registrationPaid ?? true;
 
   return (
+    <>
     <div className="relative min-h-[calc(100vh-1px)] overflow-hidden">
       <BlurredPageGhost />
 
@@ -303,7 +305,39 @@ export default function PaymentLockScreen({
             Your registration is confirmed — pay the tuition fee to unlock {areaLabel.toLowerCase()}.
           </p>
         )}
+
       </div>
     </div>
+
+    {/*
+      The road, under the padlock.
+
+      This is the one page a registration-only student ever sees, and until now
+      it was a locked door with a price on it. Their whole journey map — every
+      level, the exam, the visa, the landing, with their own name on it — is the
+      most persuasive thing the school owns, and showing it to somebody who has
+      not paid costs nothing: the map is a picture of a plan, not a delivered
+      service. Nothing behind the paywall leaks, because there is nothing behind
+      the paywall in it.
+
+      It sits OUTSIDE the locked hero rather than inside it. That block is
+      `overflow-hidden` with a viewport-height scrim, so anything added within
+      it is clipped and unreachable — which is exactly what happened on the
+      first attempt. The padlock keeps its full screen; the road begins where
+      it ends.
+
+      GermanyJourney renders itself in preview mode here, so it carries the
+      "yours the moment your seat is paid" panel and its own checkout link
+      rather than pretending the road has started.
+    */}
+    <section className="border-t border-[var(--border)] bg-[var(--background)] px-4 py-12 sm:px-6">
+      <div className="mx-auto w-full max-w-3xl">
+        <p className="mb-5 text-center text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
+          While you are here — this is where it goes
+        </p>
+        <GermanyJourney />
+      </div>
+    </section>
+    </>
   );
 }

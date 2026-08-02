@@ -288,6 +288,11 @@ export default function WelcomeTour() {
   const finish = useCallback(() => {
     setOpen(false);
     window.dispatchEvent(new CustomEvent("easyway:tour-drawer", { detail: { open: false } }));
+    // The journey map holds its once-a-day moment back while the tour is
+    // running — on a brand-new account both are due at once, and two stacked
+    // full-screen overlays on somebody's very first visit is how a warm welcome
+    // becomes an obstacle course. This is the handover.
+    window.dispatchEvent(new CustomEvent("easyway:tour-finished"));
     // Fire and forget: the tour is already gone from the screen, and a failed
     // write costs the student one repeat, not their session.
     void fetch("/api/student/onboarding", { method: "POST" }).catch(() => {});

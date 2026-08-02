@@ -338,6 +338,31 @@ export type ConfirmResult =
   | { ok: false; error: string };
 
 /**
+ * "2026-07-28" → local midnight on the 28th.
+ *
+ * `new Date("2026-07-28")` is parsed as UTC midnight by spec, so anywhere west
+ * of Greenwich it lands on the EVENING OF THE 27TH in local time — and the
+ * countdown, which works in local days, then tells a student their level
+ * started the day before the one they picked and ends a day early. An `<input
+ * type="date">` means a calendar day, not an instant, so it has to be read as
+ * one.
+ */
+function parseCalendarDay(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (match) {
+    const [, year, month, day] = match;
+    const date = new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0, 0);
+    // Midday, not midnight: a value stored at local midnight can slide across a
+    // date boundary under a daylight-saving shift or a server on a different
+    // offset, and midday survives both.
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
  * "Yes, I have started."
  *
  * The date is theirs to give, because a student confirming on Thursday may
@@ -367,8 +392,8 @@ export async function confirmStart(
 
   let startedOn = now;
   if (input.startedOn) {
-    const parsed = new Date(input.startedOn);
-    if (Number.isNaN(parsed.getTime())) return { ok: false, error: "That date could not be read" };
+    const parsed = parseCalendarDay(input.startedOn);
+    if (!parsed) return { ok: false, error: "That date could not be read" };
     startedOn = parsed;
   }
 
