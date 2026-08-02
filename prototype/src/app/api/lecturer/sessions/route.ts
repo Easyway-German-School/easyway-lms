@@ -252,10 +252,17 @@ export async function PUT(req: NextRequest) {
   }
 }
 
+/**
+ * Class days are stored as midnight UTC (see `dayKey`), so they must be
+ * FORMATTED in UTC too. Without the timeZone pin this renders in the server's
+ * local zone, and on any host behind UTC every notification named the day
+ * before — telling students a Monday class had moved off a Sunday.
+ */
 const DATE_FORMAT: Intl.DateTimeFormatOptions = {
   weekday: "long",
   day: "numeric",
   month: "long",
+  timeZone: "UTC",
 };
 
 /**

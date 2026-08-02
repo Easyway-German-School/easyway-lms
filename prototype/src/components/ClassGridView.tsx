@@ -9,6 +9,7 @@ import {
   MONTH_NAMES,
   WEEKDAY_INITIALS,
   nodeSummary,
+  parseDayKey,
   shortDate,
 } from "@/lib/class-path";
 
@@ -22,11 +23,18 @@ import {
  * day itself, exactly as it does on the map.
  */
 
+/**
+ * Postponed is PINK and cancelled is RED, deliberately not the same colour.
+ * "Come on a different day" and "do not come" are different instructions, and
+ * a student scanning a month of small boxes has only the colour to go on.
+ * Neither is struck through — a postponed class still happens.
+ */
 const STATE_STYLE: Record<string, string> = {
   done: "bg-emerald-500 text-white border-emerald-600",
   today: "bg-amber-400 text-white border-amber-500 ring-4 ring-amber-200",
   locked: "bg-[var(--border)] text-[var(--muted)] border-[var(--border-strong)]",
-  off: "bg-red-100 text-red-600 border-red-300 line-through",
+  postponed: "bg-pink-200 text-pink-800 border-pink-400",
+  cancelled: "bg-red-100 text-red-600 border-red-300 line-through",
 };
 
 /** Parse the month label the API sends ("August 2026") back into a real date. */
@@ -61,10 +69,20 @@ function DayPopover({ node, below }: { node: ClassNode; below: boolean }) {
       </p>
       <p className="text-[11px] text-[var(--muted)]">{s.slot} session</p>
 
-      {s.status === "postponed" || s.status === "cancelled" ? (
+      {s.status === "postponed" ? (
+        <div className="mt-2 rounded-lg bg-pink-100 px-2 py-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-pink-800">Postponed</p>
+          {/* The new date is the whole message. A student told only that
+              their class moved still has to ring the office to ask when to. */}
+          <p className="mt-0.5 text-[11px] font-semibold text-pink-900">
+            {s.postponedTo
+              ? `Now on ${shortDate(parseDayKey(s.postponedTo))}`
+              : "Your tutor will confirm the new date"}
+          </p>
+        </div>
+      ) : s.status === "cancelled" ? (
         <p className="mt-2 rounded-lg bg-red-100 px-2 py-1 text-[10px] font-bold uppercase text-red-700">
-          {s.status}
-          {s.postponedTo && ` — moved to ${shortDate(new Date(s.postponedTo))}`}
+          Cancelled — this class is not running
         </p>
       ) : s.topic ? (
         <p className="mt-2 text-xs leading-5 text-[var(--foreground)]">{s.topic}</p>
@@ -74,16 +92,23 @@ function DayPopover({ node, below }: { node: ClassNode; below: boolean }) {
         </p>
       )}
 
+      {s.notes && (
+        <p className="mt-2 rounded-lg bg-[var(--surface-alt)] px-2 py-1 text-[11px] leading-4 text-[var(--foreground-soft)]">
+          {s.notes}
+        </p>
+      )}
+
       {s.tutor && <p className="mt-2 text-[11px] text-[var(--muted)]">with {s.tutor}</p>}
 
-      {s.material && (
+      {/* materialAlways, not material: a postponed class keeps its handout. */}
+      {s.materialAlways && (
         <a
-          href={s.material.filePath}
+          href={s.materialAlways.filePath}
           target="_blank"
           rel="noreferrer"
           className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-2 py-1 text-[11px] font-bold text-[var(--accent)]"
         >
-          <AttachmentIcon className="h-3 w-3" /> {s.material.title}
+          <AttachmentIcon className="h-3 w-3" /> {s.materialAlways.title}
         </a>
       )}
 
@@ -192,7 +217,8 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
               <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-emerald-500" /> Held</span>
               <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-amber-400" /> Today</span>
               <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-slate-300" /> Locked</span>
-              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-red-200" /> Postponed</span>
+              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-pink-300" /> Postponed</span>
+              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-red-200" /> Cancelled</span>
             </div>
           </div>
         );

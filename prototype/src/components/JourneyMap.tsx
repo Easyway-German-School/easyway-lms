@@ -5,11 +5,12 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import Link from "next/link";
 
-import { AttachmentIcon, CrossIcon, LockIcon, SparklesIcon } from "@/components/icons";
+import { AttachmentIcon, CalendarIcon, CrossIcon, LockIcon, SparklesIcon } from "@/components/icons";
 import {
   type ClassNode,
   type Month,
   nodeSummary,
+  parseDayKey,
   shortDate,
 } from "@/lib/class-path";
 
@@ -294,9 +295,11 @@ function Region({
                       ? "border-emerald-600 bg-emerald-500"
                       : state === "today"
                         ? "border-[var(--accent)] bg-gradient-to-br from-[var(--accent)] to-[#FFB061]"
-                        : state === "off"
-                          ? "border-[var(--danger)]/50 bg-[var(--danger-soft)]"
-                          : "border-[var(--border-strong)] bg-[var(--surface)]"
+                        : state === "postponed"
+                          ? "border-pink-400 bg-pink-200"
+                          : state === "cancelled"
+                            ? "border-[var(--danger)]/50 bg-[var(--danger-soft)]"
+                            : "border-[var(--border-strong)] bg-[var(--surface)]"
                   }`}
                 />
 
@@ -314,16 +317,20 @@ function Region({
                       ? "text-white"
                       : state === "today"
                         ? "text-white"
-                        : state === "off"
-                          ? "text-[var(--danger)]"
-                          : "text-[var(--muted)]"
+                        : state === "postponed"
+                          ? "text-pink-800"
+                          : state === "cancelled"
+                            ? "text-[var(--danger)]"
+                            : "text-[var(--muted)]"
                   }`}
                 >
                   {state === "done" ? (
                     <CheckGlyph />
                   ) : state === "today" ? (
                     <StarGlyph />
-                  ) : state === "off" ? (
+                  ) : state === "postponed" ? (
+                    <CalendarIcon className="h-5 w-5" strokeWidth={3} />
+                  ) : state === "cancelled" ? (
                     <CrossIcon className="h-5 w-5" strokeWidth={3} />
                   ) : (
                     <LockIcon className="h-5 w-5" />
@@ -401,8 +408,25 @@ function ClassCard({ node }: { node: ClassNode }) {
       )}
 
       {node.status === "postponed" && (
+        <div className="mt-3 rounded-xl bg-pink-100 px-3 py-2">
+          <p className="text-xs font-bold uppercase tracking-wide text-pink-800">Postponed</p>
+          <p className="mt-0.5 text-sm font-semibold text-pink-900">
+            {node.postponedTo
+              ? `Now on ${shortDate(parseDayKey(node.postponedTo))}`
+              : "Your tutor will confirm the new date"}
+          </p>
+        </div>
+      )}
+
+      {node.status === "cancelled" && (
         <p className="mt-3 inline-block rounded-lg bg-[var(--danger-soft)] px-2.5 py-1 text-xs font-bold uppercase text-[var(--danger)]">
-          Postponed{node.postponedTo && ` — moved to ${shortDate(new Date(node.postponedTo))}`}
+          Cancelled — this class is not running
+        </p>
+      )}
+
+      {summary.notes && (
+        <p className="mt-3 rounded-xl bg-[var(--surface-alt)] px-3 py-2 text-sm leading-5 text-[var(--foreground-soft)]">
+          {summary.notes}
         </p>
       )}
 
