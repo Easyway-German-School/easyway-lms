@@ -48,6 +48,35 @@ const BODY_TONE: Record<string, string> = {
   internal: "bg-[var(--surface-alt)] text-[var(--foreground-soft)]",
 };
 
+/**
+ * The two things a student is sitting, kept apart.
+ *
+ * An EasyWay student has two completely different kinds of exam in front of
+ * them: the school's own end-of-level tests, and the ÖSD sitting that decides
+ * whether they get a visa. One list mixing them meant scanning past four
+ * classroom quizzes to find the date that actually matters. These are the two
+ * labels the school asked for, and each one is a filter over the same booked
+ * list rather than a separate page that could disagree with it.
+ */
+type ExamFilter = "all" | "easyway" | "osd";
+
+const FILTER_LABELS: Record<ExamFilter, string> = {
+  all: "All exams",
+  easyway: "EasyWay exams",
+  osd: "ÖSD exam",
+};
+
+/** Internal tests are EasyWay's; anything with an awarding body is external. */
+function isEasywayExam(body: string | null | undefined): boolean {
+  const value = String(body ?? "internal").toLowerCase();
+  return value === "internal" || value === "easyway";
+}
+
+function matchesFilter(filter: ExamFilter, body: string | null | undefined): boolean {
+  if (filter === "all") return true;
+  return filter === "easyway" ? isEasywayExam(body) : !isEasywayExam(body);
+}
+
 function daysUntil(iso: string) {
   const diff = new Date(iso).getTime() - Date.now();
   return Math.ceil(diff / 86_400_000);
@@ -61,6 +90,7 @@ export default function MyExamsPanel() {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [payingId, setPayingId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<ExamFilter>("all");
 
   const load = useCallback(async () => {
     try {
@@ -122,21 +152,63 @@ export default function MyExamsPanel() {
     return <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="h-28 animate-pulse rounded-3xl bg-slate-200/60" />)}</div>;
   }
 
+  const shownUpcoming = upcoming.filter((exam) => matchesFilter(filter, exam.examBody));
+  const shownPast = past.filter((exam) => matchesFilter(filter, exam.examBody));
+  const shownAvailable = available.filter((exam) => matchesFilter(filter, exam.examBody));
+
+  const counts: Record<ExamFilter, number> = {
+    all: upcoming.length,
+    easyway: upcoming.filter((exam) => isEasywayExam(exam.examBody)).length,
+    osd: upcoming.filter((exam) => !isEasywayExam(exam.examBody)).length,
+  };
+
   return (
     <div className="space-y-8">
       {error && <div className="rounded-2xl bg-red-50 p-4 text-sm text-red-700">{error}</div>}
 
+      {/* Two labels, as the school asked for, plus the combined view they both
+          came from — so nobody has to guess which tab a booking landed in. */}
+      <div className="inline-flex flex-wrap gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1">
+        {(["all", "easyway", "osd"] as ExamFilter[]).map((option) => (
+          <button
+            key={option}
+            onClick={() => setFilter(option)}
+            aria-pressed={filter === option}
+            className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+              filter === option
+                ? "bg-[var(--accent)] text-white shadow"
+                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            {FILTER_LABELS[option]}
+            {counts[option] > 0 ? (
+              <span className={`ml-2 text-xs ${filter === option ? "text-white/80" : "text-[var(--muted)]"}`}>
+                {counts[option]}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+
       <section>
         <h2 className="text-lg font-bold">Coming up</h2>
-        {upcoming.length === 0 ? (
+        {shownUpcoming.length === 0 ? (
           <div className="mt-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
             <CalendarIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
-            <p className="mt-3 text-sm font-semibold">No exams booked</p>
-            <p className="mt-1 text-sm text-[var(--muted)]">Anything you register for appears here.</p>
+            <p className="mt-3 text-sm font-semibold">
+              {filter === "all" ? "No exams booked" : `No ${FILTER_LABELS[filter].toLowerCase()} booked`}
+            </p>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              {filter === "easyway"
+                ? "Your tutor's end-of-level tests appear here once the office schedules them."
+                : filter === "osd"
+                  ? "ÖSD sittings you register for appear here, with your seat number."
+                  : "Anything you register for appears here."}
+            </p>
           </div>
         ) : (
           <div className="mt-3 space-y-3">
-            {upcoming.map((e) => {
+            {shownUpcoming.map((e) => {
               const days = daysUntil(e.examDate);
               return (
                 <div key={e.registrationId} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -192,11 +264,11 @@ export default function MyExamsPanel() {
         )}
       </section>
 
-      {available.length > 0 && (
+      {shownAvailable.length > 0 && (
         <section>
           <h2 className="text-lg font-bold">Open for registration</h2>
           <div className="mt-3 space-y-3">
-            {available.map((e) => (
+            {shownAvailable.map((e) => (
               <div key={e.id} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -230,11 +302,11 @@ export default function MyExamsPanel() {
         </section>
       )}
 
-      {past.length > 0 && (
+      {shownPast.length > 0 && (
         <section>
           <h2 className="text-lg font-bold">Past exams</h2>
           <div className="mt-3 space-y-3">
-            {past.map((e) => (
+            {shownPast.map((e) => (
               <div key={e.registrationId} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">

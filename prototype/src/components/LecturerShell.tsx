@@ -12,6 +12,7 @@ import {
   BroadcastMessageIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CommunityIcon,
   CrossIcon,
   CustomiseIcon,
   DashboardIcon,
@@ -38,7 +39,9 @@ type NavItem = {
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/lecturer/dashboard', icon: <DashboardIcon /> },
   { label: 'Live classroom', href: '/live', icon: <BroadcastIcon /> },
-  { label: 'Customise my classes', href: '/lecturer/classes', icon: <CustomiseIcon /> },
+  // Not "customise" any more: a tutor does not choose their class, the office
+  // does. This page shows them what they were given and their roster.
+  { label: 'My classes', href: '/lecturer/classes', icon: <CustomiseIcon /> },
   { label: 'My students', href: '/lecturer/students', icon: <UsersIcon /> },
   { label: 'Timetable', href: '/lecturer/timetable', icon: <TimetableIcon /> },
   { label: 'Private classes', href: '/lecturer/private-classes', icon: <PrivateClassIcon /> },
@@ -46,6 +49,11 @@ const navItems: NavItem[] = [
   { label: 'Materials', href: '/lecturer/materials', icon: <BookOpenIcon /> },
   { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon /> },
   { label: 'Exam/Test', href: '/lecturer/grades', icon: <ExamIcon /> },
+  // Tutors already had access to every space server-side (isStaffRole in
+  // lib/community-spaces), but no way to reach one — the entry simply was not
+  // in this sidebar, so the answering-questions-between-classes half of the
+  // community never happened.
+  { label: 'Community', href: '/community', icon: <CommunityIcon /> },
   // These two pages existed but were reachable from nowhere, so nobody used
   // them. They belong in the sidebar with everything else.
   { label: 'Gradebook', href: '/lecturer/gradebook', icon: <GradebookIcon /> },

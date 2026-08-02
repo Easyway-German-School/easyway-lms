@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
+import { KIND, notify } from '@/lib/notify';
+import { isAssigned, matchesBatch, readAssignment, studentWhereForAssignment } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -149,6 +151,45 @@ export async function POST(req: NextRequest) {
       },
       include: { course: { select: { title: true } } },
     });
+
+    /**
+     * Tell the class it is there.
+     *
+     * A material nobody knows about is a material nobody opens. This reaches
+     * exactly the students the office assigned this tutor — same clause as
+     * their roster — so an upload for Lagos A1 does not buzz Abuja, and
+     * `push: true` puts it on their phone, which for most of these students is
+     * the only device they use.
+     */
+    const lecturer = await prisma.lecturer.findUnique({ where: { id: lecturerId } });
+    const assignment = readAssignment(lecturer);
+    if (isAssigned(assignment)) {
+      const recipients = await prisma.student.findMany({
+        where: (studentWhereForAssignment(assignment) ?? {}) as any,
+        select: { id: true, admission: true },
+      });
+      const studentIds = recipients
+        .filter((student) => matchesBatch(assignment, student.admission))
+        .map((student) => student.id);
+
+      if (studentIds.length) {
+        await notify({
+          to: { studentIds },
+          kind: KIND.materialPublished,
+          severity: "info",
+          title: kind === "recording" ? "A class recording is up" : "New material from your tutor",
+          message:
+            kind === "recording"
+              ? `“${title}” is in your video library. If you missed the class, it starts where you left off.`
+              : `Your tutor uploaded “${title}”. Open Materials to download it.`,
+          link: kind === "recording" ? "/materials?tab=watch" : "/materials",
+          push: true,
+          // One announcement per material, so a tutor who saves twice does not
+          // buzz two hundred phones twice.
+          dedupeKey: `material:${material.id}`,
+        }).catch((error) => console.error("Material notification failed", error));
+      }
+    }
 
     return NextResponse.json(serialise(material));
   } catch (error) {
