@@ -1,3 +1,5 @@
+import { parseModelJson } from "@/lib/safe-json";
+
 /**
  * AI Service - Supports Claude API, Ollama (local), or mock responses
  * Set environment variables:
@@ -76,24 +78,14 @@ async function callClaude(prompt: string, maxTokens: number): Promise<string | n
 /**
  * Pull JSON out of a model reply.
  *
- * Asked for JSON and told not to wrap it, models still occasionally wrap it —
- * so strip fences and take the outermost {...} rather than trusting the whole
- * string to parse.
+ * Kept as a name because a dozen call sites use it, but the implementation now
+ * lives in one place. This file previously held its own copy AND left six
+ * other call sites on a bare `JSON.parse`, which is how the daily missions
+ * came to be discarded on every request: two parsers, and the feature that
+ * needed one most used neither.
  */
 function parseJsonReply<T>(raw: string | null): T | null {
-  if (!raw) return null;
-  const cleaned = raw
-    .replace(/^\s*```(?:json)?/i, "")
-    .replace(/```\s*$/, "")
-    .trim();
-  const start = cleaned.search(/[[{]/);
-  const end = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
-  const candidate = start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned;
-  try {
-    return JSON.parse(candidate) as T;
-  } catch {
-    return null;
-  }
+  return parseModelJson<T>(raw);
 }
 
 /** Appended to every prompt that wants JSON back. Cheap, and it works. */
@@ -145,18 +137,67 @@ export async function generateEssayNextSteps(score: number, feedback: Array<{ ca
   }
 }
 
-export async function generateDailyMissions(profile: any): Promise<Array<{ title: string; description: string; reward: string }>> {
+/**
+ * Daily missions, generated for one student.
+ *
+ * This used to return the canned set on the Claude path behind a
+ * "for now" comment, and the Ollama path threw the model's answer away
+ * because it arrived wrapped in a markdown fence. Between the two, every
+ * student in the school had been reading the same three invented missions
+ * since the feature shipped, and nothing anywhere logged that.
+ *
+ * Now it asks whichever model is actually reachable, and says so loudly when
+ * it cannot. Falling back to the canned set is still correct — a student
+ * opening their dashboard should never see an error because a model is busy —
+ * but it must be visible in the logs, not silent.
+ */
+export async function generateDailyMissions(
+  profile: any,
+): Promise<Array<{ title: string; description: string; reward: string }>> {
+  const prompt = [
+    "You write daily missions for a student learning German at a Nigerian language school.",
+    "",
+    `Level: ${profile.level || "A1"}`,
+    `Exam readiness: ${profile.examReadiness ?? 0}%`,
+    `Pathway: ${profile.pathway || "Language training"}`,
+    `Current streak: ${profile.streak ?? 0} days`,
+    `Lessons finished: ${profile.completedLessons ?? 0}`,
+    "",
+    "Write exactly 3 missions. Each must be finishable in under 15 minutes today.",
+    "Pitch them at the level given — an A1 student cannot 'discuss an article'.",
+    "Make them concrete: name the words, the tense or the situation to practise.",
+    "",
+    'Reply with ONLY a JSON array: [{"title":"…","description":"…","reward":"+20 XP"}]',
+  ].join("\n");
+
   const provider = getAIProvider();
-  if (provider === "claude") {
-    // Fallback to mock for Claude for now
-    return generateDailyMissionsMock(profile);
-  } else if (provider === "deepseek") {
-    return generateDailyMissionsMock(profile);
-  } else if (provider === "ollama") {
-    return generateDailyMissionsWithOllama(profile);
-  } else {
-    return generateDailyMissionsMock(profile);
+
+  const raw =
+    provider === "claude"
+      ? await callClaude(prompt, 700)
+      : provider === "ollama" || provider === "anythingllm"
+        ? await callLocalModel(getOllamaModel(), prompt, 0.6)
+        : null;
+
+  const parsed = parseModelJson<Array<{ title?: string; description?: string; reward?: string }>>(raw);
+
+  if (Array.isArray(parsed)) {
+    const missions = parsed
+      .filter((mission) => mission && typeof mission.title === "string" && mission.title.trim())
+      .slice(0, 3)
+      .map((mission) => ({
+        title: String(mission.title).trim(),
+        description: String(mission.description ?? "").trim(),
+        reward: String(mission.reward ?? "+20 XP").trim(),
+      }));
+
+    if (missions.length > 0) return missions;
   }
+
+  console.warn(
+    `[ai] daily missions fell back to the canned set (provider=${provider}, model answered=${raw ? "yes" : "no"})`,
+  );
+  return generateDailyMissionsMock(profile);
 }
 
 export async function generateMissionPracticeFeedback(input: {
@@ -213,7 +254,8 @@ async function generateMissionPracticeFeedbackWithLocalModel(input: {
   if (!raw) return generateMissionPracticeFeedbackMock(input);
 
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = parseModelJson<any>(raw);
+    if (!parsed) return generateMissionPracticeFeedbackMock(input);
     return {
       prompt: parsed.prompt || `Practice this mission: ${input.title}\n\n${input.description}`,
       feedback: parsed.feedback || "Nice effort. Keep improving your answer with more detail.",
@@ -533,7 +575,7 @@ async function generateDailyMissionsWithOllama(profile: any) {
     const data = (await response.json()) as any;
     const text = data.response || "";
     try {
-      const parsed = JSON.parse(text);
+      const parsed = parseModelJson<any>(text);
       if (Array.isArray(parsed)) return parsed;
       return generateDailyMissionsMock(profile);
     } catch {
@@ -559,7 +601,7 @@ async function generateCourseOutlineWithOllama(courseInfo: any) {
     const data = (await response.json()) as any;
     const text = data.response || "";
     try {
-      const parsed = JSON.parse(text);
+      const parsed = parseModelJson<any>(text);
       if (parsed?.modules && Array.isArray(parsed.modules)) return parsed;
       return generateCourseOutlineMock(courseInfo);
     } catch {
@@ -593,7 +635,7 @@ Make the package interactive, mission-driven, and suitable for classroom or self
     const data = (await response.json()) as any;
     const text = data.response || "";
     try {
-      const parsed = JSON.parse(text);
+      const parsed = parseModelJson<any>(text);
       if (parsed?.summary && Array.isArray(parsed.objectives) && Array.isArray(parsed.modules)) return parsed;
       return generateLessonPackageMock(lessonData);
     } catch {
@@ -1263,7 +1305,8 @@ ${essay}`,
     const text = data.response || "{}";
 
     try {
-      const parsed = JSON.parse(text);
+      const parsed = parseModelJson<any>(text);
+      if (!parsed) throw new Error("unparseable");
       return {
         score: parsed.score || 75,
         feedback: parsed.feedback || [],
@@ -1298,7 +1341,8 @@ async function analyzePronunciationWithOllama(phrase: string) {
     const text = data.response || "{}";
 
     try {
-      const parsed = JSON.parse(text);
+      const parsed = parseModelJson<any>(text);
+      if (!parsed) throw new Error("unparseable");
       return {
         transcription: parsed.transcription || phrase,
         issues: parsed.issues || [],
