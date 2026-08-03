@@ -45,8 +45,9 @@ export default function LoadingExperience({
           </div>
 
           <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-[var(--muted)]">Easyway</p>
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-[var(--foreground)] sm:text-3xl">
+            {/* No name eyebrow here either — the emblem sits directly beside
+                this block and already carries it. See BrandLoader. */}
+            <h1 className="text-2xl font-semibold tracking-tight text-[var(--foreground)] sm:text-3xl">
               {title}
             </h1>
             <p className="mt-4 max-w-xl text-sm leading-7 text-[var(--muted)]">{message}</p>
