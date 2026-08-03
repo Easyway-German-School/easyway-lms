@@ -104,6 +104,7 @@ export type MomentId =
   | "welcome-tour"
   | "goal"
   | "level-advance"
+  | "notifications"
   | "journey"
   | "poster";
 
@@ -141,6 +142,29 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Your level is complete",
     dockBlurb: "What you finished, and what comes next.",
+  },
+  /**
+   * Asking for notification permission, and where it sits.
+   *
+   * BELOW the tour and the goal question on purpose. A permission prompt is a
+   * request; the tour and the map are gifts. Asking before giving is how an
+   * app trains someone to say no on reflex, and the browser only lets you ask
+   * once — a refusal is close to permanent and cannot be re-prompted.
+   *
+   * ABOVE the journey and poster because those two are pleasant rather than
+   * load-bearing, and this one decides whether the student ever hears about
+   * the next class at all.
+   *
+   * In practice the two-modal cap means a brand new student sees the tour and
+   * the goal question on day one, and this waits in the dock until day two —
+   * by which point they have used the thing and the ask makes sense. That is
+   * the intended sequence, not an accident of the cap.
+   */
+  notifications: {
+    priority: 60,
+    kind: "modal",
+    dockLabel: "Turn on reminders",
+    dockBlurb: "So you hear about class and new material without opening the app.",
   },
   journey: {
     priority: 50,

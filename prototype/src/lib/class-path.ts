@@ -7,7 +7,15 @@
  * read as locked in one view and open in the other.
  */
 
-export type Material = { id: string; title: string; filePath: string; fileType: string };
+export type Material = {
+  id: string;
+  title: string;
+  filePath: string;
+  fileType: string;
+  /** Two sentences generated after upload, so the calendar can preview it. */
+  aiSummary?: string | null;
+  aiQuestCount?: number;
+};
 
 export type Session = {
   date: string;

@@ -9,6 +9,7 @@ import PaymentSuccessToastClient from "@/components/PaymentSuccessToastClient";
 import TuitionNudge from "@/components/TuitionNudge";
 import LevelAdvance from "@/components/LevelAdvance";
 import WelcomeTour from "@/components/WelcomeTour";
+import NotificationInvite from "@/components/NotificationInvite";
 import { BookOpenIcon, CompassIcon, FlameIcon, SparklesIcon, TargetIcon, TrendingUpIcon } from "@/components/icons";
 import { summarizeGamification } from "@/lib/gamification";
 import { REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
@@ -31,6 +32,8 @@ type Student = {
   branchName?: string | null;
   pathway?: string;
   examReadiness?: number;
+  /** Used to make the notification ask concrete: "your next class is …". */
+  nextLive?: string | null;
   averageGrade?: number | null;
   gradeCount?: number;
   recentGrades?: Array<{ type: string; score: number; createdAt: string }>;
@@ -574,6 +577,14 @@ function DashboardContent() {
         <div className="mx-auto max-w-7xl px-6 py-10">
           {/* Shows once per account, on the very first visit, then never again. */}
           <WelcomeTour />
+          {/* Ranks BELOW the tour in the moment queue, so a new student meets
+              the portal before being asked for anything. The queue's two-modal
+              cap usually pushes this to their second visit, which is exactly
+              when the ask makes sense. */}
+          <NotificationInvite
+            tutorName={null}
+            nextClass={student?.nextLive && student.nextLive !== "No live session scheduled" ? student.nextLive : null}
+          />
           {/* Above the hero on purpose: a student with a balance should meet it
               before anything else, and it disappears entirely once settled. */}
           <TuitionNudge className="mb-6" />

@@ -52,7 +52,21 @@ export type MergedSession = {
   /** True when a tutor has actually touched this day. */
   edited: boolean;
   lecturerName: string | null;
-  material: { id: string; title: string; filePath: string; fileType: string } | null;
+  material: {
+    id: string;
+    title: string;
+    filePath: string;
+    fileType: string;
+    /**
+     * What the AI made of it, generated in the background after upload.
+     * Carried through to the calendar so a student deciding whether to open a
+     * 14-page PDF can read two sentences first — which is the difference
+     * between a material being downloaded and a material being ignored.
+     */
+    aiSummary: string | null;
+    /** Just the count: the quests themselves live on the materials page. */
+    aiQuestCount: number;
+  } | null;
 };
 
 export type MergedMonth = Omit<ScheduleMonth, "sessions"> & { sessions: MergedSession[] };
@@ -102,7 +116,12 @@ export async function getMergedSchedule(args: {
     },
     include: {
       lecturer: { select: { user: { select: { name: true } } } },
-      material: { select: { id: true, title: true, filePath: true, fileType: true } },
+      material: {
+        select: {
+          id: true, title: true, filePath: true, fileType: true,
+          aiSummary: true, aiQuests: true,
+        },
+      },
     },
   });
 
@@ -134,7 +153,18 @@ export async function getMergedSchedule(args: {
         postponedTo: override?.postponedTo ? override.postponedTo.toISOString() : null,
         edited: Boolean(override),
         lecturerName: override?.lecturer?.user?.name ?? null,
-        material: override?.material ?? null,
+        material: override?.material
+          ? {
+              id: override.material.id,
+              title: override.material.title,
+              filePath: override.material.filePath,
+              fileType: override.material.fileType,
+              aiSummary: override.material.aiSummary,
+              aiQuestCount: Array.isArray(override.material.aiQuests)
+                ? override.material.aiQuests.length
+                : 0,
+            }
+          : null,
       } satisfies MergedSession;
     }),
   }));

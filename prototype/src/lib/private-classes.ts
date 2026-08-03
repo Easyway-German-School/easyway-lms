@@ -61,7 +61,12 @@ export async function getPrivateSchedule(args: {
     },
     include: {
       lecturer: { select: { user: { select: { name: true } } } },
-      material: { select: { id: true, title: true, filePath: true, fileType: true } },
+      material: {
+        select: {
+          id: true, title: true, filePath: true, fileType: true,
+          aiSummary: true, aiQuests: true,
+        },
+      },
     },
     orderBy: { scheduledAt: "asc" },
   });
@@ -95,7 +100,18 @@ export async function getPrivateSchedule(args: {
         postponedTo: null,
         edited: true,
         lecturerName: c.lecturer?.user?.name ?? null,
-        material: c.material,
+        // Shaped the same as a group session's material, so the calendar has
+        // one thing to render rather than two nearly-identical ones.
+        material: c.material
+          ? {
+              id: c.material.id,
+              title: c.material.title,
+              filePath: c.material.filePath,
+              fileType: c.material.fileType,
+              aiSummary: c.material.aiSummary,
+              aiQuestCount: Array.isArray(c.material.aiQuests) ? c.material.aiQuests.length : 0,
+            }
+          : null,
       };
     });
 

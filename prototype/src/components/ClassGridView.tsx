@@ -102,14 +102,40 @@ function DayPopover({ node, below }: { node: ClassNode; below: boolean }) {
 
       {/* materialAlways, not material: a postponed class keeps its handout. */}
       {s.materialAlways && (
-        <a
-          href={s.materialAlways.filePath}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-2 py-1 text-[11px] font-bold text-[var(--accent)]"
-        >
-          <AttachmentIcon className="h-3 w-3" /> {s.materialAlways.title}
-        </a>
+        <div className="mt-2">
+          <a
+            href={s.materialAlways.filePath}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-2 py-1 text-[11px] font-bold text-[var(--accent)]"
+          >
+            <AttachmentIcon className="h-3 w-3" /> {s.materialAlways.title}
+          </a>
+
+          {/*
+            The two-sentence summary, generated after upload.
+
+            This is the whole point of generating it. A student looking at a
+            filename has no way to judge whether a 14-page PDF is worth
+            opening on their data plan, so the safe choice is not to. Two
+            sentences turns that decision from a gamble into a glance.
+          */}
+          {s.materialAlways.aiSummary && (
+            <p className="mt-1.5 rounded-lg bg-[var(--surface-alt)] px-2 py-1.5 text-[11px] leading-4 text-[var(--foreground-soft)]">
+              {s.materialAlways.aiSummary}
+            </p>
+          )}
+
+          {/* Quests are the smaller ask underneath the material — five minutes
+              rather than fourteen pages. Named as a count so it reads as an
+              amount of work, not as another document. */}
+          {Boolean(s.materialAlways.aiQuestCount) && (
+            <p className="mt-1 text-[11px] font-semibold text-[var(--accent)]">
+              {s.materialAlways.aiQuestCount} quick quest
+              {s.materialAlways.aiQuestCount === 1 ? "" : "s"} from this — about 5 minutes each
+            </p>
+          )}
+        </div>
       )}
 
       {/* Arrow pointing back at the day cell, on whichever side it opened. */}
