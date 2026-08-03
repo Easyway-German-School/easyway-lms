@@ -22,24 +22,73 @@ import { unguardedPrisma } from "../src/lib/prisma";
 import { runWithAuditActor } from "../src/lib/audit-context";
 import { writeAudit } from "../src/lib/prisma-guard";
 
-/** Read a line with the echo suppressed, so the password never appears. */
+/**
+ * Read a password without printing it, but DO print a dot per character.
+ *
+ * The first version of this showed nothing at all. That is what a Unix
+ * password prompt does, and it is wrong here: typing into what looks like a
+ * dead terminal gives you no way to know whether the keystrokes registered, so
+ * the confirmation step fails and you cannot tell why. A row of dots is not a
+ * security weakness — the characters are still not on screen — and it is the
+ * difference between a prompt that works and one that gets abandoned.
+ *
+ * Raw mode rather than readline's output hook, because that hook has to guess
+ * which writes are the prompt and which are the user, and it guesses wrong on
+ * a second prompt in the same process.
+ */
 function askHidden(question: string): Promise<string> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const asMutable = rl as unknown as { _writeToOutput: (text: string) => void };
-    const original = asMutable._writeToOutput.bind(rl);
+  return new Promise((resolve, reject) => {
+    process.stdout.write(question);
 
-    asMutable._writeToOutput = (text: string) => {
-      // Let the prompt itself through; swallow everything the user types.
-      if (text.includes(question)) original(text);
+    const input = process.stdin;
+    const wasRaw = input.isRaw;
+    input.setRawMode(true);
+    input.resume();
+    input.setEncoding("utf8");
+
+    let value = "";
+
+    const done = (result: string) => {
+      input.setRawMode(Boolean(wasRaw));
+      input.pause();
+      input.removeListener("data", onData);
+      process.stdout.write("\n");
+      resolve(result);
     };
 
-    process.stdout.write(question);
-    rl.question("", (answer) => {
-      rl.close();
-      process.stdout.write("\n");
-      resolve(answer);
-    });
+    const onData = (chunk: string) => {
+      for (const char of chunk) {
+        switch (char) {
+          case "\r":
+          case "\n":
+            return done(value);
+
+          case "": // Ctrl-C
+            input.setRawMode(Boolean(wasRaw));
+            input.pause();
+            process.stdout.write("\n");
+            return reject(new Error("cancelled"));
+
+          case "": // Backspace
+          case "\b":
+            if (value.length > 0) {
+              value = value.slice(0, -1);
+              // Rub the dot out: back up, overwrite with a space, back up again.
+              process.stdout.write("\b \b");
+            }
+            break;
+
+          default:
+            // Ignore other control characters rather than storing them.
+            if (char >= " ") {
+              value += char;
+              process.stdout.write("•");
+            }
+        }
+      }
+    };
+
+    input.on("data", onData);
   });
 }
 
