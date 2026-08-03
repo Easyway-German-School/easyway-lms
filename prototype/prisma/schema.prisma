@@ -128,6 +128,9 @@ model Student {
   tutorId String?
   tutor   Lecturer? @relation(fields: [tutorId], references: [id], onDelete: SetNull)
 
+  /** Assignments set for this student by name, rather than to their level. */
+  assignmentTargets AssignmentTarget[]
+
   // Official school identifier, e.g. EW/2026/A1/JUL/0007. Nullable because
   // students created before the scheme existed are backfilled by
   // scripts/backfill-student-codes.mjs rather than blocked at read time.
@@ -1378,7 +1381,11 @@ model Assignment {
   timeLimitMinutes Int?
 
   /**
-   * Quizzes only: [{ prompt, options: string[], answerIndex }]
+   * Quizzes only. An array of questions, each tagged with its own `type`:
+   * choice | multi | boolean | short | paragraph. See src/lib/assignments.ts
+   * for the shape of each and for the parser, which reads a question with no
+   * `type` as multiple choice so every quiz written before the other types
+   * existed keeps working.
    */
   questions Json?
 
@@ -1389,8 +1396,38 @@ model Assignment {
   updatedAt DateTime @updatedAt
 
   submissions AssignmentSubmission[]
+  /**
+   * Named recipients. EMPTY MEANS EVERYONE at this level and branch, which is
+   * how every assignment written before this behaved and still behaves — the
+   * targeted case is the addition, not the new default. Setting even one
+   * target narrows the assignment to exactly that list.
+   */
+  targets     AssignmentTarget[]
 
   @@index([level, branchId])
+}
+
+/**
+ * One named student who should get one assignment.
+ *
+ * A join table rather than a JSON array of ids on Assignment, because the
+ * question actually asked is "what has this student been set?" — which is an
+ * indexed lookup here and a full scan with JSON matching there. It also means
+ * the database refuses a target pointing at a student who no longer exists,
+ * rather than leaving an id that silently matches nobody.
+ */
+model AssignmentTarget {
+  id           String     @id @default(cuid())
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([assignmentId, studentId])
+  @@index([studentId])
 }
 
 model AssignmentSubmission {
@@ -1415,6 +1452,28 @@ model AssignmentSubmission {
 
   score    Int?
   feedback String?
+
+  /**
+   * Per-question marks, as returned by gradeSubmission: the auto marks are
+   * written at submission time and the hand marks folded in later.
+   *
+   * Kept so a student can be shown which questions they lost marks on rather
+   * than a bare percentage, and so a disputed mark can be re-read months later
+   * without re-running a grader whose rules may have changed since.
+   */
+  questionScores Json?
+
+  /**
+   * True while a written answer is still waiting for a tutor.
+   *
+   * `score` stays null the whole time it is set. A part-marked paper must not
+   * show a percentage — a student who wrote a good essay seeing 40% because
+   * only the vocabulary section has been marked will read it as a fail.
+   */
+  needsReview Boolean @default(false)
+
+  markedById String?
+  markedAt   DateTime?
 
   /**
    * platform | physical — paper submissions are recorded by a tutor.

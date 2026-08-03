@@ -2,7 +2,14 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
-import { parseQuestions, toPublicQuestions, gradeQuiz, deadlineFor, isExpired } from "@/lib/assignments";
+import {
+  parseQuestions,
+  toPublicQuestions,
+  gradeSubmission,
+  totalPoints,
+  deadlineFor,
+  isExpired,
+} from "@/lib/assignments";
 
 /**
  * A student's assignments: documents to hand in and timed quizzes.
@@ -24,6 +31,30 @@ async function currentStudent(userId: string | undefined) {
   });
 }
 
+/**
+ * Which assignments this student may see.
+ *
+ * Two conditions live in an explicit AND rather than as sibling keys, because
+ * a second top-level `OR` would overwrite the first and quietly widen the
+ * query to every branch in the school.
+ *
+ * The targeting rule: an assignment with NO targets goes to the whole level,
+ * which is how every assignment behaved before targeting existed. One or more
+ * targets narrows it to exactly those students.
+ */
+function visibleTo(student: { id: string; level: string; branchId: string | null }) {
+  return {
+    published: true,
+    level: student.level,
+    AND: [
+      // Branch-specific assignments plus school-wide ones.
+      { OR: [{ branchId: student.branchId }, { branchId: null }] },
+      // Untargeted (everyone) or targeted at me.
+      { OR: [{ targets: { none: {} } }, { targets: { some: { studentId: student.id } } }] },
+    ],
+  };
+}
+
 /** GET — list assignments for this student's level and branch. */
 export async function GET() {
   const session = (await getServerSession(authOptions as any)) as any;
@@ -33,12 +64,7 @@ export async function GET() {
   }
 
   const assignments = await prisma.assignment.findMany({
-    where: {
-      published: true,
-      level: student.level,
-      // Branch-specific assignments plus school-wide ones.
-      OR: [{ branchId: student.branchId }, { branchId: null }],
-    },
+    where: visibleTo(student),
     orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
     include: {
       submissions: { where: { studentId: student.id } },
@@ -61,6 +87,7 @@ export async function GET() {
         type: a.type,
         timeLimitMinutes: a.timeLimitMinutes,
         questionCount: questions.length,
+        totalPoints: totalPoints(questions),
         dueAt: a.dueAt,
         lecturerName: a.lecturer?.user?.name ?? null,
         submission: mine
@@ -68,6 +95,9 @@ export async function GET() {
               submittedAt: mine.submittedAt,
               score: mine.score,
               feedback: mine.feedback,
+              // So the portal can say "waiting to be marked" rather than
+              // showing a blank where a result should be.
+              needsReview: mine.needsReview,
               startedAt: mine.startedAt,
               deadline,
               expired: isExpired(mine.startedAt, a.timeLimitMinutes, now),
@@ -96,11 +126,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "assignmentId is required" }, { status: 400 });
     }
 
-    const assignment = await prisma.assignment.findUnique({ where: { id: assignmentId } });
-    if (!assignment || !assignment.published || assignment.level !== student.level) {
-      return NextResponse.json({ error: "Assignment not found" }, { status: 404 });
-    }
-    if (assignment.branchId && assignment.branchId !== student.branchId) {
+    /**
+     * Re-checked here against exactly the same rule the listing uses, rather
+     * than trusted because the id arrived. Otherwise a student could submit to
+     * any assignment in the school by posting an id they were never shown —
+     * including one targeted at somebody else.
+     */
+    const assignment = await prisma.assignment.findFirst({
+      where: { id: String(assignmentId), ...visibleTo(student) },
+    });
+    if (!assignment) {
       return NextResponse.json({ error: "Assignment not found" }, { status: 404 });
     }
 
@@ -135,15 +170,29 @@ export async function POST(req: NextRequest) {
     if (action === "submit") {
       let score: number | null = null;
       let feedback: string | null = null;
+      let questionScores: object[] | undefined;
+      let needsReview = false;
 
       if (assignment.type === "quiz") {
         const questions = parseQuestions(assignment.questions);
         const expired = isExpired(existing?.startedAt ?? null, assignment.timeLimitMinutes, now);
-        const result = gradeQuiz(questions, answers);
-        score = result.score;
-        feedback = expired
-          ? `Time ran out. Scored on the answers submitted: ${result.correct} of ${result.total} correct.`
-          : `${result.correct} of ${result.total} correct.`;
+        const result = gradeSubmission(questions, answers);
+
+        questionScores = result.results as unknown as object[];
+        needsReview = result.needsReview;
+
+        /**
+         * A paper with written answers gets NO score until a tutor has marked
+         * it. Publishing the auto-marked fraction as if it were the result
+         * would show a student who wrote a strong essay a low percentage,
+         * which reads as a fail rather than as "half marked".
+         */
+        score = needsReview ? null : result.score;
+
+        const ranOut = expired ? "Time ran out — marked on the answers submitted. " : "";
+        feedback = needsReview
+          ? `${ranOut}${result.earned} of ${result.possible - result.results.filter((r) => r.needsReview).reduce((sum, r) => sum + r.possible, 0)} on the questions marked automatically. Your written ${result.awaitingReview === 1 ? "answer is" : "answers are"} with your tutor.`
+          : `${ranOut}${result.earned} of ${result.possible} marks.`;
       }
 
       const saved = await prisma.assignmentSubmission.upsert({
@@ -157,6 +206,8 @@ export async function POST(req: NextRequest) {
           fileName: typeof fileName === "string" ? fileName : undefined,
           score,
           feedback,
+          questionScores,
+          needsReview,
           startedAt: existing?.startedAt ?? now,
           submittedAt: now,
         },
@@ -167,12 +218,17 @@ export async function POST(req: NextRequest) {
           fileName: typeof fileName === "string" ? fileName : undefined,
           score,
           feedback,
+          questionScores,
+          needsReview,
           submittedAt: now,
         },
       });
 
       // Auto-graded quizzes become a Grade so they appear alongside exam
-      // results on the student's results page.
+      // results on the student's results page. A paper still waiting on a
+      // human is deliberately not recorded yet — the marking route writes it
+      // once the score is final, so a provisional mark never reaches the
+      // transcript or a certificate.
       if (assignment.type === "quiz" && score !== null) {
         try {
           await prisma.grade.create({
