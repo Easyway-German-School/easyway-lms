@@ -13,6 +13,16 @@ export default function AdminSignInForm() {
   const message = searchParams.get("message");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [totp, setTotp] = useState("");
+  /**
+   * Only true once the server has told us this account has a second factor.
+   *
+   * The field is deliberately not shown up front: whether an account carries
+   * two-factor is worth knowing to somebody working through a list of stolen
+   * addresses, and there is no reason to answer that question before a correct
+   * password has been presented.
+   */
+  const [needsCode, setNeedsCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -24,11 +34,37 @@ export default function AdminSignInForm() {
     const result = await signIn("credentials", {
       email,
       password,
+      totp,
       role: "admin",
       redirect: false,
     });
 
     if (!result?.ok) {
+      // These strings are thrown by authorize() in src/lib/auth.ts and passed
+      // through by NextAuth verbatim. Keep the two in step.
+      if (result?.error === "MFA_REQUIRED") {
+        setNeedsCode(true);
+        setError(null);
+        setLoading(false);
+        return;
+      }
+
+      if (result?.error === "MFA_INVALID") {
+        setNeedsCode(true);
+        setTotp("");
+        setError("That code was not accepted. Codes can only be used once — wait for the next one.");
+        setLoading(false);
+        return;
+      }
+
+      if (result?.error === "MFA_ENROLMENT_REQUIRED") {
+        setError(
+          "This account must have two-factor authentication set up before it can be used. Ask a super admin to enrol it, or turn MFA_ENFORCED off temporarily to get back in.",
+        );
+        setLoading(false);
+        return;
+      }
+
       setError(result?.error || "Unable to sign in. Check your email and password.");
       setLoading(false);
       return;
@@ -106,12 +142,38 @@ export default function AdminSignInForm() {
                 />
               </div>
 
+              {needsCode ? (
+                <div>
+                  <label htmlFor="totp" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">
+                    Authentication code
+                  </label>
+                  <input
+                    id="totp"
+                    // Not type="number": that strips the leading zero a TOTP
+                    // code can legitimately start with, and offers a spinner on
+                    // a value nobody wants to nudge up and down.
+                    type="text"
+                    inputMode="text"
+                    autoComplete="one-time-code"
+                    autoFocus
+                    value={totp}
+                    onChange={(event) => setTotp(event.target.value)}
+                    required
+                    className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-center text-lg tracking-[0.4em] text-[var(--foreground)] shadow-sm outline-none transition focus:border-[#FF6600] focus:bg-[var(--surface)] focus:ring-4 focus:ring-[#FF6600]/20"
+                    placeholder="000000"
+                  />
+                  <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
+                    From your authenticator app. Lost your phone? Enter one of your backup codes instead.
+                  </p>
+                </div>
+              ) : null}
+
               <button
                 type="submit"
                 disabled={loading}
                 className="w-full rounded-2xl bg-[#FF6600] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[#FF6600]/20 transition hover:bg-[#FF5500] disabled:opacity-60"
               >
-                {loading ? "Signing in..." : "Sign in"}
+                {loading ? "Signing in..." : needsCode ? "Verify and sign in" : "Sign in"}
               </button>
             </form>
 

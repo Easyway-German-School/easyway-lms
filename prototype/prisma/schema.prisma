@@ -52,6 +52,36 @@ model User {
    * a forwarded confirmation email cannot be used to take the account later.
    */
   passwordClaimed   Boolean  @default(true)
+
+  /**
+   * The TOTP shared secret, encrypted at rest. See src/lib/mfa.ts.
+   *
+   * Encrypted rather than stored plainly because a secret sitting in the clear
+   * makes the second factor worth nothing against the attack it exists to
+   * stop: whoever reads this table can already read the password hashes, and
+   * with the raw secret alongside they can mint valid codes forever. The key
+   * lives in the environment, so the database alone is not enough.
+   *
+   * Set at enrolment, before the first code is confirmed. Possession of a
+   * secret is therefore NOT proof that two-factor is on — `totpEnabledAt` is.
+   */
+  totpSecret        String?
+  /** When the first correct code was entered. Null means not enrolled. */
+  totpEnabledAt     DateTime?
+  /**
+   * One-time recovery codes, stored as bcrypt hashes and never shown again
+   * after enrolment. A lost phone must not mean a lost school.
+   */
+  totpBackupCodes   Json?
+  /**
+   * The last time-step accepted for this account.
+   *
+   * A TOTP code stays valid for its whole window, so one shoulder-surfed or
+   * intercepted code can be replayed within the same half-minute. Refusing any
+   * step at or below this one makes every code strictly single-use.
+   */
+  totpLastStep      Int?
+
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

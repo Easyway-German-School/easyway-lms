@@ -14,6 +14,13 @@ export const authOptions: AuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
         role: { label: "Role", type: "text" },
+        /**
+         * The authenticator code, or a backup code. Empty on the first
+         * attempt: the form does not know whether this account needs one until
+         * the password has been checked, and asking everybody for a code they
+         * may not have would be worse than a second round trip.
+         */
+        totp: { label: "Authentication code", type: "text" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
@@ -42,6 +49,39 @@ export const authOptions: AuthOptions = {
           if (!acceptable.includes(storedRole)) {
             const portalName = storedRole === "lecturer" ? "lecturer" : "student";
             throw new Error(`This account is registered as a ${portalName} account. Please use the correct portal.`);
+          }
+        }
+
+        /**
+         * The second factor, checked only after the password is known good.
+         *
+         * Order matters: checking the code first would let anybody discover
+         * which accounts have two-factor enabled without knowing any password.
+         *
+         * The thrown strings are a protocol with the sign-in forms, which read
+         * `error` and decide whether to show the code field. NextAuth passes
+         * the message through verbatim, so these must stay in step with
+         * MFA_REQUIRED / MFA_INVALID in the form components.
+         */
+        const { verifyLogin, shouldRequireMfa, isEnforced } = await import("@/lib/mfa");
+        const check = await verifyLogin(user.id, credentials.totp);
+
+        if (check.status === "required") throw new Error("MFA_REQUIRED");
+        if (check.status === "invalid") throw new Error("MFA_INVALID");
+
+        if (check.status === "not_enrolled") {
+          /**
+           * An account that should carry a second factor and does not.
+           *
+           * Refused only once MFA_ENFORCED is set — before that the school is
+           * still enrolling, and turning people away from the very screens
+           * they enrol on would be a lockout rather than a control.
+           */
+          if (
+            isEnforced() &&
+            shouldRequireMfa(user.adminRole, user.adminCapabilities, user.role)
+          ) {
+            throw new Error("MFA_ENROLMENT_REQUIRED");
           }
         }
 

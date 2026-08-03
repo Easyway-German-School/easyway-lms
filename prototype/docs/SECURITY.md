@@ -120,6 +120,31 @@ In this order, and do not stop halfway:
    now public.
 4. **Undo the damage** — restorable entries in the trail.
 
+If that account had two-factor on, also check `/admin/security` for a
+`Two-factor authentication switched OFF` entry. An attacker who got in with a
+stolen password and then removed the second factor leaves that line behind, and
+it dates the break-in more precisely than anything else in the trail.
+
+### 2.6 An admin has lost their phone
+
+If they still have a backup code, there is nothing to do — they sign in with it
+(each works once), then switch two-factor off and set it up again on the new
+phone from `/admin/security`.
+
+If both the phone and the codes are gone, this needs a second person, on
+purpose. There is no self-service reset, because a self-service reset is just a
+password reset wearing a hat — anyone who can trigger it can bypass the second
+factor entirely.
+
+Another super admin runs, against the live database:
+
+```bash
+npx tsx --env-file=.env.local -e "import('./src/lib/prisma').then(async ({ unguardedPrisma: p }) => { await p.user.update({ where: { email: 'THEM@easyway.example' }, data: { totpSecret: null, totpEnabledAt: null, totpBackupCodes: null, totpLastStep: null } }); console.log('cleared — they must enrol again at /admin/security'); await p.\$disconnect(); })"
+```
+
+Confirm it is really them over a channel that is not email first. Email is the
+one thing an attacker who has reached this point most likely already controls.
+
 ---
 
 ## 3. Secrets
@@ -228,7 +253,9 @@ Before the first real student signs in:
 - [ ] Run `restore-drill.yml` by hand once — **do not trust a backup you have not restored**
 - [ ] Save `RESTIC_PASSWORD` and all env vars to the password manager (§3.1)
 - [ ] Confirm `ALLOW_DEV_ROUTES` is **not** set in Vercel
-- [ ] Delete the demo admin `admin@easyway.test` — its password is in the repository
+- [x] ~~Delete the demo admin `admin@easyway.test`~~ — retired 2026-08-03, recoverable from `/admin/security`
+- [ ] Every super admin enrols in two-factor, **then** set `MFA_ENFORCED=true` (§10)
+- [ ] Set `MFA_ENCRYPTION_KEY` to its own value, so rotating `NEXTAUTH_SECRET` does not wipe enrolments
 - [ ] Change every other seeded or test password
 - [ ] Confirm `CRON_SECRET` and `NEXTAUTH_SECRET` are fresh values, not the development ones
 - [ ] Apply the migration: `npx prisma migrate deploy`
@@ -258,8 +285,9 @@ Stated plainly so nobody assumes cover that does not exist.
 
 | Gap | Why it matters | The fix when you want it |
 |---|---|---|
-| **No two-factor auth on admin accounts** | The single biggest remaining hole. A leaked admin password is a leaked student database, passport scans included. | TOTP with `otplib`, enforced for any account holding `payments` or `security` |
 | **Rate limiting is per-isolate** | In-memory on the edge, so it slows a single attacker but does not stop a distributed one | Shared counter in Upstash Redis; swap inside `hit()` in `src/middleware.ts` |
+| **Two-factor is not yet enforced** | Built and working, but `MFA_ENFORCED` is off until every super admin has enrolled — until then a leaked password is still enough | Finish enrolment, then set the variable. See §10 |
+| **Two-factor covers admins only** | A lecturer account can read their students' work and grades | Same library; the policy check in `shouldRequireMfa()` is where to widen it |
 | **No error tracking** | A failure nobody sees is a failure nobody fixes | Sentry, or self-hosted GlitchTip |
 | **Soft-delete does not filter nested reads** | `include: { payments: true }` will return soft-deleted children; top-level reads are filtered correctly | Filter in the `include`, or query the child model directly |
 | **No alert on unusual sign-in location** | The trail records the IP but nothing reads it | A daily job comparing each admin's addresses against their history |
@@ -298,3 +326,64 @@ await runWithAuditActor({ source: "script", allowUnscopedWrites: true }, async (
 
 If you find yourself reaching for this in a route handler, that is the guard
 doing its job. Narrow the filter instead.
+
+---
+
+## 10. Two-factor authentication
+
+Standard TOTP (RFC 6238) — Google Authenticator, Microsoft Authenticator, Authy,
+1Password, Bitwarden all work. No SMS, deliberately: SMS two-factor is defeated
+by SIM swap, and SIM swap is not exotic in Nigeria.
+
+### 10.1 Turn it on, in this order
+
+The order matters. Enforcing before enrolling locks every super admin out of the
+screen they enrol on.
+
+1. **Each super admin enrols** at `/admin/security` → *Two-factor
+   authentication* → **Set up**. Scan the QR, enter a code, **write down the ten
+   backup codes** — they are stored hashed and are never shown again.
+2. **Check everyone is on.** The card says *On for your account*; the sign-in
+   page should ask you for a code after your password.
+3. **Only then set `MFA_ENFORCED=true`** in the Vercel environment and redeploy.
+
+Until step 3, an account that ought to have two-factor but does not still signs
+in normally, with a warning on the security page. That is the intended state
+during rollout, not an oversight.
+
+### 10.2 Who it applies to
+
+Any admin holding `payments` or `security` — in practice the super admins, plus
+anyone individually granted the payment book. A secretary marking a register is
+not asked for a code. That is a judgement call about where the risk actually
+sits: making the whole office set up an authenticator app on day one is how a
+security control gets resented and then worked around.
+
+To widen it, edit `shouldRequireMfa()` in `src/lib/mfa.ts`.
+
+### 10.3 Environment variables
+
+| Variable | Required | What it does |
+|---|---|---|
+| `MFA_ENFORCED` | No | `true` turns away accounts that should have two-factor and do not. Leave unset until enrolment is finished. |
+| `MFA_ENCRYPTION_KEY` | Recommended | Encrypts the TOTP secrets at rest. Falls back to `NEXTAUTH_SECRET` if unset — which works, but then **rotating `NEXTAUTH_SECRET` invalidates every enrolment** and everybody must set up again. Set a separate value and you avoid that. |
+
+Generate one with:
+
+```bash
+openssl rand -base64 48
+```
+
+### 10.4 What it actually defends against
+
+The secrets are encrypted with AES-256-GCM before they are stored, so reading
+the database is not enough to mint codes — the key lives in the environment.
+Every code is single-use: the accepted time-step is recorded and anything at or
+below it is refused, so a code that was shoulder-surfed or captured by a
+phishing page is already spent. Clock drift is forgiven 30 seconds either way,
+which is one step in both directions.
+
+What it does **not** defend against: an attacker who is already inside a live
+session on an unlocked machine. Switching two-factor off asks for a current
+code for exactly that reason, but the session itself remains as good as the
+laptop it is sitting on.
