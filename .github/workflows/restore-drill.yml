@@ -1,0 +1,185 @@
+# =============================================================================
+# Proving the backups are real.
+#
+# A backup nobody has restored is a rumour. This is the step almost every team
+# skips, and skipping it is how organisations discover — on the worst day they
+# will have — that the dumps have been zero bytes since February, or that the
+# restic password in the password manager is the old one, or that pg_restore
+# refuses the file because of an extension nobody remembers enabling.
+#
+# So once a month this takes the newest snapshot, restores it into a throwaway
+# Postgres, counts every table, and compares those counts against the live
+# database. If the restore does not work, this fails loudly while there is
+# still a working system to fix it from — which is the only useful time to
+# find out.
+#
+# The scratch database is a service container, so the drill needs no second
+# database anywhere and cannot possibly write to production.
+# =============================================================================
+
+name: Restore drill
+
+on:
+  schedule:
+    # 03:00 UTC on the 3rd — a weekday-ish date, far from month-end reporting.
+    - cron: "0 3 3 * *"
+  workflow_dispatch:
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    services:
+      scratch:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: drill
+          POSTGRES_DB: drill
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
+      RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
+      SCRATCH_URL: postgresql://postgres:drill@localhost:5432/drill
+
+    steps:
+      - name: Install tooling
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc > /dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-17 restic
+
+      - name: Fetch the newest snapshot
+        id: fetch
+        run: |
+          set -euo pipefail
+          mkdir -p restored
+          restic restore latest --tag database --target restored
+          DUMP="$(find restored -name '*.dump' | head -1)"
+          if [ -z "$DUMP" ]; then
+            echo "No .dump file in the newest snapshot." >&2
+            exit 1
+          fi
+          echo "dump=${DUMP}" >> "$GITHUB_OUTPUT"
+          echo "snapshot_id=$(restic snapshots latest --tag database --json | grep -o '"short_id":"[^"]*"' | tail -1 | cut -d'"' -f4)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore it into the scratch database
+        run: |
+          set -euo pipefail
+          # --no-owner / --no-privileges because the roles Neon uses do not
+          # exist here, and a drill that fails on role names has told you
+          # nothing about whether the data survived.
+          pg_restore \
+            --dbname "$SCRATCH_URL" \
+            --no-owner \
+            --no-privileges \
+            --exit-on-error \
+            --jobs 4 \
+            "${{ steps.fetch.outputs.dump }}"
+
+      - name: Count every table, here and in production
+        id: counts
+        run: |
+          set -euo pipefail
+          cat > count.sql <<'SQL'
+          SELECT table_name,
+                 (xpath('/row/cnt/text()', xml_count))[1]::text::bigint AS rows
+          FROM (
+            SELECT table_name, table_schema,
+                   query_to_xml(format('SELECT count(*) AS cnt FROM %I.%I', table_schema, table_name),
+                                false, true, '') AS xml_count
+            FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+          ) counted
+          ORDER BY table_name;
+          SQL
+
+          psql "$SCRATCH_URL" -At -F',' -f count.sql > restored.csv
+          # Read-only against production: this is a COUNT, nothing else.
+          psql "${{ secrets.DIRECT_DATABASE_URL }}" -At -F',' -f count.sql > live.csv
+
+          wc -l restored.csv live.csv
+
+      - name: Compare
+        id: compare
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee compare.txt
+          import json, sys
+
+          def read(path):
+              out = {}
+              with open(path) as fh:
+                  for line in fh:
+                      line = line.strip()
+                      if not line or ',' not in line:
+                          continue
+                      name, count = line.rsplit(',', 1)
+                      out[name] = int(count)
+              return out
+
+          live = read('live.csv')
+          restored = read('restored.csv')
+          problems = []
+
+          missing = sorted(set(live) - set(restored))
+          if missing:
+              problems.append(f"tables absent from the restore: {', '.join(missing)}")
+
+          for table, live_rows in sorted(live.items()):
+              got = restored.get(table, 0)
+              # The dump is older than production, so fewer rows is expected.
+              # Losing more than a tenth of a populated table is not.
+              if live_rows > 10 and got < live_rows * 0.9:
+                  problems.append(f"{table}: {got} restored vs {live_rows} live")
+
+          for table in ('User', 'Student'):
+              if restored.get(table, 0) < 1:
+                  problems.append(f"{table} came back empty")
+
+          total = sum(restored.values())
+          print(f"restored {total} rows across {len(restored)} tables")
+
+          detail = {"tables": len(restored), "rows": total, "problems": problems}
+          with open('detail.json', 'w') as fh:
+              json.dump(detail, fh)
+
+          if problems:
+              print("DRILL FAILED:")
+              for p in problems:
+                  print(f"  - {p}")
+              sys.exit(1)
+          print("Drill passed: the newest backup restores to a complete database.")
+          PY
+
+      - name: Tell the app
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ "${{ job.status }}" = "success" ]; then
+            DETAIL="$(cat detail.json 2>/dev/null || echo '{}')"
+            PAYLOAD=$(printf '{"kind":"drill","status":"success","snapshotId":"%s","detail":%s}' \
+              "${{ steps.fetch.outputs.snapshot_id }}" "$DETAIL")
+          else
+            PAYLOAD=$(printf '{"kind":"drill","status":"failed","error":"Restore drill failed in run %s — the newest backup did NOT restore cleanly. See the Actions log."}' \
+              "${{ github.run_id }}")
+          fi
+
+          curl -fsS -X POST "${{ secrets.APP_BASE_URL }}/api/backup/report" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"

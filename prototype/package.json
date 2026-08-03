@@ -14,7 +14,8 @@
     "check:actions": "tsx --tsconfig tsconfig.json scripts/check-assistant-actions.ts",
     "bench:brain": "tsx --tsconfig tsconfig.json scripts/bench-local-brain.ts",
     "check:livekit": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/check-livekit.ts",
-    "test:retention": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/test-retention.ts"
+    "test:retention": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/test-retention.ts",
+    "check:guard": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/check-guard.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

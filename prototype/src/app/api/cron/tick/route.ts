@@ -99,6 +99,23 @@ export async function GET(request: NextRequest) {
     }),
   );
 
+  /**
+   * Ask, once a day, whether the backups are still happening.
+   *
+   * Deliberately runs here rather than as its own schedule. This tick is the
+   * one job the school will notice breaking, because the mail queue and the
+   * fee reminders ride on it — so if the health check ever stops running, the
+   * silence gets noticed for other reasons within a day. A lone cron watching
+   * the backups could itself fail silently, which would leave two things
+   * broken and nothing left to report either of them.
+   */
+  results.push(
+    await run("backup-health", async () => {
+      const { checkBackupHealth } = await import("@/lib/backup-health");
+      return checkBackupHealth();
+    }),
+  );
+
   const failed = results.filter((result) => !result.ok);
   return NextResponse.json(
     { ok: failed.length === 0, ran: results.length, results },

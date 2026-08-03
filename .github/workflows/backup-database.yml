@@ -1,0 +1,155 @@
+# =============================================================================
+# The nightly copy of the school.
+#
+# WHY THIS RUNS HERE AND NOT ON VERCEL
+#
+# The obvious place for this is a Vercel cron, next to every other scheduled
+# job in the app. It is the wrong place. A Vercel function is capped at 60
+# seconds on this plan and its response body at 4.5MB, and a pg_dump grows
+# with the school — so a backup written there works perfectly in testing, works
+# for the first year, and then starts failing silently somewhere around the
+# student intake that pushes it past the limit. The failure mode of a backup
+# is the one thing that must not be size-dependent.
+#
+# GitHub Actions is free for this, gets six hours, keeps its own secrets, and
+# above all lives in a different account from both Neon and Cloudflare. That
+# last point is the entire design: a backup that shares an account with the
+# thing it backs up dies in the same email compromise, the same declined card,
+# the same suspension.
+#
+# WHAT IT PRODUCES
+#
+# An encrypted, deduplicated restic snapshot in an S3-compatible bucket that
+# should be at a DIFFERENT VENDOR from Cloudflare R2 — Backblaze B2 is the
+# cheap default. restic encrypts client-side with RESTIC_PASSWORD, so the
+# storage provider holds ciphertext and nothing else. That is not paranoia:
+# these dumps contain passport scans, home addresses and payment records, and
+# a leaked bucket key must not be the same event as a leaked student database.
+# =============================================================================
+
+name: Backup database
+
+on:
+  schedule:
+    # 01:30 UTC — 02:30 in Lagos, the quietest hour for a Nigerian school.
+    - cron: "30 1 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # Two dumps at once would both succeed and waste a Neon compute hour racing.
+  group: backup-database
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
+      RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
+
+    steps:
+      - name: Install pg_dump and restic
+        run: |
+          set -euo pipefail
+          # PGDG rather than Ubuntu's default, because pg_dump refuses to dump
+          # a server newer than itself and Neon upgrades its Postgres without
+          # asking. Pinning to the newest client avoids a backup that stops
+          # working on a morning nobody touched this file.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc > /dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-17 restic
+          pg_dump --version
+          restic version
+
+      - name: Initialise the repository if this is the first run
+        run: |
+          set -euo pipefail
+          restic snapshots > /dev/null 2>&1 || restic init
+
+      - name: Dump and store
+        id: dump
+        run: |
+          set -euo pipefail
+
+          # The DIRECT string, not the pooled one. A pooler in transaction mode
+          # cannot hold the consistent snapshot a dump needs, and the failure is
+          # not an error — it is a dump that silently disagrees with itself
+          # across tables, which is worse than no dump at all.
+          STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+
+          pg_dump \
+            --format=custom \
+            --compress=9 \
+            --no-owner \
+            --no-privileges \
+            --file="easyway-${STAMP}.dump" \
+            "${{ secrets.DIRECT_DATABASE_URL }}"
+
+          SIZE="$(stat -c%s "easyway-${STAMP}.dump")"
+          echo "size_bytes=${SIZE}" >> "$GITHUB_OUTPUT"
+
+          # A dump under a megabyte means something went wrong in a way pg_dump
+          # did not consider an error — an empty schema, a permissions problem,
+          # a connection string pointing somewhere unexpected. Better to fail
+          # loudly now than to discover it during a restore.
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "Dump is only ${SIZE} bytes — refusing to treat this as a good backup." >&2
+            exit 1
+          fi
+
+          restic backup \
+            --tag database \
+            --tag "easyway" \
+            --host easyway-lms \
+            "easyway-${STAMP}.dump" \
+            --json | tee restic-out.json
+
+          SNAPSHOT="$(grep -o '"snapshot_id":"[^"]*"' restic-out.json | tail -1 | cut -d'"' -f4)"
+          echo "snapshot_id=${SNAPSHOT}" >> "$GITHUB_OUTPUT"
+
+      - name: Age out old snapshots
+        run: |
+          set -euo pipefail
+          # Fourteen dailies covers "we noticed within a fortnight", which is
+          # the realistic detection time for a quiet data problem. The monthlies
+          # exist for the other kind of question — what did this student's
+          # record say in March — which is the one auditors and disputes ask.
+          restic forget \
+            --tag database \
+            --keep-daily 14 \
+            --keep-weekly 8 \
+            --keep-monthly 12 \
+            --prune
+
+      - name: Verify the repository
+        run: |
+          set -euo pipefail
+          # Reads 5% of the actual data rather than just the metadata. A repo
+          # that lists snapshots happily can still hold corrupt packs, and the
+          # moment to find that out is not during a restore.
+          restic check --read-data-subset=5%
+
+      - name: Tell the app
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ "${{ job.status }}" = "success" ]; then
+            PAYLOAD=$(printf '{"kind":"database","status":"success","snapshotId":"%s","sizeBytes":%s}' \
+              "${{ steps.dump.outputs.snapshot_id }}" "${{ steps.dump.outputs.size_bytes }}")
+          else
+            PAYLOAD=$(printf '{"kind":"database","status":"failed","error":"Workflow run %s failed — see the Actions log."}' \
+              "${{ github.run_id }}")
+          fi
+
+          curl -fsS -X POST "${{ secrets.APP_BASE_URL }}/api/backup/report" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"

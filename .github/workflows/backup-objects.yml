@@ -1,0 +1,116 @@
+# =============================================================================
+# The nightly copy of the files.
+#
+# The database holds who a student is; the bucket holds their passport scan,
+# their photograph, every course material the school has written and every
+# recorded lesson. Restoring Postgres without this leaves a working portal full
+# of broken links, which is its own kind of disaster.
+#
+# THE ONE THING TO UNDERSTAND HERE: --backup-dir
+#
+# The instinct is `rclone sync`, which makes the destination match the source.
+# That is precisely wrong for a backup. Sync faithfully reproduces deletions —
+# so the night after somebody wipes the materials folder, the mirror wipes it
+# too, and both copies are gone. It is a replica, not a backup, and the
+# difference only becomes visible on the day it matters.
+#
+# `--backup-dir` fixes that. Anything the sync would delete or overwrite is
+# moved into a dated archive folder instead of being destroyed, so the mirror
+# always holds the current state *and* everything that used to be there.
+# =============================================================================
+
+name: Backup files
+
+on:
+  schedule:
+    # An hour after the database dump, so a restore pairs a database and a set
+    # of files that are close in time rather than a day apart.
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: backup-objects
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      # Source: Cloudflare R2, where the app writes.
+      RCLONE_CONFIG_SRC_TYPE: s3
+      RCLONE_CONFIG_SRC_PROVIDER: Cloudflare
+      RCLONE_CONFIG_SRC_ENDPOINT: ${{ secrets.STORAGE_S3_ENDPOINT }}
+      RCLONE_CONFIG_SRC_ACCESS_KEY_ID: ${{ secrets.STORAGE_S3_ACCESS_KEY }}
+      RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY: ${{ secrets.STORAGE_S3_SECRET }}
+      RCLONE_CONFIG_SRC_REGION: auto
+      # R2 bills per operation, and rclone's default checksum probing is
+      # chatty. This keeps the nightly run to a list plus the changed objects.
+      RCLONE_CONFIG_SRC_NO_CHECK_BUCKET: "true"
+
+      # Destination: a different vendor. Backblaze B2 speaks S3 and is the
+      # cheap default; anything S3-compatible works as long as it is NOT
+      # another Cloudflare account.
+      RCLONE_CONFIG_DST_TYPE: s3
+      RCLONE_CONFIG_DST_PROVIDER: ${{ secrets.BACKUP_S3_PROVIDER }}
+      RCLONE_CONFIG_DST_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+      RCLONE_CONFIG_DST_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
+      RCLONE_CONFIG_DST_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
+      RCLONE_CONFIG_DST_REGION: ${{ secrets.BACKUP_S3_REGION }}
+
+    steps:
+      - name: Install rclone
+        run: |
+          set -euo pipefail
+          sudo -v
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          rclone version
+
+      - name: Mirror, preserving anything removed
+        id: mirror
+        run: |
+          set -euo pipefail
+          STAMP="$(date -u +%Y-%m-%d)"
+
+          rclone sync \
+            "SRC:${{ secrets.STORAGE_S3_BUCKET }}" \
+            "DST:${{ secrets.BACKUP_OBJECTS_BUCKET }}/current" \
+            --backup-dir "DST:${{ secrets.BACKUP_OBJECTS_BUCKET }}/archive/${STAMP}" \
+            --transfers 8 \
+            --checkers 16 \
+            --fast-list \
+            --stats-one-line \
+            --stats 30s \
+            --log-level INFO \
+            --json-log 2> mirror.log || { cat mirror.log; exit 1; }
+
+          BYTES="$(rclone size "DST:${{ secrets.BACKUP_OBJECTS_BUCKET }}/current" --json | grep -o '"bytes":[0-9]*' | cut -d: -f2)"
+          COUNT="$(rclone size "DST:${{ secrets.BACKUP_OBJECTS_BUCKET }}/current" --json | grep -o '"count":[0-9]*' | cut -d: -f2)"
+          echo "bytes=${BYTES}" >> "$GITHUB_OUTPUT"
+          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
+
+          # An empty mirror means the source credentials or bucket name are
+          # wrong, not that the school has no files. Failing here is the only
+          # way that gets noticed before it is needed.
+          if [ "${COUNT:-0}" -lt 1 ]; then
+            echo "Mirror contains no objects — refusing to report this as a good backup." >&2
+            exit 1
+          fi
+
+      - name: Tell the app
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ "${{ job.status }}" = "success" ]; then
+            PAYLOAD=$(printf '{"kind":"objects","status":"success","sizeBytes":%s,"detail":{"objects":%s}}' \
+              "${{ steps.mirror.outputs.bytes }}" "${{ steps.mirror.outputs.count }}")
+          else
+            PAYLOAD=$(printf '{"kind":"objects","status":"failed","error":"Workflow run %s failed — see the Actions log."}' \
+              "${{ github.run_id }}")
+          fi
+
+          curl -fsS -X POST "${{ secrets.APP_BASE_URL }}/api/backup/report" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"

@@ -34,6 +34,7 @@ export const CAPABILITIES = [
   "branches",
   "staff",        // inviting lecturers, assigning admin roles
   "integrations",
+  "security",     // the audit trail, restoring deleted records, backup health
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -67,7 +68,16 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
  * Capabilities no preset may carry, however the presets are edited later.
  * Reaching one takes a deliberate per-person grant from a super admin.
  */
-export const SUPER_ONLY_CAPABILITIES: Capability[] = ["payments"];
+/**
+ * `security` sits beside `payments` here for a different reason.
+ *
+ * The audit trail is how you find out what an admin did, and the restore
+ * screen can put back a record somebody deleted on purpose. Both are ordinary
+ * tools right up until the person being investigated is the one holding them.
+ * It stays with whoever runs the school, and is granted one person at a time
+ * or not at all.
+ */
+export const SUPER_ONLY_CAPABILITIES: Capability[] = ["payments", "security"];
 
 /** An admin with no sub-role set is treated as super — nobody loses access. */
 export function normalizeAdminRole(value: unknown): AdminRole {
@@ -166,6 +176,41 @@ export async function requireCapability(
   const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
   const admin = await resolveAdmin(session?.user?.id);
 
+  /**
+   * Name the actor for everything this request goes on to write.
+   *
+   * This gate is the single door every admin route already passes through, so
+   * attaching identity here means the audit trail covers routes nobody
+   * remembered to instrument — including the ones written after this. Set
+   * before the capability check rather than after, so that a refused attempt
+   * is still attributable: somebody probing endpoints they cannot reach is
+   * exactly the pattern worth having on record.
+   */
+  if (admin) {
+    const { setAuditActor, actorFromRequest } = await import("@/lib/audit-context");
+    const { headers } = await import("next/headers");
+    let request: {
+      ip?: string;
+      userAgent?: string;
+      route?: string;
+      requestId?: string;
+    } = {};
+    try {
+      const headerList = await headers();
+      request = actorFromRequest({ headers: headerList });
+    } catch {
+      // Called outside a request scope (a script, a build-time render). The
+      // actor is still worth recording without the network details.
+    }
+    setAuditActor({
+      userId: admin.userId,
+      email: admin.email,
+      role: `admin:${admin.adminRole}`,
+      source: "app",
+      ...request,
+    });
+  }
+
   if (!admin) {
     return {
       ok: false,
@@ -188,6 +233,8 @@ export async function requireCapability(
 
 export type AdminContext = {
   userId: string;
+  /** Copied into every audit entry, so the trail survives the account. */
+  email: string;
   adminRole: AdminRole;
   /** What this person can actually reach: preset plus their own overrides. */
   capabilities: Capability[];
@@ -203,7 +250,7 @@ export async function resolveAdmin(userId: string | undefined): Promise<AdminCon
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, adminRole: true, adminCapabilities: true },
+    select: { id: true, email: true, role: true, adminRole: true, adminCapabilities: true },
   });
 
   if (!user || String(user.role).toLowerCase() !== "admin") return null;
@@ -212,6 +259,7 @@ export async function resolveAdmin(userId: string | undefined): Promise<AdminCon
   const capabilities = capabilitiesForUser(adminRole, user.adminCapabilities);
   return {
     userId: user.id,
+    email: user.email,
     adminRole,
     capabilities,
     can: (capability: Capability) => capabilities.includes(capability),

@@ -96,6 +96,7 @@ const CAPABILITY_LABELS: Record<Capability, string> = {
   branches: "Branches",
   staff: "Staff - invite tutors, set admin roles",
   integrations: "Integrations",
+  security: "Security & recovery - the activity trail, restoring deleted records (super admin)",
 };
 
 export async function PATCH(req: NextRequest) {

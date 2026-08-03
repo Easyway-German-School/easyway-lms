@@ -30,6 +30,7 @@ import {
   RosterIcon,
   SendIcon,
   ShieldIcon,
+  KeyIcon,
   TrendingUpIcon,
   UserPlusIcon,
   UsersIcon,
@@ -78,6 +79,7 @@ const navItems: NavItem[] = [
   { label: 'Compose email', href: '/admin/emails/compose', capability: 'emails' as const, icon: <SendIcon />, group: 'Settings' },
   { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <BellIcon />, group: 'Settings' },
   { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <ShieldIcon />, group: 'Settings' },
+  { label: 'Security & recovery', href: '/admin/security', capability: 'security' as const, icon: <KeyIcon />, group: 'Settings' },
   { label: 'Integrations', href: '/admin/integrations', capability: 'integrations' as const, icon: <IntegrationIcon />, group: 'Settings' },
   // Matches the capability its API now requires. A nav entry that leads
   // somewhere its own endpoint refuses is worse than no nav entry.

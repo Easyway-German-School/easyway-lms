@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
+import { assertDevOnly } from "@/lib/dev-only";
 
 export async function GET() {
+  const blocked = assertDevOnly();
+  if (blocked) return blocked;
+
   try {
     // Test if admin account exists
     const admin = await prisma.user.findUnique({

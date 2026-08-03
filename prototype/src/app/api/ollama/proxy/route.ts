@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
+import { requireAiUser } from "@/lib/ai-guard";
 
 export async function POST(req: Request) {
+  /**
+   * Behind the same gate as every other model route.
+   *
+   * Without it this forwards any prompt from any stranger to a hosted model
+   * using the school's key. There is no data to steal through it, which is
+   * why it reads as harmless — the loss is the bill, and an open relay to a
+   * paid model is something people actively scan for. It happens to be inert
+   * today because OLLAMA_API_URL is unset, and that is luck rather than
+   * design: setting that variable one afternoon would arm it silently.
+   */
+  const gate = await requireAiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const body = await req.json().catch(() => null);
     if (!body || !body.prompt) {

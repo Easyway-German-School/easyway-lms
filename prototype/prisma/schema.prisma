@@ -7,11 +7,9 @@ generator client {
 
 /**
  * Postgres, because the app is deployed to Vercel and SQLite is a file.
- *
  * A serverless function gets a read-only filesystem and a fresh container, so
  * a file-backed database is not slow there — it is absent. Every write would
  * fail, and the ones that appeared to succeed would vanish with the container.
- *
  * `url` is the POOLED connection string and `directUrl` the direct one. That
  * split is not decoration: each invocation opens its own connection, and a few
  * hundred concurrent students would exhaust a Postgres server's connection
@@ -70,6 +68,15 @@ model User {
   sentNotifications Notification[]     @relation("NotificationSender")
   proposedActions   AdminAction[]      @relation("AdminActionCreator")
   executedActions   AdminAction[]      @relation("AdminActionExecutor")
+  auditEvents       AuditLog[]         @relation("AuditActor")
+  auditRestores     AuditLog[]         @relation("AuditRestorer")
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt         DateTime?
 }
 
 model Session {
@@ -110,14 +117,12 @@ model Student {
   classType     String @default("group")
   /**
    * physical | hybrid | online — how this student attends.
-   *
-   *   physical  campus only. No live-class tab: there is no video lesson to
-   *             join, and showing them one they can never use is the fastest
-   *             way to make the portal look broken.
-   *   hybrid    registered at a campus but may join that same branch's class
-   *             over video. Gets both the campus features and the live room.
-   *   online    the Online branch. Video only, no campus.
-   *
+   * physical  campus only. No live-class tab: there is no video lesson to
+   * join, and showing them one they can never use is the fastest
+   * way to make the portal look broken.
+   * hybrid    registered at a campus but may join that same branch's class
+   * over video. Gets both the campus features and the live room.
+   * online    the Online branch. Video only, no campus.
    * Defaulted to physical so every student who registered before this existed
    * keeps the portal they already had.
    */
@@ -154,7 +159,6 @@ model Student {
 
   /**
    * The day this student actually walked into their first class.
-   *
    * THE COUNTDOWN RUNS FROM HERE, not from the batch month. A student who paid
    * in August but only started on 12 September has a level that ends in
    * November, and a portal that told them otherwise would be wrong on the one
@@ -163,7 +167,9 @@ model Student {
    */
   classesStartedAt DateTime?
 
-  /** When they pressed the button. Separate from the date they reported. */
+  /**
+   * When they pressed the button. Separate from the date they reported.
+   */
   startConfirmedAt DateTime?
 
   /**
@@ -172,7 +178,9 @@ model Student {
    */
   startConfirmedVia String?
 
-  /** "Not yet" pushes the daily prompt to tomorrow rather than killing it. */
+  /**
+   * "Not yet" pushes the daily prompt to tomorrow rather than killing it.
+   */
   startPromptSnoozedUntil DateTime?
 
   /**
@@ -199,14 +207,14 @@ model Student {
    */
   journeyStages Json?
 
-  /** Last time the once-a-day journey moment was shown. Per account, not per device. */
+  /**
+   * Last time the once-a-day journey moment was shown. Per account, not per device.
+   */
   journeySeenAt DateTime?
 
   /**
    * How often the student wants the road to open by itself.
-   *
    * "daily" (the default), "less" — every third day — or "never".
-   *
    * WHY THERE IS A MIDDLE OPTION. A popup with only "show me" and "never
    * again" is a popup most people turn off the first time it lands at a bad
    * moment, and then the best thing in the portal is gone forever over one
@@ -221,7 +229,6 @@ model Student {
   /**
    * WHY they are learning German — one of the eight roads in
    * src/lib/germany-goals.ts ("study", "ausbildung", "care", "family", …).
-   *
    * The whole destination half of the map is generated from this: a nurse's
    * road ends in Anerkennung and a first shift, a student's in a blocked
    * account and a first lecture. Null means nobody has asked them yet, which
@@ -230,7 +237,9 @@ model Student {
    * not get asked again.
    */
   germanyGoal      String?
-  /** Their own words, when they chose "Something else". Read by the branch. */
+  /**
+   * Their own words, when they chose "Something else". Read by the branch.
+   */
   germanyGoalNote  String?
   germanyGoalSetAt DateTime?
 
@@ -257,17 +266,22 @@ model Student {
   videoProgress         VideoProgress[]
   convertedFromLead     Lead?
   journeyEvents         JourneyEvent[]
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt             DateTime?
 }
 
 /**
  * One line in a student's story.
- *
  * Every milestone they reach, every "not yet", every level the office closes.
  * It exists for two readers: the student, whose map shows their own history
  * back to them ("12 August — you walked into your first class"), and the
  * office, which can see that a whole batch has confirmed starting except four
  * people worth ringing.
- *
  * Append-only by convention. Nothing here is the source of truth for state —
  * the Student columns are — so a lost row costs a line of narrative, never a
  * countdown.
@@ -283,17 +297,25 @@ model JourneyEvent {
    */
   type String
 
-  /** The stage this concerns, e.g. "firstDay", "A1", "visa". */
+  /**
+   * The stage this concerns, e.g. "firstDay", "A1", "visa".
+   */
   stage String?
 
-  /** One line, written for the student to read. */
+  /**
+   * One line, written for the student to read.
+   */
   label  String
   detail String?
 
-  /** student | attendance | admin | system — who caused it. */
+  /**
+   * student | attendance | admin | system — who caused it.
+   */
   source String @default("student")
 
-  /** When it happened in the real world, which is not always when it was recorded. */
+  /**
+   * When it happened in the real world, which is not always when it was recorded.
+   */
   occurredAt DateTime @default(now())
   createdAt  DateTime @default(now())
 
@@ -327,6 +349,13 @@ model Branch {
   lecturers     Lecturer[]
   leads         Lead[]
   recordings    ClassRecording[]
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt     DateTime?
 }
 
 model ExamRegistration {
@@ -393,6 +422,13 @@ model Pathway {
 
   courses     Course[]
   enrollments Enrollment[]
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt   DateTime?
 }
 
 model Course {
@@ -420,6 +456,14 @@ model Course {
   materials Material[]
   classes   Class[]
   exams     Exam[]
+
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt DateTime?
 
   @@unique([source, externalId])
 }
@@ -520,19 +564,24 @@ model Material {
   privateClasses PrivateClass[]
   videoProgress  VideoProgress[]
   recording      ClassRecording?
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt      DateTime?
 
   @@index([kind, level])
 }
 
 /**
  * One captured live class.
- *
  * This row exists because the file does not arrive when the class ends — the
  * egress service finishes encoding and uploading a few minutes later, and tells
  * us over a webhook. Something has to remember which room that job belonged to
  * in the meantime, and has to be there for the reconciler to find if the
  * webhook never arrives (it cannot reach a laptop, for one).
- *
  * It is also the audit trail for a class that failed to record, which is worth
  * more than it sounds: "was Tuesday recorded?" should be answerable without
  * reading logs.
@@ -540,17 +589,23 @@ model Material {
 model ClassRecording {
   id String @id @default(cuid())
 
-  /** LiveKit's id for the capture job. The join key for webhooks. */
+  /**
+   * LiveKit's id for the capture job. The join key for webhooks.
+   */
   egressId String @unique
   roomName String
 
-  /** Denormalised so a recording is filable even if the cohort later changes. */
+  /**
+   * Denormalised so a recording is filable even if the cohort later changes.
+   */
   branchId    String?
   branch      Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
   level       String?
   sessionSlot String?
 
-  /** Which tutor's join started it, for the audit trail. */
+  /**
+   * Which tutor's join started it, for the audit trail.
+   */
   startedByUserId String?
 
   /**
@@ -575,13 +630,17 @@ model ClassRecording {
    */
   keepForever Boolean @default(false)
 
-  /** When retention reclaimed the file. Null while the video still exists. */
+  /**
+   * When retention reclaimed the file. Null while the video still exists.
+   */
   purgedAt DateTime?
 
   startedAt DateTime  @default(now())
   endedAt   DateTime?
 
-  /** Where it landed in the bucket, and what the player should request. */
+  /**
+   * Where it landed in the bucket, and what the player should request.
+   */
   objectKey String?
   fileUrl   String?
 
@@ -589,9 +648,18 @@ model ClassRecording {
   sizeBytes       Int?
   error           String?
 
-  /** The library row, created once the file is safely uploaded. */
+  /**
+   * The library row, created once the file is safely uploaded.
+   */
   materialId String?   @unique
   material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt  DateTime?
 
   @@index([status, startedAt])
   @@index([roomName, status])
@@ -838,6 +906,13 @@ model Invoice {
   payments    Payment[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt   DateTime?
 }
 
 model Payment {
@@ -856,6 +931,14 @@ model Payment {
   welcomeEmailSentAt DateTime? // tracks when welcome email was sent
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
+
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt DateTime?
 }
 
 model EmailLog {
@@ -942,7 +1025,6 @@ model Lecturer {
    * The full assignment, set by an ADMIN and only by an admin. One tutor can
    * teach at several branches, several levels, several sittings and several
    * batches, so each of these is a list rather than a column.
-   *
    * Stored as JSON string arrays rather than join tables: they are always read
    * as a whole, never queried across rows, and every one of them is a short
    * closed vocabulary. Null means "never assigned" and falls back to the three
@@ -965,6 +1047,13 @@ model Lecturer {
   classSessions  ClassSession[]
   assignments    Assignment[]
   privateClasses PrivateClass[]
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt      DateTime?
 }
 
 model Class {
@@ -984,6 +1073,14 @@ model Class {
 
   enrollments Enrollment[]
   attendance  Attendance[]
+
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt DateTime?
 }
 
 model Exam {
@@ -1511,12 +1608,10 @@ model Certificate {
   /**
    * The course dates the certificate states: when this student started the
    * level and when they finished it.
-   *
    * Snapshots like everything else here. Derived from the batch month and the
    * session length at issue rather than read back later, because a student who
    * repeats a level or moves batch would otherwise change the dates printed on
    * a document already in somebody's hand.
-   *
    * Nullable for certificates issued before this existed; the document simply
    * omits the line rather than printing a guess.
    */
@@ -1535,6 +1630,13 @@ model Certificate {
   revokedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt DateTime?
 
   // One certificate per student per level. Re-running the issuer is safe.
   @@unique([studentId, level])
@@ -1543,19 +1645,16 @@ model Certificate {
 
 /**
  * Something the assistant proposed, and what happened to it.
- *
  * THE MODEL DOES NOT WRITE TO THE DATABASE. It writes a ROW HERE, describing
  * what it would do, and that row is inert until a named human presses Confirm.
  * Executing is a second, separate request that carries only this row's id — so
  * the thing that runs is the thing that was reviewed, not a re-derivation of it
  * from a conversation that has since moved on.
- *
  * That split is the whole safety story. A model that misreads "not paid" as
  * "not fully paid" produces a plan that says, in the admin's own screen, "this
  * will message 214 students" — and 214 is visibly wrong where "I have messaged
  * the unpaid students" is not. The preview is the review surface, and the
  * frozen payload is what makes the preview binding.
- *
  * It doubles as the audit log, which is not a coincidence: the record of what
  * was proposed, by whom, on whose account, and whether it ran, is the same
  * record either way. Rows are never deleted — a cancelled plan is evidence too.
@@ -1576,7 +1675,9 @@ model AdminAction {
    */
   capability String
 
-  /** One line, as shown on the confirm card. */
+  /**
+   * One line, as shown on the confirm card.
+   */
   summary String
   /**
    * The frozen arguments, exactly as validated when the plan was made. This is
@@ -1589,13 +1690,19 @@ model AdminAction {
    */
   preview Json?
 
-  /** How many records this would touch, for the list view. */
+  /**
+   * How many records this would touch, for the list view.
+   */
   affectedCount Int @default(0)
 
-  /** pending | executed | cancelled | expired | failed */
+  /**
+   * pending | executed | cancelled | expired | failed
+   */
   status String @default("pending")
 
-  /** The admin whose question produced it. */
+  /**
+   * The admin whose question produced it.
+   */
   createdById String
   createdBy   User   @relation("AdminActionCreator", fields: [createdById], references: [id], onDelete: Cascade)
 
@@ -1607,7 +1714,9 @@ model AdminAction {
   executedById String?
   executedBy   User?   @relation("AdminActionExecutor", fields: [executedById], references: [id], onDelete: SetNull)
 
-  /** What running it actually did — delivered counts, ids touched, errors. */
+  /**
+   * What running it actually did — delivered counts, ids touched, errors.
+   */
   result Json?
   error  String?
 
@@ -1623,4 +1732,150 @@ model AdminAction {
 
   @@index([createdById, status])
   @@index([createdAt])
+}
+
+/**
+ * The append-only record of who changed what.
+ * This table is the undo button. A backup restores the whole school to a
+ * moment in time, which is the wrong instrument for the failure that actually
+ * happens: one person removes one thing by mistake and nobody notices for
+ * three days. Rolling back to Tuesday to recover one student would discard
+ * every payment, mark and message from Wednesday and Thursday. So the before
+ * image of each destructive write is kept here, and a single row can be put
+ * back without touching anything else.
+ * Nothing in the application updates or deletes a row in this table. The guard
+ * in src/lib/prisma-guard.ts refuses both, so a compromised admin account can
+ * cause damage but cannot erase the evidence of having caused it.
+ */
+model AuditLog {
+  id String @id @default(cuid())
+
+  /**
+   * create | update | delete | deleteMany | updateMany | restore |
+   * login | loginFailed | export | permissionChange | secretAccess
+   */
+  action String
+
+  /**
+   * The Prisma model, e.g. "Student". Null for events with no table.
+   */
+  model    String?
+  /**
+   * The row, when the event concerns exactly one.
+   */
+  recordId String?
+
+  /**
+   * The row exactly as it stood before the write, as JSON.
+   * This is what makes restore possible, and it is also why this table is
+   * treated as confidential: a before image of a Student carries the same
+   * personal data the row itself did. The retention job in the recovery
+   * runbook prunes it on the same clock as the rest of the student record.
+   */
+  before Json?
+  /**
+   * The row after the write, for updates. Null on deletes.
+   */
+  after  Json?
+
+  /**
+   * How many rows the statement touched. Above one this was a bulk write and
+   * `before` holds an array rather than a single row.
+   */
+  affectedCount Int @default(1)
+
+  /**
+   * One line in plain German-school English, for the trail's list view.
+   */
+  summary String?
+
+  /**
+   * Who did it. SetNull rather than Cascade — deleting a staff account must
+   * never take that person's history with it, which is the exact record you
+   * want most when an account is being removed under suspicion.
+   */
+  actorId    String?
+  actor      User?   @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  /**
+   * The actor's email and role copied in at write time. Denormalised on
+   * purpose: it survives the account being deleted, renamed, or demoted, and
+   * an audit trail that reads "(deleted user)" is not a trail.
+   */
+  actorEmail String?
+  actorRole  String?
+
+  /**
+   * Where it came from: app | script | cron | assistant | seed.
+   */
+  source String @default("app")
+
+  /**
+   * Request context. The IP is stored because a sign-in from an unexpected
+   * country is the earliest visible sign of a stolen password, and there is
+   * nowhere else in this system that would notice.
+   */
+  ip        String?
+  userAgent String?
+  route     String?
+  requestId String?
+
+  /**
+   * info | notice | alert — alert is what the admin dashboard surfaces.
+   */
+  severity String @default("info")
+
+  /**
+   * False once put back, so the trail cannot be replayed twice.
+   */
+  restorable   Boolean   @default(false)
+  restoredAt   DateTime?
+  restoredById String?
+  restoredBy   User?     @relation("AuditRestorer", fields: [restoredById], references: [id], onDelete: SetNull)
+
+  at DateTime @default(now())
+
+  @@index([at])
+  @@index([model, recordId])
+  @@index([actorId, at])
+  @@index([action, at])
+  @@index([severity, at])
+  @@index([restorable, at])
+}
+
+/**
+ * One row per backup attempt, written by the GitHub Actions jobs.
+ * The point is not the record, it is the absence of one. A backup that has
+ * quietly failed for six weeks looks exactly like a backup that is working,
+ * right up until the morning it is needed. The daily cron checks this table
+ * and raises an admin alert when the newest success is older than 26 hours,
+ * so silence becomes noisy.
+ */
+model BackupRun {
+  id String @id @default(cuid())
+
+  /**
+   * database | objects | drill
+   */
+  kind   String
+  /**
+   * running | success | failed
+   */
+  status String @default("running")
+
+  /**
+   * The restic snapshot id, so the runbook can name what to restore.
+   */
+  snapshotId String?
+  sizeBytes  BigInt?
+  /**
+   * Row counts per model on a drill, transfer stats on a mirror.
+   */
+  detail     Json?
+  error      String?
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([kind, status, startedAt])
+  @@index([startedAt])
 }

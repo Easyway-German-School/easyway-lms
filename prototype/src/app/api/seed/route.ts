@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
+import { assertDevOnly } from "@/lib/dev-only";
 
 const courseStructure: Record<string, Array<{
   title: string;
@@ -81,6 +82,21 @@ const courseStructure: Record<string, Array<{
 };
 
 export async function GET() {
+  /**
+   * Closed in production, and not a moment too soon.
+   *
+   * This handler upserts admin@easyway.test with a password written in the
+   * source below. Deployed as it was, an unauthenticated GET — reachable by
+   * anyone who guessed the path, and by any crawler that found it — would
+   * create or reset an administrator account whose password is public. That
+   * is a complete takeover of the school's records through a URL.
+   *
+   * Note also that the demo admin it creates should not exist on a live
+   * system at all; docs/SECURITY.md lists removing it in the go-live checks.
+   */
+  const blocked = assertDevOnly();
+  if (blocked) return blocked;
+
   try {
     let seeded = 0;
 
