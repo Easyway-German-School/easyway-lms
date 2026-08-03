@@ -233,7 +233,7 @@ export async function GET() {
         for (let moduleIdx = 0; moduleIdx < courseData.modules.length; moduleIdx++) {
           const moduleData = courseData.modules[moduleIdx];
 
-          const module = await prisma.module.create({
+          const created = await prisma.module.create({
             data: {
               courseId: course.id,
               title: moduleData.title,
@@ -247,7 +247,7 @@ export async function GET() {
 
             await prisma.lesson.create({
               data: {
-                moduleId: module.id,
+                moduleId: created.id,
                 title: lessonData.title,
                 description: lessonData.title,
                 content: lessonData.content,

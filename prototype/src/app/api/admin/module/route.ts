@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
   if (!courseId || !title) return NextResponse.json({ error: "courseId and title required" }, { status: 400 });
 
   try {
-    const module = await prisma.module.create({
+    const created = await prisma.module.create({
       data: {
         courseId,
         title,
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
         order: order || 1,
       }
     });
-    return NextResponse.json({ module }, { status: 201 });
+    return NextResponse.json({ module: created }, { status: 201 });
   } catch (error) {
     console.error("Create module error:", error);
     return NextResponse.json({ error: "Failed to create module" }, { status: 500 });

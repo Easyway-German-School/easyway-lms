@@ -117,13 +117,13 @@ export async function POST(request: NextRequest) {
 
         const moduleKey = `${courseId}:${moduleTitle}`;
         let moduleId = createdModules.get(moduleKey);
-        let module;
+        let found;
         if (!moduleId) {
-          module = await prisma.module.findFirst({
+          found = await prisma.module.findFirst({
             where: { courseId, title: moduleTitle }
           });
-          if (!module) {
-            module = await prisma.module.create({
+          if (!found) {
+            found = await prisma.module.create({
               data: {
                 courseId,
                 title: moduleTitle,
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
             });
             moduleCount += 1;
           }
-          moduleId = module.id;
+          moduleId = found.id;
           createdModules.set(moduleKey, moduleId);
         }
 

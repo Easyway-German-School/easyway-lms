@@ -227,15 +227,15 @@ export default function LessonBuilderPage() {
       }
 
       for (let index = 0; index < lessonPackage.modules.length; index++) {
-        const module = lessonPackage.modules[index];
-        const moduleJson = await createModule(targetCourseId, module, index + 1);
+        const moduleItem = lessonPackage.modules[index];
+        const moduleJson = await createModule(targetCourseId, moduleItem, index + 1);
         if (!moduleJson.module || !moduleJson.module.id) {
           throw new Error(moduleJson.error || "Module creation failed.");
         }
         const moduleId = moduleJson.module.id;
 
-        for (let lessonIndex = 0; lessonIndex < module.lessons.length; lessonIndex++) {
-          const lesson = module.lessons[lessonIndex];
+        for (let lessonIndex = 0; lessonIndex < moduleItem.lessons.length; lessonIndex++) {
+          const lesson = moduleItem.lessons[lessonIndex];
           const lessonJson = await createLesson(moduleId, lesson, lessonIndex + 1);
           if (!lessonJson.lesson || !lessonJson.lesson.id) {
             throw new Error(lessonJson.error || "Lesson creation failed.");
@@ -324,7 +324,7 @@ export default function LessonBuilderPage() {
           <div className="rounded-3xl bg-[var(--surface)] p-8 shadow-[var(--shadow)] border-2 border-[var(--accent)]/50 space-y-6">
             <div>
               <h2 className="mb-2 flex items-center gap-2 text-2xl font-bold text-[var(--foreground)]"><CheckCircleIcon className="h-6 w-6 text-emerald-600" />Content Extracted Successfully</h2>
-              <p className="text-[var(--muted)]">Review the parsed information below. Click "Use This Content" to generate a full lesson package.</p>
+              <p className="text-[var(--muted)]">Review the parsed information below. Click &quot;Use This Content&quot; to generate a full lesson package.</p>
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">

@@ -162,7 +162,7 @@ async function ensureSeedCourses(pathwayName: string) {
       },
     });
 
-    const module = await prisma.module.create({
+    const created = await prisma.module.create({
       data: {
         courseId: createdCourse.id,
         title: "Core learning path",

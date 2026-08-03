@@ -119,8 +119,8 @@ export async function POST(request: NextRequest) {
     const flattenLessons = (courses: any[] = []) => {
       const lessons: any[] = [];
       for (const course of courses) {
-        for (const module of course.modules || []) {
-          for (const lesson of module.lessons || []) {
+        for (const courseModule of course.modules || []) {
+          for (const lesson of courseModule.lessons || []) {
             lessons.push({ id: lesson.id, title: lesson.title, description: lesson.description, order: lesson.order, duration: lesson.duration, type: lesson.type, level: course.level, courseId: course.id, summary: lesson.content?.slice(0, 800) });
           }
         }

@@ -39,7 +39,7 @@ export default function GermanyJourney({ overallProgress, steps }: GermanyJourne
       </div>
 
       <div className="mt-6 rounded-[24px] border border-slate-200 bg-[#F8FBFF] p-5">
-        <p className="text-sm font-semibold text-slate-700">You're {overallProgress}% closer to Germany 🇩🇪</p>
+        <p className="text-sm font-semibold text-slate-700">You&apos;re {overallProgress}% closer to Germany 🇩🇪</p>
         <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-200">
           <div className="h-3 rounded-full bg-gradient-to-r from-[#FF6600] to-[#FF9933]" style={{ width: `${overallProgress}%` }} />
         </div>
