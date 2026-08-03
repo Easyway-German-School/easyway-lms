@@ -2,6 +2,7 @@
 import { PencilIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { PublicQuestion } from "@/lib/assignments";
 
 /**
  * Assignments for a student: documents to hand in, and timed quizzes.
@@ -15,6 +16,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Submission = {
   submittedAt: string | null;
   score: number | null;
+  /** True while a written answer is still with the tutor. */
+  needsReview?: boolean;
   feedback: string | null;
   startedAt: string | null;
   deadline: string | null;
@@ -33,7 +36,27 @@ type Assignment = {
   submission: Submission | null;
 };
 
-type Question = { prompt: string; options: string[] };
+/**
+ * Exactly what the server sends — the answer key is stripped there, so there
+ * is no correct answer anywhere in this file to be read out of the bundle.
+ */
+type Question = PublicQuestion;
+
+/**
+ * One student's answer. The shape follows the question type: an option index
+ * for a choice, a list of indexes for checkboxes, a boolean for true/false,
+ * text for the written kinds. `null` means not answered yet.
+ */
+type Answer = number | number[] | boolean | string | null;
+
+/** Whether an answer counts as given, for the "3 of 8 answered" line. */
+function isAnswered(answer: Answer): boolean {
+  if (answer === null || answer === undefined) return false;
+  if (typeof answer === "string") return answer.trim().length > 0;
+  if (Array.isArray(answer)) return answer.length > 0;
+  if (typeof answer === "number") return answer >= 0;
+  return true;
+}
 
 function formatRemaining(ms: number) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -49,7 +72,7 @@ export default function AssignmentsPanel() {
 
   const [active, setActive] = useState<Assignment | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [answers, setAnswers] = useState<number[]>([]);
+  const [answers, setAnswers] = useState<Answer[]>([]);
   const [deadline, setDeadline] = useState<number | null>(null);
   const [remaining, setRemaining] = useState<number>(0);
   const [busy, setBusy] = useState(false);
@@ -134,7 +157,8 @@ export default function AssignmentsPanel() {
         if (!res.ok) throw new Error(data.error ?? "Could not open this quiz");
 
         setQuestions(data.questions ?? []);
-        setAnswers(new Array((data.questions ?? []).length).fill(-1));
+        // null, not -1: an unanswered checkbox question is not "option -1".
+        setAnswers(new Array((data.questions ?? []).length).fill(null));
         setDeadline(data.deadline ? new Date(data.deadline).getTime() : null);
         if (data.deadline) setRemaining(new Date(data.deadline).getTime() - Date.now());
       }
@@ -152,7 +176,7 @@ export default function AssignmentsPanel() {
 
   // ---- Taking a quiz -------------------------------------------------------
   if (active && active.type === "quiz") {
-    const answered = answers.filter((a) => a >= 0).length;
+    const answered = answers.filter(isAnswered).length;
     const low = remaining > 0 && remaining < 60_000;
 
     return (
@@ -171,26 +195,108 @@ export default function AssignmentsPanel() {
         </div>
 
         <div className="mt-5 space-y-5">
-          {questions.map((q, qi) => (
-            <div key={qi} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-              <p className="text-sm font-semibold">{qi + 1}. {q.prompt}</p>
-              <div className="mt-3 space-y-2">
-                {q.options.map((opt, oi) => (
-                  <label key={oi} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm transition ${
-                    answers[qi] === oi ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--border)] hover:bg-[var(--surface)]"
-                  }`}>
-                    <input
-                      type="radio"
-                      name={`q${qi}`}
-                      checked={answers[qi] === oi}
-                      onChange={() => setAnswers((prev) => prev.map((v, i) => (i === qi ? oi : v)))}
+          {questions.map((q, qi) => {
+            const set = (value: Answer) =>
+              setAnswers((prev) => prev.map((v, i) => (i === qi ? value : v)));
+            const picked = answers[qi];
+
+            return (
+              <div key={qi} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-sm font-semibold">{qi + 1}. {q.prompt}</p>
+                  <span className="shrink-0 text-[11px] text-[var(--muted)]">
+                    {q.points} mark{q.points === 1 ? "" : "s"}
+                  </span>
+                </div>
+
+                {/* One correct option. */}
+                {q.type === "choice" && (
+                  <div className="mt-3 space-y-2">
+                    {q.options.map((opt, oi) => (
+                      <label key={oi} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm transition ${
+                        picked === oi ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--border)] hover:bg-[var(--surface)]"
+                      }`}>
+                        <input type="radio" name={`q${qi}`} checked={picked === oi} onChange={() => set(oi)} />
+                        <span>{opt}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                {/* Several correct options. */}
+                {q.type === "multi" && (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-[var(--muted)]">Tick every answer that applies.</p>
+                    {q.options.map((opt, oi) => {
+                      const chosen = Array.isArray(picked) && picked.includes(oi);
+                      return (
+                        <label key={oi} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm transition ${
+                          chosen ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--border)] hover:bg-[var(--surface)]"
+                        }`}>
+                          <input
+                            type="checkbox"
+                            checked={chosen}
+                            onChange={() => {
+                              const current = Array.isArray(picked) ? picked : [];
+                              set(chosen ? current.filter((i) => i !== oi) : [...current, oi].sort((a, b) => a - b));
+                            }}
+                          />
+                          <span>{opt}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {q.type === "boolean" && (
+                  <div className="mt-3 flex gap-2">
+                    {[true, false].map((value) => (
+                      <button
+                        key={String(value)}
+                        type="button"
+                        onClick={() => set(value)}
+                        className={`flex-1 rounded-xl border p-3 text-sm font-medium transition ${
+                          picked === value ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--border)] hover:bg-[var(--surface)]"
+                        }`}
+                      >
+                        {value ? "Richtig / True" : "Falsch / False"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {q.type === "short" && (
+                  <input
+                    value={typeof picked === "string" ? picked : ""}
+                    onChange={(event) => set(event.target.value)}
+                    placeholder="Your answer…"
+                    // Autocorrect off: a phone keyboard "fixing" a German word
+                    // into an English one would fail the student for the
+                    // keyboard's mistake.
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm"
+                  />
+                )}
+
+                {q.type === "paragraph" && (
+                  <div className="mt-3">
+                    <textarea
+                      value={typeof picked === "string" ? picked : ""}
+                      onChange={(event) => set(event.target.value)}
+                      rows={5}
+                      placeholder="Write your answer…"
+                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm"
                     />
-                    <span>{opt}</span>
-                  </label>
-                ))}
+                    <p className="mt-1 text-[11px] text-[var(--muted)]">
+                      Your tutor marks this one. Your score appears once they have.
+                    </p>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="mt-6 flex gap-3">
@@ -295,7 +401,12 @@ export default function AssignmentsPanel() {
                         <p className="text-[11px] text-[var(--muted)]">score</p>
                       </>
                     ) : (
-                      <p className="text-xs text-[var(--muted)]">Awaiting marking</p>
+                      /* A written answer is with the tutor; a document is
+                         simply not marked yet. Saying which one stops a
+                         student reading a missing score as a lost paper. */
+                      <p className="text-xs text-[var(--muted)]">
+                        {a.submission?.needsReview ? "With your tutor" : "Awaiting marking"}
+                      </p>
                     )
                   ) : (
                     <button

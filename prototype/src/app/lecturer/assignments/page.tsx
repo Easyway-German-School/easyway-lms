@@ -4,6 +4,9 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import LecturerShell from "@/components/LecturerShell";
+import QuestionBuilder, { emptyQuestion, draftToQuestion, type QuestionDraft } from "@/components/QuestionBuilder";
+import StudentPicker from "@/components/StudentPicker";
+import MarkingQueue from "@/components/MarkingQueue";
 import { LEVELS } from "@/lib/levels";
 
 /** Tutors set work here: a document to hand in, or a timed multiple-choice quiz. */
@@ -27,9 +30,8 @@ type Assignment = {
   submissions: Submission[];
 };
 
-type Draft = { prompt: string; options: string[]; answerIndex: number };
-
-const EMPTY_QUESTION: Draft = { prompt: "", options: ["", ""], answerIndex: 0 };
+/* The question shape now lives with the builder, so the editor and the
+   thing that serialises it cannot drift apart. */
 
 export default function LecturerAssignmentsPage() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -43,7 +45,8 @@ export default function LecturerAssignmentsPage() {
   const [level, setLevel] = useState("A1");
   const [type, setType] = useState("document");
   const [timeLimit, setTimeLimit] = useState(10);
-  const [questions, setQuestions] = useState<Draft[]>([{ ...EMPTY_QUESTION, options: ["", ""] }]);
+  const [questions, setQuestions] = useState<QuestionDraft[]>([emptyQuestion()]);
+  const [studentIds, setStudentIds] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -61,10 +64,6 @@ export default function LecturerAssignmentsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  function updateQuestion(i: number, patch: Partial<Draft>) {
-    setQuestions((prev) => prev.map((q, idx) => (idx === i ? { ...q, ...patch } : q)));
-  }
-
   async function create() {
     setSaving(true);
     try {
@@ -74,7 +73,8 @@ export default function LecturerAssignmentsPage() {
         body: JSON.stringify({
           title, description, level, type,
           timeLimitMinutes: type === "quiz" ? timeLimit : null,
-          questions: type === "quiz" ? questions : undefined,
+          questions: type === "quiz" ? questions.map(draftToQuestion) : undefined,
+          studentIds,
         }),
       });
       const data = await res.json();
@@ -82,7 +82,8 @@ export default function LecturerAssignmentsPage() {
 
       setOpen(false);
       setTitle(""); setDescription("");
-      setQuestions([{ ...EMPTY_QUESTION, options: ["", ""] }]);
+      setQuestions([emptyQuestion()]);
+      setStudentIds([]);
       await load();
       setError("");
     } catch (e) {
@@ -111,6 +112,13 @@ export default function LecturerAssignmentsPage() {
         </div>
 
         {error && <div className="mb-4 rounded bg-red-100 p-4 text-red-700">{error}</div>}
+
+        {/* Marking sits above the list on purpose: it is the thing with a
+            student waiting at the other end of it. */}
+        <div className="mb-8">
+          <h2 className="mb-3 text-lg font-semibold">To mark</h2>
+          <MarkingQueue />
+        </div>
 
         {open && (
           <div className="mb-8 rounded-xl border bg-white p-6">
@@ -146,53 +154,17 @@ export default function LecturerAssignmentsPage() {
             </div>
 
             {type === "quiz" && (
-              <div className="mt-6 space-y-4">
-                <p className="text-sm font-semibold">Questions</p>
-                {questions.map((q, qi) => (
-                  <div key={qi} className="rounded-lg border bg-slate-50 p-4">
-                    <input
-                      value={q.prompt}
-                      onChange={(e) => updateQuestion(qi, { prompt: e.target.value })}
-                      placeholder={`Question ${qi + 1}`}
-                      className="w-full rounded-lg border px-3 py-2 text-sm"
-                    />
-                    <div className="mt-3 space-y-2">
-                      {q.options.map((opt, oi) => (
-                        <div key={oi} className="flex items-center gap-2">
-                          {/* The selected radio is the answer key. */}
-                          <input
-                            type="radio"
-                            name={`answer-${qi}`}
-                            checked={q.answerIndex === oi}
-                            onChange={() => updateQuestion(qi, { answerIndex: oi })}
-                            title="Correct answer"
-                          />
-                          <input
-                            value={opt}
-                            onChange={(e) => updateQuestion(qi, { options: q.options.map((o, i) => (i === oi ? e.target.value : o)) })}
-                            placeholder={`Option ${oi + 1}`}
-                            className="flex-1 rounded-lg border px-3 py-1.5 text-sm"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => updateQuestion(qi, { options: [...q.options, ""] })}
-                      className="mt-2 text-xs font-semibold text-blue-600"
-                    >
-                      + option
-                    </button>
-                  </div>
-                ))}
-                <button
-                  onClick={() => setQuestions((p) => [...p, { prompt: "", options: ["", ""], answerIndex: 0 }])}
-                  className="rounded-lg border px-3 py-1.5 text-sm font-medium"
-                >
-                  + question
-                </button>
-                <p className="text-xs text-slate-500">The selected radio button marks the correct answer.</p>
+              <div className="mt-6">
+                <p className="mb-3 text-sm font-semibold">Questions</p>
+                <QuestionBuilder questions={questions} onChange={setQuestions} />
               </div>
             )}
+
+            {/* Targeting applies to written work as much as to quizzes — a
+                make-up essay for two students is the same idea. */}
+            <div className="mt-6">
+              <StudentPicker level={level} selected={studentIds} onChange={setStudentIds} />
+            </div>
 
             <button
               onClick={create}
