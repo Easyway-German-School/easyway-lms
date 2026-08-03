@@ -136,11 +136,16 @@ purpose. There is no self-service reset, because a self-service reset is just a
 password reset wearing a hat — anyone who can trigger it can bypass the second
 factor entirely.
 
-Another super admin runs, against the live database:
+Another super admin puts the address into `scripts/reset-mfa.ts` and runs it:
 
 ```bash
-npx tsx --env-file=.env.local -e "import('./src/lib/prisma').then(async ({ unguardedPrisma: p }) => { await p.user.update({ where: { email: 'THEM@easyway.example' }, data: { totpSecret: null, totpEnabledAt: null, totpBackupCodes: null, totpLastStep: null } }); console.log('cleared — they must enrol again at /admin/security'); await p.\$disconnect(); })"
+npx tsx --tsconfig tsconfig.json --env-file=.env.local scripts/reset-mfa.ts them@easyway.example
 ```
+
+Their two-factor is cleared and they enrol again from `/admin/security`. Deliberately
+a checked-in script rather than a one-liner to paste: a command this long, carrying
+an email address, retyped from a screenshot at 7am, is how the wrong account gets
+reset.
 
 Confirm it is really them over a channel that is not email first. Email is the
 one thing an attacker who has reached this point most likely already controls.
