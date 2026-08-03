@@ -116,6 +116,29 @@ export async function GET(request: NextRequest) {
     }),
   );
 
+  /**
+   * Summarise newly uploaded materials and turn them into quests.
+   *
+   * Last, and capped at three per tick, because it is the only job here that
+   * competes for memory with the site itself — a language model and a Next
+   * server on the same 7GB machine is a real constraint, not a theoretical
+   * one. Tutors upload days before the class, so there is no hurry; what
+   * matters is that it is done before students look, not that it is done now.
+   *
+   * Never fails the tick. A model being unreachable must not turn the mail
+   * queue's cron into a red line.
+   */
+  results.push(
+    await run("material-ai", async () => {
+      try {
+        const { processMaterialQueue } = await import("@/lib/material-ai");
+        return await processMaterialQueue(3);
+      } catch (error) {
+        return { skipped: true, reason: error instanceof Error ? error.message : String(error) };
+      }
+    }),
+  );
+
   const failed = results.filter((result) => !result.ok);
   return NextResponse.json(
     { ok: failed.length === 0, ran: results.length, results },

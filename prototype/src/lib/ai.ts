@@ -966,12 +966,62 @@ function getAIProvider(workload: AiWorkload = "interactive"): Provider {
     return forced;
   }
 
-  // Each preference falls back to the other rather than to mock: a school with
-  // only one of the two configured still gets working features everywhere.
-  const preferred = workload === "backoffice" ? localProvider() : hostedProvider();
-  const fallback = workload === "backoffice" ? hostedProvider() : localProvider();
+  /**
+   * LOCAL FIRST, for every workload — not just the back office.
+   *
+   * This used to prefer the hosted model for anything a student waits on,
+   * which is the right instinct when the hosted account is funded. This one is
+   * not: the API answers "credit balance is too low", `callClaude` returns
+   * null, and every caller falls through to its canned response. The result
+   * was worse than having no hosted key at all, because a key being *present*
+   * is what made it preferred.
+   *
+   * The school's decision is no monthly bill and no rented server, so the work
+   * is arranged to be small enough not to need one — see src/lib/ai-cache.ts,
+   * which turns roughly 1,300 generations a day into about twenty. At that
+   * volume a local model, or a free hosted tier, is genuinely enough.
+   *
+   * A hosted provider is still used when there is no local runtime reachable,
+   * so a deployment with a funded key configured keeps working. `AI_PROVIDER`
+   * overrides all of it.
+   */
+  return localProvider() ?? hostedProvider() ?? "mock";
+}
 
-  return preferred ?? fallback ?? "mock";
+/**
+ * Which model is actually going to answer, for logging and for the cache row.
+ *
+ * Worth recording alongside every generated answer: when a batch of summaries
+ * comes back useless, the first question is which model produced them, and
+ * without this the answer is a guess about what the environment looked like
+ * that week.
+ */
+export function activeModelName(): string {
+  const provider = getAIProvider();
+  if (provider === "claude") return CLAUDE_MODEL;
+  if (provider === "ollama" || provider === "anythingllm") return getOllamaModel();
+  return provider;
+}
+
+/**
+ * Ask whichever model is reachable, and give back its raw text.
+ *
+ * One entry point, so a new feature cannot accidentally hardcode a provider
+ * the way the daily missions did — that mistake cost this school every
+ * personalised mission it was supposed to have been generating.
+ *
+ * Returns null on any failure. Callers decide what to do without it; for the
+ * background jobs the answer is always "leave it for the next run", never
+ * "write a placeholder into the database as though it were real output".
+ */
+export async function callModel(prompt: string, maxTokens = 800): Promise<string | null> {
+  const provider = getAIProvider();
+
+  if (provider === "claude") return callClaude(prompt, maxTokens);
+  if (provider === "ollama" || provider === "anythingllm") {
+    return callLocalModel(getOllamaModel(), prompt, 0.4);
+  }
+  return null;
 }
 
 async function callLocalModel(model: string, prompt: string, temperature = 0.2) {

@@ -319,6 +319,49 @@ model Student {
  * the Student columns are — so a lost row costs a line of narrative, never a
  * countdown.
  */
+/**
+ * Everything a model has ever produced, keyed by what it was asked.
+ *
+ * This is the whole cost story. Generating a summary per student per page view
+ * is roughly 1,300 model calls a day for this school; generating it once per
+ * material and reading it back is about twenty. That difference is what makes
+ * the AI affordable on a free tier or on the office machine, rather than
+ * needing a rented server nobody wants to pay for monthly.
+ *
+ * `key` is a hash of the task plus the exact input, so changing a material
+ * naturally misses the cache and regenerates, while re-asking the same
+ * question a thousand times costs one lookup.
+ */
+model AiCache {
+  id String @id @default(cuid())
+
+  /** sha256 of `${task}:${input}`. Unique — the lookup is the point. */
+  key String @unique
+
+  /** material_summary | material_quests | cohort_missions … */
+  task String
+
+  /** The parsed result. Shape depends on the task. */
+  value Json
+
+  /** Which model produced it, so a bad batch can be found and cleared. */
+  model String?
+
+  /**
+   * Generation is slow and can fail. A row is written before the answer
+   * arrives so two jobs cannot generate the same thing at once, and so a
+   * failure is visible rather than looking like it was never attempted.
+   * pending | ready | failed
+   */
+  status String @default("ready")
+  error  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([task, status])
+}
+
 model JourneyEvent {
   id        String  @id @default(cuid())
   studentId String
@@ -571,6 +614,29 @@ model Material {
    */
   durationSeconds Int?
   thumbnailPath   String?
+
+  /**
+   * What the AI made of this material, built in the background after upload.
+   *
+   * Denormalised onto the row rather than left in AiCache alone because the
+   * student's materials list reads it on every render, and a join through a
+   * hash key for something shown this often is work for nothing. AiCache
+   * remains the record of the generation; this is the copy that gets read.
+   *
+   * Null means "not generated yet" and the UI simply shows the material as it
+   * always did — a tutor uploading at 6am for a 9am class must not have their
+   * material hidden because a queue has not run.
+   */
+  aiSummary   String?
+  /** Bullet points a student can skim in fifteen seconds. */
+  aiKeyPoints Json?
+  /**
+   * Quests generated from this material: short, concrete tasks with an answer,
+   * so reading it turns into something to do rather than something to file.
+   */
+  aiQuests    Json?
+  aiState     String  @default("none") // none | pending | ready | failed
+  aiUpdatedAt DateTime?
   /**
    * Which CEFR level this belongs to. Duplicated from `course.level` on
    * purpose — a class recording belongs to a level but not always to a

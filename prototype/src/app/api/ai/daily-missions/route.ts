@@ -84,7 +84,29 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const profile = (body.profile || {}) as Profile;
-    const aiMissions = await generateDailyMissions(profile);
+
+    /**
+     * Cohort first, per-student only as a fallback.
+     *
+     * The cohort generator answers from cache for everyone after the first
+     * student of the day at that level and band — 43 students become one model
+     * call, which is what keeps this inside a free tier or on the office
+     * machine. `generateDailyMissions` stays as the fallback for the case
+     * where the cohort call has not been made yet and cannot be made now.
+     */
+    const { missionsForCohort, bandFor, personalise } = await import("@/lib/cohort-missions");
+
+    const band = bandFor(Number(profile.streak ?? 0), Number(profile.examReadiness ?? 0));
+    const cohort = await missionsForCohort(profile.level || "A1", band);
+
+    const aiMissions = cohort
+      ? personalise(cohort, {
+          name: (body.profile?.name as string) ?? null,
+          streak: Number(profile.streak ?? 0),
+          examReadiness: Number(profile.examReadiness ?? 0),
+        })
+      : await generateDailyMissions(profile);
+
     const missions = buildAdaptiveMissions(profile, aiMissions);
     return NextResponse.json({ missions });
   } catch (error) {
