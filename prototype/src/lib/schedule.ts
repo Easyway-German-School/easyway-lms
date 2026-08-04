@@ -5,11 +5,27 @@
 //                    means August + September — see lib/batch.ts)
 //   2. their LEVEL  (A1, A2, B1, B2, C1, C2)
 //
-// The weekday pattern ROTATES month-by-month from the batch start month:
-//   - batch month + even offset (0, 2, 4 …): Monday / Friday / Saturday
-//   - batch month + odd  offset (1, 3, 5 …): Tuesday / Wednesday / Thursday
-// so e.g. an August batch runs Mon/Fri/Sat in August, Tue/Wed/Thu in September,
-// Mon/Fri/Sat in October, and so on — repeating smartly across months.
+// ---------------------------------------------------------------------------
+// THE WEEKDAY PATTERN BELONGS TO THE BATCH, NOT TO THE CALENDAR MONTH.
+//
+// This is the rule the school actually runs on and getting it wrong is the
+// single most visible thing the calendar can do. Students are admitted in
+// monthly batches; each batch is given a weekly timetable on day one and that
+// timetable does not move for the whole two months of the course.
+//
+//   June batch      Mon / Fri / Sat   in June AND in July
+//   July batch      Tue / Wed / Thu   in July AND in August
+//   August batch    Mon / Fri / Sat   in August AND in September
+//
+// Consecutive BATCHES alternate, so the two cohorts running side by side never
+// want the same rooms on the same days. Within one batch nothing changes.
+//
+// WHAT THIS REPLACED: the pattern was picked from the month's OFFSET inside the
+// course — offset 0 got Mon/Fri/Sat and offset 1 got Tue/Wed/Thu — so every
+// batch flipped its class days halfway through. A June student was shown
+// Mon/Fri/Sat for June and then Tue/Wed/Thu for July, which is not a timetable
+// this school has ever taught. The alternation is real; it just runs across
+// batches, not across the months of one batch.
 //
 // The generator below is deterministic. When an AI model (Ollama / Claude) is
 // wired in later it can enrich each session's `focus`, but the skeleton stays
@@ -43,12 +59,27 @@ export { monthNameToIndex };
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-// Rotating weekday patterns (JS getDay(): 0=Sun … 6=Sat).
-const PATTERN_EVEN = [1, 5, 6]; // Mon, Fri, Sat
-const PATTERN_ODD = [2, 3, 4]; // Tue, Wed, Thu
+// The two weekday patterns (JS getDay(): 0=Sun … 6=Sat).
+const PATTERN_MFS = [1, 5, 6]; // Mon, Fri, Sat
+const PATTERN_TWT = [2, 3, 4]; // Tue, Wed, Thu
 
-function patternForOffset(offset: number): number[] {
-  return offset % 2 === 0 ? PATTERN_EVEN : PATTERN_ODD;
+/**
+ * The pattern a batch teaches on, for every month of its course.
+ *
+ * Chosen from the batch's OWN starting month so that consecutive intakes
+ * alternate — June Mon/Fri/Sat, July Tue/Wed/Thu, August Mon/Fri/Sat — and
+ * then held constant, because the argument is the batch's, not the month's.
+ *
+ * Keyed on the month index rather than on the absolute month so the answer for
+ * "the August batch" is the same in every year. (Those are in fact the same
+ * parity — a year is twelve months, which is even — but saying it in terms of
+ * the month index is saying what is meant.)
+ *
+ * Month indices are 0-based, so June is 5 and July is 6: an ODD index gets
+ * Mon/Fri/Sat, which is what the school's June, August and October intakes run.
+ */
+function patternForBatch(batchMonthIndex: number): number[] {
+  return batchMonthIndex % 2 === 1 ? PATTERN_MFS : PATTERN_TWT;
 }
 
 function patternLabel(days: number[]): string {
@@ -133,6 +164,10 @@ export function generatePersonalizedSchedule({
   // the calendar UI scrolling to it, not by cropping the course.
   const startOffset = 0;
 
+  // Fixed for the whole course. Read once, outside the loop, so it is not even
+  // possible for a later edit to make it depend on the month being generated.
+  const patternDays = patternForBatch(batchMonthIndex);
+
   const out: ScheduleMonth[] = [];
 
   for (let i = 0; i < months; i += 1) {
@@ -140,7 +175,6 @@ export function generatePersonalizedSchedule({
     const absoluteMonth = batchMonthIndex + offset;
     const monthIndex = ((absoluteMonth % 12) + 12) % 12;
     const year = batchYear + Math.floor(absoluteMonth / 12);
-    const patternDays = patternForOffset(offset);
 
     const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
     const sessions: ScheduleSession[] = [];

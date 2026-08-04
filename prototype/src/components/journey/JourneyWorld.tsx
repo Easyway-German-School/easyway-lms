@@ -454,9 +454,16 @@ function Guide({
    * sees a speech bubble with nobody saying it. The group is anchored by its
    * near edge and grows inwards, so it can never leave the map however far the
    * road wanders.
+   *
+   * `>=`, NOT `>`, and that one character is a measured bug fix. A stage
+   * sitting exactly on the centre line went RIGHT, and the bubble is a fixed
+   * width in real pixels while the map is a percentage — so on a 375px phone
+   * the right-hand half was not wide enough and the last word of the line was
+   * clipped off the edge of the map. A node on the centre line now goes left,
+   * where there is by definition at least as much room.
    */
-  const onLeft = to.x > 50;
-  const GAP = 26;
+  const onLeft = to.x >= 50;
+  const GAP = 20;
 
   // The guide shrinks with distance like everything else, but not all the way.
   // At the top of a long road the perspective scale is under 0.5, and a 40px
@@ -473,7 +480,10 @@ function Guide({
       transition={reduced ? { duration: 0 } : { duration: 1.5, delay: 0.5, ease: "easeInOut" }}
     >
       <div
-        className={`flex w-[150px] flex-col ${onLeft ? "items-end" : "items-start"}`}
+        // Narrower on a phone. The bubble does not shrink with the map — it is
+        // real pixels over a percentage layout — so on a 375px screen a 150px
+        // bubble plus its gap is over half the width available to one side.
+        className={`flex w-[124px] flex-col sm:w-[150px] ${onLeft ? "items-end" : "items-start"}`}
         style={{
           transform: `translate(${onLeft ? `calc(-100% - ${GAP}px)` : `${GAP}px`}, -78%) scale(${scale.toFixed(2)})`,
           transformOrigin: onLeft ? "right bottom" : "left bottom",
@@ -971,15 +981,28 @@ export default function JourneyWorld({
             It takes the side the guide is not on. */}
         {finish ? (
           <div
-            className="pointer-events-none absolute z-[60] flex flex-col items-center"
+            // The cap has to be narrower than the longest destination on one
+            // line, or it caps nothing and the label never wraps — 42vw was
+            // 157px against a 142px label, so it sat there in a single line
+            // and ran off the map. 104px is just over the flag's own width,
+            // which is the real floor for this column.
+            className="pointer-events-none absolute z-[60] flex max-w-[104px] flex-col items-center sm:max-w-[220px]"
             style={{
               left: `${finish.x}%`,
               top: `${finish.y}%`,
-              transform: `translate(${finish.x > 50 ? "-100%" : "0"}, -34%) translateX(${finish.x > 50 ? "-46px" : "46px"})`,
+              // `>=`, matching the guide: a finish sitting exactly on the
+              // centre line used to go right, and the label beside it is real
+              // pixels over a percentage layout, so on a phone it ran off the
+              // edge and was clipped by the map's overflow-hidden.
+              transform: `translate(${finish.x >= 50 ? "-100%" : "0"}, -34%) translateX(${finish.x >= 50 ? "-34px" : "34px"})`,
             }}
           >
-            <GermanFlag className="h-28 w-auto sm:h-36" amplitude={p >= 0.9 ? 11 : 8} />
-            <p className="mt-0.5 whitespace-nowrap rounded-full bg-slate-950/45 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white backdrop-blur-sm">
+            <GermanFlag className="h-24 w-auto sm:h-36" amplitude={p >= 0.9 ? 11 : 8} />
+            {/* NOT whitespace-nowrap. The destination is the student's own
+                goal — "a skilled job with my qualification", "your first
+                lecture" — and on one line at 375px that is wider than the
+                screen. It wraps and centres instead. */}
+            <p className="mt-0.5 rounded-2xl bg-slate-950/45 px-2.5 py-1 text-center text-[10px] font-bold uppercase leading-tight tracking-[0.12em] text-white backdrop-blur-sm sm:tracking-[0.16em]">
               {goal.destination}
             </p>
           </div>

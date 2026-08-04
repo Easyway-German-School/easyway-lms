@@ -45,8 +45,24 @@ function monthStart(label: string): Date | null {
   return new Date(Number(year), index, 1);
 }
 
-function DayPopover({ node, below }: { node: ClassNode; below: boolean }) {
+/**
+ * Which edge the popover hangs from.
+ *
+ * It is 224px wide and a day cell on a phone is about 40px. Centred on the
+ * cell — which is what it used to do unconditionally — it hung 90px off the
+ * side of the card for any class falling on a Sunday or a Saturday, which on a
+ * Mon/Wed/Fri timetable is most of them. So the near-edge columns anchor to
+ * their own edge instead of to their centre, and the arrow moves to match.
+ */
+function anchorFor(col: number): { box: string; arrow: string } {
+  if (col <= 1) return { box: "left-0", arrow: "left-5" };
+  if (col >= 5) return { box: "right-0", arrow: "right-5" };
+  return { box: "left-1/2 -translate-x-1/2", arrow: "left-1/2 -translate-x-1/2" };
+}
+
+function DayPopover({ node, below, col }: { node: ClassNode; below: boolean; col: number }) {
   const s = nodeSummary(node);
+  const anchor = anchorFor(col);
   return (
     <motion.div
       initial={{ opacity: 0, y: below ? -6 : 6, scale: 0.96 }}
@@ -55,7 +71,7 @@ function DayPopover({ node, below }: { node: ClassNode; below: boolean }) {
       transition={{ duration: 0.14 }}
       // Opens downward for cells in the top row, otherwise upward — a popover
       // above a first-row cell is clipped off the top of the card.
-      className={`absolute left-1/2 z-30 w-56 -translate-x-1/2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left shadow-xl ${
+      className={`absolute z-30 w-56 max-w-[calc(100vw-3rem)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left shadow-xl ${anchor.box} ${
         below ? "top-full mt-2" : "bottom-full mb-2"
       }`}
       role="tooltip"
@@ -140,7 +156,7 @@ function DayPopover({ node, below }: { node: ClassNode; below: boolean }) {
 
       {/* Arrow pointing back at the day cell, on whichever side it opened. */}
       <span
-        className={`absolute left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 bg-[var(--surface)] ${
+        className={`absolute h-3 w-3 rotate-45 bg-[var(--surface)] ${anchor.arrow} ${
           below
             ? "bottom-full translate-y-1/2 border-l border-t border-[var(--border)]"
             : "top-full -translate-y-1/2 border-b border-r border-[var(--border)]"
@@ -174,9 +190,9 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
         const leadingBlanks = start.getDay();
 
         return (
-          <div key={month.label} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 sm:p-6">
-            <div className="mb-4 flex items-baseline justify-between gap-3">
-              <h3 className="text-xl font-extrabold">{month.label}</h3>
+          <div key={month.label} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-3 sm:rounded-[28px] sm:p-6">
+            <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <h3 className="text-lg font-extrabold sm:text-xl">{month.label}</h3>
               <span className="text-xs font-semibold text-[var(--muted)]">{month.patternLabel}</span>
             </div>
 
@@ -198,6 +214,7 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
                 const showing = openKey === key || hoverKey === key;
                 // Row 0 has no space above it inside the card.
                 const inTopRow = Math.floor((leadingBlanks + i) / 7) === 0;
+                const col = (leadingBlanks + i) % 7;
 
                 if (!node) {
                   return (
@@ -232,7 +249,7 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
                     </button>
 
                     <AnimatePresence>
-                      {showing && <DayPopover node={node} below={inTopRow} />}
+                      {showing && <DayPopover node={node} below={inTopRow} col={col} />}
                     </AnimatePresence>
                   </div>
                 );

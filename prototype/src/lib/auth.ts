@@ -3,6 +3,14 @@ import type { JWT } from "next-auth/jwt";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
+import { lecturerCanSignIn } from "@/lib/lecturer-status";
+
+/**
+ * The role a revoked tutor's session carries. Not a real role — every route
+ * that requires "lecturer" refuses it, which is exactly the point. See the
+ * session callback below.
+ */
+export const INACTIVE_LECTURER_ROLE = "inactive_lecturer";
 
 const normalizeRole = (value: unknown) => String(value || "STUDENT").toLowerCase();
 
@@ -49,6 +57,27 @@ export const authOptions: AuthOptions = {
           if (!acceptable.includes(storedRole)) {
             const portalName = storedRole === "lecturer" ? "lecturer" : "student";
             throw new Error(`This account is registered as a ${portalName} account. Please use the correct portal.`);
+          }
+        }
+
+        /**
+         * A tutor who no longer works here cannot sign in.
+         *
+         * This is the whole point of the status field: when somebody leaves,
+         * the office marks them inactive instead of deleting the account, and
+         * their marks, classes and history stay on record while their access
+         * stops. Checked after the password so the message cannot be used to
+         * enumerate which accounts are inactive.
+         */
+        if (storedRole === "lecturer") {
+          const lecturer = await prisma.lecturer.findUnique({
+            where: { userId: user.id },
+            select: { status: true },
+          });
+          if (lecturer && !lecturerCanSignIn(lecturer.status)) {
+            throw new Error(
+              "This tutor account is no longer active. Contact the school office if you think this is wrong.",
+            );
           }
         }
 
@@ -125,6 +154,40 @@ export const authOptions: AuthOptions = {
             session.user.role = normalizeRole(u?.role || "STUDENT");
           } catch (e) {
             session.user.role = "student";
+          }
+        }
+
+        /**
+         * REVOCATION FOR A SESSION THAT ALREADY EXISTS.
+         *
+         * Refusing an inactive tutor at the sign-in form only stops the next
+         * sign-in. These sessions are JWTs with a 30-day life, so somebody
+         * marked inactive on Monday would otherwise keep their roster, their
+         * register and their students' marks until the token happened to lapse
+         * — precisely the window the status field was added to close.
+         *
+         * This is the one seam that covers it in a single place: every
+         * `/api/lecturer/*` route reaches its data through `getServerSession`,
+         * and each already refuses a session whose role is not "lecturer".
+         * Downgrading the role here therefore locks all seventeen of them at
+         * once, without seventeen chances to forget one.
+         *
+         * Only the role is dropped, never the identity — they stay signed in
+         * as themselves and the portal shell signs them out with an
+         * explanation, rather than the session vanishing under them.
+         */
+        if (session.user.role === "lecturer" && session.user.id) {
+          try {
+            const lecturer = await prisma.lecturer.findUnique({
+              where: { userId: session.user.id as string },
+              select: { status: true },
+            });
+            if (lecturer && !lecturerCanSignIn(lecturer.status)) {
+              session.user.role = INACTIVE_LECTURER_ROLE;
+            }
+          } catch (e) {
+            // Fail open: a database blip must not lock every tutor out of the
+            // school mid-lesson. Sign-in still refuses them.
           }
         }
       }

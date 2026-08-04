@@ -2,12 +2,18 @@
 
 export const dynamic = "force-dynamic";
 
-import StudentShell from "@/components/StudentShell";
+import PortalShell from "@/components/PortalShell";
 import CommunityHub from "@/components/CommunityHub";
 
+/**
+ * Community is in the student, tutor and admin sidebars alike, so the chrome
+ * follows the viewer. It used to be hard-wired to the student shell: a tutor
+ * who clicked Community got the student sidebar and every link from there led
+ * further into the student portal.
+ */
 export default function CommunityPage() {
   return (
-    <StudentShell>
+    <PortalShell>
       <div className="px-6 py-8">
         <div className="mb-6">
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">
@@ -20,6 +26,6 @@ export default function CommunityPage() {
         </div>
         <CommunityHub />
       </div>
-    </StudentShell>
+    </PortalShell>
   );
 }

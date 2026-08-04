@@ -122,14 +122,14 @@ export default function SmartCalendarClient() {
   return (
     <div className="space-y-6">
       {/* ---- Progress header --------------------------------------------- */}
-      <div className="overflow-hidden rounded-[28px] bg-gradient-to-br from-[var(--accent-strong)] via-[var(--accent)] to-[#FF9A4D] p-6 text-white shadow-lg">
+      <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-[var(--accent-strong)] via-[var(--accent)] to-[#FF9A4D] p-5 text-white shadow-lg sm:rounded-[28px] sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
+          <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-white/80">
               {data.currentLevel ?? data.level} journey
             </p>
-            <p className="mt-1 text-3xl font-extrabold">
-              {done} <span className="text-xl font-bold text-white/70">/ {total} classes</span>
+            <p className="mt-1 text-2xl font-extrabold sm:text-3xl">
+              {done} <span className="text-lg font-bold text-white/70 sm:text-xl">/ {total} classes</span>
             </p>
           </div>
 
@@ -161,14 +161,17 @@ export default function SmartCalendarClient() {
         )}
       </div>
 
-      {/* ---- Controls ----------------------------------------------------- */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* ---- Controls -----------------------------------------------------
+          Each group is its own full-width row on a phone and the buttons
+          split it evenly, rather than four pills of four different lengths
+          wrapping into a ragged block. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         {/* View switch — the only thing on this page a student can change. */}
-        <div className="inline-flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-1">
+        <div className="flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 sm:inline-flex">
           <button
             onClick={() => chooseView("path")}
             aria-pressed={view === "path"}
-            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition ${
+            className={`inline-flex flex-1 items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-bold transition sm:flex-none sm:px-4 ${
               view === "path" ? "bg-[var(--accent)] text-white shadow" : "text-[var(--muted)] hover:text-[var(--foreground)]"
             }`}
           >
@@ -177,7 +180,7 @@ export default function SmartCalendarClient() {
           <button
             onClick={() => chooseView("calendar")}
             aria-pressed={view === "calendar"}
-            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition ${
+            className={`inline-flex flex-1 items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-bold transition sm:flex-none sm:px-4 ${
               view === "calendar" ? "bg-[var(--accent)] text-white shadow" : "text-[var(--muted)] hover:text-[var(--foreground)]"
             }`}
           >
@@ -186,10 +189,10 @@ export default function SmartCalendarClient() {
         </div>
 
         {data.nextLevel && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-stretch gap-2">
             <button
               onClick={() => { setPreviewLevel(null); setOpenIndex(null); }}
-              className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+              className={`flex-1 rounded-full px-3 py-2 text-sm font-bold transition sm:flex-none sm:px-4 ${
                 !data.viewingNextLevel ? "bg-slate-900 text-white" : "border border-[var(--border)] hover:bg-[var(--surface-alt)]"
               }`}
             >
@@ -197,11 +200,11 @@ export default function SmartCalendarClient() {
             </button>
             <button
               onClick={() => { setPreviewLevel(data.nextLevel!); setOpenIndex(null); }}
-              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition ${
+              className={`inline-flex flex-1 items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-bold transition sm:flex-none sm:px-4 ${
                 data.viewingNextLevel ? "bg-slate-900 text-white" : "border border-[var(--border)] hover:bg-[var(--surface-alt)]"
               }`}
             >
-              <SparklesIcon /> {data.nextLevel} · peek ahead
+              <SparklesIcon /> {data.nextLevel} · peek
             </button>
           </div>
         )}

@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import LecturerShell from "@/components/LecturerShell";
 import LessonPackagePreview from "@/components/LessonPackagePreview";
 import ContentUploadArea from "@/components/ContentUploadArea";
-import { ArrowLeftIcon, CheckCircleIcon } from "@/components/icons";
+import { CheckCircleIcon } from "@/components/icons";
 import QuizValidationPanel, { type QuizQuestion } from "@/components/QuizValidationPanel";
 
 type LessonPackage = {
@@ -58,7 +58,7 @@ export default function LessonBuilderPage() {
 
   useEffect(() => {
     if (status === "unauthenticated") {
-      router.push("/auth/signin");
+      router.push("/auth/lecturer/signin");
       return;
     }
     if (status === "authenticated") {
@@ -300,14 +300,10 @@ export default function LessonBuilderPage() {
   }
 
   return (
+    <LecturerShell>
     <div className="min-h-screen bg-[var(--background)] py-10 text-[var(--foreground)]">
       <div className="mx-auto max-w-6xl px-6 md:px-10 space-y-8">
         <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
-          <div className="mb-4">
-            <Link href="/lecturer" className="inline-flex items-center gap-2 text-[var(--accent)] hover:brightness-110 text-sm font-semibold">
-              <ArrowLeftIcon /> Back to lecturer dashboard
-            </Link>
-          </div>
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h1 className="text-4xl font-bold text-[var(--foreground)]">AI Lesson Builder</h1>
@@ -516,5 +512,6 @@ export default function LessonBuilderPage() {
         ) : null}
       </div>
     </div>
+    </LecturerShell>
   );
 }

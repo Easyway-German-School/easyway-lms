@@ -14,6 +14,12 @@ import {
   type CourseLevel,
 } from "@/lib/lecturer-assignment";
 import { KIND, notify } from "@/lib/notify";
+import {
+  isEmploymentType,
+  isLecturerStatus,
+  LECTURER_STATUS_META,
+  readLecturerStatus,
+} from "@/lib/lecturer-status";
 
 /**
  * Tutor administration.
@@ -129,6 +135,11 @@ export async function GET() {
         bio: lecturer.bio,
         phone: lecturer.phone,
         photoUrl: lecturer.photoUrl,
+        status: readLecturerStatus(lecturer.status),
+        statusNote: lecturer.statusNote,
+        statusChangedAt: lecturer.statusChangedAt,
+        employmentType: lecturer.employmentType,
+        startedAt: lecturer.startedAt,
         assignment,
         assignmentLabel: describeAssignment(assignment, branchNames),
         studentCount: await countStudents(assignment),
@@ -172,6 +183,14 @@ export async function POST(request: NextRequest) {
 
   const assignment = assignmentToData(body ?? {});
 
+  // A newly created tutor is active unless the office says otherwise — the
+  // usual case is hiring somebody, and "probation" is the only other sensible
+  // starting point.
+  const status = isLecturerStatus(body?.status) ? body.status : "active";
+  const employmentType = isEmploymentType(body?.employmentType) ? body.employmentType : null;
+  const startedAtRaw = body?.startedAt ? new Date(body.startedAt) : null;
+  const startedAt = startedAtRaw && !Number.isNaN(startedAtRaw.getTime()) ? startedAtRaw : null;
+
   const hashedPassword = await bcryptjs.hash(password, 10);
   const user = await prisma.user.create({
     data: {
@@ -185,6 +204,10 @@ export async function POST(request: NextRequest) {
           bio: bio || null,
           phone: phone || null,
           photoUrl: photoUrl || null,
+          status,
+          statusChangedAt: new Date(),
+          employmentType,
+          startedAt,
           ...assignment,
         },
       },
@@ -245,6 +268,45 @@ export async function PATCH(request: NextRequest) {
   if (typeof body.phone === "string") data.phone = body.phone.trim() || null;
   if (typeof body.photoUrl === "string") data.photoUrl = body.photoUrl.trim() || null;
 
+  // Employment terms and start date are plain record-keeping — they change
+  // nothing about access, so they move independently of the status below.
+  if (body.employmentType !== undefined) {
+    if (body.employmentType === null || body.employmentType === "") {
+      data.employmentType = null;
+    } else if (isEmploymentType(body.employmentType)) {
+      data.employmentType = body.employmentType;
+    } else {
+      return NextResponse.json({ error: "Unknown employment type" }, { status: 400 });
+    }
+  }
+  if (body.startedAt !== undefined) {
+    if (body.startedAt === null || body.startedAt === "") {
+      data.startedAt = null;
+    } else {
+      const started = new Date(body.startedAt);
+      if (Number.isNaN(started.getTime())) {
+        return NextResponse.json({ error: "Invalid start date" }, { status: 400 });
+      }
+      data.startedAt = started;
+    }
+  }
+
+  const previousStatus = readLecturerStatus(lecturer.status);
+  let nextStatus = previousStatus;
+  const statusChanged = body.status !== undefined && readLecturerStatus(body.status) !== previousStatus;
+
+  if (body.status !== undefined) {
+    if (!isLecturerStatus(body.status)) {
+      return NextResponse.json({ error: "Unknown status" }, { status: 400 });
+    }
+    nextStatus = body.status;
+    data.status = body.status;
+    // Only stamped when the status actually moves, so the date answers "how
+    // long has this held?" rather than "when was this row last touched?".
+    if (statusChanged) data.statusChangedAt = new Date();
+  }
+  if (typeof body.statusNote === "string") data.statusNote = body.statusNote.trim() || null;
+
   // The assignment fields move as a set. Sending any one of them rewrites all
   // of them, so a half-submitted form can never leave a tutor assigned to a
   // branch at a level they no longer teach.
@@ -261,6 +323,25 @@ export async function PATCH(request: NextRequest) {
 
   if (assignment?.levels.length) {
     await syncLecturerClasses(lecturerId, assignment.levels);
+  }
+
+  /**
+   * Tell the tutor their status moved — except when it moved to inactive,
+   * which is the one case where a portal notification reaches nobody: they can
+   * no longer sign in to read it. That conversation belongs to the office.
+   */
+  if (statusChanged && nextStatus !== "inactive") {
+    await notify({
+      to: { userIds: [lecturer.user.id] },
+      kind: KIND.announcement,
+      severity: nextStatus === "on_leave" ? "warning" : "info",
+      title: `Your tutor status is now ${LECTURER_STATUS_META[nextStatus].label.toLowerCase()}`,
+      message:
+        typeof body.statusNote === "string" && body.statusNote.trim()
+          ? body.statusNote.trim()
+          : LECTURER_STATUS_META[nextStatus].description,
+      link: "/lecturer/dashboard",
+    }).catch((error) => console.error("Status notification failed", error));
   }
 
   // Tell the tutor their timetable changed. Silently reassigning somebody and

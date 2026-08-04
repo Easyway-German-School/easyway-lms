@@ -4,6 +4,7 @@ import { CheckCircleIcon, CrossCircleIcon, MailIcon, RefreshIcon, SettingsIcon }
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import AdminShell from "@/components/AdminShell";
 import BrandLoader from "@/components/BrandLoader";
 
 interface EmailLog {
@@ -46,7 +47,9 @@ export default function AdminEmailManagementPage() {
     try {
       const response = await fetch("/api/admin/students");
       if (response.status === 401) {
-        router.push("/auth/signin");
+        // The admin sign-in form, not the student one — an admin whose session
+        // lapsed was being handed a form that rejects their password.
+        router.push("/auth/admin");
       } else {
         setIsAdmin(true);
       }
@@ -128,6 +131,7 @@ export default function AdminEmailManagementPage() {
   }
 
   return (
+    <AdminShell>
     <div className="min-h-screen bg-[var(--background)] p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
@@ -287,5 +291,6 @@ export default function AdminEmailManagementPage() {
         )}
       </div>
     </div>
+    </AdminShell>
   );
 }

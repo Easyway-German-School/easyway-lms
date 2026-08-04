@@ -36,7 +36,9 @@ export default function PersonalizationAdminPage() {
             <h1 className="text-3xl font-bold">Personalization analytics</h1>
             <p className="mt-2 text-sm text-[var(--muted)]">Track planner strategy usage and learning plan health.</p>
           </div>
-          <Link href="/dashboard" className="rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold">
+          {/* Went to /dashboard — the STUDENT portal — from a page inside the
+              admin sidebar. "Back" now means back to the admin dashboard. */}
+          <Link href="/admin" className="rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold">
             Back to dashboard
           </Link>
         </div>

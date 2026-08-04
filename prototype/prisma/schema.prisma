@@ -25,11 +25,11 @@ datasource db {
 }
 
 model User {
-  id                String   @id @default(cuid())
-  email             String   @unique
+  id                String  @id @default(cuid())
+  email             String  @unique
   name              String?
   password          String
-  role              Role     @default(STUDENT)
+  role              Role    @default(STUDENT)
   /**
    * Which kind of admin, when role is ADMIN: super | secretary | data_comm.
    * Null for everyone else. Deliberately a separate field rather than more
@@ -51,39 +51,38 @@ model User {
    * password nobody knows. The claim link works only while this is false, so
    * a forwarded confirmation email cannot be used to take the account later.
    */
-  passwordClaimed   Boolean  @default(true)
+  passwordClaimed   Boolean @default(true)
 
   /**
    * The TOTP shared secret, encrypted at rest. See src/lib/mfa.ts.
-   *
    * Encrypted rather than stored plainly because a secret sitting in the clear
    * makes the second factor worth nothing against the attack it exists to
    * stop: whoever reads this table can already read the password hashes, and
    * with the raw secret alongside they can mint valid codes forever. The key
    * lives in the environment, so the database alone is not enough.
-   *
    * Set at enrolment, before the first code is confirmed. Possession of a
    * secret is therefore NOT proof that two-factor is on — `totpEnabledAt` is.
    */
-  totpSecret        String?
-  /** When the first correct code was entered. Null means not enrolled. */
-  totpEnabledAt     DateTime?
+  totpSecret      String?
+  /**
+   * When the first correct code was entered. Null means not enrolled.
+   */
+  totpEnabledAt   DateTime?
   /**
    * One-time recovery codes, stored as bcrypt hashes and never shown again
    * after enrolment. A lost phone must not mean a lost school.
    */
-  totpBackupCodes   Json?
+  totpBackupCodes Json?
   /**
    * The last time-step accepted for this account.
-   *
    * A TOTP code stays valid for its whole window, so one shoulder-surfed or
    * intercepted code can be replayed within the same half-minute. Refusing any
    * step at or below this one makes every code strictly single-use.
    */
-  totpLastStep      Int?
+  totpLastStep    Int?
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   student           Student?
   lecturer          Lecturer?
@@ -128,7 +127,9 @@ model Student {
   tutorId String?
   tutor   Lecturer? @relation(fields: [tutorId], references: [id], onDelete: SetNull)
 
-  /** Assignments set for this student by name, rather than to their level. */
+  /**
+   * Assignments set for this student by name, rather than to their level.
+   */
   assignmentTargets AssignmentTarget[]
 
   // Official school identifier, e.g. EW/2026/A1/JUL/0007. Nullable because
@@ -321,13 +322,11 @@ model Student {
  */
 /**
  * Everything a model has ever produced, keyed by what it was asked.
- *
  * This is the whole cost story. Generating a summary per student per page view
  * is roughly 1,300 model calls a day for this school; generating it once per
  * material and reading it back is about twenty. That difference is what makes
  * the AI affordable on a free tier or on the office machine, rather than
  * needing a rented server nobody wants to pay for monthly.
- *
  * `key` is a hash of the task plus the exact input, so changing a material
  * naturally misses the cache and regenerates, while re-asking the same
  * question a thousand times costs one lookup.
@@ -335,16 +334,24 @@ model Student {
 model AiCache {
   id String @id @default(cuid())
 
-  /** sha256 of `${task}:${input}`. Unique — the lookup is the point. */
+  /**
+   * sha256 of `${task}:${input}`. Unique — the lookup is the point.
+   */
   key String @unique
 
-  /** material_summary | material_quests | cohort_missions … */
+  /**
+   * material_summary | material_quests | cohort_missions …
+   */
   task String
 
-  /** The parsed result. Shape depends on the task. */
+  /**
+   * The parsed result. Shape depends on the task.
+   */
   value Json
 
-  /** Which model produced it, so a bad batch can be found and cleared. */
+  /**
+   * Which model produced it, so a bad batch can be found and cleared.
+   */
   model String?
 
   /**
@@ -353,7 +360,7 @@ model AiCache {
    * failure is visible rather than looking like it was never attempted.
    * pending | ready | failed
    */
-  status String @default("ready")
+  status String  @default("ready")
   error  String?
 
   createdAt DateTime @default(now())
@@ -617,44 +624,44 @@ model Material {
 
   /**
    * What the AI made of this material, built in the background after upload.
-   *
    * Denormalised onto the row rather than left in AiCache alone because the
    * student's materials list reads it on every render, and a join through a
    * hash key for something shown this often is work for nothing. AiCache
    * remains the record of the generation; this is the copy that gets read.
-   *
    * Null means "not generated yet" and the UI simply shows the material as it
    * always did — a tutor uploading at 6am for a 9am class must not have their
    * material hidden because a queue has not run.
    */
-  aiSummary   String?
-  /** Bullet points a student can skim in fifteen seconds. */
-  aiKeyPoints Json?
+  aiSummary     String?
+  /**
+   * Bullet points a student can skim in fifteen seconds.
+   */
+  aiKeyPoints   Json?
   /**
    * Quests generated from this material: short, concrete tasks with an answer,
    * so reading it turns into something to do rather than something to file.
    */
-  aiQuests    Json?
-  aiState     String  @default("none") // none | pending | ready | failed
-  aiUpdatedAt DateTime?
+  aiQuests      Json?
+  aiState       String    @default("none") // none | pending | ready | failed
+  aiUpdatedAt   DateTime?
   /**
    * Which CEFR level this belongs to. Duplicated from `course.level` on
    * purpose — a class recording belongs to a level but not always to a
    * course, and the library filters on level far more often than it joins.
    */
-  level           String?
+  level         String?
   /**
    * Groups episodes into a shelf, e.g. "A1 Speaking Lab". Free text: the
    * tutor names their own series, the library rows come from whatever exists.
    */
-  series          String?
-  episodeNumber   Int?
+  series        String?
+  episodeNumber Int?
   /**
    * Recorded-on date for a class tape, which is what the library sorts and
    * labels by. Distinct from createdAt, since a tutor often uploads last
    * week's class today.
    */
-  recordedAt      DateTime?
+  recordedAt    DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -672,6 +679,10 @@ model Material {
   deletedAt      DateTime?
 
   @@index([kind, level])
+  // Exists in the database but had fallen out of this file, so any `db push`
+  // would silently drop it. The AI backfill sweeps for aiState = "pending",
+  // which is the one query that scans this column.
+  @@index([aiState])
 }
 
 /**
@@ -1109,6 +1120,33 @@ model Lecturer {
   photoUrl String?
 
   /**
+   * Whether this tutor still teaches here: active | probation | on_leave |
+   * inactive. See src/lib/lecturer-status.ts for what each one permits.
+   * Defaults to active so every tutor who existed before this field keeps
+   * working exactly as they did. An "inactive" tutor cannot sign in, but their
+   * account, their marks and every class they ever taught stay on record —
+   * this is the alternative to deleting somebody who leaves, which used to be
+   * the only option and took their history with it.
+   */
+  status          String    @default("active")
+  /**
+   * Free text: "maternity leave until March", "contract ended".
+   */
+  statusNote      String?
+  /**
+   * When the status last moved, so the office can see how long it has held.
+   */
+  statusChangedAt DateTime?
+  /**
+   * full_time | part_time | contract | visiting. Null means unrecorded.
+   */
+  employmentType  String?
+  /**
+   * First day of teaching. Null on tutors created before this was recorded.
+   */
+  startedAt       DateTime?
+
+  /**
    * The tutor's PRIMARY class: branch + level + session. Kept because a large
    * amount of existing code — the live room name, the community space, the
    * timetable editor's opening state — needs one concrete answer to "which
@@ -1475,7 +1513,6 @@ model Assignment {
 
 /**
  * One named student who should get one assignment.
- *
  * A join table rather than a JSON array of ids on Assignment, because the
  * question actually asked is "what has this student been set?" — which is an
  * indexed lookup here and a full scan with JSON matching there. It also means
@@ -1522,7 +1559,6 @@ model AssignmentSubmission {
   /**
    * Per-question marks, as returned by gradeSubmission: the auto marks are
    * written at submission time and the hand marks folded in later.
-   *
    * Kept so a student can be shown which questions they lost marks on rather
    * than a bare percentage, and so a disputed mark can be re-read months later
    * without re-running a grader whose rules may have changed since.
@@ -1531,7 +1567,6 @@ model AssignmentSubmission {
 
   /**
    * True while a written answer is still waiting for a tutor.
-   *
    * `score` stays null the whole time it is set. A part-marked paper must not
    * show a percentage — a student who wrote a good essay seeing 40% because
    * only the vocabulary section has been marked will read it as a fail.
@@ -1599,11 +1634,52 @@ model EmailMessage {
    */
   campaignId String?
 
+  /**
+   * Which of the school's two sending identities this message goes out as:
+   * "support" (a human reads replies) or "noreply" (automated receipts).
+   * Stored per message rather than read from env at send time, because a
+   * queued message may not drain until after a config change and it must go
+   * out as the address it was composed under. See src/lib/mail-identity.ts.
+   */
+  identity String @default("noreply")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status, scheduledFor])
   @@index([campaignId])
+}
+
+/**
+ * Which notification kinds are allowed to leave the building, and how.
+ *
+ * One row per kind. Absent means "use the code default", so the table starts
+ * empty and the system behaves exactly as it did before anybody opens the
+ * settings page — an admin turning one thing off must not require seventeen
+ * rows to exist first.
+ */
+model NotificationSetting {
+  id String @id @default(cuid())
+
+  /** A KIND value from src/lib/notify.ts, e.g. "payment.received". */
+  kind String @unique
+
+  /** The in-app bell. Off means the notification is not created at all. */
+  inApp Boolean @default(true)
+  /** Browser/device push, for the ones that mean "look now". */
+  push  Boolean @default(true)
+  /** A copy by email, sent through the queue. */
+  email Boolean @default(true)
+
+  /**
+   * Which sender an emailed copy uses — "support" or "noreply". Null follows
+   * the code's default for this kind.
+   */
+  identity String?
+
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
 }
 
 model EmailSuppression {

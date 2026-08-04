@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeftIcon } from "@/components/icons";
 import { useRouter, useParams } from "next/navigation";
-import Link from "next/link";
 import { useSession } from "next-auth/react";
+import LecturerShell from "@/components/LecturerShell";
 import { uploadFile } from "@/lib/upload";
 
 export default function CourseEditorPage() {
@@ -34,7 +33,7 @@ export default function CourseEditorPage() {
 
   useEffect(() => {
     if (status === "unauthenticated") {
-      router.push("/auth/signin");
+      router.push("/auth/lecturer/signin");
       return;
     }
     if (courseId) {
@@ -223,14 +222,10 @@ export default function CourseEditorPage() {
   };
 
   return (
+    <LecturerShell>
     <div className="min-h-screen bg-[var(--background)] py-10">
       <div className="mx-auto max-w-4xl px-6 md:px-10 space-y-8">
         <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
-          <div className="mb-4">
-            <Link href="/lecturer" className="inline-flex items-center gap-2 text-[var(--accent)] hover:brightness-110 text-sm font-semibold">
-              <ArrowLeftIcon /> Back to lecturer dashboard
-            </Link>
-          </div>
           <h1 className="text-4xl font-bold text-[var(--foreground)]">Edit Course</h1>
           <p className="text-[var(--muted)] mt-2">Update course details and publish state.</p>
         </header>
@@ -484,5 +479,6 @@ export default function CourseEditorPage() {
         </div>
       </div>
     </div>
+    </LecturerShell>
   );
 }

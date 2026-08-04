@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
 import Link from "next/link";
@@ -40,27 +40,73 @@ import {
  * All of that lives in `lib/class-path.ts` and is only rendered here.
  */
 
-/** Map units. The SVG scales to the container; the HTML waypoints do not. */
-const COLS = 4;
+/**
+ * Map units. The SVG scales to the container; the HTML waypoints do not, and
+ * that asymmetry is the whole reason the column count has to be responsive.
+ *
+ * A waypoint is a fixed 52px disc with a date plate under it and an "Up next"
+ * pill over it — call it 52 × 96 real pixels that does NOT shrink with the
+ * map. Four columns of it needs about 780px of container to breathe. On a
+ * 375px phone the same four columns gave each waypoint an 82 × 68 cell, so
+ * every disc overlapped its neighbour and every date plate overlapped the disc
+ * beside it. That was the clutter — not the styling, the grid.
+ *
+ * So the map picks its columns from the width it was actually given, and the
+ * geometry follows: fewer columns means a narrower viewBox and more rows,
+ * which keeps a cell roughly square at every size instead of squashing it.
+ */
 const CELL_W = 250;
 const CELL_H = 205;
-const VIEW_W = COLS * CELL_W;
+
+/** Real pixels a single column needs before waypoints start touching. */
+const MIN_COL_PX = 150;
+const MAX_COLS = 4;
+
+function colsForWidth(width: number): number {
+  if (!width) return MAX_COLS;
+  return Math.max(2, Math.min(MAX_COLS, Math.floor(width / MIN_COL_PX)));
+}
 
 type Point = { x: number; y: number };
 
-function layoutPoints(count: number): { points: Point[]; height: number } {
-  const rows = Math.max(1, Math.ceil(count / COLS));
+function layoutPoints(count: number, cols: number): { points: Point[]; height: number } {
+  const rows = Math.max(1, Math.ceil(count / cols));
   const points = Array.from({ length: count }, (_, i) => {
-    const row = Math.floor(i / COLS);
-    const slot = i % COLS;
+    const row = Math.floor(i / cols);
+    const slot = i % cols;
     // Serpentine: even rows run left-to-right, odd rows come back.
-    const col = row % 2 === 0 ? slot : COLS - 1 - slot;
+    const col = row % 2 === 0 ? slot : cols - 1 - slot;
     return {
       x: col * CELL_W + CELL_W / 2 + Math.sin(i * 1.7) * 18,
       y: row * CELL_H + CELL_H / 2 + Math.cos(i * 2.3) * 13,
     };
   });
   return { points, height: rows * CELL_H };
+}
+
+/**
+ * The container's width in real pixels, and the column count that fits in it.
+ *
+ * Measured rather than guessed from a media query: this map is rendered inside
+ * a padded card inside a shell with a sidebar, so the viewport width is not the
+ * map's width at any breakpoint, and the sidebar collapsing changes it without
+ * the viewport changing at all.
+ */
+function useResponsiveCols(): [React.RefObject<HTMLDivElement | null>, number] {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [cols, setCols] = useState(MAX_COLS);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const measure = () => setCols(colsForWidth(node.getBoundingClientRect().width));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, cols];
 }
 
 /**
@@ -116,9 +162,9 @@ function StarGlyph() {
 }
 
 /** The terrain the trail is drawn on. Abstract on purpose — this is a school. */
-function Terrain({ height, seed }: { height: number; seed: number }) {
+function Terrain({ width, height, seed }: { width: number; height: number; seed: number }) {
   const hills = Array.from({ length: 5 }, (_, i) => ({
-    cx: ((Math.sin(seed + i * 2.1) + 1) / 2) * VIEW_W,
+    cx: ((Math.sin(seed + i * 2.1) + 1) / 2) * width,
     cy: ((Math.cos(seed + i * 1.3) + 1) / 2) * height,
     r: 130 + Math.abs(Math.sin(seed + i)) * 120,
   }));
@@ -145,6 +191,7 @@ function Region({
   month,
   monthNodes,
   index,
+  cols,
   openIndex,
   shake,
   onTap,
@@ -152,13 +199,19 @@ function Region({
   month: Month;
   monthNodes: ClassNode[];
   index: number;
+  cols: number;
   openIndex: number | null;
   shake: number | null;
   onTap: (node: ClassNode) => void;
 }) {
   const reduced = usePrefersReducedMotion();
   const uid = useId().replace(/:/g, "");
-  const { points, height } = layoutPoints(monthNodes.length);
+  // A short month must not stretch its few classes across the full width — a
+  // region with three classes in it lays them out three-wide, not four-wide
+  // with a gap where the fourth would be.
+  const gridCols = Math.max(2, Math.min(cols, monthNodes.length));
+  const viewW = gridCols * CELL_W;
+  const { points, height } = layoutPoints(monthNodes.length, gridCols);
   const path = trailPath(points);
 
   const doneCount = monthNodes.filter((node) => node.state === "done").length;
@@ -173,26 +226,36 @@ function Region({
   const hereIndex = monthNodes.findIndex((node) => node.state === "today" || node.isNext);
   const here = hereIndex >= 0 ? points[hereIndex] : null;
 
+  /**
+   * The student's marker and the "Up next" pill both hang above the same
+   * waypoint, and at the pill's height they sat on top of each other — the
+   * marker covered the middle of the word. So the marker climbs above the pill
+   * when there is one to climb over. Two numbers rather than a repositioning
+   * scheme: only one node in a region can ever be `here`.
+   */
+  const hereHasPill = hereIndex >= 0 && monthNodes[hereIndex].isNext;
+  const hereFloat = hereHasPill ? [-62, -70, -62] : [-34, -42, -34];
+
   const toPercent = (point: Point) => ({
-    left: `${(point.x / VIEW_W) * 100}%`,
+    left: `${(point.x / viewW) * 100}%`,
     top: `${(point.y / height) * 100}%`,
   });
 
   return (
     <section className="overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)]">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-6 py-4">
-        <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--accent-soft)] text-sm font-black text-[var(--accent)]">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[var(--accent-soft)] text-sm font-black text-[var(--accent)]">
             {index + 1}
           </span>
-          <div>
-            <h3 className="text-lg font-extrabold leading-tight">{month.label}</h3>
-            <p className="text-xs font-semibold text-[var(--muted)]">{month.patternLabel}</p>
+          <div className="min-w-0">
+            <h3 className="truncate text-base font-extrabold leading-tight sm:text-lg">{month.label}</h3>
+            <p className="truncate text-xs font-semibold text-[var(--muted)]">{month.patternLabel}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="h-2 w-28 overflow-hidden rounded-full bg-[var(--border)]">
+          <div className="h-2 w-20 overflow-hidden rounded-full bg-[var(--border)] sm:w-28">
             <motion.div
               className="h-full rounded-full bg-gradient-to-r from-[var(--accent-strong)] to-[var(--accent)]"
               initial={{ width: 0 }}
@@ -207,9 +270,9 @@ function Region({
       </header>
 
       <div className="relative px-3 py-4 sm:px-5">
-        <div className="relative w-full" style={{ aspectRatio: `${VIEW_W} / ${height}` }}>
+        <div className="relative w-full" style={{ aspectRatio: `${viewW} / ${height}` }}>
           <svg
-            viewBox={`0 0 ${VIEW_W} ${height}`}
+            viewBox={`0 0 ${viewW} ${height}`}
             className="absolute inset-0 h-full w-full"
             aria-hidden
           >
@@ -220,7 +283,7 @@ function Region({
               </linearGradient>
             </defs>
 
-            <Terrain height={height} seed={index * 3.7} />
+            <Terrain width={viewW} height={height} seed={index * 3.7} />
 
             {/* The road, in three passes: a wide casing, the dim surface ahead
                 of the student, and the lit surface behind them. */}
@@ -356,8 +419,14 @@ function Region({
             <motion.span
               aria-hidden
               className="pointer-events-none absolute z-20"
-              style={{ ...toPercent(here), transform: "translate(-50%, -50%)" }}
-              animate={reduced ? {} : { y: [-34, -42, -34] }}
+              style={{
+                ...toPercent(here),
+                transform: "translate(-50%, -50%)",
+                // Reduced motion gets the resting height rather than 0, which
+                // would park the marker directly on the disc.
+                ...(reduced ? { marginTop: hereFloat[0] } : null),
+              }}
+              animate={reduced ? {} : { y: hereFloat }}
               transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
             >
               <span className="grid h-7 w-7 place-items-center rounded-full bg-[var(--foreground)] text-[11px] font-black text-[var(--surface)] shadow-xl ring-2 ring-[var(--surface)]">
@@ -456,6 +525,8 @@ function ClassCard({ node }: { node: ClassNode }) {
  * the wrong one — a student who cannot see what is on the other side has no
  * reason to want it. They get to look; the padlock is what they have to move.
  */
+const TEASER_W = MAX_COLS * CELL_W;
+
 export function LockedRegionTeaser({
   nextLevel,
   currentLevel,
@@ -467,12 +538,15 @@ export function LockedRegionTeaser({
 }) {
   return (
     <section className="relative mt-6 overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)]">
-      {/* Locked terrain, drawn and then fogged. */}
+      {/* Locked terrain, drawn and then fogged. Its own fixed viewBox, stretched
+          by `preserveAspectRatio="none"` — this is a texture behind a padlock,
+          not a map anybody reads positions off, so it does not need the
+          responsive grid the real regions use. */}
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-60 blur-[5px]">
-        <svg viewBox={`0 0 ${VIEW_W} 190`} className="h-full w-full" preserveAspectRatio="none">
-          <Terrain height={190} seed={9.1} />
+        <svg viewBox={`0 0 ${TEASER_W} 190`} className="h-full w-full" preserveAspectRatio="none">
+          <Terrain width={TEASER_W} height={190} seed={9.1} />
           <path
-            d={trailPath(layoutPoints(4).points.map((point) => ({ x: point.x, y: point.y * 0.9 })))}
+            d={trailPath(layoutPoints(4, 4).points.map((point) => ({ x: point.x, y: point.y * 0.9 })))}
             fill="none"
             stroke="var(--muted)"
             strokeWidth="20"
@@ -606,6 +680,8 @@ export default function JourneyMap({
   shake: number | null;
   onTap: (node: ClassNode) => void;
 }) {
+  const [ref, cols] = useResponsiveCols();
+
   const regions = months
     .map((month) => ({
       month,
@@ -614,13 +690,14 @@ export default function JourneyMap({
     .filter((region) => region.monthNodes.length > 0);
 
   return (
-    <div className="space-y-6">
+    <div ref={ref} className="space-y-6">
       {regions.map((region, index) => (
         <Region
           key={region.month.label}
           month={region.month}
           monthNodes={region.monthNodes}
           index={index}
+          cols={cols}
           openIndex={openIndex}
           shake={shake}
           onTap={onTap}

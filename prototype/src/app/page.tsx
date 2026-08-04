@@ -2,6 +2,7 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { homePathForRole } from "@/lib/portal";
 
 export default async function HomePage() {
   const session = await getServerSession(authOptions);
@@ -73,10 +74,8 @@ export default async function HomePage() {
     );
   }
 
-  const role = (session.user as { role?: string } | undefined)?.role?.toLowerCase();
-  if (role === "lecturer" || role === "admin") {
-    redirect("/lecturer");
-  }
-
-  redirect("/dashboard");
+  // Admins used to land here too, on a page built for tutors. They now go to
+  // their own portal, and tutors go to the real tutor dashboard rather than
+  // the original demo page that used to live at `/lecturer`.
+  redirect(homePathForRole((session.user as { role?: string } | undefined)?.role));
 }

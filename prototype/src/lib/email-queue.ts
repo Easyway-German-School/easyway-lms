@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail, isEmailConfigured } from "@/lib/mailer";
+import { isMailIdentityKey, type MailIdentityKey } from "@/lib/mail-identity";
 import crypto from "crypto";
 
 /**
@@ -30,6 +31,8 @@ export type QueueInput = {
   studentId?: string | null;
   scheduledFor?: Date;
   campaignId?: string;
+  /** "support" or "noreply". See src/lib/mail-identity.ts. */
+  identity?: MailIdentityKey;
 };
 
 /** Signed token so an unsubscribe link cannot be forged for someone else. */
@@ -80,6 +83,7 @@ export async function queueEmail(input: QueueInput) {
         type: input.type ?? "general",
         studentId: input.studentId ?? null,
         campaignId: input.campaignId ?? null,
+        identity: input.identity ?? "noreply",
         status: "suppressed",
         lastError: "Address is on the suppression list",
       },
@@ -94,6 +98,7 @@ export async function queueEmail(input: QueueInput) {
       type: input.type ?? "general",
       studentId: input.studentId ?? null,
       campaignId: input.campaignId ?? null,
+      identity: input.identity ?? "noreply",
       scheduledFor: input.scheduledFor ?? new Date(),
     },
   });
@@ -176,6 +181,10 @@ export async function drainQueue(limit = 50): Promise<DrainResult> {
       html: message.html,
       type: message.type,
       studentId: message.studentId,
+      // Read off the row, not off the environment. A message queued as
+      // "support" must still go out as support even if the default changed
+      // while it sat in the queue behind a backoff.
+      identity: isMailIdentityKey(message.identity) ? message.identity : undefined,
     });
 
     if (outcome.ok) {

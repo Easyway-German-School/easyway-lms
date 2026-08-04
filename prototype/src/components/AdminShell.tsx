@@ -8,6 +8,7 @@ import NotificationCenter from '@/components/NotificationCenter';
 import {
   AttendanceIcon,
   BellIcon,
+  SlidersIcon,
   BookOpenIcon,
   BranchIcon,
   ChevronLeftIcon,
@@ -20,6 +21,7 @@ import {
   InboxIcon,
   IntegrationIcon,
   LecturerIcon,
+  LessonBuilderIcon,
   LevelUpIcon,
   MailIcon,
   MapIcon,
@@ -64,6 +66,10 @@ const navItems: NavItem[] = [
   { label: 'Exam centre', href: '/admin/exam-centre', capability: 'exams' as const, icon: <ExamCentreIcon />, group: 'Exams' },
   { label: 'Exam Registrations', href: '/admin/exam-registrations', capability: 'exams' as const, icon: <RosterIcon />, group: 'Exams' },
 
+  // Course create/delete/import used to be on the demo page at `/lecturer`,
+  // an admin screen sitting in the tutor portal. It lives here now, above the
+  // Materials page that reads what it produces.
+  { label: 'Courses', href: '/admin/courses', capability: 'materials' as const, icon: <LessonBuilderIcon />, group: 'Content' },
   { label: 'Materials', href: '/admin/materials', capability: 'materials' as const, icon: <BookOpenIcon />, group: 'Content' },
   { label: 'Community', href: '/admin/community', capability: 'community' as const, icon: <CommunityIcon />, group: 'Content' },
 
@@ -78,6 +84,7 @@ const navItems: NavItem[] = [
   { label: 'Email centre', href: '/admin/emails', capability: 'emails' as const, icon: <MailIcon />, group: 'Settings' },
   { label: 'Compose email', href: '/admin/emails/compose', capability: 'emails' as const, icon: <SendIcon />, group: 'Settings' },
   { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <BellIcon />, group: 'Settings' },
+  { label: 'Notification rules', href: '/admin/notification-settings', capability: 'emails' as const, icon: <SlidersIcon />, group: 'Settings' },
   { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <ShieldIcon />, group: 'Settings' },
   { label: 'Security & recovery', href: '/admin/security', capability: 'security' as const, icon: <KeyIcon />, group: 'Settings' },
   { label: 'Integrations', href: '/admin/integrations', capability: 'integrations' as const, icon: <IntegrationIcon />, group: 'Settings' },
@@ -276,7 +283,12 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       </aside>
 
       {/* Main Content */}
-      <main className={`flex-1 transition-all duration-300 ${collapsed ? 'lg:ml-20' : 'lg:ml-72'}`}>
+      {/* See the note in LecturerShell: a flex child defaults to
+          `min-width: auto` and will not shrink below its widest content, and
+          `body { overflow-x: hidden }` then hides the overflow instead of
+          letting the page scroll to it. The admin area is the worst case for
+          this — it is nothing but wide tables of emails and amounts. */}
+      <main className={`min-w-0 flex-1 overflow-x-clip transition-all duration-300 ${collapsed ? 'lg:ml-20' : 'lg:ml-72'}`}>
         <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-white/60 bg-white/80 px-3 py-2 backdrop-blur-xl sm:px-6">
           <button
             onClick={() => setDrawerOpen(true)}

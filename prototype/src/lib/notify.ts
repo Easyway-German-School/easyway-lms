@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { sendPushToUsers } from "@/lib/push";
+import { queueEmail } from "@/lib/email-queue";
+import { renderNotificationEmail } from "@/lib/notification-email";
+import { planFor } from "@/lib/notification-routing";
+import { KIND as KINDS, type Severity } from "@/lib/notification-kinds";
 
 /**
  * Everything that reaches somebody's bell goes through here.
@@ -31,32 +35,14 @@ import { sendPushToUsers } from "@/lib/push";
  *   });
  */
 
-export type Severity = "info" | "success" | "warning" | "critical";
-
 /**
- * Well-known kinds. A kind is just a string — anything unrecognised still
- * delivers and renders, it simply falls back to the default icon — but the
- * ones the UI styles specially live here so a typo is a compile error.
+ * The kind vocabulary now lives in its own leaf module and is re-exported
+ * here, so `import { KIND } from "@/lib/notify"` keeps working everywhere it
+ * is already written. See notification-kinds.ts for why it had to move: the
+ * routing layer names kinds, and notify.ts depends on the routing layer.
  */
-export const KIND = {
-  studentRegistered: "student.registered",
-  studentImported: "student.imported",
-  paymentReceived: "payment.received",
-  paymentFailed: "payment.failed",
-  paymentPending: "payment.pending",
-  gatewayError: "gateway.error",
-  tuitionReminder: "tuition.reminder",
-  examRegistered: "exam.registered",
-  levelAdvance: "level.advance",
-  materialPublished: "material.published",
-  assignmentDue: "assignment.due",
-  resultPublished: "result.published",
-  classStarting: "class.starting",
-  lecturerMessage: "lecturer.message",
-  leadCaptured: "lead.captured",
-  announcement: "announcement",
-  general: "general",
-} as const;
+export { KIND } from "@/lib/notification-kinds";
+export type { Severity, NotificationKind } from "@/lib/notification-kinds";
 
 /** Who a notification is for. Exactly one shape per send. */
 export type NotifyTarget =
@@ -105,6 +91,20 @@ export type NotifyInput = {
   dedupeKey?: string;
   /** Also buzz their phone. Defaults on for warning and critical. */
   push?: boolean;
+  /**
+   * Also send it as an email.
+   *
+   * Left undefined the admin settings decide, falling back to the per-kind
+   * default in mail-identity.ts. Pass a boolean only to force the issue for
+   * one specific send — a password reset that must go out whatever the
+   * settings say, for instance.
+   */
+  email?: boolean;
+  /**
+   * Longer body for the emailed copy. The in-app bell wants one line; an email
+   * with one line in it looks broken. Falls back to `message`.
+   */
+  emailBody?: string;
 };
 
 export type NotifyResult = {
@@ -115,6 +115,8 @@ export type NotifyResult = {
   skipped: number;
   /** Devices reached. Zero when VAPID keys are not configured. */
   pushed: number;
+  /** Emails put on the queue. Zero when this kind does not email. */
+  queuedEmails: number;
 };
 
 /** Resolve a target down to the user ids it actually reaches. */
@@ -183,11 +185,11 @@ function shouldPush(input: NotifyInput): boolean {
 export async function notify(input: NotifyInput): Promise<NotifyResult> {
   const batchId = randomUUID();
   const severity = input.severity ?? "info";
-  const kind = input.kind ?? KIND.general;
+  const kind = input.kind ?? KINDS.general;
 
   const recipients = await resolveRecipients(input.to);
   if (recipients.length === 0) {
-    return { batchId, created: 0, skipped: 0, pushed: 0 };
+    return { batchId, created: 0, skipped: 0, pushed: 0, queuedEmails: 0 };
   }
 
   // Anyone who already got this exact notification is dropped rather than
@@ -205,7 +207,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   }
 
   if (targets.length === 0) {
-    return { batchId, created: 0, skipped, pushed: 0 };
+    return { batchId, created: 0, skipped, pushed: 0, queuedEmails: 0 };
   }
 
   // The student id is denormalised onto the row so the existing student-scoped
@@ -216,8 +218,12 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   });
   const studentByUser = new Map(students.map((s) => [s.userId, s]));
 
+  // What this kind is allowed to use. Resolved once for the whole batch: it is
+  // a property of the kind, not of the recipient.
+  const plan = await planFor(kind, shouldPush(input));
+
   const now = new Date();
-  await prisma.notification.createMany({
+  if (plan.inApp) await prisma.notification.createMany({
     data: targets.map((userId) => {
       const student = studentByUser.get(userId);
       return {
@@ -242,7 +248,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   });
 
   let pushed = 0;
-  if (shouldPush(input)) {
+  if (plan.push) {
     // Best effort throughout: a push that fails must never lose the row that
     // is already saved, nor fail the request that triggered it.
     try {
@@ -258,7 +264,54 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
     }
   }
 
-  return { batchId, created: targets.length, skipped, pushed };
+  /**
+   * The same message, by email.
+   *
+   * QUEUED, NEVER SENT INLINE. An announcement to two hundred students would
+   * otherwise hold the admin's request open for minutes and lose the lot on a
+   * provider hiccup. The queue already owns suppression, retry with widening
+   * backoff, and the EmailLog record — this only decides who and as whom.
+   *
+   * Explicit `email: false` wins over any setting; explicit `true` overrides a
+   * kind that is off, for the handful of sends that must go out regardless.
+   * Everything else follows the admin's routing.
+   */
+  let queuedEmails = 0;
+  const wantsEmail = typeof input.email === "boolean" ? input.email : plan.email;
+  if (wantsEmail) {
+    try {
+      const people = await prisma.user.findMany({
+        where: { id: { in: targets } },
+        select: { id: true, email: true, name: true },
+      });
+      const studentIdByUser = new Map(students.map((s) => [s.userId, s.id]));
+
+      for (const person of people) {
+        if (!person.email) continue;
+        await queueEmail({
+          to: person.email,
+          subject: input.title,
+          html: renderNotificationEmail({
+            name: person.name,
+            title: input.title,
+            body: input.emailBody ?? input.message,
+            link: input.link,
+            identity: plan.identity,
+          }),
+          type: kind,
+          studentId: studentIdByUser.get(person.id) ?? null,
+          identity: plan.identity,
+        });
+        queuedEmails += 1;
+      }
+    } catch (error) {
+      // Same rule as push: the bell already rang, and a mail queue problem
+      // must not undo it or fail the request that triggered it.
+      console.warn("notify: email queueing failed", error);
+    }
+  }
+
+  return { batchId, created: plan.inApp ? targets.length : 0, skipped, pushed, queuedEmails };
 }
 
 /**

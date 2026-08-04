@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { prisma } from "@/lib/prisma";
 import { mailersendToken, sendViaMailerSend } from "@/lib/mailerlite";
+import { formatFrom, MAIL_IDENTITIES, type MailIdentityKey } from "@/lib/mail-identity";
 
 /**
  * Outbound email.
@@ -103,6 +104,7 @@ export async function sendEmail({
   html,
   type = "general",
   studentId,
+  identity,
 }: {
   to: string;
   subject: string;
@@ -110,10 +112,23 @@ export async function sendEmail({
   /** Categorises the row in EmailLog: welcome, fee_reminder_7d, etc. */
   type?: string;
   studentId?: string | null;
+  /**
+   * Which of the school's two addresses this goes out as — "support" or
+   * "noreply". See src/lib/mail-identity.ts. Omitted falls back to SMTP_FROM,
+   * so every existing caller keeps the behaviour it already had.
+   */
+  identity?: MailIdentityKey;
 }): Promise<SendEmailResult> {
+  // The chosen identity wins over SMTP_FROM. Authentication is still the one
+  // mailbox in SMTP_USER — only the From: header changes per message, which is
+  // exactly what lets one paid mailbox send as both addresses.
+  const chosen = identity ? MAIL_IDENTITIES[identity] : null;
+
   // Preferred path: MailerSend's HTTP API.
   if (mailersendToken()) {
-    const from = fromAddress();
+    const from = chosen
+      ? { email: chosen.email, name: chosen.name }
+      : fromAddress();
     const result = await sendViaMailerSend({
       to,
       subject,
@@ -141,7 +156,10 @@ export async function sendEmail({
 
   try {
     await transporter.sendMail({
-      from: process.env.SMTP_FROM || "Easyway LMS <no-reply@easyway.test>",
+      from: chosen ? formatFrom(chosen) : process.env.SMTP_FROM || "Easyway LMS <no-reply@easyway.test>",
+      // Even the automated address routes replies to a person — a student who
+      // hits reply on a wrong receipt should reach the office, not a bounce.
+      ...(chosen?.replyTo ? { replyTo: chosen.replyTo } : {}),
       to,
       subject,
       html,

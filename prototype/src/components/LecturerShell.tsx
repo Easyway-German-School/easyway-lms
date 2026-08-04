@@ -1,6 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
+import { signOut } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from "@/components/BrandLogo";
 import NotificationCenter from "@/components/NotificationCenter";
@@ -67,6 +68,7 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [revoked, setRevoked] = useState(false);
   // Below lg the sidebar is a drawer. A tutor marking attendance on their
   // phone had 288px of the 375px screen taken by a sidebar they could not
   // dismiss.
@@ -75,6 +77,43 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
+
+  /**
+   * A tutor who was marked inactive while signed in loses the portal here.
+   *
+   * Their session token stays technically valid for up to 30 days, so refusing
+   * them at the sign-in form alone would leave somebody who has left the school
+   * holding a live roster, register and gradebook until it expired. Checked on
+   * every navigation; a failed request is ignored, because a network blip must
+   * not throw a tutor out mid-lesson.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/lecturer/status", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data && data.active === false) setRevoked(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
+  useEffect(() => {
+    if (revoked) signOut({ callbackUrl: "/auth/lecturer/signin?message=This+tutor+account+is+no+longer+active.+Contact+the+school+office." });
+  }, [revoked]);
+
+  if (revoked) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[var(--background)] px-6 text-center">
+        <div>
+          <p className="text-lg font-semibold text-[var(--foreground)]">This tutor account is no longer active.</p>
+          <p className="mt-2 text-sm text-[var(--muted)]">Signing you out — contact the school office.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(10,124,255,0.10),_transparent_30%),linear-gradient(135deg,_#f7faff_0%,_#eef3ff_100%)] text-[var(--foreground)]">
@@ -145,7 +184,21 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
         </div>
       </aside>
 
-      <main className={`flex-1 transition-all duration-300 ${collapsed ? 'lg:ml-20' : 'lg:ml-72'}`}>
+      {/*
+        `min-w-0` and `overflow-x-clip` are load-bearing, not tidying.
+
+        This <main> is a flex child, and a flex child defaults to
+        `min-width: auto` — it refuses to shrink below its widest content. One
+        wide table, long student email or unbroken URL anywhere on the page
+        pushes it past the viewport, and because `body` sets `overflow-x: hidden`
+        globally the page does NOT gain a sideways scrollbar to reveal it: the
+        content is simply gone off the right edge. That presents as a dozen
+        unrelated "this page is cut off" bugs rather than one layout fault.
+
+        StudentShell was fixed this way on 2026-08-02; these two shells were
+        missed at the time.
+      */}
+      <main className={`min-w-0 flex-1 overflow-x-clip transition-all duration-300 ${collapsed ? 'lg:ml-20' : 'lg:ml-72'}`}>
         <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-white/60 bg-white/80 px-3 py-2 backdrop-blur-xl sm:px-5">
           <button
             onClick={() => setDrawerOpen(true)}

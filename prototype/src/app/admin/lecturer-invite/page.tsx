@@ -13,6 +13,14 @@ import {
   SESSION_SLOTS,
   type LecturerAssignment,
 } from "@/lib/lecturer-assignment";
+import {
+  EMPLOYMENT_TYPE_LABELS,
+  EMPLOYMENT_TYPES,
+  LECTURER_STATUS_META,
+  LECTURER_STATUSES,
+  type EmploymentType,
+  type LecturerStatus,
+} from "@/lib/lecturer-status";
 
 /**
  * Tutors.
@@ -36,6 +44,11 @@ type Tutor = {
   bio: string | null;
   phone: string | null;
   photoUrl: string | null;
+  status: LecturerStatus;
+  statusNote: string | null;
+  statusChangedAt: string | null;
+  employmentType: EmploymentType | null;
+  startedAt: string | null;
   assignment: LecturerAssignment;
   assignmentLabel: string;
   studentCount: number;
@@ -135,6 +148,154 @@ function AssignmentFields({
         onChange={(next) => set("batches", next)}
         emptyMeans="Nothing selected — this tutor takes every batch."
       />
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: LecturerStatus }) {
+  const meta = LECTURER_STATUS_META[status];
+  return (
+    <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${meta.tone}`}>{meta.label}</span>
+  );
+}
+
+/**
+ * Where a tutor is marked as having left, gone on leave, or come back.
+ *
+ * Kept separate from the assignment panel below it because the two answer
+ * different questions — "do they still work here?" and "which classes do they
+ * take?" — and folding them together would mean you could not record somebody
+ * leaving without also touching their timetable.
+ */
+function StatusPanel({
+  tutor,
+  onSaved,
+  onError,
+}: {
+  tutor: Tutor;
+  onSaved: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [status, setStatus] = useState<LecturerStatus>(tutor.status);
+  const [note, setNote] = useState(tutor.statusNote ?? "");
+  const [employmentType, setEmploymentType] = useState<string>(tutor.employmentType ?? "");
+  const [startedAt, setStartedAt] = useState(tutor.startedAt ? tutor.startedAt.slice(0, 10) : "");
+  const [saving, setSaving] = useState(false);
+
+  const meta = LECTURER_STATUS_META[status];
+  const dirty =
+    status !== tutor.status ||
+    note !== (tutor.statusNote ?? "") ||
+    employmentType !== (tutor.employmentType ?? "") ||
+    startedAt !== (tutor.startedAt ? tutor.startedAt.slice(0, 10) : "");
+
+  async function save() {
+    // Losing access is not something to do by mis-click.
+    if (status === "inactive" && tutor.status !== "inactive") {
+      const name = tutor.user.name || tutor.user.email;
+      if (
+        !confirm(
+          `Mark ${name} as inactive?\n\nThey will be signed out and will not be able to sign in again. Their marks, classes and history are all kept, and you can set them back to active at any time.`,
+        )
+      ) {
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/lecturers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lecturerId: tutor.id,
+          status,
+          statusNote: note,
+          employmentType: employmentType || null,
+          startedAt: startedAt || null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save the status");
+      onSaved(`${tutor.user.name || tutor.user.email} is now marked ${LECTURER_STATUS_META[status].label.toLowerCase()}.`);
+    } catch (saveError) {
+      onError(saveError instanceof Error ? saveError.message : "Could not save the status");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+      <p className="text-sm font-semibold text-[var(--foreground)]">Status &amp; employment</p>
+      <p className="mt-1 text-xs text-[var(--muted)]">
+        Marking somebody inactive is how a tutor leaves. It is not a deletion — every mark they entered and every
+        class they taught stays exactly where it is.
+      </p>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {LECTURER_STATUSES.map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => setStatus(option)}
+            className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
+              status === option
+                ? `${LECTURER_STATUS_META[option].tone} ring-2 ring-[var(--accent)]/40`
+                : "border border-[var(--border)] bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            {LECTURER_STATUS_META[option].label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-[var(--muted)]">{meta.description}</p>
+
+      <label className="mt-4 block text-sm font-medium">
+        Note
+        <input
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Maternity leave until March · contract ended · resigned"
+          className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
+        />
+      </label>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <label className="block text-sm font-medium">
+          Employment
+          <select
+            value={employmentType}
+            onChange={(event) => setEmploymentType(event.target.value)}
+            className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
+          >
+            <option value="">Not recorded</option>
+            {EMPLOYMENT_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {EMPLOYMENT_TYPE_LABELS[type]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm font-medium">
+          Started
+          <input
+            type="date"
+            value={startedAt}
+            onChange={(event) => setStartedAt(event.target.value)}
+            className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
+          />
+        </label>
+      </div>
+
+      <button
+        type="button"
+        onClick={save}
+        disabled={saving || !dirty}
+        className="mt-5 rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+      >
+        {saving ? "Saving…" : "Save status"}
+      </button>
     </div>
   );
 }
@@ -273,13 +434,30 @@ export default function AdminTutorsPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const [form, setForm] = useState({ name: "", email: "", password: "", phone: "", specialization: "", bio: "" });
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    phone: "",
+    specialization: "",
+    bio: "",
+    employmentType: "",
+    startedAt: "",
+  });
   const [newAssignment, setNewAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
   const [creating, setCreating] = useState(false);
 
   const [editingId, setEditingId] = useState("");
   const [editAssignment, setEditAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  /**
+   * Defaults to the people who currently teach. Somebody who left two years
+   * ago is kept forever and would otherwise crowd out the list the office
+   * actually works from — but "All" is one click away, because the whole point
+   * of a status is that the record survives.
+   */
+  const [statusFilter, setStatusFilter] = useState<LecturerStatus | "all" | "current">("current");
 
   const load = useCallback(async () => {
     try {
@@ -305,6 +483,18 @@ export default function AdminTutorsPage() {
 
   const editingTutor = useMemo(() => tutors.find((tutor) => tutor.id === editingId) ?? null, [tutors, editingId]);
 
+  const visibleTutors = useMemo(() => {
+    if (statusFilter === "all") return tutors;
+    if (statusFilter === "current") return tutors.filter((tutor) => tutor.status !== "inactive");
+    return tutors.filter((tutor) => tutor.status === statusFilter);
+  }, [tutors, statusFilter]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const tutor of tutors) counts[tutor.status] = (counts[tutor.status] ?? 0) + 1;
+    return counts;
+  }, [tutors]);
+
   async function createTutor() {
     setCreating(true);
     setError("");
@@ -321,7 +511,16 @@ export default function AdminTutorsPage() {
       setSuccess(
         `Tutor account created for ${data.lecturer?.email}. Temporary password: ${data.lecturer?.password} — hand this over now, it is not shown again.`,
       );
-      setForm({ name: "", email: "", password: "", phone: "", specialization: "", bio: "" });
+      setForm({
+        name: "",
+        email: "",
+        password: "",
+        phone: "",
+        specialization: "",
+        bio: "",
+        employmentType: "",
+        startedAt: "",
+      });
       setNewAssignment(EMPTY_ASSIGNMENT);
       await load();
     } catch (createError) {
@@ -388,8 +587,41 @@ export default function AdminTutorsPage() {
         <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
           <h2 className="text-2xl font-bold">Tutor directory</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            {loading ? "Loading…" : `${tutors.length} tutor${tutors.length === 1 ? "" : "s"}.`}
+            {loading
+              ? "Loading…"
+              : `Showing ${visibleTutors.length} of ${tutors.length} tutor${tutors.length === 1 ? "" : "s"}.`}
           </p>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {(
+              [
+                { key: "current" as const, label: "Currently teaching" },
+                ...LECTURER_STATUSES.map((status) => ({ key: status, label: LECTURER_STATUS_META[status].label })),
+                { key: "all" as const, label: "All" },
+              ]
+            ).map((option) => {
+              const count =
+                option.key === "all"
+                  ? tutors.length
+                  : option.key === "current"
+                    ? tutors.filter((tutor) => tutor.status !== "inactive").length
+                    : statusCounts[option.key] ?? 0;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setStatusFilter(option.key)}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
+                    statusFilter === option.key
+                      ? "bg-[var(--accent)] text-white"
+                      : "border border-[var(--border)] bg-[var(--surface-alt)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                  }`}
+                >
+                  {option.label} ({count})
+                </button>
+              );
+            })}
+          </div>
 
           <div className="mt-5 space-y-3">
             {!loading && tutors.length === 0 ? (
@@ -398,7 +630,13 @@ export default function AdminTutorsPage() {
               </p>
             ) : null}
 
-            {tutors.map((tutor) => {
+            {!loading && tutors.length > 0 && visibleTutors.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-[var(--border)] p-5 text-sm text-[var(--muted)]">
+                No tutors with this status.
+              </p>
+            ) : null}
+
+            {visibleTutors.map((tutor) => {
               const isEditing = editingId === tutor.id;
               return (
                 <div key={tutor.id} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
@@ -413,8 +651,19 @@ export default function AdminTutorsPage() {
                     )}
 
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-[var(--foreground)]">{tutor.user.name || "Unnamed tutor"}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-[var(--foreground)]">{tutor.user.name || "Unnamed tutor"}</p>
+                        <StatusBadge status={tutor.status} />
+                        {tutor.employmentType ? (
+                          <span className="rounded-full border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--muted)]">
+                            {EMPLOYMENT_TYPE_LABELS[tutor.employmentType]}
+                          </span>
+                        ) : null}
+                      </div>
                       <p className="text-sm text-[var(--muted)]">{tutor.user.email}</p>
+                      {tutor.statusNote ? (
+                        <p className="mt-1 text-xs italic text-[var(--muted)]">{tutor.statusNote}</p>
+                      ) : null}
                       <p className="mt-2 text-sm text-[var(--foreground-soft)]">{tutor.assignmentLabel}</p>
                       {tutor.assignment.classTypes.length ? (
                         <p className="mt-1 text-xs text-[var(--muted)]">
@@ -439,13 +688,38 @@ export default function AdminTutorsPage() {
                         }}
                         className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold text-[var(--foreground)]"
                       >
-                        {isEditing ? "Close" : "Edit assignment"}
+                        {isEditing ? "Close" : "Edit tutor"}
                       </button>
                     </div>
                   </div>
 
                   {isEditing ? (
                     <div className="mt-5 space-y-5 border-t border-[var(--border)] pt-5">
+                      <StatusPanel
+                        key={`${tutor.id}-${tutor.status}`}
+                        tutor={tutor}
+                        onSaved={async (message) => {
+                          setError("");
+                          setSuccess(message);
+                          await load();
+                        }}
+                        onError={(message) => {
+                          setSuccess("");
+                          setError(message);
+                        }}
+                      />
+
+                      {/* Assigning a class to somebody who has left, or who is
+                          away, is the mistake this whole field exists to catch
+                          — so say it here, where the class is being given. */}
+                      {!LECTURER_STATUS_META[tutor.status].assignable ? (
+                        <p className="rounded-2xl bg-amber-500/10 p-4 text-xs text-amber-800">
+                          This tutor is marked{" "}
+                          <strong>{LECTURER_STATUS_META[tutor.status].label.toLowerCase()}</strong>. You can still
+                          edit their assignment — but check that somebody is actually covering these classes.
+                        </p>
+                      ) : null}
+
                       <AssignmentFields branches={branches} value={editAssignment} onChange={setEditAssignment} />
 
                       {editAssignment.classTypes.includes("private") ? (
@@ -523,6 +797,30 @@ export default function AdminTutorsPage() {
                 onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
                 className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm"
                 placeholder="+234 …"
+              />
+            </label>
+            <label className="block text-sm font-medium">
+              Employment
+              <select
+                value={form.employmentType}
+                onChange={(event) => setForm((current) => ({ ...current, employmentType: event.target.value }))}
+                className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm"
+              >
+                <option value="">Not recorded</option>
+                {EMPLOYMENT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {EMPLOYMENT_TYPE_LABELS[type]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm font-medium">
+              Started
+              <input
+                type="date"
+                value={form.startedAt}
+                onChange={(event) => setForm((current) => ({ ...current, startedAt: event.target.value }))}
+                className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm"
               />
             </label>
             <label className="block text-sm font-medium md:col-span-2">

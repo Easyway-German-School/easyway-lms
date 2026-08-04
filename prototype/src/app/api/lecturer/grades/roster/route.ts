@@ -5,10 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { letterFor } from "@/lib/grading";
 import { KIND, notify } from "@/lib/notify";
 import {
-  matchesBatch,
-  readAssignment,
-  studentWhereForAssignment,
-} from "@/lib/lecturer-assignment";
+  ASSESSMENT_TYPES,
+  isAssessmentType,
+  resolveRoster,
+  UNASSIGNED_MESSAGE,
+} from "@/lib/lecturer-roster";
 
 /**
  * A tutor grading their own class.
@@ -30,36 +31,6 @@ import {
 
 export const dynamic = "force-dynamic";
 
-/** What a tutor can be marking. Free-text would make the gradebook unsortable. */
-const ASSESSMENT_TYPES = ["classwork", "speaking", "writing", "listening", "quiz", "mock exam"] as const;
-
-async function resolveRoster(userId: string) {
-  const lecturer = await prisma.lecturer.findUnique({ where: { userId } });
-  if (!lecturer) return { error: "Lecturer profile not found" as const };
-
-  const assignment = readAssignment(lecturer);
-  const where = studentWhereForAssignment(assignment);
-  if (!where) return { error: "unassigned" as const };
-
-  const students = await prisma.student.findMany({
-    where: { ...(where as Record<string, unknown>), status: "active" } as any,
-    select: {
-      id: true,
-      level: true,
-      sessionSlot: true,
-      studentCode: true,
-      admission: true,
-      user: { select: { name: true, email: true } },
-    },
-    orderBy: { createdAt: "asc" },
-  });
-
-  return {
-    lecturer,
-    students: students.filter((student) => matchesBatch(assignment, student.admission)),
-  };
-}
-
 export async function GET(request: NextRequest) {
   const session = (await getServerSession(authOptions as any)) as any;
   if (!session?.user?.id || String(session.user.role ?? "").toLowerCase() !== "lecturer") {
@@ -67,16 +38,16 @@ export async function GET(request: NextRequest) {
   }
 
   const resolved = await resolveRoster(session.user.id);
-  if ("error" in resolved) {
-    if (resolved.error === "unassigned") {
+  if (!resolved.ok) {
+    if (resolved.reason === "unassigned") {
       return NextResponse.json({
         assigned: false,
         students: [],
         types: ASSESSMENT_TYPES,
-        message: "You have not been assigned a class yet. The school office sets this.",
+        message: UNASSIGNED_MESSAGE,
       });
     }
-    return NextResponse.json({ error: resolved.error }, { status: 404 });
+    return NextResponse.json({ error: "Lecturer profile not found" }, { status: 404 });
   }
 
   const type = request.nextUrl.searchParams.get("type") ?? ASSESSMENT_TYPES[0];
@@ -101,8 +72,8 @@ export async function GET(request: NextRequest) {
       const grade = latest.get(student.id);
       return {
         id: student.id,
-        name: student.user.name || student.user.email,
-        email: student.user.email,
+        name: student.name,
+        email: student.email,
         studentCode: student.studentCode,
         level: student.level,
         sessionSlot: student.sessionSlot,
@@ -122,9 +93,9 @@ export async function POST(request: NextRequest) {
   }
 
   const resolved = await resolveRoster(session.user.id);
-  if ("error" in resolved) {
+  if (!resolved.ok) {
     return NextResponse.json(
-      { error: resolved.error === "unassigned" ? "You have no class assigned yet." : resolved.error },
+      { error: resolved.reason === "unassigned" ? UNASSIGNED_MESSAGE : "Lecturer profile not found" },
       { status: 403 },
     );
   }
@@ -133,7 +104,7 @@ export async function POST(request: NextRequest) {
   const type = typeof body?.type === "string" ? body.type : "";
   const grades = Array.isArray(body?.grades) ? body.grades : [];
 
-  if (!(ASSESSMENT_TYPES as readonly string[]).includes(type)) {
+  if (!isAssessmentType(type)) {
     return NextResponse.json(
       { error: `Assessment type must be one of ${ASSESSMENT_TYPES.join(", ")}` },
       { status: 400 },

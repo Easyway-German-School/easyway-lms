@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import BrandLogo from "@/components/BrandLogo";
+import PortalShell from "@/components/PortalShell";
 import { CalendarIcon } from "@/components/icons";
 
 /**
@@ -97,6 +98,10 @@ export default function ExamCentrePage() {
   }
 
   return (
+    // In the student sidebar, but also a public sales page. Signed in, it keeps
+    // the portal chrome so a student who opens it can get back out; signed out,
+    // it stays the bare page a member of the public should see.
+    <PortalShell public>
     <div className="min-h-screen bg-[linear-gradient(135deg,_#f7faff_0%,_#fffbf8_100%)]">
       <div className="mx-auto max-w-4xl px-6 py-12">
         <BrandLogo variant="wordmark" className="h-10" />
@@ -231,5 +236,6 @@ export default function ExamCentrePage() {
         </div>
       </div>
     </div>
+    </PortalShell>
   );
 }

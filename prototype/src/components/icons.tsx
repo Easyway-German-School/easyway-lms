@@ -163,6 +163,21 @@ export const BellIcon = icon("BellIcon", (
   </>
 ));
 
+/** Channel routing: three tracks, each with its own switch. */
+export const SlidersIcon = icon("SlidersIcon", (
+  <>
+    <path d="M4 6h10" />
+    <path d="M18 6h2" />
+    <circle cx="16" cy="6" r="2" />
+    <path d="M4 12h4" />
+    <path d="M12 12h8" />
+    <circle cx="10" cy="12" r="2" />
+    <path d="M4 18h10" />
+    <path d="M18 18h2" />
+    <circle cx="16" cy="18" r="2" />
+  </>
+));
+
 export const BellOffIcon = icon("BellOffIcon", (
   <>
     <path d="M18.5 14.5c-.4-.9-.5-2.6-.5-5.5a6 6 0 0 0-8.6-5.4" />
