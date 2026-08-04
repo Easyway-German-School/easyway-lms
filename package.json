@@ -2,6 +2,6 @@
   "name": "easyway-lms-root",
   "private": true,
   "scripts": {
-    "build": "npm --prefix prototype ci && npm --prefix prototype run build && cp -a prototype/.next . || true"
+    "build": "npm --prefix prototype ci && npm --prefix prototype run build && node ./scripts/copy-next.cjs"
   }
 }
