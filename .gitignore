@@ -11,3 +11,7 @@ tmp/
 *.tsbuildinfo
 .claude/
 *.db
+
+# Local temporary branches used for deployment/testing
+prototype-push/
+root-push/

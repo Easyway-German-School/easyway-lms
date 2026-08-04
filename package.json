@@ -1,8 +1,0 @@
-{
-  "name": "easyway-lms-root",
-  "private": true,
-  "scripts": {
-    "install": "cd prototype && npm ci",
-    "build": "cd prototype && npm run build && cp -r .next .."
-  }
-}
