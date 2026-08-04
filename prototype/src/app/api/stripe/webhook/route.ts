@@ -1,19 +1,26 @@
 import type Stripe from "stripe";
 import { NextRequest, NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
+import { getStripe, stripeConfigured } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
 
 export async function POST(request: NextRequest) {
+  // Answered before anything is read. On a deployment that takes payment
+  // through Paystack this route is dead weight, and it should say so plainly
+  // rather than throw an unconfigured-client error that reads like a bug.
+  if (!stripeConfigured()) {
+    return NextResponse.json({ error: "Stripe is not enabled on this deployment" }, { status: 501 });
+  }
+
   const sig = request.headers.get("stripe-signature") || "";
   const body = await request.text();
 
   let event: Stripe.Event;
 
   try {
-    event = stripe.webhooks.constructEvent(body, sig, endpointSecret) as Stripe.Event;
+    event = getStripe().webhooks.constructEvent(body, sig, endpointSecret) as Stripe.Event;
   } catch (err) {
     console.error("Webhook signature verification failed:", err);
     return NextResponse.json(

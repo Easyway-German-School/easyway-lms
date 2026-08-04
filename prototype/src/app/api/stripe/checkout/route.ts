@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
+import { getStripe, stripeConfigured } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -8,6 +8,12 @@ export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // This school charges through Paystack. Refuse clearly rather than build a
+  // checkout session against a client that has no key.
+  if (!stripeConfigured()) {
+    return NextResponse.json({ error: "Stripe is not enabled on this deployment" }, { status: 501 });
   }
 
   try {
@@ -31,7 +37,7 @@ export async function POST(request: NextRequest) {
 
     const resolvedPathwayId = resolvedPathway?.id ?? null;
 
-    const session_obj = await stripe.checkout.sessions.create({
+    const session_obj = await getStripe().checkout.sessions.create({
       payment_method_types: ["card"],
       line_items: [
         {
