@@ -1,0 +1,11 @@
+package.json
+package-lock.json
+root-push/
+prototype-push/
+README.md
+*.md
+*.yml
+*.yaml
+*.json
+!prototype/**
+
