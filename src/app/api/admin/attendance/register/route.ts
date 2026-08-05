@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
         ? (student.admission as Record<string, unknown>)
         : {};
     const mark = marked.get(student.id);
-    const present = student.attendances.filter((attendance: { present: boolean }) => attendance.present).length;
+    const present = student.attendances.filter((attendance) => attendance.present).length;
 
     return {
       id: student.id,
@@ -152,9 +152,9 @@ export async function GET(request: NextRequest) {
       : null,
     summary: {
       total: rows.length,
-      present: rows.filter((row: { mark: string }) => row.mark === "present").length,
-      absent: rows.filter((row: { mark: string }) => row.mark === "absent").length,
-      unmarked: rows.filter((row: { mark: string }) => row.mark === "unmarked").length,
+      present: rows.filter((row) => row.mark === "present").length,
+      absent: rows.filter((row) => row.mark === "absent").length,
+      unmarked: rows.filter((row) => row.mark === "unmarked").length,
     },
     students: rows,
   });

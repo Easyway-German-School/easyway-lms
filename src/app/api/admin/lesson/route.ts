@@ -1,0 +1,42 @@
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { NextRequest, NextResponse } from "next/server";
+
+import { requireCapability } from "@/lib/admin-roles";
+async function isLecturer(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) return false;
+  return (user.role?.toLowerCase() === "lecturer" || user.role?.toLowerCase() === "admin");
+}
+
+export async function POST(request: NextRequest) {
+  const gate = await requireCapability("materials");
+  if (!gate.ok) return gate.response;
+
+  const session = await getServerSession(authOptions as any) as any;
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!await isLecturer(session.user.id)) return NextResponse.json({ error: "Lecturer access required" }, { status: 403 });
+
+  const body = await request.json();
+  const { moduleId, title, description, content, type, order, duration } = body;
+  if (!moduleId || !title) return NextResponse.json({ error: "moduleId and title required" }, { status: 400 });
+
+  try {
+    const lesson = await prisma.lesson.create({
+      data: {
+        moduleId,
+        title,
+        description: description || "",
+        content: content || "",
+        type: type || "lesson",
+        order: order || 1,
+        duration: duration || 20,
+      }
+    });
+    return NextResponse.json({ lesson }, { status: 201 });
+  } catch (error) {
+    console.error("Create lesson error:", error);
+    return NextResponse.json({ error: "Failed to create lesson" }, { status: 500 });
+  }
+}

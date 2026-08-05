@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
   // one query rather than one per student.
   const marks: Array<{ studentId: string; present?: boolean; status?: string; notes?: string | null }> =
     await prisma.attendance.findMany({
-      where: { studentId: { in: students.map((student: { id: string }) => student.id) }, date },
+      where: { studentId: { in: students.map((student) => student.id) }, date },
       select: { studentId: true, present: true, status: true, notes: true },
     });
 
@@ -97,13 +97,13 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  const rows = students.map((student: { id: string; admission: unknown; attendances: { present: boolean }[]; user: { name?: string | null; email: string }; studentCode?: string; level?: string; sessionSlot?: string }) => {
+  const rows = students.map((student) => {
     const admission =
       typeof student.admission === "object" && student.admission !== null
         ? (student.admission as Record<string, unknown>)
         : {};
     const mark = marked.get(student.id);
-    const present = student.attendances.filter((attendance: { present: boolean }) => attendance.present).length;
+    const present = student.attendances.filter((attendance) => attendance.present).length;
 
     return {
       id: student.id,

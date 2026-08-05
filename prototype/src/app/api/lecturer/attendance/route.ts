@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
       ).map((student) => student.id),
     );
 
-    const rows = attendance.filter((entry: { studentId?: string }) =>
+      const rows = attendance.filter((entry) =>
       typeof entry?.studentId === 'string' && permitted.has(entry.studentId),
     );
 

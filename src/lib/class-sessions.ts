@@ -1,0 +1,199 @@
+import { prisma } from "@/lib/prisma";
+import { generatePersonalizedSchedule, type ScheduleMonth } from "@/lib/schedule";
+import { SLOT_DEFAULTS, normalizeSlot, type TimeSlot } from "@/lib/class-times";
+
+/**
+ * Merges the generated timetable skeleton with the ClassSession overrides a
+ * tutor has actually edited.
+ *
+ * The generator decides WHICH days a cohort meets (batch + level rotation).
+ * This decides what those days SAY: the real topic, clock times, whether the
+ * class was postponed, and which material to bring. A day with no override
+ * falls back to the generated defaults, so an unedited timetable still looks
+ * complete rather than empty.
+ */
+
+// The hours themselves live in lib/class-times, which has no prisma import so
+// the signup form can read the same table this does. Re-exported here because
+// a dozen server routes already import them from this module.
+export { TIME_SLOTS, SLOT_DEFAULTS, normalizeSlot, type TimeSlot } from "@/lib/class-times";
+
+/**
+ * The join key between the skeleton and its overrides: midnight UTC on the
+ * calendar day.
+ *
+ * Deliberately reads LOCAL date components. The generator builds each session
+ * with `new Date(year, month, day)` — local midnight — so in any timezone
+ * ahead of UTC (Nigeria is UTC+1) the UTC date of that instant is the previous
+ * day. Reading UTC components here would file every class against the wrong
+ * date and no override would ever match.
+ */
+export function dayKey(date: Date | string): Date {
+  const d = new Date(date);
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+}
+
+export type MergedSession = {
+  date: string;
+  weekday: string;
+  level: string;
+  title: string;
+  /** The generated default focus, kept so the UI can show it when no topic is set. */
+  defaultFocus: string;
+  slot: string;
+
+  timeSlot: TimeSlot;
+  startTime: string;
+  endTime: string;
+  topic: string | null;
+  notes: string | null;
+  status: string;
+  postponedTo: string | null;
+  /** True when a tutor has actually touched this day. */
+  edited: boolean;
+  lecturerName: string | null;
+  material: {
+    id: string;
+    title: string;
+    filePath: string;
+    fileType: string;
+    /**
+     * What the AI made of it, generated in the background after upload.
+     * Carried through to the calendar so a student deciding whether to open a
+     * 14-page PDF can read two sentences first — which is the difference
+     * between a material being downloaded and a material being ignored.
+     */
+    aiSummary: string | null;
+    /** Just the count: the quests themselves live on the materials page. */
+    aiQuestCount: number;
+  } | null;
+};
+
+export type MergedMonth = Omit<ScheduleMonth, "sessions"> & { sessions: MergedSession[] };
+
+/**
+ * Build the merged timetable for one cohort.
+ * `branchId` may be null for students without a branch — they still get the
+ * generated skeleton, just with no overrides to apply.
+ *
+ * `sessionSlot` is the sitting the student actually attends. It has to be part
+ * of the query: ClassSession is unique on branch + level + date + timeSlot, so
+ * a branch running a morning AND an evening group of the same level has two
+ * rows for the same day. Matching on date alone would hand every student
+ * whichever of the two happened to be read last.
+ */
+export async function getMergedSchedule(args: {
+  branchId: string | null;
+  level: string;
+  batch?: string | null;
+  /** When the student registered — decides WHICH occurrence of the batch month. */
+  registeredAt?: Date | null;
+  sessionSlot?: string | null;
+  now?: Date;
+  months?: number;
+}): Promise<{ level: string; batchMonth: string; batchYear: number; sessionSlot: TimeSlot; months: MergedMonth[] }> {
+  const slot = normalizeSlot(args.sessionSlot);
+
+  const generated = generatePersonalizedSchedule({
+    level: args.level,
+    batch: args.batch ?? null,
+    registeredAt: args.registeredAt ?? null,
+    now: args.now,
+    months: args.months ?? 2,
+  });
+
+  const allDates = generated.months.flatMap((m) => m.sessions.map((s) => dayKey(s.date)));
+  if (!args.branchId || allDates.length === 0) {
+    return { ...generated, sessionSlot: slot, months: generated.months.map((m) => withDefaults(m, slot)) };
+  }
+
+  const overrides = await prisma.classSession.findMany({
+    where: {
+      branchId: args.branchId,
+      level: generated.level,
+      timeSlot: slot,
+      date: { in: allDates },
+    },
+    include: {
+      lecturer: { select: { user: { select: { name: true } } } },
+      material: {
+        select: {
+          id: true, title: true, filePath: true, fileType: true,
+          aiSummary: true, aiQuests: true,
+        },
+      },
+    },
+  });
+
+  // Key by day so lookup during the merge is O(1).
+  const byDay = new Map<string, (typeof overrides)[number]>();
+  for (const o of overrides) byDay.set(o.date.toISOString(), o);
+
+  const months = generated.months.map((month) => ({
+    ...month,
+    sessions: month.sessions.map((s) => {
+      const override = byDay.get(dayKey(s.date).toISOString());
+      // An unedited day still belongs to the student's own sitting.
+      const timeSlot = normalizeSlot(override?.timeSlot ?? slot);
+      const defaults = SLOT_DEFAULTS[timeSlot];
+
+      return {
+        date: s.date,
+        weekday: s.weekday,
+        level: s.level,
+        title: s.title,
+        defaultFocus: s.focus,
+        slot: s.slot,
+        timeSlot,
+        startTime: override?.startTime || defaults.startTime,
+        endTime: override?.endTime || defaults.endTime,
+        topic: override?.topic ?? null,
+        notes: override?.notes ?? null,
+        status: override?.status ?? "scheduled",
+        postponedTo: override?.postponedTo ? override.postponedTo.toISOString() : null,
+        edited: Boolean(override),
+        lecturerName: override?.lecturer?.user?.name ?? null,
+        material: override?.material
+          ? {
+              id: override.material.id,
+              title: override.material.title,
+              filePath: override.material.filePath,
+              fileType: override.material.fileType,
+              aiSummary: override.material.aiSummary,
+              aiQuestCount: Array.isArray(override.material.aiQuests)
+                ? override.material.aiQuests.length
+                : 0,
+            }
+          : null,
+      } satisfies MergedSession;
+    }),
+  }));
+
+  return { ...generated, sessionSlot: slot, months };
+}
+
+/** Shape an unedited month so the client only deals with one session type. */
+function withDefaults(month: ScheduleMonth, slot: TimeSlot): MergedMonth {
+  const defaults = SLOT_DEFAULTS[slot];
+  return {
+    ...month,
+    sessions: month.sessions.map((s) => ({
+      date: s.date,
+      weekday: s.weekday,
+      level: s.level,
+      title: s.title,
+      defaultFocus: s.focus,
+      slot: s.slot,
+      timeSlot: slot,
+      startTime: defaults.startTime,
+      endTime: defaults.endTime,
+      topic: null,
+      notes: null,
+      status: "scheduled",
+      postponedTo: null,
+      edited: false,
+      lecturerName: null,
+      material: null,
+    })),
+  };
+}

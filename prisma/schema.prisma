@@ -1,0 +1,2112 @@
+// This is your Prisma schema file.
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/**
+ * Postgres, because the app is deployed to Vercel and SQLite is a file.
+ * A serverless function gets a read-only filesystem and a fresh container, so
+ * a file-backed database is not slow there — it is absent. Every write would
+ * fail, and the ones that appeared to succeed would vanish with the container.
+ * `url` is the POOLED connection string and `directUrl` the direct one. That
+ * split is not decoration: each invocation opens its own connection, and a few
+ * hundred concurrent students would exhaust a Postgres server's connection
+ * limit within a minute without a pooler in front. Migrations, meanwhile,
+ * cannot run through a pooler in transaction mode, which is what `directUrl`
+ * is for. Neon and Supabase both hand you the two strings; if yours does not,
+ * set both to the same value and keep an eye on connection count.
+ */
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+model User {
+  id                String  @id @default(cuid())
+  email             String  @unique
+  name              String?
+  password          String
+  role              Role    @default(STUDENT)
+  /**
+   * Which kind of admin, when role is ADMIN: super | secretary | data_comm.
+   * Null for everyone else. Deliberately a separate field rather than more
+   * Role values, so every existing auth check on ADMIN keeps working and
+   * existing admins keep full access by defaulting to super.
+   */
+  adminRole         String?
+  /**
+   * Per-person overrides on top of the sub-role's preset, as JSON:
+   * { "grant": ["payments"], "revoke": ["staff"] }
+   * Null means "just the preset", which is what every existing admin has, so
+   * nobody's access changes until somebody deliberately ticks a box. Kept as
+   * a diff rather than a flat capability list so that widening a preset later
+   * still reaches the people on it.
+   */
+  adminCapabilities Json?
+  /**
+   * False on an account created by an exam booking, which starts with a
+   * password nobody knows. The claim link works only while this is false, so
+   * a forwarded confirmation email cannot be used to take the account later.
+   */
+  passwordClaimed   Boolean @default(true)
+
+  /**
+   * The TOTP shared secret, encrypted at rest. See src/lib/mfa.ts.
+   * Encrypted rather than stored plainly because a secret sitting in the clear
+   * makes the second factor worth nothing against the attack it exists to
+   * stop: whoever reads this table can already read the password hashes, and
+   * with the raw secret alongside they can mint valid codes forever. The key
+   * lives in the environment, so the database alone is not enough.
+   * Set at enrolment, before the first code is confirmed. Possession of a
+   * secret is therefore NOT proof that two-factor is on — `totpEnabledAt` is.
+   */
+  totpSecret      String?
+  /**
+   * When the first correct code was entered. Null means not enrolled.
+   */
+  totpEnabledAt   DateTime?
+  /**
+   * One-time recovery codes, stored as bcrypt hashes and never shown again
+   * after enrolment. A lost phone must not mean a lost school.
+   */
+  totpBackupCodes Json?
+  /**
+   * The last time-step accepted for this account.
+   * A TOTP code stays valid for its whole window, so one shoulder-surfed or
+   * intercepted code can be replayed within the same half-minute. Refusing any
+   * step at or below this one makes every code strictly single-use.
+   */
+  totpLastStep    Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student           Student?
+  lecturer          Lecturer?
+  sessions          Session[]
+  missionProgress   MissionProgress[]
+  threads           Thread[]
+  comments          Comment[]
+  channelReads      ChannelRead[]
+  pushSubs          PushSubscription[]
+  examRegistrations ExamRegistration[]
+  notifications     Notification[]     @relation("NotificationRecipient")
+  sentNotifications Notification[]     @relation("NotificationSender")
+  proposedActions   AdminAction[]      @relation("AdminActionCreator")
+  executedActions   AdminAction[]      @relation("AdminActionExecutor")
+  auditEvents       AuditLog[]         @relation("AuditActor")
+  auditRestores     AuditLog[]         @relation("AuditRestorer")
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt         DateTime?
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Student {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  tutorId String?
+  tutor   Lecturer? @relation(fields: [tutorId], references: [id], onDelete: SetNull)
+
+  /**
+   * Assignments set for this student by name, rather than to their level.
+   */
+  assignmentTargets AssignmentTarget[]
+
+  // Official school identifier, e.g. EW/2026/A1/JUL/0007. Nullable because
+  // students created before the scheme existed are backfilled by
+  // scripts/backfill-student-codes.mjs rather than blocked at read time.
+  studentCode String? @unique
+
+  status        String @default("active")
+  level         String @default("A1") // A1, A2, B1, B2, C1, C2
+  /**
+   * morning | afternoon | evening — which sitting of their level they attend.
+   */
+  sessionSlot   String @default("morning")
+  /**
+   * group | private. A private student sits no group timetable, so the
+   * generated branch+level schedule does not apply to them — their calendar
+   * comes from PrivateClass rows instead.
+   */
+  classType     String @default("group")
+  /**
+   * physical | hybrid | online — how this student attends.
+   * physical  campus only. No live-class tab: there is no video lesson to
+   * join, and showing them one they can never use is the fastest
+   * way to make the portal look broken.
+   * hybrid    registered at a campus but may join that same branch's class
+   * over video. Gets both the campus features and the live room.
+   * online    the Online branch. Video only, no campus.
+   * Defaulted to physical so every student who registered before this existed
+   * keeps the portal they already had.
+   */
+  deliveryMode  String @default("physical")
+  pathway       String @default("Language training")
+  examReadiness Int    @default(0)
+  outcome       String @default("C1 readiness + German work placement support")
+  nextLive      String @default("No live session scheduled")
+  // Arbitrary admission form payload saved as JSON
+  admission     Json?
+
+  // Graduation tracking
+  graduationDate DateTime?
+
+  /**
+   * The level we have already told this student they finished, e.g. "A1".
+   * Stops the "your level is complete" notification firing again every time
+   * the dashboard loads. Storing the level rather than a boolean means the
+   * offer fires once per level, automatically, all the way up the ladder.
+   */
+  advanceOfferedFor String?
+
+  /**
+   * When this student finished (or skipped) the welcome tour.
+   * Server-side rather than localStorage on purpose: a student who signs up on
+   * a laptop and then opens the portal on their phone should not be walked
+   * through the introduction a second time.
+   */
+  welcomeTourSeenAt DateTime?
+
+  // ---------------------------------------------------------------------
+  // The journey to Germany. See src/lib/germany-journey.ts.
+  // ---------------------------------------------------------------------
+
+  /**
+   * The day this student actually walked into their first class.
+   * THE COUNTDOWN RUNS FROM HERE, not from the batch month. A student who paid
+   * in August but only started on 12 September has a level that ends in
+   * November, and a portal that told them otherwise would be wrong on the one
+   * date they care about most. Null until they confirm it (or until an
+   * attendance row proves it, which confirms it for them).
+   */
+  classesStartedAt DateTime?
+
+  /**
+   * When they pressed the button. Separate from the date they reported.
+   */
+  startConfirmedAt DateTime?
+
+  /**
+   * How the start was established: "student" (they confirmed it), "attendance"
+   * (their first register entry proved it), or "admin" (the office set it).
+   */
+  startConfirmedVia String?
+
+  /**
+   * "Not yet" pushes the daily prompt to tomorrow rather than killing it.
+   */
+  startPromptSnoozedUntil DateTime?
+
+  /**
+   * How many times they have answered "not yet", and the last reason given.
+   * A student on their sixth "not yet" is a student the branch should call —
+   * this is the churn signal the office never had.
+   */
+  notStartedCount  Int     @default(0)
+  notStartedReason String?
+
+  /**
+   * When the OFFICE marked this student's level finished, and which level that
+   * was. The "your level is complete, here is the next one" offer fires off
+   * this and nothing else. It used to be derived from the batch month, which
+   * congratulated students who had not attended a single lesson.
+   */
+  levelCompletedAt  DateTime?
+  levelCompletedFor String?
+
+  /**
+   * Stages after the classroom — documents, visa, arrival — which no database
+   * of ours can observe. The student reports them and the office may verify
+   * them: { "visa": { "status": "claimed", "at": "...", "note": "..." } }
+   */
+  journeyStages Json?
+
+  /**
+   * Last time the once-a-day journey moment was shown. Per account, not per device.
+   */
+  journeySeenAt DateTime?
+
+  /**
+   * How often the student wants the road to open by itself.
+   * "daily" (the default), "less" — every third day — or "never".
+   * WHY THERE IS A MIDDLE OPTION. A popup with only "show me" and "never
+   * again" is a popup most people turn off the first time it lands at a bad
+   * moment, and then the best thing in the portal is gone forever over one
+   * mistimed Tuesday. "Show less" is the answer to "not right now" that does
+   * not cost the school the feature, and for the student it is the honest
+   * version of what they meant. It is stored per ACCOUNT rather than per
+   * device for the same reason journeySeenAt is: turning it off on a laptop
+   * and meeting it again on a phone would read as the portal ignoring them.
+   */
+  journeyMomentPreference String @default("daily")
+
+  /**
+   * WHY they are learning German — one of the eight roads in
+   * src/lib/germany-goals.ts ("study", "ausbildung", "care", "family", …).
+   * The whole destination half of the map is generated from this: a nurse's
+   * road ends in Anerkennung and a first shift, a student's in a blocked
+   * account and a first lecture. Null means nobody has asked them yet, which
+   * is a real and different state from "custom" — an unasked student gets the
+   * generic road AND the question; a `custom` student has answered and does
+   * not get asked again.
+   */
+  germanyGoal      String?
+  /**
+   * Their own words, when they chose "Something else". Read by the branch.
+   */
+  germanyGoalNote  String?
+  germanyGoalSetAt DateTime?
+
+  // Email tracking for scheduled reminders
+  feeRemindersScheduled Json? // tracks which reminders (7d, 14d, 30d) have been sent
+  emailPreferences      Json? // user preferences for notification types
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  enrollments           Enrollment[]
+  progress              Progress[]
+  grades                Grade[]
+  completions           Completion[]
+  personalizedPlan      PersonalizedPlan?
+  examRegistrations     ExamRegistration[]
+  attendances           Attendance[]
+  notifications         Notification[]
+  invoices              Invoice[]
+  payments              Payment[]
+  assignmentSubmissions AssignmentSubmission[]
+  privateClasses        PrivateClass[]
+  certificates          Certificate[]
+  videoProgress         VideoProgress[]
+  convertedFromLead     Lead?
+  journeyEvents         JourneyEvent[]
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt             DateTime?
+}
+
+/**
+ * One line in a student's story.
+ * Every milestone they reach, every "not yet", every level the office closes.
+ * It exists for two readers: the student, whose map shows their own history
+ * back to them ("12 August — you walked into your first class"), and the
+ * office, which can see that a whole batch has confirmed starting except four
+ * people worth ringing.
+ * Append-only by convention. Nothing here is the source of truth for state —
+ * the Student columns are — so a lost row costs a line of narrative, never a
+ * countdown.
+ */
+/**
+ * Everything a model has ever produced, keyed by what it was asked.
+ * This is the whole cost story. Generating a summary per student per page view
+ * is roughly 1,300 model calls a day for this school; generating it once per
+ * material and reading it back is about twenty. That difference is what makes
+ * the AI affordable on a free tier or on the office machine, rather than
+ * needing a rented server nobody wants to pay for monthly.
+ * `key` is a hash of the task plus the exact input, so changing a material
+ * naturally misses the cache and regenerates, while re-asking the same
+ * question a thousand times costs one lookup.
+ */
+model AiCache {
+  id String @id @default(cuid())
+
+  /**
+   * sha256 of `${task}:${input}`. Unique — the lookup is the point.
+   */
+  key String @unique
+
+  /**
+   * material_summary | material_quests | cohort_missions …
+   */
+  task String
+
+  /**
+   * The parsed result. Shape depends on the task.
+   */
+  value Json
+
+  /**
+   * Which model produced it, so a bad batch can be found and cleared.
+   */
+  model String?
+
+  /**
+   * Generation is slow and can fail. A row is written before the answer
+   * arrives so two jobs cannot generate the same thing at once, and so a
+   * failure is visible rather than looking like it was never attempted.
+   * pending | ready | failed
+   */
+  status String  @default("ready")
+  error  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([task, status])
+}
+
+model JourneyEvent {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /**
+   * started | not-yet | stage-claimed | level-completed | level-advanced |
+   * registered | paid
+   */
+  type String
+
+  /**
+   * The stage this concerns, e.g. "firstDay", "A1", "visa".
+   */
+  stage String?
+
+  /**
+   * One line, written for the student to read.
+   */
+  label  String
+  detail String?
+
+  /**
+   * student | attendance | admin | system — who caused it.
+   */
+  source String @default("student")
+
+  /**
+   * When it happened in the real world, which is not always when it was recorded.
+   */
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([studentId, occurredAt])
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  location  String?
+  status    String   @default("active")
+  /**
+   * physical | online. The online branch is a real branch — it has its own
+   * cohorts, tutors, timetable, community space and fees, and every existing
+   * branch+level query keeps working unchanged. This flag only drives the
+   * differences that genuinely exist: no campus, a live room instead of a
+   * classroom, and recordings as the safety net for a dropped connection.
+   * Defaulted to physical so every branch created before this existed keeps
+   * behaving exactly as it did.
+   */
+  mode      String   @default("physical")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  students      Student[]
+  notifications Notification[]
+  spaces        Space[]
+  classSessions ClassSession[]
+  assignments   Assignment[]
+  exams         Exam[]
+  lecturers     Lecturer[]
+  leads         Lead[]
+  recordings    ClassRecording[]
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt     DateTime?
+}
+
+model ExamRegistration {
+  id String @id @default(cuid())
+
+  /**
+   * Null for an external candidate. The centre sits members of the public for
+   * ÖSD, not only enrolled students, and requiring a Student row made that
+   * impossible.
+   */
+  studentId String?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /**
+   * The account that owns this booking — set for students AND candidates, so
+   * "my exams" is a single query rather than two paths that can disagree.
+   */
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /**
+   * Details captured for candidates who are not students.
+   */
+  candidateName  String?
+  candidateEmail String?
+  candidatePhone String?
+
+  examId String?
+  exam   Exam?   @relation(fields: [examId], references: [id], onDelete: SetNull)
+
+  examName String
+  examDate DateTime
+  /**
+   * registered | confirmed | cancelled | completed | no_show
+   */
+  status   String   @default("registered")
+  notes    String?
+
+  /**
+   * unpaid | paid | waived — a seat is only held once the fee is settled.
+   */
+  paymentStatus    String  @default("unpaid")
+  paymentReference String?
+  amountPaid       Int?
+
+  seatNumber String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([examId, status])
+}
+
+model Pathway {
+  id          String @id @default(cuid())
+  name        String @unique // "Language training", "Nursing career path", etc
+  headline    String
+  description String
+  duration    String // "12 weeks", "6 months"
+  level       String // "B1-C1", "A1-B2"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  courses     Course[]
+  enrollments Enrollment[]
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt   DateTime?
+}
+
+model Course {
+  id        String  @id @default(cuid())
+  pathwayId String
+  pathway   Pathway @relation(fields: [pathwayId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String
+  order       Int // sequence in pathway
+  duration    Int // minutes
+  level       String // "A1", "B1", "C1"
+  published   Boolean @default(true)
+
+  // Integration mirroring: where this record came from and its id in that system.
+  // source = "local" for records created in EasyWay; "moodle"/"canvas"/etc for mirrored ones.
+  source     String  @default("local")
+  externalId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  modules   Module[]
+  progress  Progress[]
+  materials Material[]
+  classes   Class[]
+  exams     Exam[]
+
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt DateTime?
+
+  @@unique([source, externalId])
+}
+
+model Module {
+  id       String @id @default(cuid())
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String
+  order       Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lessons Lesson[]
+}
+
+model Lesson {
+  id       String @id @default(cuid())
+  moduleId String
+  module   Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String
+  content     String // HTML/markdown
+  type        String @default("lesson") // "lesson", "quiz", "assignment", "discussion"
+  order       Int
+  duration    Int // minutes
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  completions Completion[]
+}
+
+model Material {
+  id       String  @id @default(cuid())
+  /**
+   * Optional since class recordings arrived. A recording belongs to a level
+   * and a date, not to a course — forcing tutors to pick an unrelated course
+   * just to upload Tuesday's class would have put junk in the catalogue.
+   */
+  courseId String?
+  course   Course? @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  title       String
+  description String?
+  filePath    String // relative path to file
+  fileName    String
+  fileType    String // pdf, doc, video, image, etc
+  fileSize    Int // bytes
+  uploadedBy  String? // admin user id who uploaded
+
+  /**
+   * document | video | recording.
+   * `fileType` already says "video/mp4", but it cannot tell a taught lesson
+   * apart from an auto-captured class recording, and the library shelves the
+   * two differently. Derived from fileType on upload, so old rows read as
+   * documents until backfilled.
+   */
+  kind String @default("document")
+
+  /**
+   * Video shelf metadata. All nullable: a PDF has none of it, and a video
+   * uploaded before the library existed simply shows fewer details rather
+   * than breaking the row.
+   */
+  durationSeconds Int?
+  thumbnailPath   String?
+
+  /**
+   * What the AI made of this material, built in the background after upload.
+   * Denormalised onto the row rather than left in AiCache alone because the
+   * student's materials list reads it on every render, and a join through a
+   * hash key for something shown this often is work for nothing. AiCache
+   * remains the record of the generation; this is the copy that gets read.
+   * Null means "not generated yet" and the UI simply shows the material as it
+   * always did — a tutor uploading at 6am for a 9am class must not have their
+   * material hidden because a queue has not run.
+   */
+  aiSummary     String?
+  /**
+   * Bullet points a student can skim in fifteen seconds.
+   */
+  aiKeyPoints   Json?
+  /**
+   * Quests generated from this material: short, concrete tasks with an answer,
+   * so reading it turns into something to do rather than something to file.
+   */
+  aiQuests      Json?
+  aiState       String    @default("none") // none | pending | ready | failed
+  aiUpdatedAt   DateTime?
+  /**
+   * Which CEFR level this belongs to. Duplicated from `course.level` on
+   * purpose — a class recording belongs to a level but not always to a
+   * course, and the library filters on level far more often than it joins.
+   */
+  level         String?
+  /**
+   * Groups episodes into a shelf, e.g. "A1 Speaking Lab". Free text: the
+   * tutor names their own series, the library rows come from whatever exists.
+   */
+  series        String?
+  episodeNumber Int?
+  /**
+   * Recorded-on date for a class tape, which is what the library sorts and
+   * labels by. Distinct from createdAt, since a tutor often uploads last
+   * week's class today.
+   */
+  recordedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  classSessions  ClassSession[]
+  privateClasses PrivateClass[]
+  videoProgress  VideoProgress[]
+  recording      ClassRecording?
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt      DateTime?
+
+  @@index([kind, level])
+  // Exists in the database but had fallen out of this file, so any `db push`
+  // would silently drop it. The AI backfill sweeps for aiState = "pending",
+  // which is the one query that scans this column.
+  @@index([aiState])
+}
+
+/**
+ * One captured live class.
+ * This row exists because the file does not arrive when the class ends — the
+ * egress service finishes encoding and uploading a few minutes later, and tells
+ * us over a webhook. Something has to remember which room that job belonged to
+ * in the meantime, and has to be there for the reconciler to find if the
+ * webhook never arrives (it cannot reach a laptop, for one).
+ * It is also the audit trail for a class that failed to record, which is worth
+ * more than it sounds: "was Tuesday recorded?" should be answerable without
+ * reading logs.
+ */
+model ClassRecording {
+  id String @id @default(cuid())
+
+  /**
+   * LiveKit's id for the capture job. The join key for webhooks.
+   */
+  egressId String @unique
+  roomName String
+
+  /**
+   * Denormalised so a recording is filable even if the cohort later changes.
+   */
+  branchId    String?
+  branch      Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  level       String?
+  sessionSlot String?
+
+  /**
+   * Which tutor's join started it, for the audit trail.
+   */
+  startedByUserId String?
+
+  /**
+   * active | completed | failed | aborted | purged
+   * `aborted` is a capture we stopped deliberately (an empty room), which is
+   * not a failure and should not be alarmed on. `purged` means retention
+   * reclaimed the file — the row survives so "was Tuesday recorded?" stays
+   * answerable after the video itself is gone.
+   */
+  status String @default("active")
+
+  /**
+   * video | audio — which capture profile was used. An audio recording is
+   * roughly a seventh the size and is the right default for a language class,
+   * where the payload is speech.
+   */
+  variant String @default("video")
+
+  /**
+   * Set by a tutor or admin on a class worth keeping: a landmark lesson, an
+   * exam briefing. Retention never touches these, whatever the policy says.
+   */
+  keepForever Boolean @default(false)
+
+  /**
+   * When retention reclaimed the file. Null while the video still exists.
+   */
+  purgedAt DateTime?
+
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+
+  /**
+   * Where it landed in the bucket, and what the player should request.
+   */
+  objectKey String?
+  fileUrl   String?
+
+  durationSeconds Int?
+  sizeBytes       Int?
+  error           String?
+
+  /**
+   * The library row, created once the file is safely uploaded.
+   */
+  materialId String?   @unique
+  material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt  DateTime?
+
+  @@index([status, startedAt])
+  @@index([roomName, status])
+}
+
+/**
+ * Where a student stopped watching.
+ * One row per student per video, upserted as the player reports progress. It
+ * powers "Continue watching" and the resume-from-here jump, which matter far
+ * more here than on a normal video site: a student on a bad Nigerian
+ * connection gets dropped mid-lesson routinely and must not lose their place.
+ */
+model VideoProgress {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  materialId String
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  /**
+   * Furthest playback position reached, in seconds.
+   */
+  positionSeconds Int     @default(0)
+  /**
+   * Set once the student passes ~95% of the runtime. Stored rather than
+   * recomputed because `durationSeconds` can be null on older uploads, and a
+   * finished video must not silently reappear as unwatched.
+   */
+  completed       Boolean @default(false)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, materialId])
+  @@index([studentId, updatedAt])
+}
+
+model Completion {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  lessonId String
+  lesson   Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  status   String  @default("started") // "started", "in_progress", "completed"
+  score    Int?
+  feedback String?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@unique([studentId, lessonId])
+}
+
+model Progress {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  percentComplete Int       @default(0)
+  started         DateTime  @default(now())
+  completed       DateTime?
+
+  @@unique([studentId, courseId])
+}
+
+model Enrollment {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  pathwayId String
+  pathway   Pathway @relation(fields: [pathwayId], references: [id], onDelete: Cascade)
+
+  classId String?
+  class   Class?  @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  status          String  @default("active") // "active", "completed", "paused"
+  stripeSessionId String? // for payment tracking
+
+  enrolledAt  DateTime  @default(now())
+  completedAt DateTime?
+
+  @@unique([studentId, pathwayId])
+}
+
+model Grade {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  examId String?
+  exam   Exam?   @relation(fields: [examId], references: [id], onDelete: SetNull)
+
+  type     String // "essay", "quiz", "speaking", "pronunciation", "exam"
+  content  String? // the essay text, quiz answers, etc
+  score    Int // 0-100
+  grade    String? // A, B, C, D, F
+  feedback String? // grading feedback
+
+  /**
+   * platform | physical — whether the work was sat on the LMS or on paper in
+   * the branch. A physical score is keyed in by a tutor, so it has no
+   * submission record behind it and cannot be audited the same way.
+   */
+  submissionMode String @default("platform")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, examId])
+}
+
+model MissionProgress {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  missionId String
+  done      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, missionId])
+}
+
+model PersonalizedPlan {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  plan      String // JSON stringified plan
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId])
+}
+
+/**
+ * One notification, for anybody.
+ * It began as a student-only record and the student columns are kept exactly
+ * as they were, so every row already written still resolves. What is new is
+ * `userId` and `audience`, which is what lets the same table reach a lecturer
+ * or an admin:
+ * userId set        one person, whoever they are
+ * studentId set     one student (the original shape)
+ * branchId / level  every student matching, the existing broadcast
+ * audience set      everyone holding that role — "admin", "lecturer",
+ * "student", or "all"
+ * A row with none of them is a notice to the whole school. Delivery goes
+ * through src/lib/notify.ts; nothing should write this table directly.
+ */
+model Notification {
+  id      String @id @default(cuid())
+  title   String
+  message String
+  /**
+   * email | in-app. Only in-app rows reach the bell.
+   */
+  channel String @default("email")
+
+  /**
+   * Addressed to exactly this account, whatever role it holds.
+   */
+  userId String?
+  user   User?   @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+
+  studentId String?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  level     String?
+
+  /**
+   * Broadcast to a whole role: student | lecturer | admin | all.
+   */
+  audience String?
+
+  /**
+   * What happened, in one machine-readable token — "payment.received",
+   * "student.registered", "gateway.error". Drives the icon, and lets the
+   * portal filter without pattern-matching the title, which is what the bell
+   * used to do.
+   */
+  kind String @default("general")
+
+  /**
+   * info | success | warning | critical. Critical is what makes noise.
+   */
+  severity String @default("info")
+
+  /**
+   * Where clicking it should take the reader.
+   */
+  link String?
+
+  /**
+   * Who sent it, when a person did. Null for anything the system raised.
+   */
+  senderId String?
+  sender   User?   @relation("NotificationSender", fields: [senderId], references: [id], onDelete: SetNull)
+
+  /**
+   * One id shared by every row a single send produced.
+   * Notifications are fanned out — a broadcast to 200 students writes 200
+   * rows, because one row shared between readers cannot record which of them
+   * has read it. This is what lets the admin list fold that send back into a
+   * single line.
+   */
+  batchId String?
+
+  /**
+   * Caller-supplied idempotency token. A second send with the same key to the
+   * same person is dropped, which is how the payment-warning tiers and the
+   * level-advance offer avoid firing twice.
+   */
+  dedupeKey String?
+
+  status    String    @default("pending")
+  sentAt    DateTime?
+  readAt    DateTime? // for in-app notifications
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([userId, readAt])
+  @@index([audience, readAt])
+  @@index([studentId, readAt])
+  @@index([batchId])
+  @@index([dedupeKey])
+  @@index([createdAt])
+}
+
+model Invoice {
+  id          String    @id @default(cuid())
+  studentId   String
+  student     Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status      String    @default("draft")
+  dueDate     DateTime?
+  totalAmount Int
+  currency    String    @default("usd")
+  lineItems   Json?
+  payments    Payment[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt   DateTime?
+}
+
+model Payment {
+  id                 String    @id @default(cuid())
+  studentId          String
+  student            Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  invoiceId          String?
+  invoice            Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  amount             Int
+  currency           String    @default("usd")
+  status             String    @default("pending")
+  method             String
+  description        String?
+  stripeSessionId    String?
+  paymentIntentId    String?
+  welcomeEmailSentAt DateTime? // tracks when welcome email was sent
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt DateTime?
+}
+
+model EmailLog {
+  id             String   @id @default(cuid())
+  studentId      String?
+  recipientEmail String
+  type           String // "welcome", "fee_reminder_7d", "fee_reminder_14d", "fee_reminder_30d", "exam_reminder", "graduation"
+  subject        String
+  status         String   @default("sent") // "sent", "failed", "bounced"
+  sentAt         DateTime @default(now())
+  errorMessage   String?
+  retries        Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([type])
+  @@index([sentAt])
+}
+
+model Attendance {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  classId String?
+  class   Class?  @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  date    DateTime
+  present Boolean  @default(true)
+  status  String   @default("present") // present, absent, late, excused
+  notes   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, date])
+}
+
+// Persisted state for each external LMS/community connector.
+// Replaces the old in-memory scheduler so sync status survives restarts and
+// is shared across every server instance (single source of truth for "always-on").
+model IntegrationConnector {
+  id              String  @id // "moodle", "canvas", "discourse", "open-edx"
+  name            String
+  enabled         Boolean @default(true)
+  autoSync        Boolean @default(true)
+  intervalMinutes Int     @default(30)
+
+  status      String    @default("idle") // idle, syncing, connected, degraded, error
+  lastSyncAt  DateTime?
+  nextSyncAt  DateTime?
+  lastError   String?
+  itemsSynced Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Lecturer {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  specialization String?
+  bio            String?
+  phone          String?
+
+  photoUrl String?
+
+  /**
+   * Whether this tutor still teaches here: active | probation | on_leave |
+   * inactive. See src/lib/lecturer-status.ts for what each one permits.
+   * Defaults to active so every tutor who existed before this field keeps
+   * working exactly as they did. An "inactive" tutor cannot sign in, but their
+   * account, their marks and every class they ever taught stay on record —
+   * this is the alternative to deleting somebody who leaves, which used to be
+   * the only option and took their history with it.
+   */
+  status          String    @default("active")
+  /**
+   * Free text: "maternity leave until March", "contract ended".
+   */
+  statusNote      String?
+  /**
+   * When the status last moved, so the office can see how long it has held.
+   */
+  statusChangedAt DateTime?
+  /**
+   * full_time | part_time | contract | visiting. Null means unrecorded.
+   */
+  employmentType  String?
+  /**
+   * First day of teaching. Null on tutors created before this was recorded.
+   */
+  startedAt       DateTime?
+
+  /**
+   * The tutor's PRIMARY class: branch + level + session. Kept because a large
+   * amount of existing code — the live room name, the community space, the
+   * timetable editor's opening state — needs one concrete answer to "which
+   * class is this?". Always mirrors the first entry of the arrays below, so
+   * these three never disagree with the assignment.
+   */
+  branchId    String?
+  branch      Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  level       String?
+  sessionSlot String?
+
+  /**
+   * The full assignment, set by an ADMIN and only by an admin. One tutor can
+   * teach at several branches, several levels, several sittings and several
+   * batches, so each of these is a list rather than a column.
+   * Stored as JSON string arrays rather than join tables: they are always read
+   * as a whole, never queried across rows, and every one of them is a short
+   * closed vocabulary. Null means "never assigned" and falls back to the three
+   * primary columns above, so every tutor created before this existed keeps
+   * exactly the class they had.
+   */
+  branchIds    Json? // Branch ids
+  levels       Json? // ["A1", "A2"]
+  sessionSlots Json? // ["morning", "evening"]
+  classTypes   Json? // ["physical", "online", "private"]
+  batches      Json? // ["January", … "December"]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  classes        Class[]
+  exams          Exam[]
+  materials      Material[]
+  students       Student[]
+  classSessions  ClassSession[]
+  assignments    Assignment[]
+  privateClasses PrivateClass[]
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt      DateTime?
+}
+
+model Class {
+  id       String @id @default(cuid())
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  lecturerId String
+  lecturer   Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  schedule    String? // JSON formatted schedule
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  enrollments Enrollment[]
+  attendance  Attendance[]
+
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt DateTime?
+}
+
+model Exam {
+  id       String  @id @default(cuid())
+  // Optional: an ÖSD sitting the centre hosts belongs to no course and has no
+  // assigned lecturer, while an internal course test has both.
+  courseId String?
+  course   Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  name        String
+  description String?
+  examDate    DateTime
+  totalScore  Int      @default(100)
+
+  /**
+   * ÖSD | Goethe | telc | internal — who awards the certificate.
+   */
+  examBody String  @default("internal")
+  /**
+   * CEFR level the sitting is for.
+   */
+  level    String?
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  /**
+   * Fee in kobo-free naira. Null means no fee (internal tests).
+   */
+  fee Int?
+
+  /**
+   * Seats available. Null means uncapped.
+   */
+  capacity             Int?
+  registrationDeadline DateTime?
+
+  /**
+   * Only published sittings are bookable by candidates.
+   */
+  published Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  grades        Grade[]
+  registrations ExamRegistration[]
+
+  @@index([published, examDate])
+}
+
+enum Role {
+  STUDENT
+  LECTURER
+  ADMIN
+  /**
+   * Registered for an exam only — no classes, materials or community.
+   */
+  CANDIDATE
+}
+
+// ---------------------------------------------------------------------------
+// Community hub (Discord-style channels + Reddit-style threads).
+// A Space is scoped to one branch AND one level, so "Lagos · A1" and
+// "Abuja · A1" are separate communities even though the syllabus matches.
+// ---------------------------------------------------------------------------
+
+model Space {
+  id          String   @id @default(cuid())
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  level       String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  channels Channel[]
+
+  @@unique([branchId, level])
+}
+
+model Channel {
+  id          String   @id @default(cuid())
+  spaceId     String
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  slug        String
+  name        String
+  description String?
+  kind        String   @default("topic")
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  threads Thread[]
+  reads   ChannelRead[]
+
+  @@unique([spaceId, slug])
+}
+
+/**
+ * Per-member read marker. Unread = threads in the channel whose lastActivityAt
+ * is newer than lastReadAt. One row per (user, channel); absence means the
+ * member has never opened the channel, so everything in it counts as unread.
+ */
+model ChannelRead {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channelId  String
+  channel    Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  lastReadAt DateTime @default(now())
+
+  @@unique([userId, channelId])
+  @@index([userId])
+}
+
+/**
+ * A browser push endpoint (Web Push / VAPID). A member may have several — one
+ * per device or browser — so the key is the endpoint, not the user.
+ */
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Thread {
+  id             String   @id @default(cuid())
+  channelId      String
+  channel        Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  title          String
+  body           String
+  pinned         Boolean  @default(false)
+  lastActivityAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  comments Comment[]
+
+  @@index([channelId, lastActivityAt])
+}
+
+model Comment {
+  id        String    @id @default(cuid())
+  threadId  String
+  thread    Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    Comment?  @relation("CommentChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Comment[] @relation("CommentChildren")
+  body      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([threadId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Timetable overlay.
+//
+// src/lib/schedule.ts generates the SKELETON of a term from the batch/level
+// rotation — which days a cohort meets. That skeleton is deterministic and has
+// no database behind it. This model is the human layer on top: the real topic
+// a tutor is teaching that day, the actual clock times, whether the class got
+// postponed, and which material to bring.
+//
+// A row is created only when someone edits a day, so an untouched timetable
+// costs nothing and the generator stays the source of truth for WHICH days a
+// cohort meets.
+// ---------------------------------------------------------------------------
+
+model ClassSession {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  level    String
+
+  /**
+   * Midnight UTC on the day of the class — the join key back to the skeleton.
+   */
+  date     DateTime
+  /**
+   * morning | afternoon | evening — the branch runs all three.
+   */
+  timeSlot String   @default("morning")
+
+  startTime String? // "09:00"
+  endTime   String? // "11:00"
+
+  /**
+   * The day's topic, editable by the tutor and visible to students.
+   */
+  topic String?
+  notes String?
+
+  /**
+   * scheduled | postponed | cancelled | held
+   */
+  status      String    @default("scheduled")
+  postponedTo DateTime?
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  materialId String?
+  material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  /**
+   * Live-room override. The room name is normally derived from branch + level
+   * + date + slot (see lib/live-classroom.ts) so no row is needed for a class
+   * to be joinable; this only exists for the case where a tutor moves a
+   * session into an existing room, or pins a permanent one.
+   */
+  roomName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([branchId, level, date, timeSlot])
+  @@index([branchId, level, date])
+}
+
+// ---------------------------------------------------------------------------
+// Assignments: documents to hand in, and timed quizzes.
+//
+// Quiz questions and answers live in JSON rather than their own tables. The
+// shape is small, always read as a whole, and never queried across rows — a
+// question has no meaning outside its quiz — so tables would buy nothing.
+// ---------------------------------------------------------------------------
+
+model Assignment {
+  id       String  @id @default(cuid())
+  level    String
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  title       String
+  description String?
+
+  /**
+   * document | quiz
+   */
+  type String @default("document")
+
+  /**
+   * Quizzes only. Null means untimed.
+   */
+  timeLimitMinutes Int?
+
+  /**
+   * Quizzes only. An array of questions, each tagged with its own `type`:
+   * choice | multi | boolean | short | paragraph. See src/lib/assignments.ts
+   * for the shape of each and for the parser, which reads a question with no
+   * `type` as multiple choice so every quiz written before the other types
+   * existed keeps working.
+   */
+  questions Json?
+
+  dueAt     DateTime?
+  published Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submissions AssignmentSubmission[]
+  /**
+   * Named recipients. EMPTY MEANS EVERYONE at this level and branch, which is
+   * how every assignment written before this behaved and still behaves — the
+   * targeted case is the addition, not the new default. Setting even one
+   * target narrows the assignment to exactly that list.
+   */
+  targets     AssignmentTarget[]
+
+  @@index([level, branchId])
+}
+
+/**
+ * One named student who should get one assignment.
+ * A join table rather than a JSON array of ids on Assignment, because the
+ * question actually asked is "what has this student been set?" — which is an
+ * indexed lookup here and a full scan with JSON matching there. It also means
+ * the database refuses a target pointing at a student who no longer exists,
+ * rather than leaving an id that silently matches nobody.
+ */
+model AssignmentTarget {
+  id           String     @id @default(cuid())
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([assignmentId, studentId])
+  @@index([studentId])
+}
+
+model AssignmentSubmission {
+  id           String     @id @default(cuid())
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /**
+   * Documents: the written answer and/or an uploaded file.
+   */
+  text     String?
+  filePath String?
+  fileName String?
+
+  /**
+   * Quizzes: the chosen option index per question.
+   */
+  answers Json?
+
+  score    Int?
+  feedback String?
+
+  /**
+   * Per-question marks, as returned by gradeSubmission: the auto marks are
+   * written at submission time and the hand marks folded in later.
+   * Kept so a student can be shown which questions they lost marks on rather
+   * than a bare percentage, and so a disputed mark can be re-read months later
+   * without re-running a grader whose rules may have changed since.
+   */
+  questionScores Json?
+
+  /**
+   * True while a written answer is still waiting for a tutor.
+   * `score` stays null the whole time it is set. A part-marked paper must not
+   * show a percentage — a student who wrote a good essay seeing 40% because
+   * only the vocabulary section has been marked will read it as a fail.
+   */
+  needsReview Boolean @default(false)
+
+  markedById String?
+  markedAt   DateTime?
+
+  /**
+   * platform | physical — paper submissions are recorded by a tutor.
+   */
+  submissionMode String @default("platform")
+
+  /**
+   * Set when a timed quiz is opened. The deadline is derived from this on the
+   * server, so a student cannot win time by reloading or editing the clock.
+   */
+  startedAt   DateTime?
+  submittedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assignmentId, studentId])
+}
+
+// ---------------------------------------------------------------------------
+// Outbound email pipeline.
+//
+// Mail is queued rather than sent inline: a bulk send to every unpaid student
+// cannot block a request, and a provider hiccup must not lose the message.
+// A worker drains the queue with backoff, and Suppression records addresses
+// that must never be written to again.
+// ---------------------------------------------------------------------------
+
+model EmailMessage {
+  id String @id @default(cuid())
+
+  to      String
+  subject String
+  html    String
+  /**
+   * welcome | fee_reminder | exam_reminder | bulk | ...
+   */
+  type    String @default("general")
+
+  studentId String?
+
+  /**
+   * queued | sending | sent | failed | suppressed | cancelled
+   */
+  status    String  @default("queued")
+  attempts  Int     @default(0)
+  lastError String?
+
+  /**
+   * Not sent before this time; drives reminders and scheduled campaigns.
+   */
+  scheduledFor DateTime  @default(now())
+  sentAt       DateTime?
+
+  /**
+   * Groups the messages produced by one bulk send.
+   */
+  campaignId String?
+
+  /**
+   * Which of the school's two sending identities this message goes out as:
+   * "support" (a human reads replies) or "noreply" (automated receipts).
+   * Stored per message rather than read from env at send time, because a
+   * queued message may not drain until after a config change and it must go
+   * out as the address it was composed under. See src/lib/mail-identity.ts.
+   */
+  identity String @default("noreply")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, scheduledFor])
+  @@index([campaignId])
+}
+
+/**
+ * Which notification kinds are allowed to leave the building, and how.
+ *
+ * One row per kind. Absent means "use the code default", so the table starts
+ * empty and the system behaves exactly as it did before anybody opens the
+ * settings page — an admin turning one thing off must not require seventeen
+ * rows to exist first.
+ */
+model NotificationSetting {
+  id String @id @default(cuid())
+
+  /** A KIND value from src/lib/notify.ts, e.g. "payment.received". */
+  kind String @unique
+
+  /** The in-app bell. Off means the notification is not created at all. */
+  inApp Boolean @default(true)
+  /** Browser/device push, for the ones that mean "look now". */
+  push  Boolean @default(true)
+  /** A copy by email, sent through the queue. */
+  email Boolean @default(true)
+
+  /**
+   * Which sender an emailed copy uses — "support" or "noreply". Null follows
+   * the code's default for this kind.
+   */
+  identity String?
+
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+model EmailSuppression {
+  id     String  @id @default(cuid())
+  email  String  @unique
+  /**
+   * bounced | complained | unsubscribed | manual
+   */
+  reason String
+  note   String?
+
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Private (one-to-one) classes.
+//
+// A private student has no branch+level timetable to generate from, so their
+// calendar is these rows and nothing else. Kept separate from ClassSession
+// because that model is keyed on branch + level + slot — the exact thing a
+// private class does not have.
+// ---------------------------------------------------------------------------
+
+model PrivateClass {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  scheduledAt     DateTime
+  durationMinutes Int      @default(60)
+  topic           String?
+  /**
+   * scheduled | completed | cancelled | postponed
+   */
+  status          String   @default("scheduled")
+  notes           String?
+
+  materialId String?
+  material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId, scheduledAt])
+}
+
+// ---------------------------------------------------------------------------
+// Registration funnel.
+//
+// Enquiries land here, NOT in Student. A campaign can bring in thousands of
+// registrants who never pay or enrol, and putting those straight into the
+// roster would wreck every count the school reports on — class sizes, revenue
+// per branch, attendance rates. An admin converts a Lead into a real Student
+// (payment pending, access gated) when it is genuinely an enrolment.
+// ---------------------------------------------------------------------------
+
+model Lead {
+  id    String  @id @default(cuid())
+  name  String
+  email String  @unique
+  phone String?
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  /**
+   * Level they enquired about, and the sitting they asked for.
+   */
+  interestedLevel String?
+  sessionSlot     String?
+  /**
+   * group | private
+   */
+  classType       String  @default("group")
+
+  /**
+   * Where the enquiry came from: website, campaign name, csv_import, walk_in.
+   */
+  source String  @default("website")
+  /**
+   * new | invited | converted | dropped
+   */
+  status String  @default("new")
+  notes  String?
+
+  /**
+   * When the enrolment invite was last emailed, so the office can chase.
+   */
+  invitedAt DateTime?
+
+  /**
+   * Set on conversion. One-to-one, so a Lead cannot be converted twice into
+   * two competing student records.
+   */
+  convertedStudentId String?   @unique
+  convertedStudent   Student?  @relation(fields: [convertedStudentId], references: [id], onDelete: SetNull)
+  convertedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([branchId, interestedLevel])
+}
+
+// A certificate is a historical document, so the level, branch, tutor and score
+// are SNAPSHOT here rather than read through the student relation at render
+// time. A student promoted from A1 to A2, or moved from Lagos to Abuja, must
+// still hold an A1 Lagos certificate afterwards.
+//
+// Every student who completes a session gets one. Passing decides the KIND, not
+// whether there is a certificate at all: `achievement` for a pass, `completion`
+// for attendance without one. Nothing in the wording of either says "failed".
+model Certificate {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /**
+   * achievement | completion
+   */
+  kind  String
+  level String
+
+  /**
+   * distinction | merit | pass | participation — printed on the face.
+   */
+  award String @default("participation")
+
+  /**
+   * Printed serial, e.g. EW/CERT/2026/A1/0007. Public, so it must be unique.
+   */
+  serial     String @unique
+  /**
+   * Short code for third-party verification at /verify/<code>. Separate from
+   * the serial because the serial is guessable by design (it counts up) and a
+   * guessable code would let anyone enumerate every student's result.
+   */
+  verifyCode String @unique
+
+  /**
+   * Average across all grades at issue. Null when the student was never scored.
+   */
+  averageScore Int?
+  passed       Boolean @default(false)
+
+  // Snapshots, deliberately denormalised. See the note above.
+  studentName String
+  studentCode String?
+  branchName  String?
+  tutorName   String?
+  batch       String?
+
+  /**
+   * The course dates the certificate states: when this student started the
+   * level and when they finished it.
+   * Snapshots like everything else here. Derived from the batch month and the
+   * session length at issue rather than read back later, because a student who
+   * repeats a level or moves batch would otherwise change the dates printed on
+   * a document already in somebody's hand.
+   * Nullable for certificates issued before this existed; the document simply
+   * omits the line rather than printing a guess.
+   */
+  courseStart DateTime?
+  courseEnd   DateTime?
+
+  /**
+   * Tuition still owed when the certificate was issued, kept for the record.
+   * The PROVISIONAL stamp is NOT driven by this column — it is recomputed from
+   * the live balance, so a student who settles up later gets a clean document
+   * instead of being punished forever by a snapshot.
+   */
+  outstandingAtIssue Int @default(0)
+
+  issuedAt  DateTime  @default(now())
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
+   * client rewrites delete into an update on every model listed here, and
+   * filters these rows out of ordinary reads, so the application behaves as
+   * though the row is gone while the data is still on disk and restorable.
+   */
+  deletedAt DateTime?
+
+  // One certificate per student per level. Re-running the issuer is safe.
+  @@unique([studentId, level])
+  @@index([issuedAt])
+}
+
+/**
+ * Something the assistant proposed, and what happened to it.
+ * THE MODEL DOES NOT WRITE TO THE DATABASE. It writes a ROW HERE, describing
+ * what it would do, and that row is inert until a named human presses Confirm.
+ * Executing is a second, separate request that carries only this row's id — so
+ * the thing that runs is the thing that was reviewed, not a re-derivation of it
+ * from a conversation that has since moved on.
+ * That split is the whole safety story. A model that misreads "not paid" as
+ * "not fully paid" produces a plan that says, in the admin's own screen, "this
+ * will message 214 students" — and 214 is visibly wrong where "I have messaged
+ * the unpaid students" is not. The preview is the review surface, and the
+ * frozen payload is what makes the preview binding.
+ * It doubles as the audit log, which is not a coincidence: the record of what
+ * was proposed, by whom, on whose account, and whether it ran, is the same
+ * record either way. Rows are never deleted — a cancelled plan is evidence too.
+ */
+model AdminAction {
+  id String @id @default(cuid())
+
+  /**
+   * Which action, e.g. message_students, mark_attendance, promote_students.
+   * Matched back to the registry in src/lib/assistant-actions.ts at execute
+   * time; an action that no longer exists refuses to run rather than guessing.
+   */
+  kind String
+
+  /**
+   * The capability the executing admin must hold. Stored rather than looked up
+   * so a later change to the registry cannot silently widen an old plan.
+   */
+  capability String
+
+  /**
+   * One line, as shown on the confirm card.
+   */
+  summary String
+  /**
+   * The frozen arguments, exactly as validated when the plan was made. This is
+   * what executes — never the model's later retelling.
+   */
+  payload Json
+  /**
+   * The preview the human actually approved: counts, sample rows, warnings.
+   * Kept so the audit trail records what was on screen, not just what ran.
+   */
+  preview Json?
+
+  /**
+   * How many records this would touch, for the list view.
+   */
+  affectedCount Int @default(0)
+
+  /**
+   * pending | executed | cancelled | expired | failed
+   */
+  status String @default("pending")
+
+  /**
+   * The admin whose question produced it.
+   */
+  createdById String
+  createdBy   User   @relation("AdminActionCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  /**
+   * The admin who pressed Confirm. Usually the same person, deliberately not
+   * assumed to be: a plan left open on a shared front-desk machine and executed
+   * by whoever sat down next is exactly the event this column exists to record.
+   */
+  executedById String?
+  executedBy   User?   @relation("AdminActionExecutor", fields: [executedById], references: [id], onDelete: SetNull)
+
+  /**
+   * What running it actually did — delivered counts, ids touched, errors.
+   */
+  result Json?
+  error  String?
+
+  /**
+   * Plans go stale. A fee-chase list assembled an hour ago may have had three
+   * of its students pay since, so a plan past this is refused and must be
+   * re-asked rather than executed against a world that has moved.
+   */
+  expiresAt  DateTime
+  executedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([createdById, status])
+  @@index([createdAt])
+}
+
+/**
+ * The append-only record of who changed what.
+ * This table is the undo button. A backup restores the whole school to a
+ * moment in time, which is the wrong instrument for the failure that actually
+ * happens: one person removes one thing by mistake and nobody notices for
+ * three days. Rolling back to Tuesday to recover one student would discard
+ * every payment, mark and message from Wednesday and Thursday. So the before
+ * image of each destructive write is kept here, and a single row can be put
+ * back without touching anything else.
+ * Nothing in the application updates or deletes a row in this table. The guard
+ * in src/lib/prisma-guard.ts refuses both, so a compromised admin account can
+ * cause damage but cannot erase the evidence of having caused it.
+ */
+model AuditLog {
+  id String @id @default(cuid())
+
+  /**
+   * create | update | delete | deleteMany | updateMany | restore |
+   * login | loginFailed | export | permissionChange | secretAccess
+   */
+  action String
+
+  /**
+   * The Prisma model, e.g. "Student". Null for events with no table.
+   */
+  model    String?
+  /**
+   * The row, when the event concerns exactly one.
+   */
+  recordId String?
+
+  /**
+   * The row exactly as it stood before the write, as JSON.
+   * This is what makes restore possible, and it is also why this table is
+   * treated as confidential: a before image of a Student carries the same
+   * personal data the row itself did. The retention job in the recovery
+   * runbook prunes it on the same clock as the rest of the student record.
+   */
+  before Json?
+  /**
+   * The row after the write, for updates. Null on deletes.
+   */
+  after  Json?
+
+  /**
+   * How many rows the statement touched. Above one this was a bulk write and
+   * `before` holds an array rather than a single row.
+   */
+  affectedCount Int @default(1)
+
+  /**
+   * One line in plain German-school English, for the trail's list view.
+   */
+  summary String?
+
+  /**
+   * Who did it. SetNull rather than Cascade — deleting a staff account must
+   * never take that person's history with it, which is the exact record you
+   * want most when an account is being removed under suspicion.
+   */
+  actorId    String?
+  actor      User?   @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  /**
+   * The actor's email and role copied in at write time. Denormalised on
+   * purpose: it survives the account being deleted, renamed, or demoted, and
+   * an audit trail that reads "(deleted user)" is not a trail.
+   */
+  actorEmail String?
+  actorRole  String?
+
+  /**
+   * Where it came from: app | script | cron | assistant | seed.
+   */
+  source String @default("app")
+
+  /**
+   * Request context. The IP is stored because a sign-in from an unexpected
+   * country is the earliest visible sign of a stolen password, and there is
+   * nowhere else in this system that would notice.
+   */
+  ip        String?
+  userAgent String?
+  route     String?
+  requestId String?
+
+  /**
+   * info | notice | alert — alert is what the admin dashboard surfaces.
+   */
+  severity String @default("info")
+
+  /**
+   * False once put back, so the trail cannot be replayed twice.
+   */
+  restorable   Boolean   @default(false)
+  restoredAt   DateTime?
+  restoredById String?
+  restoredBy   User?     @relation("AuditRestorer", fields: [restoredById], references: [id], onDelete: SetNull)
+
+  at DateTime @default(now())
+
+  @@index([at])
+  @@index([model, recordId])
+  @@index([actorId, at])
+  @@index([action, at])
+  @@index([severity, at])
+  @@index([restorable, at])
+}
+
+/**
+ * One row per backup attempt, written by the GitHub Actions jobs.
+ * The point is not the record, it is the absence of one. A backup that has
+ * quietly failed for six weeks looks exactly like a backup that is working,
+ * right up until the morning it is needed. The daily cron checks this table
+ * and raises an admin alert when the newest success is older than 26 hours,
+ * so silence becomes noisy.
+ */
+model BackupRun {
+  id String @id @default(cuid())
+
+  /**
+   * database | objects | drill
+   */
+  kind   String
+  /**
+   * running | success | failed
+   */
+  status String @default("running")
+
+  /**
+   * The restic snapshot id, so the runbook can name what to restore.
+   */
+  snapshotId String?
+  sizeBytes  BigInt?
+  /**
+   * Row counts per model on a drill, transfer stats on a mirror.
+   */
+  detail     Json?
+  error      String?
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([kind, status, startedAt])
+  @@index([startedAt])
+}

@@ -1,0 +1,576 @@
+@import "tailwindcss";
+
+/* Explicit source scanning: automatic detection was not picking up src/,
+   which silently emitted a utility-free stylesheet. */
+@source "../../";
+
+/* ---------------------------------------------------------------------------
+   Theme
+   ---------------------------------------------------------------------------
+   Three themes, and only one place that decides what any of them look like.
+
+   Two rules make this work, and both were broken before:
+
+   1. `--background` is a GRADIENT, so it may only ever be applied with the
+      `background` shorthand. Tailwind's `bg-[var(--background)]` compiles to
+      `background-color`, which silently discards a gradient and leaves the
+      element transparent. That is why every page and every loader used to show
+      the same dark sheet no matter which theme was picked — the themed layers
+      were all transparent and `body` underneath them was hardcoded navy.
+      Use `.app-canvas` (below) instead.
+
+   2. `body` follows `var(--background)`. Nothing paints a page background from
+      a literal colour any more; if it did, the toggle would not reach it.
+
+   Colour is doing psychological work here, so it is deliberate rather than
+   decorative: teal is the school's steady, trustworthy ground, orange is
+   the reward signal and belongs to whatever the student should touch next, and
+   the custom theme goes indigo-violet — the dusk palette, the one that reads as
+   night study and makes the orange land like a lit window.
+
+   `--accent` is the FILL orange (brand exact, #FF6600). `--accent-ink` is the
+   same colour deepened until it is legible as TEXT on that theme's surfaces.
+   They are separate because the brand orange is a beautiful button and an
+   unreadable paragraph.
+   --------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+
+  --background:
+    radial-gradient(1100px 620px at 10% -10%, rgba(13,124,126,0.14), transparent 62%),
+    radial-gradient(940px 560px at 94% 2%, rgba(255,102,0,0.12), transparent 64%),
+    linear-gradient(180deg, #fcfbf9 0%, #f3f6f6 52%, #fdf7f2 100%);
+  --foreground: #10201f;
+  --foreground-soft: #34433f;
+  --surface: #ffffff;
+  --surface-alt: #f2f6f6;
+  --surface-strong: #ffffff;
+  --surface-soft: rgba(255,255,255,0.72);
+  --card: #ffffff;
+  --border: rgba(13, 124, 126, 0.18);
+  --border-strong: rgba(13, 124, 126, 0.34);
+  --shadow: 0 30px 80px rgba(10, 40, 40, 0.08);
+  --accent: #FF6600;
+  --accent-ink: #B34700;
+  --accent-strong: #0D7C7E;
+  --accent-soft: rgba(255, 102, 0, 0.12);
+  --accent-contrast: #ffffff;
+  --success: #15803d;
+  --success-soft: rgba(21,128,61,0.12);
+  --danger: #b91c1c;
+  --danger-soft: rgba(185,28,28,0.12);
+  --warning: #b45309;
+  --warning-soft: rgba(180,83,9,0.14);
+  --muted: #52625e;
+
+  /* The decorative scene layers (stars, grid, auroras) tint themselves from
+     these rather than assuming a dark page to draw white on. */
+  --scene-ink: 13, 124, 126;
+  --scene-strength: 0.5;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Daylight. The default, and the one the school is photographed in.
+   Also available as a SCOPE — any element carrying `.theme-light` forces its
+   subtree back to daylight. The signed-out pages use it: they are painted in
+   literal whites, so under the dusk palette they came out as white cards with
+   indigo children. They are also the one place the theme switch is hidden, so
+   pinning them is not overriding a choice anybody made. */
+html.theme-light,
+.theme-light {
+  color-scheme: light;
+
+  --background:
+    radial-gradient(1100px 620px at 10% -10%, rgba(13,124,126,0.14), transparent 62%),
+    radial-gradient(940px 560px at 94% 2%, rgba(255,102,0,0.12), transparent 64%),
+    linear-gradient(180deg, #fcfbf9 0%, #f3f6f6 52%, #fdf7f2 100%);
+  --foreground: #10201f;
+  --foreground-soft: #34433f;
+  --surface: #ffffff;
+  --surface-alt: #f2f6f6;
+  --surface-strong: #ffffff;
+  --surface-soft: rgba(255,255,255,0.72);
+  --card: #ffffff;
+  --border: rgba(13, 124, 126, 0.18);
+  --border-strong: rgba(13, 124, 126, 0.34);
+  --shadow: 0 30px 80px rgba(10, 40, 40, 0.08);
+  --accent: #FF6600;
+  --accent-ink: #B34700;
+  --accent-strong: #0D7C7E;
+  --accent-soft: rgba(255, 102, 0, 0.12);
+  --accent-contrast: #ffffff;
+  --muted: #52625e;
+  --scene-ink: 13, 124, 126;
+  --scene-strength: 0.5;
+}
+
+/* Night. Deep teal-black rather than grey — the brand's own shadow. */
+html.theme-dark {
+  color-scheme: dark;
+
+  --background:
+    radial-gradient(1000px 560px at 8% -6%, rgba(13,124,126,0.30), transparent 60%),
+    radial-gradient(900px 520px at 96% 6%, rgba(255,102,0,0.18), transparent 62%),
+    linear-gradient(180deg, #061316 0%, #0a1c20 48%, #08181b 100%);
+  --foreground: #edf5f4;
+  --foreground-soft: #cbdcd9;
+  --surface: #102227;
+  --surface-alt: #162c32;
+  --surface-strong: #0c1a1e;
+  --surface-soft: rgba(16,34,39,0.72);
+  --card: #102227;
+  --border: rgba(154, 214, 213, 0.16);
+  --border-strong: rgba(154, 214, 213, 0.32);
+  --shadow: 0 30px 90px rgba(0,0,0,0.55);
+  --accent: #FF7A1A;
+  --accent-ink: #FFB273;
+  --accent-strong: #3FC3C6;
+  --accent-soft: rgba(255, 122, 26, 0.18);
+  --accent-contrast: #10201f;
+  --success: #4ade80;
+  --success-soft: rgba(74,222,128,0.16);
+  --danger: #f87171;
+  --danger-soft: rgba(248,113,113,0.16);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251,191,36,0.16);
+  --muted: #9db4b1;
+  --scene-ink: 255, 255, 255;
+  --scene-strength: 1;
+}
+
+/* Dusk. The mystical one: indigo-violet ground, teal moonlight, orange as the
+   only warm thing on screen — which is exactly where attention should go. */
+html.theme-custom {
+  color-scheme: dark;
+
+  --background:
+    radial-gradient(1000px 600px at 6% -8%, rgba(124, 92, 255, 0.34), transparent 62%),
+    radial-gradient(880px 520px at 98% 4%, rgba(13, 124, 126, 0.34), transparent 60%),
+    radial-gradient(760px 620px at 62% 108%, rgba(255, 102, 0, 0.22), transparent 60%),
+    linear-gradient(180deg, #0a081c 0%, #120e2b 52%, #0d0b22 100%);
+  --foreground: #f2eeff;
+  --foreground-soft: #d3cbf2;
+  --surface: #171233;
+  --surface-alt: #1e1842;
+  --surface-strong: #120e2a;
+  --surface-soft: rgba(23,18,51,0.72);
+  --card: #171233;
+  --border: rgba(168, 146, 255, 0.22);
+  --border-strong: rgba(168, 146, 255, 0.42);
+  --shadow: 0 30px 110px rgba(28, 10, 70, 0.6);
+  --accent: #FF7A1A;
+  --accent-ink: #FFB273;
+  --accent-strong: #38D0D3;
+  --accent-soft: rgba(255, 122, 26, 0.18);
+  --accent-contrast: #10061f;
+  --success: #5eead4;
+  --success-soft: rgba(94,234,212,0.16);
+  --danger: #fb7185;
+  --danger-soft: rgba(251,113,133,0.16);
+  --warning: #fcd34d;
+  --warning-soft: rgba(252,211,77,0.16);
+  --muted: #ada2d8;
+  --scene-ink: 196, 178, 255;
+  --scene-strength: 1;
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  /* The shorthand, and `var(--background)` — see the note above. A literal
+     colour here is what made the theme toggle look broken. */
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  background-attachment: fixed;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background-image:
+    radial-gradient(circle at 20% 12%, rgba(var(--scene-ink), 0.10), transparent 20%),
+    radial-gradient(circle at 84% 18%, rgba(255, 136, 34, 0.10), transparent 16%),
+    repeating-linear-gradient(0deg, rgba(var(--scene-ink), 0.03), rgba(var(--scene-ink), 0.03) 1px, transparent 1px, transparent 34px);
+  opacity: calc(0.4 * var(--scene-strength));
+}
+
+/* ---------------------------------------------------------------------------
+   The one safe way to paint the themed page background.
+
+   `bg-[var(--background)]` cannot do it (background-color drops the gradient),
+   and every full-bleed surface in the app needs it, so it gets a real class.
+   --------------------------------------------------------------------------- */
+.app-canvas {
+  background: var(--background);
+  background-attachment: fixed;
+}
+
+/* Legibility over brand purity, in exactly one place.
+
+   `--accent` is #FF6600 because that is the school's orange and it must stay
+   exact wherever it is a FILL. As body text on white it is 2.9:1, which fails
+   at any size. Rather than rewrite `text-[var(--accent)]` across four dozen
+   files — and risk missing the ones that matter — the utility itself is
+   redirected to the ink variant. Fills, borders and rings are untouched. */
+.text-\[var\(--accent\)\] { color: var(--accent-ink); }
+
+* {
+  box-sizing: border-box;
+  transition: background-color 0.25s ease, color 0.25s ease, transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+::selection {
+  background: rgba(255,102,0,0.22);
+  color: #1a1a1a;
+}
+
+html.theme-dark ::selection {
+  background: rgba(255,153,51,0.28);
+  color: #f0f0f0;
+}
+
+html.theme-custom ::selection {
+  background: rgba(255,102,0,0.28);
+  color: #ffffff;
+}
+
+.hero-glow {
+  background: radial-gradient(circle at top left, rgba(13,124,126,0.16), transparent 22%),
+              radial-gradient(circle at top right, rgba(255,102,0,0.14), transparent 24%);
+}
+
+.glass-panel {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.floating-ring {
+  position: absolute;
+  right: 0;
+  top: 6rem;
+  width: 20rem;
+  height: 20rem;
+  background: radial-gradient(circle, rgba(13,124,126,0.18), transparent 45%);
+  filter: blur(70px);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.float-animation {
+  animation: float 7s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.dashboard-shell {
+  position: relative;
+  overflow: hidden;
+}
+
+.dashboard-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(var(--scene-ink),0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(var(--scene-ink),0.12) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: linear-gradient(180deg, rgba(0,0,0,0.8), transparent 78%);
+  pointer-events: none;
+}
+
+.dashboard-shell::after {
+  content: "";
+  position: absolute;
+  inset: -20% auto auto -10%;
+  width: 24rem;
+  height: 24rem;
+  background: radial-gradient(circle, rgba(13,124,126,0.2), transparent 58%);
+  filter: blur(70px);
+  pointer-events: none;
+}
+
+.cinematic-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: linear-gradient(145deg, var(--surface), var(--surface-alt));
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.cinematic-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 0%, rgba(var(--scene-ink),0.16) 45%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 0.7s ease;
+  pointer-events: none;
+}
+
+.cinematic-card:hover::before {
+  transform: translateX(120%);
+}
+
+.glow-pill {
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.14) inset, 0 16px 34px rgba(15, 23, 42, 0.14);
+}
+
+.float-card {
+  animation: float 6.5s ease-in-out infinite;
+}
+
+.hero-orb {
+  animation: orbFloat 8s ease-in-out infinite;
+}
+
+.glass-chip {
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+}
+
+.pulse-ring {
+  animation: pulseRing 2.6s ease-out infinite;
+}
+
+.shimmer-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer-line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.45), transparent);
+  transform: translateX(-100%);
+  animation: shimmer 2.8s linear infinite;
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
+@keyframes orbFloat {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(0, -12px, 0) scale(1.04); }
+}
+
+@keyframes pulseRing {
+  0% { transform: scale(0.9); opacity: 0.75; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
+@keyframes blob {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  33% { transform: translate(-52%, -48%) scale(1.08); }
+  66% { transform: translate(-48%, -52%) scale(0.94); }
+}
+
+@keyframes pulseSlow {
+  0%, 100% { opacity: 0.45; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.05); }
+}
+
+@keyframes pan {
+  0% { transform: translateX(-20%); }
+  100% { transform: translateX(20%); }
+}
+
+.animate-blob {
+  animation: blob 12s ease-in-out infinite;
+}
+
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+
+.animate-pulse-slow {
+  animation: pulseSlow 4.5s ease-in-out infinite;
+}
+
+.animate-pan {
+  animation: pan 18s linear infinite;
+}
+
+/* The scene layers tint from --scene-ink so they read as light motes on a dark
+   theme and as faint teal dust on the light one, instead of painting white on
+   white and vanishing. */
+.scene-stars {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 18% 13%, rgba(var(--scene-ink),0.16), transparent 4%),
+                    radial-gradient(circle at 62% 19%, rgba(var(--scene-ink),0.12), transparent 3%),
+                    radial-gradient(circle at 83% 65%, rgba(var(--scene-ink),0.14), transparent 4%),
+                    radial-gradient(circle at 35% 79%, rgba(var(--scene-ink),0.08), transparent 3%);
+  opacity: calc(0.42 * var(--scene-strength));
+  pointer-events: none;
+}
+
+.scene-grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(var(--scene-ink),0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(var(--scene-ink),0.05) 1px, transparent 1px);
+  background-size: 36px 36px;
+  opacity: calc(0.2 * var(--scene-strength));
+  pointer-events: none;
+}
+
+.scene-aurora {
+  position: absolute;
+  width: 28rem;
+  height: 28rem;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(255, 136, 34, 0.22), transparent 54%);
+  filter: blur(96px);
+  opacity: 0.7;
+  pointer-events: none;
+  animation: blob 18s ease-in-out infinite;
+}
+
+.scene-aurora.left-10.top-16 {
+  left: 2.5rem;
+  top: 4rem;
+}
+
+.scene-aurora.right-16.top-24 {
+  right: 4rem;
+  top: 6rem;
+}
+
+.scene-halo {
+  position: absolute;
+  width: 18rem;
+  height: 18rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(var(--scene-ink),0.18);
+  background: rgba(var(--scene-ink),0.05);
+  filter: blur(22px);
+  opacity: calc(0.38 * var(--scene-strength));
+  pointer-events: none;
+  animation: pulseSlow 10s ease-in-out infinite;
+}
+
+.scene-halo.right-1\/3.top-1\/2 {
+  right: 33%;
+  top: 52%;
+}
+
+.scene-scanline {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(var(--scene-ink),0.07) 1px, transparent 1px);
+  background-size: 100% 44px;
+  opacity: calc(0.09 * var(--scene-strength));
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Brand loader
+   Animation primitives for <BrandLoader />. Namespaced ew- because this file
+   already carries several generic keyframe names (shimmer, float, blob) from
+   the marketing scenes and they must not collide.
+   --------------------------------------------------------------------------- */
+
+/* The emblem breathes rather than spins — the artwork has a fixed "up"
+   (the mortarboard) and rotating it would read as broken. */
+@keyframes ew-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-6px) scale(1.035); }
+}
+
+/* Counter-rotating orbit rings in the brand orange/teal. */
+@keyframes ew-orbit {
+  to { transform: rotate(360deg); }
+}
+
+/* Light sweeping across the emblem, masked to the badge shape. */
+@keyframes ew-sweep {
+  0%   { transform: translateX(-120%) skewX(-18deg); opacity: 0; }
+  35%  { opacity: 1; }
+  100% { transform: translateX(220%) skewX(-18deg); opacity: 0; }
+}
+
+/* Concentric rings expanding out from the emblem. */
+@keyframes ew-ripple {
+  0%   { transform: scale(0.82); opacity: 0.5; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+
+/* Indeterminate bar that travels rather than filling, so it never implies a
+   percentage we don't actually know. */
+@keyframes ew-track {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+@keyframes ew-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.ew-breathe { animation: ew-breathe 3.6s ease-in-out infinite; }
+.ew-orbit   { animation: ew-orbit 7s linear infinite; }
+.ew-orbit-reverse { animation: ew-orbit 11s linear infinite reverse; }
+.ew-sweep   { animation: ew-sweep 2.9s ease-in-out infinite; }
+.ew-ripple  { animation: ew-ripple 2.8s ease-out infinite; }
+.ew-track   { animation: ew-track 1.6s ease-in-out infinite; }
+.ew-fade-up { animation: ew-fade-up 0.45s ease-out both; }
+
+/* The dashed oval on the live photo capture, turning slowly so the guide reads
+   as active rather than as a static sticker over the video. */
+@keyframes ew-guide-spin {
+  to { transform: rotate(360deg); }
+}
+.ew-guide-spin { animation: ew-guide-spin 9s linear infinite; }
+
+/* Vestibular safety: hold the layout, drop the motion. */
+@media (prefers-reduced-motion: reduce) {
+  .ew-breathe,
+  .ew-orbit,
+  .ew-orbit-reverse,
+  .ew-sweep,
+  .ew-ripple,
+  .ew-guide-spin,
+  .ew-fade-up {
+    animation: none !important;
+  }
+  /* The bar keeps a slow pulse so "still working" stays legible. */
+  .ew-track {
+    animation: pulseSlow 2s ease-in-out infinite !important;
+    transform: none !important;
+  }
+}
