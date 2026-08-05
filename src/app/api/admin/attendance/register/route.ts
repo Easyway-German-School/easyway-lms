@@ -107,7 +107,7 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  const rows = students.map((student: StudentWithAttendance) => {
+  const rows = students.map((student) => {
     const admission =
       typeof student.admission === "object" && student.admission !== null
         ? (student.admission as Record<string, unknown>)
