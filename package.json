@@ -2,6 +2,6 @@
   "name": "easyway-lms-root",
   "private": true,
   "scripts": {
-    "build": "npm --prefix prototype ci && npm --prefix prototype run build && cp -r prototype/.next ."
+    "build": "npm --prefix prototype ci && npm --prefix prototype run build && node -e \"const fs = require('fs'); const out = '.next'; if (fs.existsSync(out)) fs.rmSync(out, { recursive: true, force: true }); fs.cpSync('prototype/.next', out, { recursive: true, force: true });\""
   }
 }
