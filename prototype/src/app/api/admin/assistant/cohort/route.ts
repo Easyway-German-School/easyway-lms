@@ -61,7 +61,7 @@ export async function POST(request: Request) {
   }
 
   const result = await notify({
-    to: { studentIds: real.map((student) => student.id) },
+    to: { studentIds: real.map((student: { id: string }) => student.id) },
     title,
     message,
     kind: KIND.announcement,

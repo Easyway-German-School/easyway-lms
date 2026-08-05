@@ -1,3 +1,4 @@
+const path = require('path');
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Allow both localhost and 127.0.0.1 for HMR in development
@@ -22,6 +23,12 @@ const nextConfig = {
   },
 
   webpack: (config, { dev }) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      'motion-dom$': path.resolve(__dirname, 'node_modules', 'motion-dom', 'dist', 'cjs', 'index.js'),
+      'motion-dom': path.resolve(__dirname, 'node_modules', 'motion-dom', 'dist', 'cjs', 'index.js'),
+    };
+
     if (dev) {
       // Webpack's default dev cache is written to disk and grows without bound
       // — .next/cache had reached 1.5GB. In memory, capped, it costs a cold

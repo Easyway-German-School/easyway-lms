@@ -129,11 +129,11 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
 
     briefing.students = {
       total: students.length,
-      active: students.filter((s) => s.status === "active").length,
+      active: students.filter((s: { status: string }) => s.status === "active").length,
       byLevel,
       byBranch,
-      newThisWeek: students.filter((s) => s.createdAt >= weekAgo).length,
-      newThisMonth: students.filter((s) => s.createdAt >= monthStart).length,
+      newThisWeek: students.filter((s: { createdAt: Date }) => s.createdAt >= weekAgo).length,
+      newThisMonth: students.filter((s: { createdAt: Date }) => s.createdAt >= monthStart).length,
     };
   }
 
@@ -159,12 +159,12 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
     for (const student of students) {
       const lookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
       const tuitionFee = tuitionFeeFor(lookup);
-      const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
+      const totalPaid = student.payments.reduce((sum: number, p: { amount: number }) => sum + p.amount, 0);
 
       collectedAllTime += totalPaid;
       collectedThisMonth += student.payments
-        .filter((p) => p.createdAt >= monthStart)
-        .reduce((sum, p) => sum + p.amount, 0);
+        .filter((p: { createdAt: Date }) => p.createdAt >= monthStart)
+        .reduce((sum: number, p: { amount: number }) => sum + p.amount, 0);
 
       const { fullPaid } = derivePaymentStatus({
         totalPaid,
@@ -221,7 +221,7 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
       where: { date: { gte: weekAgo } },
       select: { status: true },
     });
-    const present = recent.filter((a) => a.status === "present").length;
+    const present = recent.filter((a: { status: string }) => a.status === "present").length;
     briefing.attendance = {
       sessionsLast7Days: recent.length,
       averagePresentPercent: recent.length > 0 ? Math.round((present / recent.length) * 100) : null,
