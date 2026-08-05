@@ -1,62 +1,12 @@
 {
-  "name": "prototype",
-  "version": "0.1.0",
+  "name": "easyway-lms-root",
   "private": true,
-  "scripts": {
-    "dev": "next dev --webpack --hostname 0.0.0.0",
-    "build": "prisma generate && next build --webpack",
-    "start": "next start --hostname 0.0.0.0",
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate deploy",
-    "db:port": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/port-sqlite-to-postgres.ts",
-    "check:actions": "tsx --tsconfig tsconfig.json scripts/check-assistant-actions.ts",
-    "bench:brain": "tsx --tsconfig tsconfig.json scripts/bench-local-brain.ts",
-    "check:livekit": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/check-livekit.ts",
-    "test:retention": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/test-retention.ts",
-    "check:guard": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/check-guard.ts"
-  },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0",
-    "@prisma/client": "^6.19.3",
-    "@tanstack/react-query": "^5.101.4",
-    "@tldraw/tldraw": "^5.1.1",
-    "aws4fetch": "^1.0.20",
-    "bcryptjs": "^3.0.3",
-    "docx": "^9.7.1",
-    "fflate": "^0.8.3",
-    "framer-motion": "^12.42.2",
-    "livekit-client": "^2.21.0",
-    "livekit-server-sdk": "^2.17.0",
-    "mammoth": "^1.12.0",
     "next": "16.2.9",
-    "next-auth": "^4.24.14",
-    "nodemailer": "^7.0.13",
-    "otplib": "^13.4.1",
-    "pdf-parse": "^2.4.5",
-    "pdf2json": "^4.0.3",
-    "qrcode": "^1.5.4",
     "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "react-webcam": "^7.2.0",
-    "stripe": "^22.3.0",
-    "web-push": "^3.6.7"
+    "react-dom": "19.2.4"
   },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/next-auth": "^3.13.0",
-    "@types/node": "^20",
-    "@types/nodemailer": "^8.0.1",
-    "@types/qrcode": "^1.5.6",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "@types/web-push": "^3.6.4",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.9",
-    "prisma": "^6.19.3",
-    "tailwindcss": "^4",
-    "tsx": "^4.23.4",
-    "typescript": "^5"
+  "scripts": {
+    "build": "npm --prefix prototype install --include=dev --no-audit --no-fund && npm --prefix prototype run build && node -e \"const fs=require('fs');const path=require('path');const out='.next';if(fs.existsSync(out))fs.rmSync(out,{recursive:true,force:true});fs.cpSync('prototype/.next',out,{recursive:true,force:true});const src=path.join(out,'routes-manifest.json');const dst=path.join(out,'routes-manifest-deterministic.json');if(fs.existsSync(src)&&!fs.existsSync(dst))fs.copyFileSync(src,dst);\""
   }
 }
