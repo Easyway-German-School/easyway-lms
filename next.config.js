@@ -25,6 +25,7 @@ const nextConfig = {
   webpack: (config, { dev }) => {
     config.resolve.alias = {
       ...config.resolve.alias,
+      '@': path.resolve(__dirname, 'src'),
       'motion-dom$': path.resolve(__dirname, 'node_modules', 'motion-dom', 'dist', 'cjs', 'index.js'),
       'motion-dom': path.resolve(__dirname, 'node_modules', 'motion-dom', 'dist', 'cjs', 'index.js'),
     };
