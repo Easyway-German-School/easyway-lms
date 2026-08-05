@@ -7,6 +7,6 @@
     "react-dom": "19.2.4"
   },
   "scripts": {
-    "build": "npm --prefix prototype ci && npm --prefix prototype run build && node -e \"const fs = require('fs'); const out = '.next'; if (fs.existsSync(out)) fs.rmSync(out, { recursive: true, force: true }); fs.cpSync('prototype/.next', out, { recursive: true, force: true });\""
+    "build": "npm --prefix prototype ci --include=dev && npm --prefix prototype run build && node -e \"const fs = require('fs'); const out = '.next'; if (fs.existsSync(out)) fs.rmSync(out, { recursive: true, force: true }); fs.cpSync('prototype/.next', out, { recursive: true, force: true });\""
   }
 }
