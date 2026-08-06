@@ -24,14 +24,17 @@ const MAX_BYTES = 8 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
+    // Parse body early so we can allow unauthenticated uploads to the
+    // `photos` folder (signup avatars) while still requiring sessions for
+    // other folders.
     const body = await request.json();
     const { filename, contentType, data } = body;
     const folder = FOLDERS.has(String(body.folder)) ? String(body.folder) : "files";
+
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id && folder !== "photos") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     if (!filename || !data) {
       return NextResponse.json({ error: "filename and data are required" }, { status: 400 });

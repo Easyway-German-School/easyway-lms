@@ -37,11 +37,8 @@ const EXPIRY_SECONDS = 600;
 const FOLDERS = new Set(["files", "materials", "photos"]);
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+  // Parse the body early so callers that want to upload signup photos
+  // (folder: "photos") can be allowed without an authenticated session.
   const body = await request.json().catch(() => ({}));
   const filename = String(body.filename ?? "").trim();
   const contentType = String(body.contentType ?? "application/octet-stream");
@@ -51,6 +48,14 @@ export async function POST(request: NextRequest) {
 
   if (!filename) {
     return NextResponse.json({ error: "filename is required" }, { status: 400 });
+  }
+
+  // Allow unauthenticated uploads to the `photos` folder so signup can upload
+  // an avatar before the user has an account. All other folders still require
+  // an authenticated session.
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id && folder !== "photos") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const storage = objectStorage();
