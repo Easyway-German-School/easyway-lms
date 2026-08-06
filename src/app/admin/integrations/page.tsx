@@ -116,8 +116,6 @@ export default function AdminIntegrationsPage() {
           statuses[connector.id] = {
             connectorId: connector.id,
             status: connector.configured ? 'idle' : 'error',
-            lastSync: null,
-            nextSync: null,
             errorMessage: connector.configured ? undefined : 'Not configured',
             itemsSync: 0,
           };
