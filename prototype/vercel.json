@@ -8,41 +8,9 @@
     }
   ],
   "functions": {
-    "src/app/api/ai/**/route.ts": {
-      "maxDuration": 60
-    },
-    "src/app/api/cron/tick/route.ts": {
-      "maxDuration": 60
-    },
-    "src/app/api/live/recording/**/route.ts": {
-      "maxDuration": 60
-    },
-    "src/app/api/admin/students/import/route.ts": {
-      "maxDuration": 60
-    }
-  }
-}
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "nextjs",
-  "crons": [
-    {
-      "path": "/api/cron/tick",
-      "schedule": "0 6 * * *"
-    }
-  ],
-  "functions": {
-    "src/app/api/ai/**/route.ts": {
-      "maxDuration": 60
-    },
-    "src/app/api/cron/tick/route.ts": {
-      "maxDuration": 60
-    },
-    "src/app/api/live/recording/**/route.ts": {
-      "maxDuration": 60
-    },
-    "src/app/api/admin/students/import/route.ts": {
-      "maxDuration": 60
-    }
+    "src/app/api/ai/**/route.ts": { "maxDuration": 60 },
+    "src/app/api/cron/tick/route.ts": { "maxDuration": 60 },
+    "src/app/api/live/recording/**/route.ts": { "maxDuration": 60 },
+    "src/app/api/admin/students/import/route.ts": { "maxDuration": 60 }
   }
 }
