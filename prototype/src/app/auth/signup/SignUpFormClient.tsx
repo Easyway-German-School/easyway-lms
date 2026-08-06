@@ -275,7 +275,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
       // Upload the photo first and use the RETURNED url (state would be stale here).
       let uploadedPhotoUrl = photoUrl;
       if (photoFile) {
-        uploadedPhotoUrl = await uploadFile(photoFile);
+        uploadedPhotoUrl = await uploadImage(photoFile);
       }
 
       if (!uploadedPhotoUrl) {
