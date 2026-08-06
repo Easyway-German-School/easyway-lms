@@ -448,9 +448,9 @@ export default function CommunityHub({ compact = false }: { compact?: boolean })
   return (
     // In compact mode the hub floats over a page, so it has to stay inside the
     // viewport on a laptop or a phone rather than running off the top.
-    <div className={`flex ${compact ? "h-[min(32rem,60vh)]" : "h-[calc(100vh-13rem)] min-h-[34rem]"} overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]`}>
+    <div className={`flex flex-col sm:flex-row ${compact ? "h-[min(32rem,60vh)]" : "h-[calc(100vh-13rem)] min-h-[34rem]"} overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]`}>
       {/* Channel rail */}
-      <aside className={`${compact ? "w-40" : "w-64"} shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-alt)] p-3`}>
+      <aside className={`${compact ? "w-40" : "sm:w-64 w-full"} shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-alt)] p-3`}>
         {isStaff && spaces.length > 1 && (
           <select
             value={spaceId ?? ""}

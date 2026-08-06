@@ -662,7 +662,8 @@ export default function AdminStudentsPage() {
         ) : null}
 
         <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] shadow-sm">
-          <table className="min-w-full divide-y divide-[var(--border)]">
+          <div className="w-full overflow-x-auto">
+            <table className="min-w-full divide-y divide-[var(--border)]">
             <thead className="bg-[var(--surface)] text-left text-sm uppercase tracking-[0.16em] text-[var(--muted)]">
               <tr>
                 <th className="px-6 py-4">Name</th>
@@ -747,7 +748,8 @@ export default function AdminStudentsPage() {
                 ))
               )}
             </tbody>
-          </table>
+            </table>
+          </div>
           <div className="flex items-center justify-between gap-4 border-t border-[var(--border)] bg-[var(--surface)] px-6 py-4">
             <div className="text-sm text-[var(--muted)]">
             Page {page} • Showing {students.length} of {totalCount} students

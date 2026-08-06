@@ -3,5 +3,9 @@ prototype-push/
 README.md
 *.md
 *.yml
+.venv/
+**/node_modules/
+**/.git
+**/.git.bak
 *.yaml
 
