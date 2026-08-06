@@ -30,3 +30,4 @@ verify-*.js
 tmp-*.mjs
 prisma/schema.prisma.recovered-backup
 prisma/schema.updates.prisma
+.vercel
