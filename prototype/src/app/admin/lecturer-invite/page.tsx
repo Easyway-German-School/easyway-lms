@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
 import PasswordInput from "@/components/PasswordInput";
+import PhotoCapture from "@/components/PhotoCapture";
 import AssignmentPicker from "@/components/admin/AssignmentPicker";
-import { uploadImage, validateImageFile } from "@/lib/upload";
+import { uploadImage } from "@/lib/upload";
 import { ArrowLeftIcon, LecturerIcon, UsersIcon } from "@/components/icons";
 import {
   BATCHES,
@@ -447,10 +448,12 @@ export default function AdminTutorsPage() {
   });
   const [newAssignment, setNewAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
   const [creating, setCreating] = useState(false);
+  const [createPhotoFile, setCreatePhotoFile] = useState<File | null>(null);
   const [createPhotoUrl, setCreatePhotoUrl] = useState<string | null>(null);
   const [uploadingCreatePhoto, setUploadingCreatePhoto] = useState(false);
 
   const [editingId, setEditingId] = useState("");
+  const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
   const [editPhotoUrl, setEditPhotoUrl] = useState<string | null>(null);
   const [uploadingEditPhoto, setUploadingEditPhoto] = useState(false);
   const [editAssignment, setEditAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
@@ -500,12 +503,8 @@ export default function AdminTutorsPage() {
     return counts;
   }, [tutors]);
 
-  async function uploadTutorPhoto(file: File, target: "create" | "edit") {
-    const invalid = validateImageFile(file);
-    if (invalid) {
-      setError(invalid);
-      return null;
-    }
+  async function uploadTutorPhoto(file: File | null, target: "create" | "edit") {
+    if (!file) return null;
 
     if (target === "create") {
       setUploadingCreatePhoto(true);
@@ -541,10 +540,18 @@ export default function AdminTutorsPage() {
     setError("");
     setSuccess("");
     try {
+      let uploadedPhotoUrl = createPhotoUrl;
+      if (createPhotoFile) {
+        uploadedPhotoUrl = await uploadTutorPhoto(createPhotoFile, "create");
+      }
+      if (createPhotoFile && !uploadedPhotoUrl) {
+        return;
+      }
+
       const res = await fetch("/api/admin/lecturers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, ...newAssignment, photoUrl: createPhotoUrl ?? undefined }),
+        body: JSON.stringify({ ...form, ...newAssignment, photoUrl: uploadedPhotoUrl ?? undefined }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not create the tutor account");
@@ -563,6 +570,7 @@ export default function AdminTutorsPage() {
         startedAt: "",
       });
       setNewAssignment(EMPTY_ASSIGNMENT);
+      setCreatePhotoFile(null);
       setCreatePhotoUrl(null);
       await load();
     } catch (createError) {
@@ -578,15 +586,25 @@ export default function AdminTutorsPage() {
     setError("");
     setSuccess("");
     try {
+      let uploadedPhotoUrl = editPhotoUrl;
+      if (editPhotoFile) {
+        uploadedPhotoUrl = await uploadTutorPhoto(editPhotoFile, "edit");
+      }
+      if (editPhotoFile && !uploadedPhotoUrl) {
+        return;
+      }
+
       const res = await fetch("/api/admin/lecturers", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lecturerId: editingId, ...editAssignment, photoUrl: editPhotoUrl ?? undefined }),
+        body: JSON.stringify({ lecturerId: editingId, ...editAssignment, photoUrl: uploadedPhotoUrl ?? undefined }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save the assignment");
       setSuccess("Assignment saved. The tutor has been notified and their roster is already updated.");
       setEditingId("");
+      setEditPhotoFile(null);
+      setEditPhotoUrl(null);
       await load();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save the assignment");
@@ -765,34 +783,24 @@ export default function AdminTutorsPage() {
                       <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
                         <p className="text-sm font-semibold text-[var(--foreground)]">Tutor photo</p>
                         <p className="mt-1 text-xs text-[var(--muted)]">
-                          Pick an image here and it will be uploaded and attached to this tutor profile.
+                          Use the same photo picker as the student signup flow — take a photo or upload one.
                         </p>
-                        <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--foreground)]">
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="sr-only"
-                            onChange={async (event) => {
-                              const file = event.target.files?.[0];
-                              event.target.value = "";
-                              if (!file) return;
-                              await uploadTutorPhoto(file, "edit");
+                        <div className="mt-3">
+                          <PhotoCapture
+                            disabled={uploadingEditPhoto}
+                            onChange={(file) => {
+                              setEditPhotoFile(file);
+                              setEditPhotoUrl(file ? "" : null);
                             }}
                           />
-                          <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]">
-                            {uploadingEditPhoto ? "Uploading…" : "Choose photo"}
-                          </span>
-                          <span className="text-xs text-[var(--muted)]">
-                            JPG or PNG · up to 5MB
-                          </span>
-                        </label>
-                        {editPhotoUrl ? (
+                        </div>
+                        {editingTutor?.photoUrl && !editPhotoFile ? (
                           <div className="mt-3 inline-flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--muted)]">
                             <span className="h-8 w-8 overflow-hidden rounded-full border border-[var(--border)]">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={editPhotoUrl} alt="Tutor preview" className="h-full w-full object-cover" />
+                              <img src={editingTutor.photoUrl} alt="Current tutor photo" className="h-full w-full object-cover" />
                             </span>
-                            Ready to save with this tutor.
+                            Current photo on this tutor profile.
                           </div>
                         ) : null}
                       </div>
@@ -924,34 +932,17 @@ export default function AdminTutorsPage() {
           <div className="mt-8 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">Photo</p>
             <p className="mt-1 text-xs text-[var(--muted)]">
-              Pick an image here and it will be uploaded automatically for the new tutor account.
+              Use the same photo picker as the student signup flow — take a photo or upload one for the new tutor.
             </p>
-            <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--foreground)]">
-              <input
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (!file) return;
-                  await uploadTutorPhoto(file, "create");
+            <div className="mt-3">
+              <PhotoCapture
+                disabled={uploadingCreatePhoto}
+                onChange={(file) => {
+                  setCreatePhotoFile(file);
+                  setCreatePhotoUrl(file ? "" : null);
                 }}
               />
-              <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]">
-                {uploadingCreatePhoto ? "Uploading…" : "Choose photo"}
-              </span>
-              <span className="text-xs text-[var(--muted)]">JPG or PNG · up to 5MB</span>
-            </label>
-            {createPhotoUrl ? (
-              <div className="mt-3 inline-flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--muted)]">
-                <span className="h-10 w-10 overflow-hidden rounded-full border border-[var(--border)]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={createPhotoUrl} alt="New tutor preview" className="h-full w-full object-cover" />
-                </span>
-                Ready to save with the new tutor profile.
-              </div>
-            ) : null}
+            </div>
           </div>
 
           <div className="mt-8 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
