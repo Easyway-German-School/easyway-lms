@@ -90,18 +90,12 @@ export default function AdminIntegrationsPage() {
 
   async function initializeConnectorSync(connectorId: string) {
     try {
-      const res = await fetch("/api/admin/integrations/sync-init", {
+      const res = await fetch(`/api/admin/integrations?connectorId=${encodeURIComponent(connectorId)}&action=sync`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connectorId, autoSync: true, intervalMinutes: 30 }),
       });
 
       if (!res.ok) throw new Error("Failed to initialize sync");
-      const data = await res.json();
-      setSyncStatuses((prev) => ({
-        ...prev,
-        [connectorId]: data.status || { connectorId, status: 'idle' },
-      }));
+      await checkAllSyncStatuses();
     } catch (err) {
       console.error(`Failed to initialize sync for ${connectorId}:`, err);
       setSyncStatuses((prev) => ({
@@ -113,10 +107,23 @@ export default function AdminIntegrationsPage() {
 
   async function checkAllSyncStatuses() {
     try {
-      const res = await fetch("/api/admin/integrations/sync-status");
+      const res = await fetch("/api/admin/integrations");
       if (!res.ok) return;
       const data = await res.json();
-      setSyncStatuses(data.statuses || {});
+      if (Array.isArray(data.connectors)) {
+        const statuses: Record<string, SyncStatus> = {};
+        for (const connector of data.connectors) {
+          statuses[connector.id] = {
+            connectorId: connector.id,
+            status: connector.configured ? 'idle' : 'error',
+            lastSync: null,
+            nextSync: null,
+            errorMessage: connector.configured ? undefined : 'Not configured',
+            itemsSync: 0,
+          };
+        }
+        setSyncStatuses(statuses);
+      }
     } catch (err) {
       console.error("Failed to check sync statuses:", err);
     }
@@ -124,10 +131,8 @@ export default function AdminIntegrationsPage() {
 
   async function forceSync(connectorId: string) {
     try {
-      const res = await fetch("/api/admin/integrations/sync-force", {
+      const res = await fetch(`/api/admin/integrations?connectorId=${encodeURIComponent(connectorId)}&action=sync`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connectorId }),
       });
 
       if (!res.ok) throw new Error("Failed to force sync");
