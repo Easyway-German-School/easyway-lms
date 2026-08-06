@@ -12,12 +12,11 @@ follows is environment and verification.
 
 Vercel → **Add New → Project** → import `Easyway-German-School/easyway-lms`.
 
-**Root Directory must be `prototype`.** The Next app is not at the repo root, and
-this is the single most common way this import goes wrong — Vercel will report
-"No Next.js version detected" if it is left at the default.
+**Root Directory must be `prototype`.** The Next app is not at the repo root, and this is the single most common way this import goes wrong — Vercel will report "No Next.js version detected" if it is left at the default.
 
-Everything else is detected: build command `npm run build` (which runs
-`prisma generate` first), output `.next`, install `npm install`.
+This repo also now includes a root-level `vercel.json` so Vercel builds the nested `prototype/` app correctly and copies the generated `.next` output into the project root for deployment.
+
+Everything else is detected: build command `npm run build` (which runs `prisma generate` first), output `.next`, install `npm install`.
 
 ---
 
