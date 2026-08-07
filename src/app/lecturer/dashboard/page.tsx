@@ -115,6 +115,21 @@ const ACTIVITY_ICON: Record<string, (props: { className?: string }) => React.Rea
   cancelled: (props) => <AttendanceIcon {...props} />,
 };
 
+function getActivityRoute(kind: string): string {
+  switch (kind) {
+    case 'material':
+    case 'recording':
+      return '/lecturer/materials';
+    case 'grade':
+      return '/lecturer/grades';
+    case 'postponed':
+    case 'cancelled':
+      return '/lecturer/attendance';
+    default:
+      return '/lecturer/dashboard';
+  }
+}
+
 export default function LecturerDashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -187,7 +202,18 @@ export default function LecturerDashboard() {
           <div className="max-w-7xl mx-auto p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Total Classes */}
-              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow">
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => router.push('/lecturer/classes')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    router.push('/lecturer/classes');
+                  }
+                }}
+                className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow cursor-pointer"
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[var(--muted)] text-sm">Total Classes</p>
@@ -201,7 +227,18 @@ export default function LecturerDashboard() {
               </div>
 
               {/* Total Students */}
-              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow">
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => router.push('/lecturer/students')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    router.push('/lecturer/students');
+                  }
+                }}
+                className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow cursor-pointer"
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[var(--muted)] text-sm">Total Students</p>
@@ -215,7 +252,18 @@ export default function LecturerDashboard() {
               </div>
 
               {/* Materials */}
-              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow">
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => router.push('/lecturer/materials')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    router.push('/lecturer/materials');
+                  }
+                }}
+                className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow cursor-pointer"
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[var(--muted)] text-sm">Materials Uploaded</p>
@@ -229,7 +277,18 @@ export default function LecturerDashboard() {
               </div>
 
               {/* Attendance Rate */}
-              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow">
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => router.push('/lecturer/attendance')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    router.push('/lecturer/attendance');
+                  }
+                }}
+                className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow cursor-pointer"
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[var(--muted)] text-sm">Avg Attendance</p>
@@ -250,28 +309,28 @@ export default function LecturerDashboard() {
               <h2 className="text-xl font-bold text-[var(--foreground)] mb-4">Quick Actions</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <button
-                  onClick={() => {}}
+                  onClick={() => router.push('/lecturer/attendance')}
                   className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 hover:bg-[var(--surface-alt)] transition-colors text-center"
                 >
                   <div className="mb-2 flex justify-center text-[var(--accent)]"><AttendanceRateIcon className="h-5 w-5" /></div>
                   <p className="font-semibold text-sm text-[var(--foreground)]">Mark Attendance</p>
                 </button>
                 <button
-                  onClick={() => {}}
+                  onClick={() => router.push('/lecturer/materials')}
                   className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 hover:bg-[var(--surface-alt)] transition-colors text-center"
                 >
                   <div className="mb-2 flex justify-center text-[var(--accent)]"><MaterialsIcon className="h-5 w-5" /></div>
                   <p className="font-semibold text-sm text-[var(--foreground)]">Upload Material</p>
                 </button>
                 <button
-                  onClick={() => {}}
+                  onClick={() => router.push('/lecturer/grades')}
                   className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 hover:bg-[var(--surface-alt)] transition-colors text-center"
                 >
                   <div className="mb-2 flex justify-center text-[var(--accent)]"><GradeIcon className="h-5 w-5" /></div>
                   <p className="font-semibold text-sm text-[var(--foreground)]">Enter Grades</p>
                 </button>
                 <button
-                  onClick={() => {}}
+                  onClick={() => router.push('/lecturer/messages')}
                   className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 hover:bg-[var(--surface-alt)] transition-colors text-center"
                 >
                   <div className="mb-2 flex justify-center text-[var(--accent)]"><MessageIcon className="h-5 w-5" /></div>
@@ -300,9 +359,11 @@ export default function LecturerDashboard() {
                     {stats.activity.map((entry, index) => {
                       const Icon = ACTIVITY_ICON[entry.kind] ?? BookOpenIcon;
                       return (
-                        <div
+                        <button
                           key={entry.id}
-                          className={`flex items-start gap-3 ${
+                          type="button"
+                          onClick={() => router.push(getActivityRoute(entry.kind))}
+                          className={`flex w-full items-start gap-3 text-left ${
                             index < stats.activity.length - 1 ? "border-b border-[var(--border)] pb-4" : ""
                           }`}
                         >

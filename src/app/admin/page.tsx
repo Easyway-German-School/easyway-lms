@@ -100,12 +100,14 @@ function Kpi({
   sub,
   tone = "neutral",
   index,
+  onClick,
 }: {
   label: string;
   value: string;
   sub?: ReactNode;
   tone?: "neutral" | "good" | "warn" | "bad";
   index: number;
+  onClick?: () => void;
 }) {
   const toneClass = {
     neutral: "text-[var(--foreground)]",
@@ -119,7 +121,20 @@ function Kpi({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05 }}
-      className="rounded-3xl border border-[var(--border)] bg-white/80 p-5 shadow-sm"
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      className={`rounded-3xl border border-[var(--border)] bg-white/80 p-5 shadow-sm ${onClick ? "cursor-pointer transition hover:-translate-y-0.5 hover:border-[var(--accent)]/40 hover:shadow-md" : ""}`}
     >
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">{label}</p>
       <p className={`mt-2.5 text-3xl font-black tracking-tight ${toneClass}`}>{value}</p>
@@ -265,6 +280,7 @@ export default function AdminHomePage() {
             label="Students"
             value={String(data?.school.students ?? "—")}
             sub={data ? `${data.school.activeStudents} active · +${data.school.newStudentsThisMonth} this month` : undefined}
+            onClick={() => router.push("/admin/students")}
           />
           <Kpi
             index={1}
@@ -272,16 +288,18 @@ export default function AdminHomePage() {
             value={String(data?.lockedOut ?? "—")}
             tone={data && data.lockedOut > 0 ? "warn" : "good"}
             sub="Cannot reach classes yet"
+            onClick={() => router.push("/admin/payments")}
           />
           {finance ? (
             <>
-              <Kpi index={2} label="Collected" value={naira(finance.collectedRevenue)} tone="good" sub={`${finance.collectionRate}% of expected`} />
-              <Kpi index={3} label="Outstanding" value={naira(finance.outstanding)} tone={finance.outstanding > 0 ? "bad" : "good"} sub="Tuition still owed" />
+              <Kpi index={2} label="Collected" value={naira(finance.collectedRevenue)} tone="good" sub={`${finance.collectionRate}% of expected`} onClick={() => router.push("/admin/payments")} />
+              <Kpi index={3} label="Outstanding" value={naira(finance.outstanding)} tone={finance.outstanding > 0 ? "bad" : "good"} sub="Tuition still owed" onClick={() => router.push("/admin/payments")} />
               <Kpi
                 index={4}
                 label="This month"
                 value={naira(finance.revenueThisMonth)}
                 tone={finance.monthOnMonthPercent != null && finance.monthOnMonthPercent < 0 ? "bad" : "good"}
+                onClick={() => router.push("/admin/finance")}
                 sub={
                   finance.monthOnMonthPercent != null
                     ? (
@@ -303,6 +321,7 @@ export default function AdminHomePage() {
             value={data?.attendance.rate != null ? `${data.attendance.rate}%` : "—"}
             tone={data?.attendance.rate != null && data.attendance.rate < 70 ? "warn" : "good"}
             sub={data ? `${data.attendance.recordsLast30Days} records` : undefined}
+            onClick={() => router.push("/admin/attendance")}
           />
         </div>
 
