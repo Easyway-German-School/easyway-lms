@@ -52,7 +52,7 @@ export default function AttendancePage() {
       const res = await fetch("/api/admin/students");
       if (!res.ok) throw new Error("Failed to fetch students");
       const data = await res.json();
-      setStudents(data);
+      setStudents(Array.isArray(data) ? data : data.students ?? []);
     } catch (err) {
       console.error("Failed to load students:", err);
     }
