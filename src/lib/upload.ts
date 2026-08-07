@@ -115,15 +115,6 @@ export async function uploadFile(file: File, folder: UploadFolder = "files"): Pr
   }
 
   return proxyUpload();
-
-  return {
-    // The original name, not the uniquified one the server stored under —
-    // this is what gets shown to students in the materials list.
-    url: String(json.url || ""),
-    filename: file.name,
-    contentType,
-    size: Number(json.size) || file.size,
-  };
 }
 
 /** Every avatar picker in the app. Kept for the call sites that only want a URL. */
