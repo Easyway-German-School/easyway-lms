@@ -46,44 +46,75 @@ export async function uploadFile(file: File, folder: UploadFolder = "files"): Pr
     body: JSON.stringify({ filename: file.name, contentType, folder }),
   });
 
-  if (!presign.ok) {
-    const json = await presign.json().catch(() => ({}));
-    throw new Error(json?.error || "Upload failed");
+  const presignText = await presign.text().catch(() => "");
+  let presignJson: any = null;
+  try {
+    presignJson = presignText ? JSON.parse(presignText) : null;
+  } catch {
+    presignJson = null;
   }
 
-  const plan = await presign.json();
+  if (!presign.ok) {
+    const reason =
+      (presignJson?.error && String(presignJson.error)) || presignText || "Upload failed";
+    throw new Error(reason);
+  }
 
-  if (plan.mode === "direct") {
-    const put = await fetch(plan.uploadUrl, {
-      method: "PUT",
-      // Must match the Content-Type that was signed, or the bucket rejects the
-      // signature — a mismatch here is the classic cause of a 403 on upload.
-      headers: { "Content-Type": contentType },
-      body: file,
+  const plan = presignJson;
+
+  async function proxyUpload() {
+    const response = await fetch("/api/media/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: file.name,
+        contentType,
+        folder,
+        data: await readAsBase64(file),
+      }),
     });
 
-    if (!put.ok) {
-      throw new Error(`Upload failed (${put.status}). Check the bucket's CORS rules allow PUT from this site.`);
+    const json = await response.json().catch(() => null);
+    if (!response.ok) {
+      const reason = (json?.error && String(json.error)) || `Upload failed (${response.status})`;
+      throw new Error(reason);
     }
 
-    return { url: String(plan.url), filename: file.name, contentType, size: file.size };
-  }
-
-  const response = await fetch("/api/media/upload", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    return {
+      url: String(json.url || ""),
       filename: file.name,
       contentType,
-      folder,
-      data: await readAsBase64(file),
-    }),
-  });
-
-  const json = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(json?.error || "Upload failed");
+      size: Number(json.size) || file.size,
+    };
   }
+
+  if (plan.mode === "direct") {
+    try {
+      const put = await fetch(plan.uploadUrl, {
+        method: "PUT",
+        // Must match the Content-Type that was signed, or the bucket rejects the
+        // signature — a mismatch here is the classic cause of a 403 on upload.
+        headers: { "Content-Type": contentType },
+        body: file,
+      });
+
+      if (!put.ok) {
+        const statusText = await put.text().catch(() => "");
+        throw new Error(
+          `Direct upload failed (${put.status}). ${
+            statusText || "Check the bucket's CORS rules allow PUT from this site."
+          }`,
+        );
+      }
+
+      return { url: String(plan.url), filename: file.name, contentType, size: file.size };
+    } catch (directUploadError) {
+      console.warn("Direct upload failed, falling back to proxy upload:", directUploadError);
+      return proxyUpload();
+    }
+  }
+
+  return proxyUpload();
 
   return {
     // The original name, not the uniquified one the server stored under —

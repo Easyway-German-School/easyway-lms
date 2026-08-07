@@ -73,6 +73,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [photoFileName, setPhotoFileName] = useState("");
   const [photoUrl, setPhotoUrl] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("");
   const [heardFrom] = useState("");
   const [emergencyContactName] = useState("");
   const [emergencyContactInfo] = useState("");
@@ -215,21 +216,41 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   // updates (setPhotoUrl) are async and would still be stale in the same tick.
   const uploadFile = async (file: File): Promise<string> => {
     setUploadingPhoto(true);
+    setUploadMessage("Uploading photo...");
     setError("");
     setPhotoFileName(file.name);
 
     try {
       const uploadedUrl = await uploadImage(file);
       setPhotoUrl(uploadedUrl);
+      setUploadMessage("Photo uploaded successfully.");
       return uploadedUrl;
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
+      const message = uploadError instanceof Error ? uploadError.message : "Upload failed";
+      setError(message);
+      setUploadMessage("Photo upload failed. Please try another photo or contact support.");
       setPhotoFileName("");
       setPhotoUrl("");
       return "";
     } finally {
       setUploadingPhoto(false);
     }
+  };
+
+  const handlePhotoSelected = async (file: File | null) => {
+    if (!file) {
+      setPhotoFile(null);
+      setPhotoFileName("");
+      setPhotoUrl("");
+      setUploadMessage("");
+      return;
+    }
+
+    setPhotoFile(file);
+    setPhotoFileName(file.name);
+    setPhotoUrl("");
+    setUploadMessage("Uploading photo... If the direct upload fails, we will retry through the app.");
+    await uploadFile(file);
   };
 
   const handleSignUp = async (event: FormEvent<HTMLFormElement>) => {
@@ -816,16 +837,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <div className="mt-2">
                   <PhotoCapture
                     disabled={uploadingPhoto}
-                    onChange={(file) => {
-                      setPhotoFile(file);
-                      setPhotoFileName(file?.name || "");
-                      // A new photo invalidates whatever was uploaded before it,
-                      // or the submit would quietly keep the old one.
-                      setPhotoUrl("");
-                    }}
+                    onChange={handlePhotoSelected}
                   />
                 </div>
-                {uploadingPhoto ? <p className="mt-2 text-xs text-[var(--muted)]">Uploading photo…</p> : null}
+                {uploadMessage ? (
+                  <p className="mt-2 text-xs text-[var(--muted)]">{uploadMessage}</p>
+                ) : uploadingPhoto ? (
+                  <p className="mt-2 text-xs text-[var(--muted)]">Uploading photo…</p>
+                ) : null}
               </div>
             </div>
           )}
