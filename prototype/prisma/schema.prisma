@@ -386,6 +386,7 @@ model Student {
   videoProgress         VideoProgress[]
   convertedFromLead     Lead?
   journeyEvents         JourneyEvent[]
+  liveInvites           LiveClassInvite[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -520,6 +521,7 @@ model Branch {
   lecturers     Lecturer[]
   leads         Lead[]
   recordings    ClassRecording[]
+  liveSessions  LiveClassSession[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -1272,6 +1274,7 @@ model Lecturer {
   classSessions  ClassSession[]
   assignments    Assignment[]
   privateClasses PrivateClass[]
+  liveSessions   LiveClassSession[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -1815,6 +1818,115 @@ model PrivateClass {
   updatedAt DateTime @updatedAt
 
   @@index([studentId, scheduledAt])
+}
+
+// ---------------------------------------------------------------------------
+// "Is class happening right now?"
+//
+// Nothing in this schema could answer that before. A room name is derived from
+// branch + level + slot, so it exists whether or not anybody is in it — which
+// is fine for building a URL and useless for telling a student their tutor has
+// arrived. A student's only way to find out was to open /live and look at an
+// empty room, which teaches them to stop checking.
+//
+// A LiveClassSession row IS the answer. It is opened when the tutor joins,
+// closed when they leave, and while it is open every way a student might hear
+// about the class — the bell, their phone, the dashboard, a code typed on a
+// friend's laptop — reads from this one row.
+// ---------------------------------------------------------------------------
+
+model LiveClassSession {
+  id String @id @default(cuid())
+
+  /**
+   * The LiveKit/Jitsi room this session is happening in. NOT unique: the same
+   * cohort room is used again next week, and the history of who taught when is
+   * worth keeping. "Live now" means `endedAt IS NULL`, not "a row exists".
+   */
+  roomName String
+
+  /**
+   * Short human code — "K7QP2M" — for the student whose email did not arrive,
+   * or who is on a phone and will not type a URL. Unique across ALL sessions
+   * including ended ones, so a code can never be recycled into a different
+   * class while somebody still has it written down.
+   */
+  joinCode String @unique
+
+  /**
+   * cohort | private. A cohort session reaches a whole roster; a private one
+   * reaches exactly the students on its invite list and nobody else.
+   */
+  kind String @default("cohort")
+
+  /** What the student sees in the popup: "Lagos · A1 · Morning". */
+  title String
+
+  branchId    String?
+  branch      Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  level       String?
+  sessionSlot String?
+
+  /** Set on a one-to-one session, pointing back at the booking. */
+  privateClassId String?
+
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
+  /** The account that opened it, which is not always a Lecturer row. */
+  startedByUserId String?
+
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+
+  /**
+   * Touched by the tutor's heartbeat. A browser that crashes never sends the
+   * "I left" call, so without this a session stays open forever and the
+   * dashboard tells students to join a class that finished on Tuesday. Anything
+   * not seen for a few minutes is treated as over — see lib/live-presence.ts.
+   */
+  lastSeenAt DateTime @default(now())
+
+  invites LiveClassInvite[]
+
+  @@index([roomName, endedAt])
+  @@index([endedAt, lastSeenAt])
+  @@index([branchId, level, sessionSlot, endedAt])
+}
+
+/**
+ * One student, singled out.
+ *
+ * For a private class this is the guest list and the access control at once —
+ * the token minter refuses anybody without a row here. For a cohort class it is
+ * optional and means something softer: "the tutor rang this person", which is
+ * how a tutor pulls three students into a catch-up without notifying forty.
+ */
+model LiveClassInvite {
+  id String @id @default(cuid())
+
+  sessionId String
+  session   LiveClassSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /**
+   * invited — rung, not yet answered
+   * joined  — got a token and connected
+   * declined— said no, so the tutor stops waiting on them
+   */
+  status String @default("invited")
+
+  joinedAt    DateTime?
+  respondedAt DateTime?
+  /** How many times the tutor has rung. Shown to the tutor, not the student. */
+  ringCount   Int       @default(1)
+
+  createdAt DateTime @default(now())
+
+  @@unique([sessionId, studentId])
+  @@index([studentId, status])
 }
 
 // ---------------------------------------------------------------------------

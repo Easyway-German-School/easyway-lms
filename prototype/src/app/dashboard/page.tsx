@@ -7,6 +7,7 @@ import { useSession } from "next-auth/react";
 import BrandLoader from "@/components/BrandLoader";
 import PaymentSuccessToastClient from "@/components/PaymentSuccessToastClient";
 import TuitionNudge from "@/components/TuitionNudge";
+import LiveClassBanner from "@/components/live/LiveClassBanner";
 import LevelAdvance from "@/components/LevelAdvance";
 import WelcomeTour from "@/components/WelcomeTour";
 import NotificationInvite from "@/components/NotificationInvite";
@@ -585,6 +586,11 @@ function DashboardContent() {
             tutorName={null}
             nextClass={student?.nextLive && student.nextLive !== "No live session scheduled" ? student.nextLive : null}
           />
+          {/* ABOVE EVEN THE TUITION BAND, and it is the only thing that goes
+              there. Everything else on this dashboard is still true in an hour;
+              a class in session is not. It renders nothing at all when no class
+              is live, so it costs the other 23 hours of the day nothing. */}
+          <LiveClassBanner className="mb-6" />
           {/* Above the hero on purpose: a student with a balance should meet it
               before anything else, and it disappears entirely once settled. */}
           <TuitionNudge className="mb-6" />

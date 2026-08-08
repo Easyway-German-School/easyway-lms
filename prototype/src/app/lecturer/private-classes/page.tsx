@@ -4,7 +4,8 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import LecturerShell from "@/components/LecturerShell";
-import { AttachmentIcon, PrivateClassIcon } from "@/components/icons";
+import TutorLivePanel from "@/components/live/TutorLivePanel";
+import { AttachmentIcon, BroadcastIcon, PrivateClassIcon } from "@/components/icons";
 
 /**
  * One-to-one class booking.
@@ -153,6 +154,10 @@ export default function LecturerPrivateClassesPage() {
           </p>
         </div>
 
+        {/* A one-to-one already in progress, with the one student on its guest
+            list and whether they have answered. Nothing renders when idle. */}
+        <TutorLivePanel className="mb-6" />
+
         {error && <div className="mb-4 rounded bg-red-100 p-4 text-red-700">{error}</div>}
 
         {loading ? (
@@ -278,6 +283,27 @@ export default function LecturerPrivateClassesPage() {
                         </p>
                         {c.materialTitle && <p className="mt-1 flex items-center gap-1.5 text-xs text-blue-600"><AttachmentIcon className="h-3.5 w-3.5" /> {c.materialTitle}</p>}
                       </div>
+                      <div className="flex items-center gap-2">
+                      {/*
+                        START NOW, and only on a session that is still ahead.
+                        A one-to-one has no cohort to fall back on: if the tutor
+                        does not open the room, the room does not exist, and the
+                        student sits in the portal watching nothing happen.
+                        Opening it rings that student BY NAME — they are the
+                        guest list, so nobody else can get a token for it.
+
+                        Hidden once completed or cancelled, because "start" on a
+                        class that already happened is only ever a misclick.
+                      */}
+                      {(c.status === "scheduled" || c.status === "postponed") && (
+                        <a
+                          href={`/live?privateClassId=${c.id}`}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-[#0D7C7E] px-3.5 py-1.5 text-sm font-semibold text-white transition hover:brightness-110"
+                        >
+                          <BroadcastIcon className="h-3.5 w-3.5" />
+                          Start &amp; ring
+                        </a>
+                      )}
                       <select
                         value={c.status}
                         onChange={(e) => setStatus(c.id, e.target.value)}
@@ -289,6 +315,7 @@ export default function LecturerPrivateClassesPage() {
                         <option value="postponed">Postponed</option>
                         <option value="cancelled">Cancelled</option>
                       </select>
+                      </div>
                     </div>
                   );
                 })}

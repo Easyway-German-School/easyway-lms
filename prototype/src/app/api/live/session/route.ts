@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import { AccessToken } from "livekit-server-sdk";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -7,6 +6,15 @@ import { canAttendLive, deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { isOnlineBranch, initialVideoQualityFor, readOnlineProfile } from "@/lib/online-branch";
 import { ensureRecordingStarted } from "@/lib/class-recorder";
+import {
+  announceLiveSession,
+  liveSessionByCode,
+  liveSessionForStudent,
+  markInviteJoined,
+  mayJoinPrivateRoom,
+  openLiveSession,
+  LIVE_HEARTBEAT_MS,
+} from "@/lib/live-presence";
 import {
   cohortRoomName,
   initialQualityFor,
@@ -37,7 +45,8 @@ export async function GET(request: Request) {
     }
 
     const url = new URL(request.url);
-    const privateClassId = url.searchParams.get("privateClassId");
+    const requestedPrivateClassId = url.searchParams.get("privateClassId");
+    const joinCode = url.searchParams.get("code");
 
     const [student, lecturer] = await Promise.all([
       prisma.student.findUnique({
@@ -55,6 +64,54 @@ export async function GET(request: Request) {
     }
 
     const role: RoomRole = lecturer ? "tutor" : "student";
+    const isAdmin = String(session.user.role ?? "").toLowerCase() === "admin";
+
+    /**
+     * A join code is a SHORTCUT, NOT A KEY.
+     *
+     * It resolves which room the person meant — the whole point is the student
+     * on somebody else's laptop, or the one whose email never arrived — and then
+     * every authorization check below runs exactly as it would have. Treating a
+     * six-character code as proof of membership would hand the room to anyone
+     * who overheard it read out.
+     */
+    const codedSession = joinCode ? await liveSessionByCode(joinCode) : null;
+    if (joinCode && !codedSession) {
+      return NextResponse.json(
+        { error: "No live class", message: "That code does not match a class that is live right now." },
+        { status: 404 },
+      );
+    }
+
+    const privateClassId = codedSession?.privateClassId ?? requestedPrivateClassId;
+
+    /**
+     * THE PRIVATE ROOM CHECK.
+     *
+     * `privateClassId` arrives in a query string, and until this existed that
+     * was the only thing between a signed-in student and somebody else's
+     * one-to-one lesson: pass an id, get a token. Ids are not secrets — they
+     * appear in the tutor's own page markup — so this was a real way into a
+     * private conversation. Membership is now checked against the booking and
+     * the guest list before anything is minted.
+     */
+    if (privateClassId) {
+      const allowed = await mayJoinPrivateRoom({
+        privateClassId,
+        studentId: student?.id ?? null,
+        lecturerId: lecturer?.id ?? null,
+        isAdmin,
+      });
+      if (!allowed) {
+        return NextResponse.json(
+          {
+            error: "Not your class",
+            message: "This is a private class you have not been invited to.",
+          },
+          { status: 403 },
+        );
+      }
+    }
 
     // A student who still owes the deposit does not get a token at all. The
     // paywall on the page is the polite version of this; this is the one that
@@ -69,7 +126,9 @@ export async function GET(request: Request) {
        * because the room they would join belongs to a different cohort.
        *
        * `private` is the exception: a one-to-one student takes their class
-       * wherever their tutor books it, including over video.
+       * wherever their tutor books it, including over video. Note that this
+       * now leans on a VERIFIED privateClassId — the membership check above
+       * has already run — rather than on the caller simply claiming one.
        */
       if (!canAttendLive(student.deliveryMode) && student.classType !== "private" && !privateClassId) {
         return NextResponse.json(
@@ -110,12 +169,97 @@ export async function GET(request: Request) {
     const level = lecturer?.level ?? student?.level ?? "A1";
     const sessionSlot = lecturer?.sessionSlot ?? student?.sessionSlot ?? "morning";
 
-    const roomName = privateClassId
+    let roomName = privateClassId
       ? privateRoomName(privateClassId)
       : cohortRoomName({ branchName: branch?.name, level, sessionSlot });
-    const displayName = privateClassId
-      ? "Private class"
+    let displayName = privateClassId
+      ? codedSession?.title ?? "Private class"
       : roomDisplayName({ branchName: branch?.name, level, sessionSlot });
+
+    /**
+     * A STUDENT MAY NOT WALK INTO A ROOM NOBODY IS TEACHING IN.
+     *
+     * Not a policy so much as an honesty fix. The room name is derived, so it
+     * has always existed at three in the morning and looked exactly like a
+     * lesson in progress — an empty grey grid the student concludes is broken.
+     * Telling them "nothing is running yet, here is when it is" is the truth,
+     * and it is also the only place we can offer them the alternative (the
+     * recording of the last one) instead of a dead end.
+     *
+     * Tutors are exempt: somebody has to be first into the room.
+     */
+    let liveSession = null;
+    if (role === "student" && student) {
+      liveSession = await liveSessionForStudent({
+        id: student.id,
+        branchId: student.branchId,
+        level: student.level,
+        sessionSlot: student.sessionSlot,
+        classType: student.classType,
+      });
+
+      if (!liveSession) {
+        return NextResponse.json(
+          {
+            error: "Not live",
+            notLive: true,
+            message: "Your tutor has not started the class yet. We will buzz you the moment they do.",
+            roomName,
+            displayName,
+          },
+          { status: 409 },
+        );
+      }
+
+      /**
+       * Follow the session, not the derivation.
+       *
+       * A student invited to a one-to-one, or to a catch-up their tutor opened
+       * outside the usual sitting, must land in THAT room — the room their own
+       * branch+level+slot derives to is a different class, and sending them
+       * there is how you get one student sitting alone wondering where everyone
+       * is while the lesson happens next door.
+       */
+      roomName = liveSession.roomName;
+      displayName = liveSession.title;
+    }
+
+    /**
+     * The tutor arriving is what OPENS the class — the same event that starts
+     * the recording. One join does four things: it opens the row, mints the
+     * join code, rings the roster, and starts the capture. Nothing here is a
+     * button, because the one class a tutor forgets to press the button for is
+     * the one a student needed.
+     */
+    if (role === "tutor") {
+      const opened = await openLiveSession({
+        roomName,
+        title: displayName,
+        kind: privateClassId ? "private" : "cohort",
+        branchId: branch?.id ?? null,
+        level,
+        sessionSlot,
+        privateClassId: privateClassId ?? null,
+        lecturerId: lecturer?.id ?? null,
+        startedByUserId: session.user.id,
+        // A private booking's own student is on the guest list automatically.
+        // The tutor adding others is a separate, explicit act.
+        inviteStudentIds: privateClassId ? await studentIdsForPrivateClass(privateClassId) : undefined,
+      });
+
+      liveSession = { ...opened, invited: false, inviteStatus: null };
+
+      // Only on the FIRST open — `announceLiveSession` dedupes on the session
+      // id, so a reload does not ring forty phones a second time.
+      announceLiveSession(
+        opened,
+        opened.kind === "private" ? { studentIds: await studentIdsForPrivateClass(privateClassId!) } : {},
+      );
+    } else if (liveSession?.invited && student) {
+      // Turning up answers the call, so the tutor's roster stops showing this
+      // student as still ringing.
+      await markInviteJoined(liveSession.id, student.id);
+    }
 
     // Online students told us their connection at signup; start them there
     // rather than making them discover Data Saver during a frozen lesson.
@@ -138,6 +282,14 @@ export async function GET(request: Request) {
       isOnlineBranch: isOnlineBranch(branch),
       initialQuality,
       participantName: session.user.name || session.user.email || "Student",
+      // What the page needs to show the code, keep the session warm, and tell
+      // the student who they are about to be in a room with.
+      liveSessionId: liveSession?.id ?? null,
+      joinCode: liveSession?.joinCode ?? null,
+      startedAt: liveSession?.startedAt ?? null,
+      tutorName: liveSession?.lecturerName ?? null,
+      isPrivate: Boolean(privateClassId),
+      heartbeatMs: LIVE_HEARTBEAT_MS,
     };
 
     if (!liveKitConfigured()) {
@@ -179,12 +331,6 @@ export async function GET(request: Request) {
     });
 
     /**
-     * The tutor arriving is what starts the recording.
-     *
-     * Not a button, because the one class a tutor forgets to record is the one
-     * a student needed. Not a student arriving either — students turn up early
-     * to an empty room, and we would capture ten minutes of nobody.
-     *
      * Deliberately not awaited: a slow or failing egress service must not delay
      * the tutor's own token by so much as a round trip. `ensureRecordingStarted`
      * swallows its errors and is idempotent, so a reload does not start a
@@ -216,4 +362,13 @@ export async function GET(request: Request) {
     console.error("Live session setup failed", error);
     return NextResponse.json({ error: "Could not set up the classroom" }, { status: 500 });
   }
+}
+
+/** The booked student, who is on the guest list by definition. */
+async function studentIdsForPrivateClass(privateClassId: string): Promise<string[]> {
+  const booking = await prisma.privateClass.findUnique({
+    where: { id: privateClassId },
+    select: { studentId: true },
+  });
+  return booking ? [booking.studentId] : [];
 }

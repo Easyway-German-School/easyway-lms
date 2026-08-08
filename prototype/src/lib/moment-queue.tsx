@@ -204,6 +204,14 @@ const HANDOVER_MS = 620;
 const SETTLE_MS = 450;
 const SETTLE_CEILING_MS = 2600;
 
+/**
+ * Fired by anything that must own the screen outright — today, only an incoming
+ * live class. `detail.active` true silences the queue; false hands it back.
+ * An event rather than a context method so a component rendered ALONGSIDE the
+ * provider (not inside it) can still say so.
+ */
+export const MOMENT_PREEMPT_EVENT = "easyway:moment-preempt";
+
 /* -------------------------------------------------------------------------- */
 /* The director                                                               */
 /* -------------------------------------------------------------------------- */
@@ -335,9 +343,32 @@ export function MomentQueueProvider({ children }: { children: ReactNode }) {
     setSummoned(id);
   }, []);
 
+  /**
+   * A RINGING CLASS OUTRANKS THE WHOLE TABLE, and it is not in the table.
+   *
+   * Everything the queue orders is something that can wait — a tour, a
+   * celebration, a poster. An incoming live class cannot: it is happening now,
+   * it stops happening, and it is the one interruption where being ten minutes
+   * late is the same as never seeing it. Giving it priority 200 would still be
+   * wrong, because the cap, the settle window and the handover gap are all
+   * built for things that keep. So it sits outside the queue entirely and
+   * simply tells the queue to stand down while it is on screen.
+   *
+   * Not `holding`: holding is the handover gap and expires on a timer. This one
+   * clears only when the call does.
+   */
+  const [preempted, setPreempted] = useState(false);
+  useEffect(() => {
+    const onPreempt = (event: Event) => {
+      setPreempted(Boolean((event as CustomEvent<{ active?: boolean }>).detail?.active));
+    };
+    window.addEventListener(MOMENT_PREEMPT_EVENT, onPreempt);
+    return () => window.removeEventListener(MOMENT_PREEMPT_EVENT, onPreempt);
+  }, []);
+
   /** Whose turn it is. */
   useEffect(() => {
-    if (active || holding) return;
+    if (active || holding || preempted) return;
     // Nothing is granted until the claims have stopped arriving — otherwise
     // the priority table ranks nothing but fetch latency.
     if (!settled) return;
@@ -361,7 +392,7 @@ export function MomentQueueProvider({ children }: { children: ReactNode }) {
     if (MOMENTS[next].kind === "toast" || modalsShown < MAX_MODALS) {
       setActive(next);
     }
-  }, [active, holding, settled, claimed, done, modalsShown, summoned]);
+  }, [active, holding, preempted, settled, claimed, done, modalsShown, summoned]);
 
   const deferred = useMemo(
     () =>

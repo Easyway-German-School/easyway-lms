@@ -4,11 +4,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
 import BrandLogo from "@/components/BrandLogo";
+import LiveClassCall from "@/components/live/LiveClassCall";
 import MomentDock from "@/components/MomentDock";
 import NotificationCenter from "@/components/NotificationCenter";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
 import { MomentQueueProvider } from "@/lib/moment-queue";
 import { canAttendLive, isLiveOnlyRoute, isTuitionGatedRoute } from "@/lib/access";
+import { LiveClassProvider, useLiveClass } from "@/lib/useLiveClass";
 import { useStudentAccess } from "@/lib/useStudentAccess";
 import {
   AssignmentIcon,
@@ -59,9 +61,31 @@ const navItems: NavItem[] = [
   { label: "Profile", href: "/profile", icon: <ProfileIcon /> },
 ];
 
+/**
+ * The provider is OUTSIDE the shell body, not inside it.
+ *
+ * The shell itself is a consumer — the sidebar needs the live dot — and a
+ * component cannot read a context it renders. Splitting it here also means the
+ * poll lives above everything in the portal, so navigating between pages does
+ * not tear it down and start a fresh twenty-second clock each time.
+ *
+ * Polling is suspended on /live: the classroom already knows it is live.
+ */
 export default function StudentShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const insideClassroom = pathname?.startsWith("/live") ?? false;
+
+  return (
+    <LiveClassProvider enabled={!insideClassroom}>
+      <StudentShellBody>{children}</StudentShellBody>
+    </LiveClassProvider>
+  );
+}
+
+function StudentShellBody({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const router = useRouter();
+  const { live } = useLiveClass();
   const [collapsed, setCollapsed] = useState(false);
   // Below lg the sidebar is a drawer, not a column. It used to be a fixed 288px
   // pane with the content pushed 288px right, which on a phone left the portal
@@ -186,6 +210,10 @@ export default function StudentShell({ children }: { children: React.ReactNode }
               // meeting the padlock explains the paywall far better than a
               // dead, greyed-out button does.
               const locked = !hasAccess && isTuitionGatedRoute(item.href);
+              // A class in progress is the one thing in this sidebar that is
+              // true right now and stops being true. It gets a pulse; nothing
+              // else does, which is what keeps the pulse meaning something.
+              const isLiveNow = Boolean(live) && item.href === "/live";
               return (
                 <button
                   key={item.href}
@@ -203,9 +231,28 @@ export default function StudentShell({ children }: { children: React.ReactNode }
                       : "text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
                   }`}
                 >
-                  <span className={`flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${active ? "border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]" : "group-hover:border-[var(--border-strong)]"}`}>{item.icon}</span>
+                  <span className={`relative flex h-9 w-9 items-center justify-center rounded-xl border text-base shadow-sm transition ${
+                    isLiveNow
+                      ? "border-[#0D7C7E]/40 bg-[#0D7C7E]/10 text-[#0D7C7E]"
+                      : active
+                      ? "border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]"
+                      : "border-[var(--border)] bg-[var(--surface-alt)] group-hover:border-[var(--border-strong)]"
+                  }`}>
+                    {item.icon}
+                    {isLiveNow && (
+                      <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400" />
+                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-[var(--surface)]" />
+                      </span>
+                    )}
+                  </span>
                   {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
-                  {!collapsed && locked && <LockIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]/70" strokeWidth={2.2} />}
+                  {!collapsed && isLiveNow && (
+                    <span className="shrink-0 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-600">
+                      Live
+                    </span>
+                  )}
+                  {!collapsed && locked && !isLiveNow && <LockIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]/70" strokeWidth={2.2} />}
                 </button>
               );
             })}
@@ -296,6 +343,10 @@ export default function StudentShell({ children }: { children: React.ReactNode }
       {/* Whatever the queue held back. Bottom left, because the community
           launcher and the theme switch already own the other corner. */}
       <MomentDock />
+
+      {/* Outranks all of the above, and knows it. A class that has started is
+          the only thing in this portal that expires while you look at it. */}
+      <LiveClassCall />
     </div>
     </MomentQueueProvider>
   );

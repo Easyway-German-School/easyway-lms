@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
 import { AttendanceIcon, BookOpenIcon, GradebookIcon } from '@/components/icons';
 import BrandLoader from "@/components/BrandLoader";
+import TutorLivePanel from "@/components/live/TutorLivePanel";
 
 function StatIcon({ children }: { children: React.ReactNode }) {
   return <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] shadow-sm">{children}</span>;
@@ -174,6 +175,13 @@ export default function LecturerDashboard() {
               Manage your classes, upload materials, and track student progress
             </p>
           </div>
+        </div>
+
+        {/* First thing a tutor sees, and only while it is true: their own live
+            class, the code to read out, and who has actually turned up. Renders
+            nothing when no class is running. */}
+        <div className="max-w-7xl mx-auto px-6 pt-6">
+          <TutorLivePanel />
         </div>
 
         {/* Stats Grid */}

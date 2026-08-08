@@ -3,14 +3,18 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import BrandLoader from "@/components/BrandLoader";
 import StudentShell from "@/components/StudentShell";
 import LecturerShell from "@/components/LecturerShell";
 import JitsiClassroom from "@/components/live/JitsiClassroom";
 import LiveKitClassroom from "@/components/live/LiveKitClassroom";
 import PreflightCheck from "@/components/live/PreflightCheck";
+import JoinByCode from "@/components/live/JoinByCode";
+import LiveClassCode from "@/components/live/LiveClassCode";
+import { BroadcastIcon, CalendarIcon, FilmIcon } from "@/components/icons";
 import { qualityModesFor, qualitySpec, type QualityMode, type RoomRole } from "@/lib/live-classroom";
 
 type LiveSession = {
@@ -26,6 +30,12 @@ type LiveSession = {
   isOnlineBranch: boolean;
   initialQuality: QualityMode;
   participantName: string;
+  liveSessionId: string | null;
+  joinCode: string | null;
+  startedAt: string | null;
+  tutorName: string | null;
+  isPrivate: boolean;
+  heartbeatMs: number;
 };
 
 /**
@@ -49,22 +59,43 @@ function Lobby({
 }) {
   // A tutor is offered Sharp and nothing else — see `qualityModesFor()`.
   const choices = qualityModesFor(session.role);
+  const isTutor = session.role === "tutor";
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] p-8 text-white shadow-xl">
-        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/70">
-          {session.isOnlineBranch ? "EasyWay Online" : "Live classroom"}
-        </p>
-        <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">{session.displayName}</h1>
+      <div className="rounded-3xl bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] p-6 text-white shadow-xl sm:p-8">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/70">
+            {session.isPrivate ? "One-to-one class" : session.isOnlineBranch ? "EasyWay Online" : "Live classroom"}
+          </p>
+          {/* Only shown to a student, and only because it is true: the tutor is
+              already in the room by the time a student can be here at all. */}
+          {!isTutor && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+              </span>
+              Live
+            </span>
+          )}
+        </div>
+
+        <h1 className="mt-3 text-2xl font-semibold sm:text-4xl">{session.displayName}</h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-white/85">
-          {session.role === "tutor"
-            ? "Your cohort joins this same room. Start whenever you are ready — students who arrive early will be waiting inside."
-            : "Your tutor and classmates are in this room. Pick the quality that matches your connection, then join."}
+          {isTutor
+            ? "Your cohort joins this same room. Starting the class rings every student on your roster — students who arrive early will be waiting inside."
+            : session.tutorName
+              ? `${session.tutorName} is already in the room. Pick the quality that matches your connection, then join.`
+              : "Your tutor and classmates are in this room. Pick the quality that matches your connection, then join."}
         </p>
       </div>
 
-      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+      {/* The code is the tutor's to read out, so it sits above the fold for
+          them and is not shown to a student at all — they already got in. */}
+      {isTutor && session.joinCode ? <LiveClassCode code={session.joinCode} /> : null}
+
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
         <h2 className="text-lg font-semibold">{choices.length > 1 ? "Choose your video quality" : "You teach in Sharp"}</h2>
         <p className="mt-1 text-sm text-[var(--muted)]">
           {choices.length > 1 ? (
@@ -114,11 +145,11 @@ function Lobby({
             onClick={onJoin}
             className="rounded-full bg-[var(--accent)] px-8 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110"
           >
-            Join the class
+            {isTutor ? "Start the class" : "Join the class"}
           </button>
           <span className="text-xs text-[var(--muted)]">You can change any of this during the lesson.</span>
           <Link
-            href={session.role === "tutor" ? "/lecturer/dashboard" : "/dashboard"}
+            href={isTutor ? "/lecturer/dashboard" : "/dashboard"}
             className="rounded-full border border-[var(--border)] px-6 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
           >
             Back to dashboard
@@ -158,22 +189,98 @@ function Lobby({
   );
 }
 
-export default function LiveClassroomPage() {
+/**
+ * NOBODY IS TEACHING RIGHT NOW.
+ *
+ * This screen replaced the worst moment in the old classroom: a student who
+ * arrived early, or a day late, or simply curious, met an empty grey video grid
+ * that is indistinguishable from a class where everybody has their camera off.
+ * They concluded the portal was broken, and there was nothing to disagree with
+ * them.
+ *
+ * So the empty room is never shown. What the student gets instead is the truth
+ * plus three ways forward, because a dead end is the thing that actually loses
+ * people: a promise to buzz them, the timetable that says when, the recordings
+ * of the last one, and a box for a code if their tutor is running a session
+ * their timetable does not know about.
+ */
+function NotLiveScreen({ message, title }: { message: string; title: string | null }) {
+  return (
+    <div className="space-y-5">
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center sm:p-10">
+        <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-[var(--surface-alt)] text-[var(--muted)]">
+          <BroadcastIcon className="h-8 w-8" />
+        </span>
+        <h1 className="mt-5 text-2xl font-semibold text-[var(--foreground)]">No class in session</h1>
+        <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[var(--muted)]">{message}</p>
+        {title ? (
+          <p className="mt-2 text-xs font-medium uppercase tracking-[0.2em] text-[var(--muted)]">{title}</p>
+        ) : null}
+
+        <div className="mt-6 flex flex-wrap justify-center gap-2.5">
+          <Link
+            href="/calendar"
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition hover:brightness-110"
+          >
+            <CalendarIcon className="h-4 w-4" />
+            When is my next class?
+          </Link>
+          <Link
+            href="/materials?tab=watch"
+            className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+          >
+            <FilmIcon className="h-4 w-4" />
+            Watch the last class
+          </Link>
+        </div>
+
+        {/* Said plainly, because the alternative is a student who refreshes this
+            page every four minutes for an hour. */}
+        <p className="mt-6 text-xs text-[var(--muted)]">
+          You do not need to keep checking. Your phone and the bell will both go off the moment your tutor starts.
+        </p>
+      </div>
+
+      <JoinByCode />
+    </div>
+  );
+}
+
+function LiveClassroomPageInner() {
+  const searchParams = useSearchParams();
+  const code = searchParams.get("code");
+
   const [session, setSession] = useState<LiveSession | null>(null);
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
+  const [notLive, setNotLive] = useState<{ message: string; title: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [joined, setJoined] = useState(false);
   const [mode, setMode] = useState<QualityMode>("medium");
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       try {
-        const res = await fetch("/api/live/session", { cache: "no-store" });
+        const query = code ? `?code=${encodeURIComponent(code)}` : "";
+        const res = await fetch(`/api/live/session${query}`, { cache: "no-store" });
         const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
 
         if (res.status === 401) {
           setError("Please sign in to join your class.");
+          return;
+        }
+        if (res.status === 409 && data.notLive) {
+          setNotLive({ message: data.message, title: data.displayName ?? null });
+          return;
+        }
+        if (res.status === 404 && code) {
+          setNotLive({
+            message: "That code does not match a class that is live right now. Check it with your tutor — codes change every class.",
+            title: null,
+          });
           return;
         }
         if (res.status === 403) {
@@ -188,16 +295,78 @@ export default function LiveClassroomPage() {
         setSession(data as LiveSession);
         setMode((data as LiveSession).initialQuality);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : "Could not reach the classroom service.");
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "Could not reach the classroom service.");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     load();
+    return () => {
+      cancelled = true;
+    };
+  }, [code]);
+
+  /**
+   * THE TUTOR'S HEARTBEAT.
+   *
+   * An open session is what tells forty students the class is on, so the one
+   * thing it must never do is stay open after the tutor has gone. A closed
+   * laptop, a crashed tab and a flat battery all look identical from the server
+   * — none of them send "I left" — so the server expires anything it has not
+   * heard from, and this is the sound of the tutor still being here.
+   *
+   * It starts at the LOBBY, not on join. A tutor who opens the page, reads out
+   * the code and spends two minutes on the quality screen has already had their
+   * students rung; if the heartbeat waited for the video to connect, the
+   * session would expire underneath them while they were still setting up.
+   */
+  const isTutor = session?.role === "tutor";
+  const heartbeatMs = session?.heartbeatMs ?? 45_000;
+  const beating = Boolean(isTutor && session?.liveSessionId);
+
+  useEffect(() => {
+    if (!beating) return;
+
+    const beat = () => {
+      void fetch("/api/live/presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "heartbeat" }),
+      }).catch(() => {});
+    };
+
+    beat();
+    const timer = window.setInterval(beat, heartbeatMs);
+    return () => window.clearInterval(timer);
+  }, [beating, heartbeatMs]);
+
+  const endedRef = useRef(false);
+
+  /**
+   * Ending the class is EXPLICIT and idempotent.
+   *
+   * Not fired on unmount: a tutor navigating to the roster mid-lesson, or React
+   * remounting in strict mode, would end the class for everybody. Only leaving
+   * the classroom deliberately does it — and the heartbeat expiry is the safety
+   * net for every other way a tutor can disappear.
+   */
+  const endClass = useCallback(() => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    void fetch("/api/live/presence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "end" }),
+    }).catch(() => {});
   }, []);
 
-  const handleLeave = useCallback(() => setJoined(false), []);
+  const handleLeave = useCallback(() => {
+    if (isTutor) endClass();
+    setJoined(false);
+  }, [isTutor, endClass]);
 
   const body = (() => {
     if (loading) {
@@ -227,6 +396,8 @@ export default function LiveClassroomPage() {
         </div>
       );
     }
+
+    if (notLive) return <NotLiveScreen message={notLive.message} title={notLive.title} />;
 
     if (!session) return null;
 
@@ -264,7 +435,7 @@ export default function LiveClassroomPage() {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45, ease: "easeOut" }}
-      className="min-h-screen px-6 py-10"
+      className="min-h-screen px-4 py-6 sm:px-6 sm:py-10"
     >
       <div className="mx-auto max-w-5xl">{body}</div>
     </motion.div>
@@ -273,6 +444,18 @@ export default function LiveClassroomPage() {
   // Tutors and students both live here, so the page picks the chrome that
   // matches whoever is signed in rather than hard-coding the student portal.
   if (session?.role === "tutor") return <LecturerShell>{content}</LecturerShell>;
-  if (session) return <StudentShell>{content}</StudentShell>;
+  // The not-live screen is a student's screen: it belongs inside their portal,
+  // with the sidebar and the bell, not on a bare page that looks like an error.
+  if (session || notLive || lockedMessage) return <StudentShell>{content}</StudentShell>;
   return <div className="min-h-screen bg-[var(--background)]">{content}</div>;
+}
+
+export default function LiveClassroomPage() {
+  // `useSearchParams` opts the tree into client-side rendering, and Next
+  // requires the boundary to be explicit rather than inferred.
+  return (
+    <Suspense fallback={<BrandLoader size="lg" title="Klassenzimmer wird geöffnet…" message="Setting up your classroom." />}>
+      <LiveClassroomPageInner />
+    </Suspense>
+  );
 }
