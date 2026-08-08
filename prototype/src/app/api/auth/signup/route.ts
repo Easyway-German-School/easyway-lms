@@ -5,13 +5,27 @@ import { assignStudentCode } from "@/lib/student-code";
 import { notifyAdminsOfRegistration } from "@/lib/admin-alerts";
 import { linkLeadOnSignup } from "@/lib/leads";
 import { isOnlineBranch } from "@/lib/online-branch";
+import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
 
+/**
+ * Whether there is a Branch table to select from.
+ *
+ * This used to ask `sqlite_master`, from back when the database was SQLite and
+ * a fresh checkout might not have the table yet. After the move to Postgres
+ * that query does not merely return nothing — `sqlite_master` does not exist,
+ * so it THROWS, the catch swallowed it, and this returned false every single
+ * time in production. The branch-required check below is guarded by it, which
+ * means that check has silently not run since the migration: a student could
+ * register with no branch at all, and branch is what decides their tuition
+ * price, their timetable and whose roster they appear on.
+ *
+ * Counting rows through Prisma asks the same question in a way that does not
+ * depend on which engine is underneath.
+ */
 async function branchTableExists() {
   try {
-    const rows = await prisma.$queryRaw<Array<{ name: string }>>`
-      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'Branch'
-    `;
-    return rows.some((row) => row.name === "Branch");
+    await prisma.branch.count();
+    return true;
   } catch {
     return false;
   }
@@ -33,6 +47,28 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    /**
+     * Registration is open to the public, so it is metered by IP.
+     *
+     * Ten an hour is generous for the real case — a family or a cyber café
+     * enrolling several students in one sitting stays well inside it — and
+     * ruinous for a script, because each account that gets through writes a
+     * User, a Student, a student code and an alert email to the office.
+     */
+    const ip = clientIp(request.headers);
+    const limit = checkRateLimit(`signup:ip:${ip}`, {
+      windowMs: 60 * 60 * 1000,
+      max: 10,
+    });
+
+    if (!limit.ok) {
+      return rateLimitResponse(
+        limit,
+        "Too many registration attempts from this connection. Please try again later.",
+        buildCorsHeaders(request),
+      );
+    }
+
     const body = await request.json().catch(() => null);
     const {
       email,

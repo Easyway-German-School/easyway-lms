@@ -4,6 +4,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { lecturerCanSignIn } from "@/lib/lecturer-status";
+import { checkRateLimit, clearRateLimit, clientIp } from "@/lib/rate-limit";
 
 /**
  * The role a revoked tutor's session carries. Not a real role — every route
@@ -30,9 +31,54 @@ export const authOptions: AuthOptions = {
          */
         totp: { label: "Authentication code", type: "text" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) {
           throw new Error("Missing credentials");
+        }
+
+        /**
+         * Two counters, because they stop different attacks and one alone
+         * leaves the other open.
+         *
+         * By email: caps guesses against one account no matter how many
+         * addresses the attacker comes from. By IP: caps an attacker who
+         * sprays one common password across many accounts, which the
+         * per-email counter would never see.
+         *
+         * The per-email limit is deliberately the looser of the two and the
+         * window deliberately short. A tight one hands anybody who knows a
+         * student's address the ability to lock them out of their own portal
+         * by failing sign-in on purpose — trading a brute-force risk for a
+         * harassment tool. Ten tries in fifteen minutes is far below what
+         * guessing a password needs and far above what a real person typing
+         * from memory ever hits.
+         *
+         * Counted before the bcrypt compare, so a refused attempt costs us
+         * nothing. That is half the point: bcrypt is expensive by design, and
+         * an unmetered sign-in route is a way to spend our CPU, not just our
+         * patience.
+         */
+        const email = credentials.email.trim().toLowerCase();
+        const ip = clientIp(req?.headers);
+
+        const byEmail = checkRateLimit(`signin:email:${email}`, {
+          windowMs: 15 * 60 * 1000,
+          max: 10,
+        });
+        const byIp = checkRateLimit(`signin:ip:${ip}`, {
+          windowMs: 15 * 60 * 1000,
+          max: 50,
+        });
+
+        if (!byEmail.ok || !byIp.ok) {
+          /**
+           * One message for both, and it names no account. Saying "this
+           * account is locked" would confirm the address exists — turning the
+           * protection into the enumeration oracle it was added to prevent.
+           */
+          throw new Error(
+            "Too many sign-in attempts. Please wait a few minutes and try again.",
+          );
         }
 
         const user = await prisma.user.findUnique({
@@ -113,6 +159,17 @@ export const authOptions: AuthOptions = {
             throw new Error("MFA_ENROLMENT_REQUIRED");
           }
         }
+
+        /**
+         * Cleared only here, at full success — past the password, the tutor
+         * status check and the second factor.
+         *
+         * Not cleared on MFA_REQUIRED: that path has a correct password but no
+         * code yet, and forgiving the count there would let somebody who has
+         * stolen a password retry the six-digit code without limit, which is
+         * the one thing the second factor exists to make expensive.
+         */
+        clearRateLimit(`signin:email:${email}`);
 
         return {
           id: user.id,
