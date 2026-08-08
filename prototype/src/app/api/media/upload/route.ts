@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { putFile, storageKey } from "@/lib/storage";
 
 const FOLDERS = new Set(["files", "materials", "photos"]);
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     const { filename, contentType, data } = body;
     const folder = FOLDERS.has(String(body.folder)) ? String(body.folder) : "files";
 
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
     if (!session?.user?.id && folder !== "photos") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { letterFor, PASS_MARK } from "@/lib/grading";
@@ -36,21 +35,22 @@ export const dynamic = "force-dynamic";
 
 type Cell = { score: number; letter: string; feedback: string | null; markedAt: string };
 
-async function requireLecturer() {
-  const session = (await getServerSession(authOptions as never)) as {
-    user?: { id?: string; role?: string };
-  } | null;
+type LecturerGradebookAuth = { error: NextResponse } | { userId: string };
+
+async function requireLecturer(): Promise<LecturerGradebookAuth> {
+  const session = await requireAuthSession();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   const userId = session?.user?.id;
   const role = String(session?.user?.role ?? "").toLowerCase();
   if (!userId || !(role === "lecturer" || role === "admin")) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }), userId: "" };
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  return { error: null, userId };
+  return { userId };
 }
 
 export async function GET() {
   const auth = await requireLecturer();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   const roster = await resolveRoster(auth.userId);
   if (!roster.ok) {
@@ -271,7 +271,7 @@ export async function GET() {
  */
 export async function PATCH(request: NextRequest) {
   const auth = await requireLecturer();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   const roster = await resolveRoster(auth.userId);
   if (!roster.ok) {

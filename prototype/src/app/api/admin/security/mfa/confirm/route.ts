@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { unguardedPrisma } from "@/lib/prisma";
-import { resolveAdmin } from "@/lib/admin-roles";
+import { requireAdmin } from "@/lib/admin-roles";
 import { confirmEnrolment } from "@/lib/mfa";
 import { writeAudit } from "@/lib/prisma-guard";
 
@@ -15,9 +13,9 @@ import { writeAudit } from "@/lib/prisma-guard";
  * only route back in from a lost phone.
  */
 export async function POST(request: Request) {
-  const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
-  const admin = await resolveAdmin(session?.user?.id);
-  if (!admin) return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+  const admin = auth.admin;
 
   const body = await request.json().catch(() => ({}));
   const token = typeof body?.token === "string" ? body.token : "";

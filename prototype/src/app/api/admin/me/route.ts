@@ -1,7 +1,5 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { NextResponse } from "next/server";
-import { resolveAdmin, ADMIN_ROLE_LABELS } from "@/lib/admin-roles";
+import { requireAdmin, ADMIN_ROLE_LABELS } from "@/lib/admin-roles";
 
 /**
  * What the signed-in admin is allowed to do. The admin shell calls this to
@@ -12,12 +10,9 @@ import { resolveAdmin, ADMIN_ROLE_LABELS } from "@/lib/admin-roles";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  const admin = await resolveAdmin(session?.user?.id);
-
-  if (!admin) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+  const admin = auth.admin;
 
   return NextResponse.json({
     adminRole: admin.adminRole,

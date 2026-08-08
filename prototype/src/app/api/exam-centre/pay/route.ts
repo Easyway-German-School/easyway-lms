@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { safeJson } from "@/lib/safe-json";
 import { resolvePayable, settleExamFee } from "@/lib/exam-payments";
 
@@ -35,7 +35,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "registrationId is required" }, { status: 400 });
     }
 
-    const session = (await getServerSession(authOptions as any)) as any;
+    const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const resolved = await resolvePayable(registrationId, {
       userId: session?.user?.id ?? null,
       token,

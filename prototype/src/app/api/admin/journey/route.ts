@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { resolveAdmin } from "@/lib/admin-roles";
+import { requireCapability } from "@/lib/admin-roles";
 import { completeLevelForStudents, listCohort } from "@/lib/germany-journey-server";
 
 export const dynamic = "force-dynamic";
@@ -18,21 +16,12 @@ export const dynamic = "force-dynamic";
  * being readable by anybody with an admin cookie.
  */
 async function requireStudentsAdmin() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  const admin = await resolveAdmin(session?.user?.id);
-
-  if (!admin) {
-    return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
-  }
-  if (!admin.can("students")) {
-    return { error: NextResponse.json({ error: "Your admin role cannot sign off levels" }, { status: 403 }) };
-  }
-  return { admin };
+  return requireCapability("students");
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireStudentsAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireStudentsAdmin();
+  if (!gate.ok) return gate.response;
 
   try {
     const params = req.nextUrl.searchParams;
@@ -61,8 +50,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireStudentsAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireStudentsAdmin();
+  if (!gate.ok) return gate.response;
 
   try {
     const body = await req.json().catch(() => ({}));

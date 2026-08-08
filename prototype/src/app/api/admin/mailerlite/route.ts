@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { adminHasCapability } from "@/lib/admin-roles";
+import { requireCapability } from "@/lib/admin-roles";
 import { checkMailerLite, checkMailerSend, listGroups } from "@/lib/mailerlite";
 import { syncStudentsToMailerLite } from "@/lib/mailerlite-sync";
 import { activeTransport } from "@/lib/mailer";
@@ -17,19 +15,14 @@ import { activeTransport } from "@/lib/mailer";
 export const dynamic = "force-dynamic";
 
 async function requireEmailAdmin() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  if (!session?.user?.id) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  if (!(await adminHasCapability(session.user.id, "emails"))) {
-    return { error: NextResponse.json({ error: "Your admin role does not cover email" }, { status: 403 }) };
-  }
-  return { userId: session.user.id as string };
+  const gate = await requireCapability("emails");
+  if (!gate.ok) return gate.response;
+  return { userId: gate.session.user.id as string };
 }
 
 export async function GET() {
   const auth = await requireEmailAdmin();
-  if (auth.error) return auth.error;
+  if (auth instanceof NextResponse) return auth;
 
   const [marketing, transactional, groups] = await Promise.all([
     checkMailerLite(),
@@ -48,7 +41,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const auth = await requireEmailAdmin();
-  if (auth.error) return auth.error;
+  if (auth instanceof NextResponse) return auth;
 
   try {
     const body = await req.json().catch(() => ({}));

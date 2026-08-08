@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { adminHasCapability } from "@/lib/admin-roles";
+import { requireCapability } from "@/lib/admin-roles";
 import { queueCampaign, withUnsubscribeFooter } from "@/lib/email-queue";
 import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
@@ -28,14 +26,9 @@ type Audience = {
 };
 
 async function requireEmailAdmin() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  if (!session?.user?.id) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  if (!(await adminHasCapability(session.user.id, "emails"))) {
-    return { error: NextResponse.json({ error: "Your admin role does not cover email" }, { status: 403 }) };
-  }
-  return { userId: session.user.id as string };
+  const gate = await requireCapability("emails");
+  if (!gate.ok) return gate.response;
+  return { userId: gate.session.user.id as string, session: gate.session };
 }
 
 async function resolveAudience(audience: Audience) {
@@ -76,7 +69,7 @@ async function resolveAudience(audience: Audience) {
 
 export async function POST(req: NextRequest) {
   const auth = await requireEmailAdmin();
-  if (auth.error) return auth.error;
+  if (auth instanceof NextResponse) return auth;
 
   try {
     const body = await req.json();
@@ -133,7 +126,7 @@ export async function POST(req: NextRequest) {
 /** GET — recent campaigns and queue health for the dashboard. */
 export async function GET() {
   const auth = await requireEmailAdmin();
-  if (auth.error) return auth.error;
+  if (auth instanceof NextResponse) return auth;
 
   const [counts, recent, suppressions] = await Promise.all([
     prisma.emailMessage.groupBy({ by: ["status"], _count: { status: true } }),

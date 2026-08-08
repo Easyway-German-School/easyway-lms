@@ -1,23 +1,16 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-import { adminHasCapability } from "@/lib/admin-roles";
+import { requireCapability } from "@/lib/admin-roles";
 
-async function isAdmin(userId: string) {
-  // Admin AND cleared for this area — see src/lib/admin-roles.ts.
-  return adminHasCapability(userId, "exams");
+async function requireExamAdmin() {
+  const gate = await requireCapability("exams");
+  if (!gate.ok) return gate.response;
+  return { userId: gate.session.user.id as string };
 }
 
 export async function GET(request: Request) {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!await isAdmin(session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const auth = await requireExamAdmin();
+  if (auth instanceof NextResponse) return auth;
 
   const url = new URL(request.url);
   const studentId = url.searchParams.get("studentId");
@@ -39,14 +32,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!await isAdmin(session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const auth = await requireExamAdmin();
+  if (auth instanceof NextResponse) return auth;
 
   const body = await request.json().catch(() => ({}));
   const studentId = typeof body.studentId === "string" ? body.studentId : "";
@@ -90,14 +77,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!await isAdmin(session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const auth = await requireExamAdmin();
+  if (auth instanceof NextResponse) return auth;
 
   const body = await request.json().catch(() => ({}));
   const examId = typeof body.examId === "string" ? body.examId : "";
@@ -136,14 +117,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!await isAdmin(session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const auth = await requireExamAdmin();
+  if (auth instanceof NextResponse) return auth;
 
   const body = await request.json().catch(() => ({}));
   const examId = typeof body.examId === "string" ? body.examId : "";

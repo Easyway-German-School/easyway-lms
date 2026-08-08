@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { parseQuestions, totalPoints, type Question } from "@/lib/assignments";
@@ -8,25 +7,28 @@ import { parseQuestions, totalPoints, type Question } from "@/lib/assignments";
 
 export const dynamic = "force-dynamic";
 
-async function requireStaff() {
-  const session = (await getServerSession(authOptions as any)) as any;
+type LecturerAssignmentsAuth = { error: NextResponse } | { userId: string; lecturerId: string | null };
+
+async function requireStaff(): Promise<LecturerAssignmentsAuth> {
+  const session = await requireAuthSession();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   if (!session?.user?.id) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { role: true, lecturer: { select: { id: true } } },
+    select: { id: true, role: true, lecturer: { select: { id: true } } },
   });
   const role = String(user?.role ?? "").toLowerCase();
   if (role !== "lecturer" && role !== "admin") {
     return { error: NextResponse.json({ error: "Staff access required" }, { status: 403 }) };
   }
-  return { lecturerId: user?.lecturer?.id ?? null };
+  return { userId: user!.id, lecturerId: user?.lecturer?.id ?? null };
 }
 
 export async function GET(req: NextRequest) {
   const auth = await requireStaff();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   const level = req.nextUrl.searchParams.get("level");
 
@@ -124,7 +126,7 @@ async function resolveTargets(studentIds: unknown, level: string): Promise<strin
 
 export async function POST(req: NextRequest) {
   const auth = await requireStaff();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   try {
     const body = await req.json();
@@ -176,7 +178,7 @@ export async function POST(req: NextRequest) {
  */
 export async function PATCH(req: NextRequest) {
   const auth = await requireStaff();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   try {
     const body = await req.json();

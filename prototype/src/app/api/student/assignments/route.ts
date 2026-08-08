@@ -1,5 +1,5 @@
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -57,7 +57,8 @@ function visibleTo(student: { id: string; level: string; branchId: string | null
 
 /** GET — list assignments for this student's level and branch. */
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const student = await currentStudent(session?.user?.id);
   if (!student) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -114,7 +115,8 @@ export async function GET() {
  *   { assignmentId, action: "submit", answers?, text?, filePath?, fileName? }
  */
 export async function POST(req: NextRequest) {
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const student = await currentStudent(session?.user?.id);
   if (!student) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

@@ -26,8 +26,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { objectStorage, publicUrlFor, storageKey } from "@/lib/storage";
+import { requireAuthSession } from "@/lib/auth";
+import { normalizeStorageEndpoint, objectStorage, publicUrlFor, storageKey } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
   // Allow unauthenticated uploads to the `photos` folder so signup can upload
   // an avatar before the user has an account. All other folders still require
   // an authenticated session.
-  const session = await getServerSession(authOptions);
+  const session = await requireAuthSession();
   if (!session?.user?.id && folder !== "photos") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -64,8 +64,9 @@ export async function POST(request: NextRequest) {
   }
 
   const key = storageKey(folder, filename);
-  const base = storage.endpoint
-    ? `${storage.endpoint.replace(/\/+$/, "")}/${storage.bucket}`
+  const endpoint = normalizeStorageEndpoint(storage.endpoint);
+  const base = endpoint
+    ? `${endpoint.replace(/\/+$/, "")}/${storage.bucket}`
     : `https://${storage.bucket}.s3.${storage.region}.amazonaws.com`;
 
   const { AwsClient } = await import("aws4fetch");

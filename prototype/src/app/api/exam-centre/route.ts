@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOpenExams, registerForExam } from "@/lib/exam-centre";
 import { queueEmail } from "@/lib/email-queue";
@@ -28,7 +28,8 @@ export async function GET(req: NextRequest) {
     ]);
 
     // Signed-in students get their own details prefilled.
-    const session = (await getServerSession(authOptions as any)) as any;
+    const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     let me = null;
     if (session?.user?.id) {
       const student = await prisma.student.findUnique({
@@ -64,7 +65,8 @@ export async function POST(req: NextRequest) {
 
     // A signed-in student registers as themselves; the client cannot pass a
     // studentId and book on someone else's behalf.
-    const session = (await getServerSession(authOptions as any)) as any;
+    const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     let studentId: string | null = null;
     let notifyEmail = candidateEmail as string | undefined;
     let notifyName = candidateName as string | undefined;

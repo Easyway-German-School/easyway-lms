@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { examReminderEmailTemplate } from "@/lib/email-templates";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 
 /**
  * POST /api/emails/send/exam-reminder
@@ -12,7 +12,7 @@ import { authOptions } from "@/lib/auth";
  */
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
     
     if (!session || (session.user.role !== "ADMIN" && session.user.role !== "SYSTEM")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

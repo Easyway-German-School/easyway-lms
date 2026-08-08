@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
@@ -47,7 +46,7 @@ function serialise(material: {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
 
     if (!session || session.user.role !== 'lecturer') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -73,7 +72,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
 
     if (!session || session.user.role !== 'lecturer') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

@@ -1,13 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-
 import { requireCapability } from "@/lib/admin-roles";
-async function isAdmin(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  return user?.role?.toLowerCase() === "admin";
-}
 
 function startOfMonth(dt: Date) {
   return new Date(dt.getFullYear(), dt.getMonth(), 1, 0, 0, 0, 0);
@@ -20,10 +13,6 @@ function endOfMonth(dt: Date) {
 export async function GET(request: Request) {
   const gate = await requireCapability("payments");
   if (!gate.ok) return gate.response;
-
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!await isAdmin(session.user.id)) return NextResponse.json({ error: "Admin access required" }, { status: 403 });
 
   const now = new Date();
   const months: { label: string; start: Date; end: Date }[] = [];

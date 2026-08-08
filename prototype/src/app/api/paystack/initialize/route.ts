@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { safeJson } from "@/lib/safe-json";
 import {
@@ -22,7 +22,7 @@ import {
  * way the Abuja premium can be enforced.
  */
 export async function POST(request: Request) {
-  const session = await getServerSession(authOptions);
+  const session = await requireAuthSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

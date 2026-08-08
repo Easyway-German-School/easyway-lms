@@ -8,11 +8,28 @@ export async function GET() {
   if (blocked) return blocked;
 
   try {
-    // Test if admin account exists
-    const admin = await prisma.user.findUnique({
-      where: { email: "admin@easyway.test" },
+    const demoAdminEmail = "admin@easyway.test";
+    const demoAdminPassword = "AdminPass123!";
+
+    let admin = await prisma.user.findUnique({
+      where: { email: demoAdminEmail },
     });
-    
+    let seeded = false;
+
+    if (!admin) {
+      const hashedAdmin = await bcryptjs.hash(demoAdminPassword, 10);
+      admin = await prisma.user.create({
+        data: {
+          email: demoAdminEmail,
+          name: "Demo Admin",
+          password: hashedAdmin,
+          role: "ADMIN",
+        },
+      });
+      seeded = true;
+      console.log("[test-signin] Created demo admin account for local development.");
+    }
+
     console.log("[test-signin] Admin user:", {
       exists: !!admin,
       email: admin?.email,
@@ -20,12 +37,7 @@ export async function GET() {
       roleNormalized: admin?.role?.toLowerCase(),
     });
 
-    if (!admin) {
-      return NextResponse.json({ error: "Admin not found" }, { status: 404 });
-    }
-
-    // Test password
-    const passwordMatch = await bcryptjs.compare("AdminPass123!", admin.password);
+    const passwordMatch = await bcryptjs.compare(demoAdminPassword, admin.password);
     console.log("[test-signin] Password match:", passwordMatch);
 
     return NextResponse.json({
@@ -34,6 +46,7 @@ export async function GET() {
       role: admin.role,
       roleNormalized: admin.role?.toLowerCase(),
       passwordMatches: passwordMatch,
+      seeded,
     });
   } catch (error) {
     console.error("[test-signin] Error:", error);

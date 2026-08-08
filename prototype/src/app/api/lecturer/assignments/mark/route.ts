@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -22,8 +21,11 @@ import {
 
 export const dynamic = "force-dynamic";
 
-async function requireStaff() {
-  const session = (await getServerSession(authOptions as any)) as any;
+type LecturerStaffAuth = { error: NextResponse } | { userId: string; lecturerId: string | null };
+
+async function requireStaff(): Promise<LecturerStaffAuth> {
+  const session = await requireAuthSession();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   if (!session?.user?.id) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
@@ -40,7 +42,7 @@ async function requireStaff() {
 
 export async function GET(req: NextRequest) {
   const auth = await requireStaff();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   const assignmentId = req.nextUrl.searchParams.get("assignmentId");
 
@@ -94,7 +96,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const auth = await requireStaff();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   try {
     const { submissionId, marks, feedback } = await req.json();

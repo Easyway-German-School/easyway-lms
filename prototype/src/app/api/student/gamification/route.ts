@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateStreak, deriveBadges, summarizeGamification } from "@/lib/gamification";
 
@@ -13,7 +13,8 @@ import { calculateStreak, deriveBadges, summarizeGamification } from "@/lib/gami
  * sync, so these numbers cannot disagree with the student's actual history.
  */
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

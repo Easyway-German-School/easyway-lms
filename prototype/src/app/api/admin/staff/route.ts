@@ -1,11 +1,9 @@
-import { getServerSession } from "next-auth";
 import bcryptjs from "bcryptjs";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import {
-  resolveAdmin,
+  requireCapability,
   ADMIN_ROLES,
   ADMIN_ROLE_LABELS,
   CAPABILITIES,
@@ -13,6 +11,7 @@ import {
   capabilitiesForUser,
   normalizeAdminRole,
   parseOverrides,
+  type AdminContext,
   type AdminRole,
   type Capability,
 } from "@/lib/admin-roles";
@@ -52,15 +51,7 @@ function looksLikeEmail(email: string): boolean {
 }
 
 async function requireSuper() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  const admin = await resolveAdmin(session?.user?.id);
-  if (!admin) {
-    return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
-  }
-  if (!admin.can("staff")) {
-    return { error: NextResponse.json({ error: "Only a Super Admin can change admin roles" }, { status: 403 }) };
-  }
-  return { admin };
+  return requireCapability("staff");
 }
 
 /**
@@ -84,7 +75,7 @@ async function wouldOrphanStaff(userId: string, keepsStaff: boolean): Promise<bo
 
 export async function GET() {
   const auth = await requireSuper();
-  if (auth.error) return auth.error;
+  if (!auth.ok) return auth.response;
 
   const admins = await prisma.user.findMany({
     where: { role: "ADMIN" },
@@ -159,7 +150,7 @@ const CAPABILITY_LABELS: Record<Capability, string> = {
  */
 export async function POST(req: NextRequest) {
   const auth = await requireSuper();
-  if (auth.error) return auth.error;
+  if (!auth.ok) return auth.response;
 
   try {
     const body = await req.json();
@@ -242,7 +233,7 @@ export async function POST(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   const auth = await requireSuper();
-  if (auth.error) return auth.error;
+  if (!auth.ok) return auth.response;
 
   const userId = req.nextUrl.searchParams.get("userId") ?? "";
   if (!userId) return NextResponse.json({ error: "userId is required" }, { status: 400 });
@@ -279,7 +270,7 @@ export async function DELETE(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   const auth = await requireSuper();
-  if (auth.error) return auth.error;
+  if (!auth.ok) return auth.response;
 
   try {
     const body = await req.json();

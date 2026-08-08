@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getMergedSchedule, dayKey, normalizeSlot, TIME_SLOTS } from "@/lib/class-sessions";
 import { NextRequest, NextResponse } from "next/server";
@@ -35,7 +34,8 @@ type Staff = {
 };
 
 async function requireStaff(): Promise<{ error: NextResponse } | { staff: Staff }> {
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   if (!session?.user?.id) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }

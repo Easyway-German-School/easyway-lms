@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { drainQueue } from "@/lib/email-queue";
 import { adminHasCapability } from "@/lib/admin-roles";
 
@@ -18,7 +18,8 @@ async function authorize(req: NextRequest) {
   const expected = process.env.CRON_SECRET;
   if (expected && req.headers.get("authorization") === `Bearer ${expected}`) return true;
 
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   return Boolean(session?.user?.id && (await adminHasCapability(session.user.id, "emails")));
 }
 

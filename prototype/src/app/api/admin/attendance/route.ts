@@ -1,29 +1,22 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
-import { adminHasCapability } from "@/lib/admin-roles";
-
-async function isAdmin(userId: string) {
-  // Admin AND cleared for this area — see src/lib/admin-roles.ts.
-  return adminHasCapability(userId, "attendance");
-}
+import { requireCapability } from "@/lib/admin-roles";
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions as any) as any;
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!await isAdmin(session.user.id)) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
+    const gate = await requireCapability("attendance");
+    if (!gate.ok) return gate.response;
 
     const { searchParams } = new URL(req.url);
     const studentId = searchParams.get("studentId");
 
-    const where = studentId ? { studentId } : {};
+    const where: any = {};
+    if (studentId) where.studentId = studentId;
+    if (gate.session.user.tenantId) {
+      where.student = {
+        branch: { tenantId: gate.session.user.tenantId },
+      };
+    }
 
     const attendances = await prisma.attendance.findMany({
       where,
@@ -50,14 +43,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions as any) as any;
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!await isAdmin(session.user.id)) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
+    const gate = await requireCapability("attendance");
+    if (!gate.ok) return gate.response;
 
     const { studentId, date, status, notes } = await req.json();
 
@@ -68,9 +55,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check if student exists
     const student = await prisma.student.findUnique({
       where: { id: studentId },
+      select: {
+        id: true,
+        branch: { select: { tenantId: true } },
+      },
     });
 
     if (!student) {
@@ -78,6 +68,10 @@ export async function POST(req: NextRequest) {
         { error: "Student not found" },
         { status: 404 }
       );
+    }
+
+    if (gate.session.user.tenantId && student.branch?.tenantId !== gate.session.user.tenantId) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
     const attendance = await prisma.attendance.create({
@@ -109,14 +103,8 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions as any) as any;
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!await isAdmin(session.user.id)) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
+    const gate = await requireCapability("attendance");
+    if (!gate.ok) return gate.response;
 
     const { id, date, status, notes } = await req.json();
 
@@ -125,6 +113,21 @@ export async function PATCH(req: NextRequest) {
         { error: "id is required" },
         { status: 400 }
       );
+    }
+
+    const existing = await prisma.attendance.findUnique({
+      where: { id },
+      select: {
+        student: { select: { branch: { select: { tenantId: true } } } },
+      },
+    });
+
+    if (!existing) {
+      return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+    }
+
+    if (gate.session.user.tenantId && existing.student?.branch?.tenantId !== gate.session.user.tenantId) {
+      return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
     }
 
     const updateData: any = {};
@@ -157,14 +160,8 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions as any) as any;
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!await isAdmin(session.user.id)) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
+    const gate = await requireCapability("attendance");
+    if (!gate.ok) return gate.response;
 
     const { id } = await req.json();
 
@@ -173,6 +170,21 @@ export async function DELETE(req: NextRequest) {
         { error: "id is required" },
         { status: 400 }
       );
+    }
+
+    const existing = await prisma.attendance.findUnique({
+      where: { id },
+      select: {
+        student: { select: { branch: { select: { tenantId: true } } } },
+      },
+    });
+
+    if (!existing) {
+      return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+    }
+
+    if (gate.session.user.tenantId && existing.student?.branch?.tenantId !== gate.session.user.tenantId) {
+      return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
     }
 
     await prisma.attendance.delete({

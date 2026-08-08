@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   isAssigned,
@@ -10,6 +9,8 @@ import {
 } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
+
+type LecturerMessagesAuth = { error: NextResponse } | { lecturer: { id: string; status: string; branchId: string | null; level: string | null; sessionSlot: string | null; user: { name: string | null; email: string } } };
 
 /**
  * Announcements from a tutor to the cohort they teach.
@@ -24,15 +25,16 @@ export const dynamic = "force-dynamic";
  * special-casing.
  */
 
-async function requireLecturer() {
-  const session = (await getServerSession(authOptions as any)) as any;
+async function requireLecturer(): Promise<LecturerMessagesAuth> {
+  const session = await requireAuthSession();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   if (!session?.user?.id) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
   const lecturer = await prisma.lecturer.findUnique({
     where: { userId: session.user.id },
-    include: { user: { select: { name: true } }, branch: { select: { id: true, name: true } } },
+    include: { user: { select: { name: true, email: true } }, branch: { select: { id: true, name: true } } },
   });
 
   if (!lecturer) {
@@ -72,7 +74,7 @@ async function cohortStudents(lecturer: AssignmentSource) {
 /** GET — what this tutor has already sent, newest first, grouped per send. */
 export async function GET() {
   const auth = await requireLecturer();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
   const { lecturer } = auth;
 
   const students = await cohortStudents(lecturer);
@@ -135,7 +137,7 @@ export async function GET() {
 /** POST — send to the whole cohort, or to one student. */
 export async function POST(request: NextRequest) {
   const auth = await requireLecturer();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
   const { lecturer } = auth;
 
   try {

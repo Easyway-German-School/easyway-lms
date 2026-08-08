@@ -172,6 +172,31 @@ const QUALITY_PILL: Record<ConnectionQuality, { label: string; className: string
   [ConnectionQuality.Unknown]: { label: "Checking…", className: "bg-white/10 text-slate-300" },
 };
 
+/**
+ * Automatic downgrade, and the three rules that stop it becoming its own
+ * problem.
+ *
+ * The connection pill used to say "Weak — try Data saver" and then leave the
+ * student to find a dropdown mid-lesson — which is exactly the moment they are
+ * least able to, because the picture they would be navigating by is frozen. So
+ * a link that stays bad now drops a rung on its own.
+ *
+ *   1. It only ever steps DOWN, one rung at a time. Recovering is the
+ *      student's call: a connection that has just come back is the last thing
+ *      to gamble 720p on.
+ *   2. A manual choice suspends it. A student who has just decided something
+ *      should not be argued with by the UI two seconds later.
+ *   3. Every step says what it did and offers to put it back, because a
+ *      picture that quietly degrades itself reads as a broken app.
+ */
+const QUALITY_LADDER: QualityMode[] = ["high", "medium", "low", "audio"];
+/** How long the link must stay bad before we act. A flap is not a failure. */
+const POOR_HOLD_MS = 10_000;
+/** Gap between automatic steps, so a wobble cannot fall straight to audio. */
+const AUTO_STEP_COOLDOWN_MS = 15_000;
+/** After a manual choice, leave the student alone for this long. */
+const MANUAL_OVERRIDE_MS = 90_000;
+
 export default function LiveKitClassroom({
   url,
   token,
@@ -189,10 +214,37 @@ export default function LiveKitClassroom({
   const [cameraOn, setCameraOn] = useState(qualitySpec(initialQuality).publishesVideo);
   const [screenSharing, setScreenSharing] = useState(false);
   const [quality, setQuality] = useState<ConnectionQuality>(ConnectionQuality.Unknown);
+  const [autoNotice, setAutoNotice] = useState<{ from: QualityMode; to: QualityMode } | null>(null);
   // Room state lives on the Room object, not in React. Rather than mirroring it
   // (and drifting), events bump this counter and the component re-reads.
   const [, forceRender] = useState(0);
   const bump = useCallback(() => forceRender((n) => n + 1), []);
+
+  // The downgrade ticker reads all of its inputs from refs. It has to run on a
+  // clock rather than on the quality event — "Poor for ten seconds" is not
+  // something an event that fires on *change* can tell you — and a ticker that
+  // re-subscribed every time the mode or the quality moved would keep resetting
+  // its own timers.
+  const modeRef = useRef<QualityMode>(initialQuality);
+  const statusRef = useRef<Status>("connecting");
+  const poorSinceRef = useRef<number | null>(null);
+  const lastAutoStepRef = useRef(0);
+  const manualUntilRef = useRef(0);
+  const applyModeRef = useRef<(next: QualityMode, source: "manual" | "auto") => void>(() => {});
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  // When the link went bad, or null if it is currently fine.
+  useEffect(() => {
+    const bad = quality === ConnectionQuality.Poor || quality === ConnectionQuality.Lost;
+    poorSinceRef.current = bad ? poorSinceRef.current ?? Date.now() : null;
+  }, [quality]);
 
   useEffect(() => {
     let cancelled = false;
@@ -278,7 +330,13 @@ export default function LiveKitClassroom({
   // Switching mode re-negotiates what the server sends us. Video publications
   // are disabled outright in audio mode; in every other mode the tile size
   // does the work via adaptive stream.
-  const changeMode = useCallback(async (next: QualityMode) => {
+  const applyMode = useCallback(async (next: QualityMode, source: "manual" | "auto") => {
+    if (source === "manual") {
+      // Rule 2: the student has just told us what they want. Stop guessing.
+      manualUntilRef.current = Date.now() + MANUAL_OVERRIDE_MS;
+      setAutoNotice(null);
+    }
+
     setMode(next);
     const room = roomRef.current;
     if (!room) return;
@@ -299,6 +357,45 @@ export default function LiveKitClassroom({
       setCameraOn(false);
     }
   }, [cameraOn]);
+
+  useEffect(() => {
+    applyModeRef.current = applyMode;
+  }, [applyMode]);
+
+  /** Everything the student drives goes through here, so it counts as manual. */
+  const changeMode = useCallback((next: QualityMode) => applyMode(next, "manual"), [applyMode]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      // A reconnect reports Lost, but it is a dropped socket rather than a slow
+      // link — downgrading someone for it would punish them for a blip.
+      if (statusRef.current !== "connected") return;
+      if (poorSinceRef.current === null) return;
+      if (now - poorSinceRef.current < POOR_HOLD_MS) return;
+      if (now < manualUntilRef.current) return;
+      if (now - lastAutoStepRef.current < AUTO_STEP_COOLDOWN_MS) return;
+
+      const current = modeRef.current;
+      const next = QUALITY_LADDER[QUALITY_LADDER.indexOf(current) + 1];
+      if (!next) return; // Already on audio — there is nothing left to give up.
+
+      lastAutoStepRef.current = now;
+      // Give the new rung a fair hearing before judging it too.
+      poorSinceRef.current = now;
+      setAutoNotice({ from: current, to: next });
+      applyModeRef.current(next, "auto");
+    }, 2_000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // The banner is an explanation, not a dialog. It says its piece and goes.
+  useEffect(() => {
+    if (!autoNotice) return;
+    const timer = setTimeout(() => setAutoNotice(null), 12_000);
+    return () => clearTimeout(timer);
+  }, [autoNotice]);
 
   const toggleMic = useCallback(async () => {
     const room = roomRef.current;
@@ -367,6 +464,25 @@ export default function LiveKitClassroom({
           ) : null}
         </div>
       </div>
+
+      {autoNotice ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-5 py-3 text-sm text-amber-200">
+          <p className="min-w-0 flex-1 leading-6">
+            Your connection was struggling, so we moved you from{" "}
+            <span className="font-semibold">{qualitySpec(autoNotice.from).label}</span> to{" "}
+            <span className="font-semibold">{qualitySpec(autoNotice.to).label}</span>.
+            {autoNotice.to === "audio"
+              ? " Your camera is off and the picture is gone, but you can still hear the lesson and still be heard."
+              : " Your audio is untouched."}
+          </p>
+          <button
+            onClick={() => changeMode(autoNotice.from)}
+            className="shrink-0 rounded-xl bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+          >
+            Put it back
+          </button>
+        </div>
+      ) : null}
 
       {status === "failed" ? (
         <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-6 text-sm text-rose-200">
@@ -460,8 +576,9 @@ export default function LiveKitClassroom({
 
       <p className="rounded-2xl bg-slate-900/60 px-5 py-3 text-xs leading-5 text-slate-400">
         <span className="font-semibold text-slate-200">{qualitySpec(mode).label}:</span> {qualitySpec(mode).description} Roughly{" "}
-        {qualitySpec(mode).dataHint.replace("~", "")}. If the video stutters, drop a level — your audio stays full quality at every
-        setting, and the class recording is always in your video library afterwards.
+        {qualitySpec(mode).dataHint.replace("~", "")}. If your connection struggles we drop a level for you automatically — you can
+        always put it back. Your audio stays full quality at every setting, and the class recording is always in your video library
+        afterwards.
       </p>
     </div>
   );

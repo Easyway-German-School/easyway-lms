@@ -1,5 +1,5 @@
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { derivePaymentStatus, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { NextResponse } from "next/server";
@@ -7,7 +7,7 @@ import { mayAutoCreateStudent } from "@/lib/candidates";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

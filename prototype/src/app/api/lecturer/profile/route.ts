@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import bcryptjs from "bcryptjs";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { LEVELS } from "@/lib/levels";
 import { cohortRoomName } from "@/lib/live-classroom";
@@ -17,8 +16,26 @@ export const dynamic = "force-dynamic";
 
 const SLOTS = ["morning", "afternoon", "evening"] as const;
 
-async function requireLecturer() {
-  const session = (await getServerSession(authOptions as any)) as any;
+type LecturerProfile = {
+  id: string;
+  userId: string;
+  status: string;
+  branchId: string | null;
+  level: string | null;
+  sessionSlot: string | null;
+  phone: string | null;
+  photoUrl: string | null;
+  bio: string | null;
+  specialization: string | null;
+  user: { id: string; name: string | null; email: string };
+  branch: { id: string; name: string; mode: string } | null;
+};
+
+type LecturerProfileAuth = { error: NextResponse } | { lecturer: LecturerProfile };
+
+async function requireLecturer(): Promise<LecturerProfileAuth> {
+  const session = await requireAuthSession();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   if (!session?.user?.id) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
@@ -47,7 +64,7 @@ async function requireLecturer() {
  */
 export async function GET() {
   const auth = await requireLecturer();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
   const { lecturer } = auth;
 
   const branches = await prisma.branch.findMany({
@@ -138,7 +155,7 @@ export async function GET() {
  */
 export async function PUT(request: NextRequest) {
   const auth = await requireLecturer();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
   const { lecturer } = auth;
 
   try {

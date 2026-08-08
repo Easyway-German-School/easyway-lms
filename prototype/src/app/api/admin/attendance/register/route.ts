@@ -33,6 +33,9 @@ export async function GET(request: NextRequest) {
   const dateParam = params.get("date");
 
   const branches = await prisma.branch.findMany({
+    where: gate.session.user.tenantId
+      ? { tenantId: gate.session.user.tenantId }
+      : {},
     orderBy: { name: "asc" },
     select: { id: true, name: true, mode: true },
   });
@@ -54,6 +57,9 @@ export async function GET(request: NextRequest) {
       level: level.toUpperCase(),
       ...(sessionSlot ? { sessionSlot } : {}),
       status: "active",
+      branch: gate.session.user.tenantId
+        ? { tenantId: gate.session.user.tenantId }
+        : undefined,
     },
     select: {
       id: true,

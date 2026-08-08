@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { resolveAdmin } from "@/lib/admin-roles";
+import { requireAdmin, type AdminContext } from "@/lib/admin-roles";
 import { ollamaWarm } from "@/lib/ollama";
 import { runTool, toolSpecsFor, type ToolOutcome } from "@/lib/assistant-tools";
 import { actionSpecsFor, isActionName } from "@/lib/assistant-actions";
@@ -305,18 +303,9 @@ number of people it affects and a Confirm button. You are drafting; they decide.
  */
 const MAX_TOOL_ROUNDS = 4;
 
-async function requireAssistantAdmin() {
-  const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
-  const admin = await resolveAdmin(session?.user?.id);
-  if (!admin) {
-    return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
-  }
-  return { admin };
-}
-
 export async function GET() {
-  const auth = await requireAssistantAdmin();
-  if (auth.error) return auth.error;
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
 
   const [status, briefing] = await Promise.all([
     brainStatus(),
@@ -355,8 +344,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAssistantAdmin();
-  if (auth.error) return auth.error;
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
 
   const body = await request.json().catch(() => ({}));
   const question = typeof body.question === "string" ? body.question.trim() : "";

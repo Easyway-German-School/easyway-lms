@@ -1,27 +1,12 @@
 import bcryptjs from "bcryptjs";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
 import { requireCapability } from "@/lib/admin-roles";
-async function isAdmin(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  return user?.role === "ADMIN";
-}
 
 export async function GET(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
-
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!await isAdmin(session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
 
   const url = new URL(request.url);
   const branchId = url.searchParams.get("branchId");
@@ -40,17 +25,14 @@ export async function GET(request: Request) {
   if (batch) whereClause.admission = { path: ["batch"], equals: batch };
   if (status) whereClause.status = status;
 
+  if (gate.session.user.tenantId) {
+    whereClause.branch = { tenantId: gate.session.user.tenantId };
+  }
+
   if (search) {
     whereClause.AND = whereClause.AND || [];
-    // No `mode: "insensitive"` here: SQLite does not support it and Prisma
-    // rejects the whole query, so every search returned a 500. SQLite's LIKE is
-    // already case-insensitive for ASCII, which is what these columns hold.
     whereClause.AND.push({
       OR: [
-        // `mode: "insensitive"` throughout: on SQLite a LIKE was already
-        // case-blind, so nobody ever typed a capital letter and lost a student.
-        // Postgres is not, and without this the office would search "chidi" and
-        // be told there is no such person.
         { user: { name: { contains: search, mode: "insensitive" } } },
         { user: { email: { contains: search, mode: "insensitive" } } },
       ],
@@ -101,15 +83,6 @@ export async function POST(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!await isAdmin(session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
-
   const body = await request.json().catch(() => ({}));
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
@@ -132,6 +105,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Email already registered" }, { status: 400 });
   }
 
+  if (gate.session.user.tenantId && branchId) {
+    const branch = await prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { tenantId: true },
+    });
+    if (!branch || branch.tenantId !== gate.session.user.tenantId) {
+      return NextResponse.json({ error: "Branch not found" }, { status: 404 });
+    }
+  }
+
   const hashedPassword = await bcryptjs.hash(password, 10);
 
   try {
@@ -141,6 +124,7 @@ export async function POST(request: Request) {
         name,
         password: hashedPassword,
         role: "STUDENT",
+        tenantId: gate.session.user.tenantId,
         student: {
           create: {
             level,
@@ -163,15 +147,6 @@ export async function PATCH(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!await isAdmin(session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
-
   const body = await request.json().catch(() => ({}));
   const studentId = typeof body.studentId === "string" ? body.studentId : "";
   const name = typeof body.name === "string" ? body.name.trim() : undefined;
@@ -191,8 +166,18 @@ export async function PATCH(request: Request) {
   }
 
   try {
-    const student = await prisma.student.findUnique({ where: { id: studentId }, include: { user: true } });
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        user: true,
+        branch: { select: { tenantId: true } },
+      },
+    });
     if (!student) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
+
+    if (gate.session.user.tenantId && student.branch?.tenantId !== gate.session.user.tenantId) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
@@ -207,23 +192,21 @@ export async function PATCH(request: Request) {
     if (name) updateUser.name = name;
     if (email) updateUser.email = email;
 
-    /**
-     * Resetting a student's password from the office.
-     *
-     * There is no self-service "forgot password" flow, and a locked-out student
-     * cannot be sent a reset link by an app with no email configured — so
-     * without this the only cure was editing the database by hand. A school
-     * secretary sets a temporary password and reads it to the student over the
-     * phone or WhatsApp, which is how the branches already work.
-     *
-     * Gated the same as every other admin write on this route: the `students`
-     * capability plus a confirmed admin account.
-     */
     if (newPassword) {
       if (newPassword.length < 8) {
         return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
       }
       updateUser.password = await bcryptjs.hash(newPassword, 10);
+    }
+
+    if (gate.session.user.tenantId && branchId) {
+      const branch = await prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { tenantId: true },
+      });
+      if (!branch || branch.tenantId !== gate.session.user.tenantId) {
+        return NextResponse.json({ error: "Branch not found" }, { status: 404 });
+      }
     }
 
     const updateStudent = {} as {
@@ -254,15 +237,6 @@ export async function DELETE(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!await isAdmin(session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
-
   const body = await request.json().catch(() => ({}));
   const studentId = typeof body.studentId === "string" ? body.studentId : "";
   if (!studentId) {
@@ -270,8 +244,15 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { userId: true, branch: { select: { tenantId: true } } },
+    });
     if (!student) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
+
+    if (gate.session.user.tenantId && student.branch?.tenantId !== gate.session.user.tenantId) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 

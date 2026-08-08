@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 
@@ -32,9 +31,8 @@ type Viewer = {
 };
 
 async function resolveViewer(): Promise<Viewer | null> {
-  const session = (await getServerSession(authOptions as never)) as
-    | { user?: { id?: string; email?: string } }
-    | null;
+  const session = await requireAuthSession();
+  if (!session) return null;
 
   const id = session?.user?.id;
   const email = session?.user?.email;

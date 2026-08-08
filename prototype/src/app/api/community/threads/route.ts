@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { authorizeChannel, isStaffRole } from "@/lib/community-spaces";
 import { markChannelRead } from "@/lib/community-unread";
@@ -8,7 +8,7 @@ import { sendPushToUsers, spaceMemberIds } from "@/lib/push";
 
 /** GET /api/community/threads?channelId=... — thread list for one channel. */
 export async function GET(request: Request) {
-  const session = await getServerSession(authOptions);
+  const session = await requireAuthSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -55,7 +55,7 @@ export async function GET(request: Request) {
 
 /** POST /api/community/threads — start a new thread. */
 export async function POST(request: Request) {
-  const session = await getServerSession(authOptions);
+  const session = await requireAuthSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

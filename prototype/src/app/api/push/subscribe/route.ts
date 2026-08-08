@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isPushConfigured, vapidPublicKey } from "@/lib/push";
 
@@ -14,7 +14,7 @@ export async function GET() {
 
 /** POST — store (or refresh) this device's push endpoint. */
 export async function POST(request: Request) {
-  const session = await getServerSession(authOptions);
+  const session = await requireAuthSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 
 /** DELETE — the member turned notifications off on this device. */
 export async function DELETE(request: Request) {
-  const session = await getServerSession(authOptions);
+  const session = await requireAuthSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

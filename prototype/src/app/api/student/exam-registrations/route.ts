@@ -1,5 +1,5 @@
 import { getServerSession, type Session } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
@@ -7,7 +7,7 @@ const DEFAULT_EXAM_CAPACITY = 30;
 
 export async function GET() {
   try {
-    const session = (await getServerSession(authOptions)) as Session | null;
+    const session = await requireAuthSession();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -48,7 +48,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = (await getServerSession(authOptions)) as Session | null;
+    const session = await requireAuthSession();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

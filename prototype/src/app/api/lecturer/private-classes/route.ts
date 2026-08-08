@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -15,8 +14,11 @@ export const dynamic = "force-dynamic";
 
 const STATUSES = ["scheduled", "completed", "cancelled", "postponed"];
 
-async function requireStaff() {
-  const session = (await getServerSession(authOptions as any)) as any;
+type LecturerPrivateClassesAuth = { error: NextResponse } | { userId: string; role: string; lecturerId: string | null };
+
+async function requireStaff(): Promise<LecturerPrivateClassesAuth> {
+  const session = await requireAuthSession();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   if (!session?.user?.id) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
@@ -37,7 +39,7 @@ async function requireStaff() {
 /** GET — private students, and the classes booked for one of them. */
 export async function GET(req: NextRequest) {
   const auth = await requireStaff();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   try {
     const studentId = req.nextUrl.searchParams.get("studentId");
@@ -101,7 +103,7 @@ export async function GET(req: NextRequest) {
 /** POST — book a new one-to-one class. */
 export async function POST(req: NextRequest) {
   const auth = await requireStaff();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   try {
     const body = await req.json();
@@ -155,7 +157,7 @@ export async function POST(req: NextRequest) {
 /** PUT — update or cancel an existing one-to-one class. */
 export async function PUT(req: NextRequest) {
   const auth = await requireStaff();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   try {
     const body = await req.json();

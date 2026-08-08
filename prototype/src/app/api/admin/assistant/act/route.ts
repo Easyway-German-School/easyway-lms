@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { resolveAdmin } from "@/lib/admin-roles";
+import { requireAdmin, type AdminContext } from "@/lib/admin-roles";
 import { cancelPlan, executePlan } from "@/lib/action-plans";
 
 export const dynamic = "force-dynamic";
@@ -29,22 +27,15 @@ export const dynamic = "force-dynamic";
  *   500  failed part-way               → go and look before retrying
  */
 
-async function requireAdmin() {
-  const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
-  const admin = await resolveAdmin(session?.user?.id);
-  if (!admin) {
-    return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
-  }
-  return { admin };
-}
-
 export async function POST(request: Request) {
   const auth = await requireAdmin();
-  if (auth.error) return auth.error;
+  if (auth instanceof NextResponse) return auth;
 
   const body = await request.json().catch(() => ({}));
   const planId = typeof body.planId === "string" ? body.planId : "";
   if (!planId) return NextResponse.json({ error: "Which action?" }, { status: 400 });
+
+  if (!auth.ok) return auth.response;
 
   if (body.cancel === true) {
     const cancelled = await cancelPlan(planId, auth.admin);

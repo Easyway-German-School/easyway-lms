@@ -1,23 +1,10 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { adminHasCapability } from "@/lib/admin-roles";
-
-async function isAdmin(userId: string) {
-  // Admin AND cleared for this area — see src/lib/admin-roles.ts.
-  return adminHasCapability(userId, "payments");
-}
+import { requireCapability } from "@/lib/admin-roles";
 
 export async function GET() {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!await isAdmin(session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const gate = await requireCapability("payments");
+  if (!gate.ok) return gate.response;
 
   const payments = await prisma.payment.findMany({
     orderBy: { createdAt: "desc" },
@@ -33,14 +20,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!await isAdmin(session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const gate = await requireCapability("payments");
+  if (!gate.ok) return gate.response;
 
   const body = await request.json().catch(() => ({}));
   const studentId = typeof body.studentId === "string" && body.studentId.trim() ? body.studentId : "";

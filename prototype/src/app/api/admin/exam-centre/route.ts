@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { adminHasCapability } from "@/lib/admin-roles";
+import { requireCapability } from "@/lib/admin-roles";
 import { EXAM_BODIES } from "@/lib/exam-centre";
 
 /** Staff view of the exam centre: schedule sittings, see who has booked. */
@@ -10,19 +8,14 @@ import { EXAM_BODIES } from "@/lib/exam-centre";
 export const dynamic = "force-dynamic";
 
 async function requireExamAdmin() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  if (!session?.user?.id) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  if (!(await adminHasCapability(session.user.id, "exams"))) {
-    return { error: NextResponse.json({ error: "Your admin role does not cover exams" }, { status: 403 }) };
-  }
-  return { userId: session.user.id as string };
+  const gate = await requireCapability("exams");
+  if (!gate.ok) return gate.response;
+  return { userId: gate.session.user.id as string };
 }
 
 export async function GET() {
   const auth = await requireExamAdmin();
-  if (auth.error) return auth.error;
+    if (auth instanceof NextResponse) return auth;
 
   const [exams, branches] = await Promise.all([
     prisma.exam.findMany({
@@ -58,7 +51,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const auth = await requireExamAdmin();
-  if (auth.error) return auth.error;
+    if (auth instanceof NextResponse) return auth;
 
   try {
     const b = await req.json();
@@ -103,7 +96,7 @@ export async function POST(req: NextRequest) {
 /** PATCH — publish/unpublish, or mark a registration paid. */
 export async function PATCH(req: NextRequest) {
   const auth = await requireExamAdmin();
-  if (auth.error) return auth.error;
+    if (auth instanceof NextResponse) return auth;
 
   try {
     const { examId, published, registrationId, paymentStatus, status } = await req.json();

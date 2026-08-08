@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { resolveSpaceScope } from "@/lib/community-spaces";
 import { unreadByChannel, totalUnread } from "@/lib/community-unread";
 import { prisma } from "@/lib/prisma";
@@ -16,7 +16,7 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
+  const session = await requireAuthSession();
   if (!session?.user?.id) {
     // Signed-out users simply have nothing waiting; not an error worth logging.
     return NextResponse.json({ total: 0 });

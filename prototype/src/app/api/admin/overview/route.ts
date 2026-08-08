@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { resolveAdmin } from "@/lib/admin-roles";
+import { requireAdmin } from "@/lib/admin-roles";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -25,15 +22,9 @@ function monthKey(date: Date) {
  * the whole page 403ing — a secretary still needs the student numbers.
  */
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const admin = await resolveAdmin(session.user.id as string);
-  if (!admin) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+  const admin = auth.admin;
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);

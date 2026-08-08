@@ -1,9 +1,7 @@
-import { getServerSession } from "next-auth";
 import bcryptjs from "bcryptjs";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
-import { resolveAdmin } from "@/lib/admin-roles";
+import { requireAdmin } from "@/lib/admin-roles";
 
 /**
  * An admin changing their own password.
@@ -22,13 +20,9 @@ import { resolveAdmin } from "@/lib/admin-roles";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
-  const session = (await getServerSession(authOptions as never)) as {
-    user?: { id?: string };
-  } | null;
-  const admin = await resolveAdmin(session?.user?.id);
-  if (!admin) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+  const admin = auth.admin;
 
   const body = await req.json().catch(() => null);
   const currentPassword = typeof body?.currentPassword === "string" ? body.currentPassword : "";

@@ -1,29 +1,14 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolveAdmin } from "@/lib/admin-roles";
 import { inviteLeads, importLeadsFromCsv } from "@/lib/leads";
+import { requireCapability } from "@/lib/admin-roles";
 
 export const dynamic = "force-dynamic";
 
-async function requireStudentsAdmin() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  const admin = await resolveAdmin(session?.user?.id);
-
-  if (!admin) {
-    return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
-  }
-  if (!admin.can("students")) {
-    return { error: NextResponse.json({ error: "Your admin role cannot manage enquiries" }, { status: 403 }) };
-  }
-  return { admin };
-}
-
 /** GET — the enquiry list, with counts per status for the summary row. */
 export async function GET(req: NextRequest) {
-  const auth = await requireStudentsAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireCapability("students");
+  if (!gate.ok) return gate.response;
 
   try {
     const status = req.nextUrl.searchParams.get("status");
@@ -80,8 +65,8 @@ export async function GET(req: NextRequest) {
 
 /** POST — invite, drop, or bulk-import. */
 export async function POST(req: NextRequest) {
-  const auth = await requireStudentsAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireCapability("students");
+  if (!gate.ok) return gate.response;
 
   try {
     const body = await req.json();

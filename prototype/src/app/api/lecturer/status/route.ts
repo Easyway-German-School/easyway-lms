@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { LECTURER_STATUS_META, readLecturerStatus } from "@/lib/lecturer-status";
 
@@ -16,9 +15,7 @@ export const dynamic = "force-dynamic";
  * because it runs on every navigation inside the portal.
  */
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as
-    | { user?: { id?: string; role?: string } }
-    | null;
+  const session = await requireAuthSession();
 
   const userId = session?.user?.id;
   const role = String(session?.user?.role ?? "").toLowerCase();

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { dayKey } from '@/lib/class-sessions';
@@ -8,7 +7,7 @@ import { readAssignment, studentWhereForAssignment } from '@/lib/lecturer-assign
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
 
     if (!session || session.user.role !== 'lecturer') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -62,7 +61,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
 
     if (!session || String(session.user?.role ?? '').toLowerCase() !== 'lecturer') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

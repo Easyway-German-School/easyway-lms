@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { authorizeChannel } from "@/lib/community-spaces";
 import { markChannelRead } from "@/lib/community-unread";
 
 /** POST /api/community/read — clear the unread badge on a channel. */
 export async function POST(request: Request) {
-  const session = await getServerSession(authOptions);
+  const session = await requireAuthSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

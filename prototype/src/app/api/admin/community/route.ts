@@ -1,8 +1,6 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
-import { adminHasCapability } from "@/lib/admin-roles";
+import { requireCapability } from "@/lib/admin-roles";
 
 /**
  * Admin moderation for the community hub.
@@ -13,26 +11,10 @@ import { adminHasCapability } from "@/lib/admin-roles";
  * routes are what lecturers use.
  */
 
-async function isAdmin(userId: string) {
-  // Admin AND cleared for this area — see src/lib/admin-roles.ts.
-  return adminHasCapability(userId, "community");
-}
-
-async function requireAdmin() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  if (!session?.user?.id) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  if (!(await isAdmin(session.user.id))) {
-    return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
-  }
-  return { userId: session.user.id as string };
-}
-
 /** GET — every thread, newest activity first, optionally filtered. */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireCapability("community");
+  if (!gate.ok) return gate.response;
 
   try {
     const { searchParams } = new URL(req.url);
@@ -99,8 +81,8 @@ export async function GET(req: NextRequest) {
 
 /** PATCH — pin or unpin a thread. */
 export async function PATCH(req: NextRequest) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireCapability("community");
+  if (!gate.ok) return gate.response;
 
   try {
     const { id, pinned } = await req.json();
@@ -126,8 +108,8 @@ export async function PATCH(req: NextRequest) {
  * `type` defaults to "thread" so an id alone behaves as it always did.
  */
 export async function DELETE(req: NextRequest) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireCapability("community");
+  if (!gate.ok) return gate.response;
 
   try {
     const { id, type } = await req.json();

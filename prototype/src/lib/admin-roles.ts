@@ -1,3 +1,4 @@
+import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -166,15 +167,21 @@ export async function adminHasCapability(userId: string, capability: Capability)
  */
 export async function requireCapability(
   capability: Capability,
-): Promise<{ ok: true; admin: AdminContext } | { ok: false; response: Response }> {
+): Promise<{ ok: true; admin: AdminContext; session: Session } | { ok: false; response: Response }> {
   // Imported here rather than at the top: this module is pulled into client
   // bundles for its label maps, and next-auth's server entry must not follow.
-  const { getServerSession } = await import("next-auth");
-  const { authOptions } = await import("@/lib/auth");
+  const { requireAuthSession } = await import("@/lib/auth");
   const { NextResponse } = await import("next/server");
 
-  const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
-  const admin = await resolveAdmin(session?.user?.id);
+  const session = await requireAuthSession();
+  if (!session) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+
+  const admin = await resolveAdmin(session.user.id);
 
   /**
    * Name the actor for everything this request goes on to write.
@@ -228,7 +235,33 @@ export async function requireCapability(
     };
   }
 
-  return { ok: true, admin };
+  return { ok: true, admin, session };
+}
+
+export async function requireAdmin(): Promise<
+  | { ok: true; admin: AdminContext; session: Session }
+  | { ok: false; response: Response }
+> {
+  const { requireAuthSession } = await import("@/lib/auth");
+  const { NextResponse } = await import("next/server");
+
+  const session = await requireAuthSession();
+  if (!session) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+
+  const admin = await resolveAdmin(session.user.id);
+  if (!admin) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Admin access required" }, { status: 403 }),
+    };
+  }
+
+  return { ok: true, admin, session };
 }
 
 export type AdminContext = {

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import bcryptjs from "bcryptjs";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { assignStudentCode } from "@/lib/student-code";
 import { LEVELS } from "@/lib/levels";
@@ -49,27 +47,9 @@ function tempPassword(): string {
   return `Easyway${Math.floor(1000 + Math.random() * 9000)}!`;
 }
 
-async function requireAdmin() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  if (!session?.user?.id) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { role: true },
-  });
-  if ((user?.role ?? "").toLowerCase() !== "admin") {
-    return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
-  }
-  return { ok: true as const };
-}
-
 export async function POST(request: NextRequest) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
-
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
 
   try {
     const body = await request.json().catch(() => ({}));
