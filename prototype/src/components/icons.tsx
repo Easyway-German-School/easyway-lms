@@ -748,6 +748,26 @@ export const SignalIcon = icon("SignalIcon", (
   </>
 ));
 
+/** Go edge-to-edge. Four corners opening outwards. */
+export const ExpandIcon = icon("ExpandIcon", (
+  <>
+    <path d="M9 3H5a2 2 0 0 0-2 2v4" />
+    <path d="M15 3h4a2 2 0 0 1 2 2v4" />
+    <path d="M15 21h4a2 2 0 0 0 2-2v-4" />
+    <path d="M9 21H5a2 2 0 0 1-2-2v-4" />
+  </>
+));
+
+/** Leave edge-to-edge. The same four corners, folding back in. */
+export const ShrinkIcon = icon("ShrinkIcon", (
+  <>
+    <path d="M3 9h4a2 2 0 0 0 2-2V3" />
+    <path d="M21 9h-4a2 2 0 0 1-2-2V3" />
+    <path d="M21 15h-4a2 2 0 0 0-2 2v4" />
+    <path d="M3 15h4a2 2 0 0 1 2 2v4" />
+  </>
+));
+
 export const HandIcon = icon("HandIcon", (
   <>
     <path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11" />

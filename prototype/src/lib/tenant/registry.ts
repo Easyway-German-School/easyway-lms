@@ -76,6 +76,20 @@ export const TENANT_OWNED_MODELS = [
   "AdminAction",
   "AuditLog",
   "BackupRun",
+
+  /**
+   * Both already carry a non-null `tenantId`, so the column script skips them.
+   *
+   * Listed as tenant-owned because of how they are READ in the partner
+   * dashboard: "show me my API keys" must never be able to show somebody
+   * else's. The pre-authentication lookup in resolveApiKey() is unaffected —
+   * it deliberately uses the raw client, because finding the key is precisely
+   * how the tenant gets identified in the first place. That is the one query
+   * that cannot be tenant-scoped, and it is scoped by a 256-bit secret
+   * instead.
+   */
+  "ApiKey",
+  "IdempotencyRecord",
 ] as const;
 
 /**

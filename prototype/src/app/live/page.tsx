@@ -10,7 +10,8 @@ import StudentShell from "@/components/StudentShell";
 import LecturerShell from "@/components/LecturerShell";
 import JitsiClassroom from "@/components/live/JitsiClassroom";
 import LiveKitClassroom from "@/components/live/LiveKitClassroom";
-import { QUALITY_MODES, qualitySpec, type QualityMode, type RoomRole } from "@/lib/live-classroom";
+import PreflightCheck from "@/components/live/PreflightCheck";
+import { qualityModesFor, qualitySpec, type QualityMode, type RoomRole } from "@/lib/live-classroom";
 
 type LiveSession = {
   provider: "livekit" | "jitsi";
@@ -46,6 +47,9 @@ function Lobby({
   onModeChange: (mode: QualityMode) => void;
   onJoin: () => void;
 }) {
+  // A tutor is offered Sharp and nothing else — see `qualityModesFor()`.
+  const choices = qualityModesFor(session.role);
+
   return (
     <div className="space-y-6">
       <div className="rounded-3xl bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] p-8 text-white shadow-xl">
@@ -61,28 +65,39 @@ function Lobby({
       </div>
 
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-        <h2 className="text-lg font-semibold">Choose your video quality</h2>
+        <h2 className="text-lg font-semibold">{choices.length > 1 ? "Choose your video quality" : "You teach in Sharp"}</h2>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          We have pre-selected <span className="font-semibold text-[var(--foreground)]">{qualitySpec(mode).label}</span>
-          {session.isOnlineBranch
-            ? " based on the connection you told us about at signup."
-            : " as a safe starting point."}{" "}
-          You can change it at any point during class.
+          {choices.length > 1 ? (
+            <>
+              We have pre-selected <span className="font-semibold text-[var(--foreground)]">{qualitySpec(mode).label}</span>
+              {session.isOnlineBranch
+                ? " based on the connection you told us about at signup."
+                : " as a safe starting point."}{" "}
+              You can change it at any point during class.
+            </>
+          ) : (
+            <>
+              Your class is subscribed to you, so the server sends each student the best layer their own line can carry. Turning your
+              own quality down would turn it down for everybody — so there is nothing to choose here. Each student picks their own.
+            </>
+          )}
         </p>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          {QUALITY_MODES.map((spec) => {
+        <div className={`mt-5 grid gap-3 ${choices.length > 1 ? "sm:grid-cols-2" : ""}`}>
+          {choices.map((spec) => {
             const active = spec.value === mode;
+            const single = choices.length === 1;
             return (
               <button
                 key={spec.value}
                 type="button"
+                disabled={single}
                 onClick={() => onModeChange(spec.value)}
                 className={`rounded-2xl border p-4 text-left transition ${
                   active
                     ? "border-[var(--accent)] bg-[var(--accent-soft)] shadow-[0_8px_24px_rgba(10,124,255,0.12)]"
                     : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-slate-300"
-                }`}
+                } ${single ? "cursor-default" : ""}`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold text-[var(--foreground)]">{spec.label}</span>
@@ -101,6 +116,7 @@ function Lobby({
           >
             Join the class
           </button>
+          <span className="text-xs text-[var(--muted)]">You can change any of this during the lesson.</span>
           <Link
             href={session.role === "tutor" ? "/lecturer/dashboard" : "/dashboard"}
             className="rounded-full border border-[var(--border)] px-6 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
@@ -109,6 +125,13 @@ function Lobby({
           </Link>
         </div>
       </div>
+
+      {/*
+        The pre-flight sits BELOW the quality choice and ABOVE the reassurance
+        cards, because it depends on the quality: an audio-only student is never
+        asked for a camera, so they are never shown one failing.
+      */}
+      <PreflightCheck wantsVideo={qualitySpec(mode).publishesVideo} />
 
       <div className="grid gap-4 sm:grid-cols-3">
         {[

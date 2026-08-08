@@ -153,10 +153,36 @@ export async function POST(request: Request) {
         },
       });
 
-      await prisma.invoice.update({
-        where: { id: existingPayment.invoiceId ?? "" },
-        data: { status: paymentClassification.invoiceStatus },
-      }).catch(() => null);
+      /**
+       * Mark the invoice paid — but only when there is one.
+       *
+       * This was `where: { id: existingPayment.invoiceId ?? "" }` with a
+       * `.catch(() => null)`. Twenty-one of thirty-six completed payments have
+       * no invoice, so that fell through to a lookup for id `""`, Prisma threw
+       * P2025, and the catch ate it. Nothing was broken by it — those payments
+       * genuinely have no invoice to update — but it meant a REAL failure here
+       * was indistinguishable from the ordinary case. A connection blip while
+       * marking an invoice paid would leave a student showing as owing money
+       * they had paid, behind a paywall, and nobody would ever find out.
+       *
+       * Now the no-invoice case is a condition rather than an exception, and a
+       * genuine failure is logged loudly instead of discarded. Still not
+       * allowed to throw: the money is already recorded above, and rejecting
+       * the webhook would make Paystack retry a payment we have accepted.
+       */
+      if (existingPayment.invoiceId) {
+        try {
+          await prisma.invoice.update({
+            where: { id: existingPayment.invoiceId },
+            data: { status: paymentClassification.invoiceStatus },
+          });
+        } catch (error) {
+          console.error(
+            `[paystack] payment ${existingPayment.id} recorded, but invoice ${existingPayment.invoiceId} could not be marked ${paymentClassification.invoiceStatus}:`,
+            error,
+          );
+        }
+      }
 
       await enrollIfPathwayExists({ studentId: student.id, pathwayId, reference: paymentReference });
 

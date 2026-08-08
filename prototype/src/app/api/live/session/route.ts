@@ -9,6 +9,7 @@ import { isOnlineBranch, initialVideoQualityFor, readOnlineProfile } from "@/lib
 import { ensureRecordingStarted } from "@/lib/class-recorder";
 import {
   cohortRoomName,
+  initialQualityFor,
   liveKitConfigured,
   privateRoomName,
   roomDisplayName,
@@ -120,9 +121,12 @@ export async function GET(request: Request) {
     // rather than making them discover Data Saver during a frozen lesson.
     // Everyone else starts Balanced, which is safe on a campus network.
     const onlineProfile = student ? readOnlineProfile(student.admission) : {};
-    const initialQuality: QualityMode = isOnlineBranch(branch)
+    const preferredQuality: QualityMode = isOnlineBranch(branch)
       ? initialVideoQualityFor(onlineProfile.connection)
       : "medium";
+    // A tutor is pinned to Sharp regardless of what the branch would suggest —
+    // the room is subscribed to them, so their layer is everyone's ceiling.
+    const initialQuality: QualityMode = initialQualityFor(role, preferredQuality);
 
     const context = {
       roomName,
@@ -160,6 +164,16 @@ export async function GET(request: Request) {
       canPublish: true,
       canSubscribe: true,
       canPublishData: true,
+      /**
+       * Needed for hand-raise, and only for that.
+       *
+       * A raised hand has to survive a student joining ten minutes late, so it
+       * lives in the participant's own attributes rather than in a fire-and-
+       * forget data message. This is the permission to write those. It lets a
+       * participant edit their OWN attributes and nobody else's, which is
+       * exactly the scope wanted — the tutor-only powers stay in `roomAdmin`.
+       */
+      canUpdateOwnMetadata: true,
       // Only a tutor can mute others, remove a participant, or end the class.
       roomAdmin: role === "tutor",
     });

@@ -168,6 +168,35 @@ export function qualitySpec(mode: QualityMode): QualityModeSpec {
 }
 
 /**
+ * Which rungs this person is offered.
+ *
+ * **A tutor gets one: Sharp.** Not a restriction for its own sake — the tutor is
+ * the only publisher the whole room is subscribed to, so a tutor who drops to
+ * Data saver hands every student in the class a 180p lesson to save one person's
+ * bandwidth. That is the wrong trade in every direction, and it is the kind of
+ * setting somebody changes once "to test something" and never changes back.
+ *
+ * Students keep all four. They are the ones on mobile data, they are the ones
+ * whose own downlink is the constraint, and turning their own tile down costs
+ * nobody else anything.
+ *
+ * The tutor still is not stuck with a frozen picture: `adaptiveStream` and
+ * `dynacast` keep negotiating underneath, and the layer a student actually
+ * receives is still chosen per-student by the server. This governs the menu, not
+ * the transport.
+ */
+export function qualityModesFor(role: RoomRole): QualityModeSpec[] {
+  if (role === "tutor") return QUALITY_MODES.filter((spec) => spec.value === "high");
+  return QUALITY_MODES;
+}
+
+/** Where this person's classroom opens. A tutor always opens Sharp. */
+export function initialQualityFor(role: RoomRole, preferred: QualityMode): QualityMode {
+  const allowed = qualityModesFor(role);
+  return allowed.some((spec) => spec.value === preferred) ? preferred : allowed[0].value;
+}
+
+/**
  * What a student is allowed to do in the room.
  *
  * A tutor publishes and moderates; a student publishes their own camera and

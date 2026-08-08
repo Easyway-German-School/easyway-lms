@@ -130,6 +130,76 @@ model Tenant {
 
   users     User[]
   branches  Branch[]
+  apiKeys   ApiKey[]
+  idempotencyRecords IdempotencyRecord[]
+}
+
+/// A partner's credential for the public API.
+///
+/// New table, so it ships ahead of the tenant migration without touching any
+/// existing read. See src/lib/api/keys.ts for the format and why it has both a
+/// prefix and a hash.
+model ApiKey {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// What the partner calls it. Shown in their dashboard, never used for auth.
+  name String
+
+  /// The non-secret half — `ewk_live_a1b2c3d4`. Unique, indexed, and safe to
+  /// log. Without it, "which key made this call?" can only be answered by
+  /// storing the secret, and a support conversation about a misbehaving
+  /// integration turns into a request to paste a live credential into a chat.
+  prefix String @unique
+
+  /// sha256 of the whole key. The secret half exists once, in the response
+  /// that created it.
+  keyHash String @unique
+
+  /// live | test. A test key reaches the same endpoints and never touches
+  /// real money or real students — no engineering team will integrate without
+  /// somewhere safe to make mistakes.
+  environment String @default("test")
+
+  /// Comma-separated grants, e.g. "students:read,payments:read".
+  scopes String @default("")
+
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId, revokedAt])
+}
+
+/// The answer we already gave to a request the partner is repeating.
+///
+/// Networks time out after the work is done. Without this, a partner's retry
+/// enrols the student twice and charges them twice, and they cannot tell
+/// whether the first call worked — which makes retrying unsafe, which makes
+/// the API unusable for anything that matters.
+model IdempotencyRecord {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// The partner's own key, unique per tenant rather than globally: two
+  /// partners must be able to pick the same string without colliding.
+  key String
+
+  /// sha256 of method + path + body. Reusing one key for a DIFFERENT request
+  /// is a bug in the caller, and answering it with the old response would
+  /// silently drop the new one — so it is refused instead.
+  requestHash String
+
+  statusCode   Int
+  responseBody String
+
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, key])
+  @@index([createdAt])
 }
 
 model Student {

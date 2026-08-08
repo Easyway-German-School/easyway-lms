@@ -32,6 +32,9 @@ const TENANT_OWNED = [
   "Thread", "Comment", "ClassRecording", "VideoProgress", "MissionProgress",
   "PersonalizedPlan", "JourneyEvent", "IntegrationConnector", "AdminAction",
   "AuditLog", "BackupRun",
+  // Already carry a non-null tenantId of their own; listed so the registry and
+  // this script agree, and skipped by the "already present" check below.
+  "ApiKey", "IdempotencyRecord",
 ];
 
 const write = process.argv.includes("--write");
