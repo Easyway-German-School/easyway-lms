@@ -45,7 +45,7 @@
  */
 
 import { EgressClient, EncodedFileOutput, EncodedFileType, EncodingOptions, S3Upload } from "livekit-server-sdk";
-import { objectStorage } from "@/lib/storage";
+import { recordingObjectStorage } from "@/lib/storage";
 
 /**
  * Tuned for a classroom rather than a film set.
@@ -111,17 +111,10 @@ export type RecordingStorage = {
  * class. A tutor must always be able to teach.
  */
 export function recordingStorage(): RecordingStorage | null {
-  // Same bucket resolver the uploads use, so one set of credentials serves
-  // both. The public base is the one difference: recordings are streamed and
-  // carry no personal documents, so they are served from a CDN rather than
-  // through the app's own auth-checked /api/files route.
-  const storage = objectStorage();
-  if (!storage) return null;
-
-  return {
-    ...storage,
-    publicBaseUrl: process.env.RECORDING_PUBLIC_BASE_URL || storage.publicBaseUrl,
-  };
+  // `RECORDING_S3_*` wins here and `STORAGE_S3_*` is the fallback, so one key
+  // pair can still serve both — but a school that wants recordings in their own
+  // bucket gets it by setting the recording vars, and nothing else moves.
+  return recordingObjectStorage();
 }
 
 export function recordingConfigured(): boolean {
@@ -162,20 +155,26 @@ export function recordingObjectKey(input: {
 /**
  * The URL the student's player will hit.
  *
- * Prefers an explicit public base (an R2 custom domain or CDN hostname), then
- * falls back to the bucket endpoint. Returning a path when neither is set is
- * intentional: the row is still created and the recording is still safe in the
- * bucket, and an admin can fix the base URL later without losing the class.
+ * With `RECORDING_PUBLIC_BASE_URL` set, that is a CDN or custom domain in front
+ * of a public bucket, and the bytes never touch this app.
+ *
+ * Without it, the file is served through `/api/files/<key>` — the same
+ * authenticated, Range-aware route the uploads use, so the player can still
+ * seek and scrub. This is the safe default and, on Backblaze and R2 alike, the
+ * common one: making a bucket public is a billing decision as much as a
+ * technical one, and a school should not have to make it to get playback.
+ *
+ * What it must NEVER do is return the raw bucket endpoint, which is what it
+ * used to do. On a private bucket that URL is an unsigned request to an
+ * authenticated host: a guaranteed 403, written into `Material.filePath`, for a
+ * recording that captured and uploaded perfectly.
  */
 export function recordingPublicUrl(objectKey: string, storage = recordingStorage()): string {
-  if (!storage) return objectKey;
-  if (storage.publicBaseUrl) {
-    return `${storage.publicBaseUrl.replace(/\/+$/, "")}/${objectKey}`;
+  const key = objectKey.replace(/^\/+/, "");
+  if (storage?.publicBaseUrl) {
+    return `${storage.publicBaseUrl.replace(/\/+$/, "")}/${key}`;
   }
-  if (storage.endpoint) {
-    return `${storage.endpoint.replace(/\/+$/, "")}/${storage.bucket}/${objectKey}`;
-  }
-  return `https://${storage.bucket}.s3.${storage.region}.amazonaws.com/${objectKey}`;
+  return `/api/files/${key}`;
 }
 
 /** The egress output description LiveKit writes to. */

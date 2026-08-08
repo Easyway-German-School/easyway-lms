@@ -14,6 +14,12 @@ import { NextResponse } from "next/server";
  */
 export const INACTIVE_LECTURER_ROLE = "inactive_lecturer";
 
+/**
+ * The role a session carries once the account's password has been reset out
+ * from under it. Not a real role — every route refuses it, which is the point.
+ */
+export const REVOKED_SESSION_ROLE = "revoked_session";
+
 const normalizeRole = (value: unknown) => String(value || "STUDENT").toLowerCase();
 
 export const authOptions: AuthOptions = {
@@ -201,11 +207,71 @@ export const authOptions: AuthOptions = {
         token.id = user.id;
         token.role = normalizeRole(user.role);
         token.tenantId = user.tenantId;
+        // Sign-in time. Anything reset after this invalidates the token.
+        token.issuedAt = Date.now();
+        token.pwCheckedAt = Date.now();
       }
+
+      /**
+       * A password reset must end the sessions that existed before it.
+       *
+       * Otherwise the feature does not do the job people actually use it for.
+       * Someone resets their password precisely because they think another
+       * person is in their account — and with 30-day JWTs, that person keeps
+       * the roster, the marks and the payment history for the rest of the
+       * month regardless.
+       *
+       * Checked here rather than in the session callback, and throttled,
+       * because the session callback runs on every `getServerSession` — that
+       * is a database round trip per API call, forever, for every user. Every
+       * five minutes bounds the cost to something negligible and bounds the
+       * attacker's remaining window to five minutes, which is the right trade
+       * against a 30-day one.
+       */
+      const CHECK_EVERY_MS = 5 * 60 * 1000;
+      const lastChecked = Number(token.pwCheckedAt ?? 0);
+
+      if (token.id && Date.now() - lastChecked > CHECK_EVERY_MS) {
+        try {
+          const { lastPasswordResetAt } = await import("@/lib/password-reset");
+          const resetAt = await lastPasswordResetAt(token.id as string);
+          const issuedAt = Number(token.issuedAt ?? 0);
+
+          if (resetAt && issuedAt && resetAt.getTime() > issuedAt) {
+            token.revoked = true;
+          }
+          token.pwCheckedAt = Date.now();
+        } catch {
+          /**
+           * Fail open, deliberately, and for the same reason the tutor status
+           * check below does: a database blip must not sign the whole school
+           * out mid-lesson. It also means this works before the
+           * PasswordResetToken table has been pushed — the query throws, the
+           * check is skipped, and everything else carries on.
+           */
+        }
+      }
+
       return token;
     },
     async session({ session, token }: { session: any; token: JWT }) {
       if (session.user) {
+        /**
+         * A token issued before the password was reset carries no role.
+         *
+         * Same seam the revoked-tutor check below uses, for the same reason:
+         * every route already refuses a session whose role it does not
+         * recognise, so dropping the role here locks all of them at once
+         * rather than requiring each to remember a new check. The identity is
+         * kept so the portal can explain itself instead of the session
+         * silently evaporating.
+         */
+        if (token.revoked) {
+          session.user.id = token.id as string;
+          session.user.role = REVOKED_SESSION_ROLE;
+          return session;
+        }
+
         session.user.id = token.id as string;
         session.user.role = normalizeRole(token.role || "STUDENT");
         session.user.tenantId = token.tenantId as string | undefined;

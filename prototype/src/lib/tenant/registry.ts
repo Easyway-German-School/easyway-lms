@@ -108,6 +108,22 @@ export const GLOBAL_MODELS = {
   Session: "per-user auth token, resolved through User",
 
   /**
+   * Reset tokens, reached only by exact hash and never listed.
+   *
+   * Global for a reason that is easy to get wrong: the reset flow runs
+   * *before* anyone is signed in, so there is no session and therefore no
+   * tenant to scope by. A tenant filter here would not add safety — the
+   * lookup key is already 256 bits of unguessable secret, and it is unique
+   * across the whole table — but it would break the flow entirely, because
+   * the one moment we need to find the row is the one moment we cannot know
+   * whose tenant to look in.
+   *
+   * The tenant boundary is enforced one step later instead: the token points
+   * at a User, and User carries the tenant.
+   */
+  PasswordResetToken: "looked up by unguessable hash, pre-authentication; tenant comes from the User it points at",
+
+  /**
    * Carries its own tenantId already and is the join point for the others.
    */
   User: "tenant column already present; scoped by the extension directly",

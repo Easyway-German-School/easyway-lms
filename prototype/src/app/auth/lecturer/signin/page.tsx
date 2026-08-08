@@ -82,12 +82,19 @@ function LecturerSignInContent() {
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-[var(--muted)]">
-              Password
-            </label>
+            <div className="flex items-baseline justify-between gap-3">
+              <label htmlFor="password" className="block text-sm font-medium text-[var(--muted)]">
+                Password
+              </label>
+              {/* Tutors reset through the same flow as students — the token is
+                  issued against the User row, which is role-agnostic. */}
+              <a href="/auth/forgot" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                Forgot password?
+              </a>
+            </div>
             <PasswordInput
               id="password"
-                            value={password}
+              value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               className="mt-2 w-full px-4 py-2 bg-[var(--surface-alt)] border border-[var(--border)] rounded-lg text-[var(--foreground)] focus:outline-none focus:border-[var(--accent)]"

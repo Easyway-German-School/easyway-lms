@@ -106,7 +106,15 @@ export default function SignInForm() {
               </div>
 
               <div>
-                <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Password</label>
+                <div className="mb-1.5 flex items-baseline justify-between gap-3">
+                  <label htmlFor="password" className="block text-sm font-medium text-[var(--foreground)]">Password</label>
+                  {/* Beside the field rather than below the button: somebody who
+                      cannot remember their password realises it here, not after
+                      failing to sign in. */}
+                  <Link href="/auth/forgot" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                    Forgot password?
+                  </Link>
+                </div>
                 <PasswordInput
                   id="password"
                   value={password}

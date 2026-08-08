@@ -55,6 +55,8 @@ model User {
    */
   passwordClaimed   Boolean @default(true)
 
+  passwordResetTokens PasswordResetToken[]
+
   /**
    * The TOTP shared secret, encrypted at rest. See src/lib/mfa.ts.
    * Encrypted rather than stored plainly because a secret sitting in the clear
@@ -2125,4 +2127,41 @@ model BackupRun {
 
   @@index([kind, status, startedAt])
   @@index([startedAt])
+}
+
+/// A single-use, short-lived permission to set a new password.
+///
+/// A NEW TABLE rather than columns on User, deliberately. Adding a column to a
+/// populated table means the generated client selects something the live
+/// database does not have yet, which is an error on every read until the push
+/// lands. A new table only breaks queries against itself, so this can ship
+/// ahead of its migration and simply not work until pushed.
+model PasswordResetToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// sha256 of the token, never the token.
+  ///
+  /// Same reasoning as the password column beside it: this table is a list of
+  /// live "become this person" credentials, so a database dump must not be a
+  /// list of working reset links. The raw value exists only in the email.
+  tokenHash String @unique
+
+  /// One hour. Long enough for someone to find the mail, short enough that a
+  /// forwarded or archived message stops being a key by the afternoon.
+  expiresAt DateTime
+
+  /// Set the moment it is spent. Presence here means the token is dead, and
+  /// the most recent one also tells the session layer when this account's
+  /// password last changed.
+  usedAt DateTime?
+
+  /// Kept for abuse investigation — whose connection asked for this.
+  requestedIp String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, usedAt])
+  @@index([expiresAt])
 }
