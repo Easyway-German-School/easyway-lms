@@ -30,6 +30,8 @@ model User {
   name              String?
   password          String
   role              Role    @default(STUDENT)
+  tenantId          String?
+  tenant            Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   /**
    * Which kind of admin, when role is ADMIN: super | secretary | data_comm.
    * Null for everyone else. Deliberately a separate field rather than more
@@ -114,6 +116,18 @@ model Session {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users     User[]
+  branches  Branch[]
 }
 
 model Student {
@@ -409,6 +423,8 @@ model Branch {
   id        String   @id @default(cuid())
   name      String   @unique
   location  String?
+  tenantId  String?
+  tenant    Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   status    String   @default("active")
   /**
    * physical | online. The online branch is a real branch — it has its own

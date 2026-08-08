@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { adminHasCapability } from "@/lib/admin-roles";
+import { requireTenantSession, tenantScopeForPayment } from "@/lib/tenant-access";
 
 async function isAdmin(userId: string) {
   // Admin AND cleared for this area — see src/lib/admin-roles.ts.
@@ -10,16 +9,17 @@ async function isAdmin(userId: string) {
 }
 
 export async function GET() {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  if (!await isAdmin(session.user.id)) {
+  if (!await isAdmin(auth.session.user.id)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
+  const where = tenantScopeForPayment(auth.tenantId);
+
   const payments = await prisma.payment.findMany({
+    where,
     orderBy: { createdAt: "desc" },
     include: {
       student: {
@@ -33,12 +33,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  if (!await isAdmin(session.user.id)) {
+  if (!await isAdmin(auth.session.user.id)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -56,6 +54,15 @@ export async function POST(request: Request) {
   }
 
   try {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { user: { select: { tenantId: true } } },
+    });
+
+    if (auth.tenantId && (!student || student.user.tenantId !== auth.tenantId)) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
+
     const payment = await prisma.payment.create({
       data: {
         studentId,

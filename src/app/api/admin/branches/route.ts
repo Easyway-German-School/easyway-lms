@@ -1,8 +1,7 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { adminHasCapability } from "@/lib/admin-roles";
+import { requireTenantSession, tenantScopeForUser } from "@/lib/tenant-access";
 
 async function isAdmin(userId: string) {
   // Admin AND cleared for this area — see src/lib/admin-roles.ts.
@@ -10,16 +9,17 @@ async function isAdmin(userId: string) {
 }
 
 export async function GET() {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  if (!await isAdmin(session.user.id)) {
+  if (!await isAdmin(auth.session.user.id)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
+  const where: Record<string, unknown> = tenantScopeForUser(auth.tenantId);
+
   const branches = await prisma.branch.findMany({
+    where,
     orderBy: { name: "asc" },
   });
 
@@ -27,12 +27,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  if (!await isAdmin(session.user.id)) {
+  if (!await isAdmin(auth.session.user.id)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -51,6 +49,7 @@ export async function POST(request: Request) {
         name,
         location: location || null,
         status,
+        ...(auth.tenantId ? { tenantId: auth.tenantId } : {}),
       },
     });
     return NextResponse.json({ branch }, { status: 201 });
@@ -60,12 +59,10 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  if (!await isAdmin(session.user.id)) {
+  if (!await isAdmin(auth.session.user.id)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -80,6 +77,16 @@ export async function PATCH(request: Request) {
   }
 
   try {
+    if (auth.tenantId) {
+      const existing = await prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { tenantId: true },
+      });
+      if (!existing || existing.tenantId !== auth.tenantId) {
+        return NextResponse.json({ error: "Branch not found" }, { status: 404 });
+      }
+    }
+
     const branch = await prisma.branch.update({
       where: { id: branchId },
       data: {
@@ -95,12 +102,10 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  if (!await isAdmin(session.user.id)) {
+  if (!await isAdmin(auth.session.user.id)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -111,6 +116,16 @@ export async function DELETE(request: Request) {
   }
 
   try {
+    if (auth.tenantId) {
+      const existing = await prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { tenantId: true },
+      });
+      if (!existing || existing.tenantId !== auth.tenantId) {
+        return NextResponse.json({ error: "Branch not found" }, { status: 404 });
+      }
+    }
+
     await prisma.branch.delete({ where: { id: branchId } });
     return NextResponse.json({ success: true });
   } catch (error) {

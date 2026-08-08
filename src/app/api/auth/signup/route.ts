@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
     const branchRow = normalizedBranchId
       ? await prisma.branch.findUnique({
           where: { id: normalizedBranchId },
-          select: { name: true, mode: true },
+          select: { name: true, mode: true, tenantId: true },
         })
       : null;
     const requestedDeliveryMode = String(deliveryMode ?? "").toLowerCase();
@@ -265,6 +265,7 @@ export async function POST(request: NextRequest) {
           name: normalizedName,
           password: hashedPassword,
           role: normalizedRole,
+          tenantId: branchRow?.tenantId ?? undefined,
           student: {
             create: ({
               level: normalizedLevel,

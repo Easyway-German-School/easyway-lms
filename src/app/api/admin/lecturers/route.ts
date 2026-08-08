@@ -3,6 +3,7 @@ import bcryptjs from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 
 import { requireCapability } from "@/lib/admin-roles";
+import { requireTenantSession, tenantScopeForLecturer } from "@/lib/tenant-access";
 import {
   COURSE_LEVELS,
   assignmentToData,
@@ -112,15 +113,23 @@ export async function GET() {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
 
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
+
   const [lecturers, branches] = await Promise.all([
     prisma.lecturer.findMany({
+      where: tenantScopeForLecturer(auth.tenantId),
       orderBy: { createdAt: "desc" },
       include: {
         user: { select: { id: true, name: true, email: true, role: true } },
         classes: { include: { course: true }, orderBy: { createdAt: "asc" } },
       },
     }),
-    prisma.branch.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, mode: true } }),
+    prisma.branch.findMany({
+      where: auth.tenantId ? { tenantId: auth.tenantId } : {},
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, mode: true },
+    }),
   ]);
 
   const branchNames = new Map(branches.map((branch) => [branch.id, branch.name]));
@@ -158,6 +167,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
+
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
   const body = await request.json().catch(() => null);
   const name = typeof body?.name === "string" ? body.name.trim() : "";
@@ -198,6 +210,7 @@ export async function POST(request: NextRequest) {
       name,
       password: hashedPassword,
       role: "LECTURER",
+      tenantId: auth.tenantId ?? null,
       lecturer: {
         create: {
           specialization: specialization || null,
@@ -248,6 +261,9 @@ export async function PATCH(request: NextRequest) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
 
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
+
   const body = await request.json().catch(() => null);
   const lecturerId = typeof body?.lecturerId === "string" ? body.lecturerId : "";
   if (!lecturerId) {
@@ -256,9 +272,12 @@ export async function PATCH(request: NextRequest) {
 
   const lecturer = await prisma.lecturer.findUnique({
     where: { id: lecturerId },
-    include: { user: { select: { id: true, name: true } } },
+    include: { user: { select: { id: true, name: true, tenantId: true } } },
   });
   if (!lecturer) {
+    return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
+  }
+  if (auth.tenantId && lecturer.user.tenantId !== auth.tenantId) {
     return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
   }
 

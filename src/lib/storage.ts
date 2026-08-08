@@ -46,6 +46,13 @@ export type ObjectStorage = {
   publicBaseUrl?: string;
 };
 
+export function normalizeStorageEndpoint(endpoint?: string): string | undefined {
+  if (!endpoint) return undefined;
+  const trimmed = String(endpoint).trim().replace(/\/+$|^\s+|\s+$/g, "");
+  if (!trimmed) return undefined;
+  return /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 /**
  * Credentials for the upload bucket.
  *
@@ -62,7 +69,7 @@ export function objectStorage(): ObjectStorage | null {
     bucket,
     // R2 ignores region, but SigV4 requires one and "auto" is what R2 documents.
     region: process.env.STORAGE_S3_REGION || process.env.RECORDING_S3_REGION || "auto",
-    endpoint: process.env.STORAGE_S3_ENDPOINT || process.env.RECORDING_S3_ENDPOINT || undefined,
+    endpoint: normalizeStorageEndpoint(process.env.STORAGE_S3_ENDPOINT || process.env.RECORDING_S3_ENDPOINT),
     accessKey,
     secret,
     publicBaseUrl: process.env.STORAGE_PUBLIC_BASE_URL || undefined,
@@ -75,8 +82,9 @@ export function storageConfigured(): boolean {
 
 /** The bucket's own address for an object, used for signing. */
 function objectUrl(key: string, storage: ObjectStorage): string {
-  const base = storage.endpoint
-    ? `${storage.endpoint.replace(/\/+$/, "")}/${storage.bucket}`
+  const endpoint = normalizeStorageEndpoint(storage.endpoint);
+  const base = endpoint
+    ? `${endpoint.replace(/\/+$/, "")}/${storage.bucket}`
     : `https://${storage.bucket}.s3.${storage.region}.amazonaws.com`;
   return `${base}/${key.replace(/^\/+/, "")}`;
 }

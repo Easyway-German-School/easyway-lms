@@ -1,21 +1,18 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-
 import { requireCapability } from "@/lib/admin-roles";
-async function isAdmin(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  return user?.role === "ADMIN";
-}
+import { requireTenantSession, tenantScopeForPayment } from "@/lib/tenant-access";
 
 export async function GET(request: Request) {
   const gate = await requireCapability("payments");
   if (!gate.ok) return gate.response;
 
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!await isAdmin(session.user.id)) return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
+
+  if (!await gate.admin.can("payments")) {
+    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  }
 
   const url = new URL(request.url);
   const status = url.searchParams.get("status");
@@ -24,13 +21,10 @@ export async function GET(request: Request) {
   const page = parseInt(url.searchParams.get("page") || "1", 10) || 1;
   const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get("pageSize") || "20", 10)));
 
-  const where: any = {};
+  const where: any = tenantScopeForPayment(auth.tenantId);
   if (status) where.status = status;
   if (method) where.method = method;
   if (search) {
-    // No `mode: "insensitive"`: SQLite does not support it and Prisma rejects
-    // the whole query, so every payment search returned a 500. SQLite's LIKE is
-    // already case-insensitive for ASCII.
     where.OR = [
       { student: { user: { name: { contains: search, mode: "insensitive" as const } } } },
       { student: { user: { email: { contains: search, mode: "insensitive" as const } } } },
@@ -53,9 +47,8 @@ export async function PATCH(request: Request) {
   const gate = await requireCapability("payments");
   if (!gate.ok) return gate.response;
 
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!await isAdmin(session.user.id)) return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
   const body = await request.json().catch(() => ({}));
   const paymentId = typeof body.paymentId === "string" ? body.paymentId : "";
@@ -64,8 +57,15 @@ export async function PATCH(request: Request) {
   if (!paymentId) return NextResponse.json({ error: "Payment ID is required" }, { status: 400 });
 
   try {
-    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { student: { include: { user: true } } },
+    });
     if (!payment) return NextResponse.json({ error: "Payment not found" }, { status: 404 });
+
+    if (auth.tenantId && payment.student.user.tenantId !== auth.tenantId) {
+      return NextResponse.json({ error: "Payment not found" }, { status: 404 });
+    }
 
     const update: any = {};
     if (status) update.status = status;

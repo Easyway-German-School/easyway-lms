@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveAdmin } from "@/lib/admin-roles";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requireTenantSession, tenantScopeForStudent, tenantScopeForBranch, tenantScopeForLecturer } from "@/lib/tenant-access";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -25,15 +23,17 @@ function monthKey(date: Date) {
  * the whole page 403ing — a secretary still needs the student numbers.
  */
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  const admin = await resolveAdmin(session.user.id as string);
+  const admin = await resolveAdmin(auth.session.user.id as string);
   if (!admin) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
+
+  const studentWhere = tenantScopeForStudent(auth.tenantId);
+  const branchWhere = tenantScopeForBranch(auth.tenantId);
+  const lecturerWhere = tenantScopeForLecturer(auth.tenantId);
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -59,6 +59,7 @@ export async function GET() {
     recentSubmissions,
   ] = await Promise.all([
     prisma.student.findMany({
+      where: studentWhere,
       select: {
         id: true,
         level: true,
@@ -70,8 +71,8 @@ export async function GET() {
         payments: { where: { status: "completed" }, select: { amount: true } },
       },
     }),
-    prisma.branch.count(),
-    prisma.lecturer.count(),
+    prisma.branch.count({ where: auth.tenantId ? { tenantId: auth.tenantId } : {} }),
+    prisma.lecturer.count({ where: lecturerWhere }),
     prisma.lead.groupBy({ by: ["status"], _count: { id: true } }),
     prisma.material.count(),
     prisma.thread.count(),
@@ -87,11 +88,16 @@ export async function GET() {
       select: { id: true, name: true, enabled: true, status: true, lastSyncAt: true, lastError: true, itemsSynced: true },
     }),
     prisma.payment.findMany({
-      where: { status: "completed", createdAt: { gte: sixMonthsAgo } },
+      where: {
+        status: "completed",
+        createdAt: { gte: sixMonthsAgo },
+        student: tenantScopeForStudent(auth.tenantId).user ?? undefined,
+      },
       select: { amount: true, createdAt: true, method: true, student: { select: { user: { select: { name: true } } } } },
       orderBy: { createdAt: "desc" },
     }),
     prisma.student.findMany({
+      where: studentWhere,
       take: 5,
       orderBy: { createdAt: "desc" },
       select: { createdAt: true, level: true, user: { select: { name: true } }, branch: { select: { name: true } } },

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { adminHasCapability } from "@/lib/admin-roles";
+import { requireTenantSession, tenantScopeForInvoice, tenantScopeForPayment } from "@/lib/tenant-access";
 
 async function isAdmin(userId: string) {
   // Admin AND cleared for this area — see src/lib/admin-roles.ts.
@@ -10,16 +9,23 @@ async function isAdmin(userId: string) {
 }
 
 export async function GET(request: Request) {
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!await isAdmin(session.user.id)) return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
+  if (!await isAdmin(auth.session.user.id)) return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+
+  const paymentWhere = tenantScopeForPayment(auth.tenantId);
+  const invoiceWhere = tenantScopeForInvoice(auth.tenantId);
 
   // Aggregate basic finance metrics
-  const completed = await prisma.payment.aggregate({ where: { status: "completed" }, _sum: { amount: true }, _count: { id: true } });
-  const pending = await prisma.payment.aggregate({ where: { status: "pending" }, _sum: { amount: true }, _count: { id: true } });
-  const failed = await prisma.payment.aggregate({ where: { status: "failed" }, _sum: { amount: true }, _count: { id: true } });
+  const completed = await prisma.payment.aggregate({ where: { ...paymentWhere, status: "completed" }, _sum: { amount: true }, _count: { id: true } });
+  const pending = await prisma.payment.aggregate({ where: { ...paymentWhere, status: "pending" }, _sum: { amount: true }, _count: { id: true } });
+  const failed = await prisma.payment.aggregate({ where: { ...paymentWhere, status: "failed" }, _sum: { amount: true }, _count: { id: true } });
 
-  const invoices = await prisma.invoice.aggregate({ _sum: { totalAmount: true }, _count: { id: true } });
+  const invoices = await prisma.invoice.aggregate({
+    where: invoiceWhere,
+    _sum: { totalAmount: true },
+    _count: { id: true },
+  });
 
   const totalPayments = (completed._sum.amount || 0) + (pending._sum.amount || 0) + (failed._sum.amount || 0);
   const totalRevenue = completed._sum.amount || 0;
@@ -29,6 +35,7 @@ export async function GET(request: Request) {
 
   const byMethod = await prisma.payment.groupBy({
     by: ["method"],
+    where: paymentWhere,
     _sum: { amount: true },
   });
 

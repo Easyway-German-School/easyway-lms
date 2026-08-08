@@ -119,6 +119,7 @@ export const authOptions: AuthOptions = {
           email: user.email,
           name: user.name,
           role: storedRole,
+          tenantId: user.tenantId ?? undefined,
         };
       },
     }),
@@ -141,6 +142,7 @@ export const authOptions: AuthOptions = {
       if (user) {
         token.id = user.id;
         token.role = normalizeRole(user.role);
+        token.tenantId = user.tenantId;
       }
       return token;
     },
@@ -148,6 +150,18 @@ export const authOptions: AuthOptions = {
       if (session.user) {
         session.user.id = token.id as string;
         session.user.role = normalizeRole(token.role || "STUDENT");
+        session.user.tenantId = token.tenantId as string | undefined;
+        if (!token.tenantId && token.id) {
+          try {
+            const u = await prisma.user.findUnique({
+              where: { id: token.id as string },
+              select: { tenantId: true },
+            });
+            session.user.tenantId = u?.tenantId ?? undefined;
+          } catch (e) {
+            session.user.tenantId = undefined;
+          }
+        }
         if (!token.role) {
           try {
             const u = await prisma.user.findUnique({ where: { id: token.id as string } });

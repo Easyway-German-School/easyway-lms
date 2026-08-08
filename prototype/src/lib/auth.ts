@@ -1,10 +1,11 @@
-import NextAuth, { type AuthOptions } from "next-auth";
+import NextAuth, { getServerSession, type AuthOptions, type Session } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { lecturerCanSignIn } from "@/lib/lecturer-status";
 import { checkRateLimit, clearRateLimit, clientIp } from "@/lib/rate-limit";
+import { NextResponse } from "next/server";
 
 /**
  * The role a revoked tutor's session carries. Not a real role — every route
@@ -176,6 +177,7 @@ export const authOptions: AuthOptions = {
           email: user.email,
           name: user.name,
           role: storedRole,
+          tenantId: user.tenantId ?? undefined,
         };
       },
     }),
@@ -198,6 +200,7 @@ export const authOptions: AuthOptions = {
       if (user) {
         token.id = user.id;
         token.role = normalizeRole(user.role);
+        token.tenantId = user.tenantId;
       }
       return token;
     },
@@ -205,6 +208,18 @@ export const authOptions: AuthOptions = {
       if (session.user) {
         session.user.id = token.id as string;
         session.user.role = normalizeRole(token.role || "STUDENT");
+        session.user.tenantId = token.tenantId as string | undefined;
+        if (!token.tenantId && token.id) {
+          try {
+            const u = await prisma.user.findUnique({
+              where: { id: token.id as string },
+              select: { tenantId: true },
+            });
+            session.user.tenantId = u?.tenantId ?? undefined;
+          } catch (e) {
+            session.user.tenantId = undefined;
+          }
+        }
         if (!token.role) {
           try {
             const u = await prisma.user.findUnique({ where: { id: token.id as string } });
@@ -254,5 +269,19 @@ export const authOptions: AuthOptions = {
 
   secret: process.env.NEXTAUTH_SECRET,
 };
+
+export async function getServerAuthSession(): Promise<Session | null> {
+  return (await getServerSession(authOptions as never)) as Session | null;
+}
+
+export async function requireAuthSession(): Promise<Session | null> {
+  const session = await getServerAuthSession();
+  if (!session?.user?.id) return null;
+  return session;
+}
+
+export function tenantWhere(tenantId?: string): { tenantId?: string } {
+  return tenantId ? { tenantId } : {};
+}
 
 export const authHandler = NextAuth(authOptions);

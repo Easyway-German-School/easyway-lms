@@ -1,10 +1,9 @@
 import bcryptjs from "bcryptjs";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
 import { requireCapability } from "@/lib/admin-roles";
+import { requireTenantSession, tenantScopeForUser } from "@/lib/tenant-access";
 async function isAdmin(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   return user?.role === "ADMIN";
@@ -14,12 +13,10 @@ export async function GET(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  if (!await isAdmin(session.user.id)) {
+  if (!await isAdmin(auth.session.user.id)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -34,7 +31,7 @@ export async function GET(request: Request) {
   const page = parseInt(url.searchParams.get("page") || "1", 10) || 1;
   const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get("pageSize") || "20", 10)));
 
-  const whereClause: any = {};
+  const whereClause: any = tenantScopeForUser(auth.tenantId);
   if (branchId) whereClause.branchId = branchId;
   if (level) whereClause.level = level;
   if (batch) whereClause.admission = { path: ["batch"], equals: batch };
@@ -101,12 +98,10 @@ export async function POST(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  if (!await isAdmin(session.user.id)) {
+  if (!await isAdmin(auth.session.user.id)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -134,6 +129,13 @@ export async function POST(request: Request) {
 
   const hashedPassword = await bcryptjs.hash(password, 10);
 
+  if (auth.tenantId && branchId) {
+    const branch = await prisma.branch.findUnique({ where: { id: branchId }, select: { tenantId: true } });
+    if (!branch || branch.tenantId !== auth.tenantId) {
+      return NextResponse.json({ error: "Branch not found" }, { status: 404 });
+    }
+  }
+
   try {
     const user = await prisma.user.create({
       data: {
@@ -141,6 +143,7 @@ export async function POST(request: Request) {
         name,
         password: hashedPassword,
         role: "STUDENT",
+        tenantId: auth.tenantId ?? undefined,
         student: {
           create: {
             level,
@@ -163,12 +166,10 @@ export async function PATCH(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  if (!await isAdmin(session.user.id)) {
+  if (!await isAdmin(auth.session.user.id)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -193,6 +194,10 @@ export async function PATCH(request: Request) {
   try {
     const student = await prisma.student.findUnique({ where: { id: studentId }, include: { user: true } });
     if (!student) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
+
+    if (auth.tenantId && student.user.tenantId !== auth.tenantId) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
@@ -254,12 +259,10 @@ export async function DELETE(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const session = await getServerSession(authOptions as any) as any;
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
 
-  if (!await isAdmin(session.user.id)) {
+  if (!await isAdmin(auth.session.user.id)) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -270,8 +273,12 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    const student = await prisma.student.findUnique({ where: { id: studentId }, include: { user: true } });
     if (!student) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
+
+    if (auth.tenantId && student.user.tenantId !== auth.tenantId) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 

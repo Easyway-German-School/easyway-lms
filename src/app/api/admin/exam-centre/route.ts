@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { adminHasCapability } from "@/lib/admin-roles";
+import { requireTenantSession, tenantScopeForExam, tenantScopeForBranch } from "@/lib/tenant-access";
 import { EXAM_BODIES } from "@/lib/exam-centre";
 
 /** Staff view of the exam centre: schedule sittings, see who has booked. */
@@ -10,22 +9,24 @@ import { EXAM_BODIES } from "@/lib/exam-centre";
 export const dynamic = "force-dynamic";
 
 async function requireExamAdmin() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  if (!session?.user?.id) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  const auth = await requireTenantSession();
+  if (!auth.ok) {
+    return { error: auth.response };
   }
-  if (!(await adminHasCapability(session.user.id, "exams"))) {
+  if (!(await adminHasCapability(auth.session.user.id, "exams"))) {
     return { error: NextResponse.json({ error: "Your admin role does not cover exams" }, { status: 403 }) };
   }
-  return { userId: session.user.id as string };
+  return { auth };
 }
 
 export async function GET() {
-  const auth = await requireExamAdmin();
-  if (auth.error) return auth.error;
+  const authGate = await requireExamAdmin();
+  if (authGate.error) return authGate.error;
+  const auth = authGate.auth;
 
   const [exams, branches] = await Promise.all([
     prisma.exam.findMany({
+      where: tenantScopeForExam(auth.tenantId),
       orderBy: { examDate: "desc" },
       include: {
         branch: { select: { id: true, name: true } },
@@ -39,7 +40,11 @@ export async function GET() {
         },
       },
     }),
-    prisma.branch.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.branch.findMany({
+      where: tenantScopeForBranch(auth.tenantId),
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
   ]);
 
   return NextResponse.json({
@@ -57,13 +62,24 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireExamAdmin();
-  if (auth.error) return auth.error;
+  const authGate = await requireExamAdmin();
+  if (authGate.error) return authGate.error;
+  const auth = authGate.auth;
 
   try {
     const b = await req.json();
     if (!b.name?.trim() || !b.examDate) {
       return NextResponse.json({ error: "A name and exam date are required" }, { status: 400 });
+    }
+
+    if (auth.tenantId && b.branchId) {
+      const branch = await prisma.branch.findUnique({
+        where: { id: b.branchId },
+        select: { tenantId: true },
+      });
+      if (!branch || branch.tenantId !== auth.tenantId) {
+        return NextResponse.json({ error: "Branch not found" }, { status: 404 });
+      }
     }
 
     const examDate = new Date(b.examDate);
@@ -102,13 +118,25 @@ export async function POST(req: NextRequest) {
 
 /** PATCH — publish/unpublish, or mark a registration paid. */
 export async function PATCH(req: NextRequest) {
-  const auth = await requireExamAdmin();
-  if (auth.error) return auth.error;
+  const authGate = await requireExamAdmin();
+  if (authGate.error) return authGate.error;
+  const auth = authGate.auth;
 
   try {
     const { examId, published, registrationId, paymentStatus, status } = await req.json();
 
     if (registrationId) {
+      const registration = await prisma.examRegistration.findUnique({
+        where: { id: registrationId },
+        include: { student: { include: { user: true } } },
+      });
+      if (!registration) {
+        return NextResponse.json({ error: "Registration not found" }, { status: 404 });
+      }
+      if (auth.tenantId && registration.student?.user?.tenantId !== auth.tenantId) {
+        return NextResponse.json({ error: "Registration not found" }, { status: 404 });
+      }
+
       const updated = await prisma.examRegistration.update({
         where: { id: registrationId },
         data: {

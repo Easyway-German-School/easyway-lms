@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
+import { requireTenantSession, tenantScopeForUser } from "@/lib/tenant-access";
 import { deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { KIND, notify } from "@/lib/notify";
@@ -25,10 +26,14 @@ export async function GET(request: NextRequest) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
 
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
+
   const query = (request.nextUrl.searchParams.get("q") ?? "").trim();
 
   const students = await prisma.student.findMany({
     where: {
+      ...tenantScopeForUser(auth.tenantId),
       classType: "private",
       ...(query
         ? {
@@ -90,6 +95,9 @@ export async function POST(request: NextRequest) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
 
+  const auth = await requireTenantSession();
+  if (!auth.ok) return auth.response!;
+
   const body = await request.json().catch(() => null);
   const studentId = typeof body?.studentId === "string" ? body.studentId : "";
   const lecturerId = typeof body?.lecturerId === "string" ? body.lecturerId : "";
@@ -101,16 +109,22 @@ export async function POST(request: NextRequest) {
   const [student, lecturer] = await Promise.all([
     prisma.student.findUnique({
       where: { id: studentId },
-      select: { id: true, classType: true, userId: true },
+      select: { id: true, classType: true, userId: true, user: { select: { tenantId: true } } },
     }),
     prisma.lecturer.findUnique({
       where: { id: lecturerId },
-      select: { id: true, phone: true, user: { select: { name: true, email: true } } },
+      select: { id: true, phone: true, user: { select: { name: true, email: true, tenantId: true } } },
     }),
   ]);
 
   if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
   if (!lecturer) return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
+  if (auth.tenantId && student.user.tenantId !== auth.tenantId) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+  if (auth.tenantId && lecturer.user.tenantId !== auth.tenantId) {
+    return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
+  }
   if (student.classType !== "private") {
     return NextResponse.json(
       { error: "Only students on a private package can be assigned a one-to-one tutor" },

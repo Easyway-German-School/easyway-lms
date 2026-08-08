@@ -27,7 +27,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { objectStorage, publicUrlFor, storageKey } from "@/lib/storage";
+import { normalizeStorageEndpoint, objectStorage, publicUrlFor, storageKey } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -64,8 +64,9 @@ export async function POST(request: NextRequest) {
   }
 
   const key = storageKey(folder, filename);
-  const base = storage.endpoint
-    ? `${storage.endpoint.replace(/\/+$/, "")}/${storage.bucket}`
+  const endpoint = normalizeStorageEndpoint(storage.endpoint);
+  const base = endpoint
+    ? `${endpoint.replace(/\/+$/, "")}/${storage.bucket}`
     : `https://${storage.bucket}.s3.${storage.region}.amazonaws.com`;
 
   const { AwsClient } = await import("aws4fetch");
