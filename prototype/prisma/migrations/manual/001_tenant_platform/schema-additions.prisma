@@ -1,0 +1,99 @@
+// Append to prisma/schema.prisma as part of step 1.
+//
+// Metered billing, in the shape AI providers use: an append-only event ledger,
+// a daily rollup you actually bill from, and a prepaid balance.
+
+/// One billable thing that happened. Append-only — never updated, never
+/// deleted. Corrections are written as a second event with a negative
+/// quantity, so the ledger stays a history rather than a current opinion.
+model UsageEvent {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// See METERS in src/lib/usage/meter.ts. A string rather than an enum so a
+  /// new meter does not need a migration — pricing changes far more often
+  /// than schemas should.
+  meter String
+
+  /// Whole units of the meter's smallest unit (tokens, seconds, bytes, 1).
+  /// Integer, because money computed from floats is money that disagrees with
+  /// itself at the fourth decimal place and cannot be reconciled.
+  quantity Int
+
+  /// THE FIELD THAT PREVENTS DOUBLE BILLING.
+  ///
+  /// Webhooks retry. Jobs re-run. A LiveKit session can report twice. Without
+  /// a unique key the second delivery bills the customer again, which is the
+  /// one class of bug that ends a platform's reputation in a single incident.
+  /// Callers derive it from the source event, never from a timestamp or a
+  /// random value.
+  idempotencyKey String @unique
+
+  /// When it happened, not when it was recorded — a job draining a queue must
+  /// not push usage into the wrong billing day.
+  occurredAt DateTime @default(now())
+
+  /// Free-form context for the invoice line: which student, which session,
+  /// which model. Never read for arithmetic.
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, meter, occurredAt])
+  @@index([tenantId, occurredAt])
+}
+
+/// The rollup invoices are computed from.
+///
+/// Billing scans the raw ledger exactly never: at a million events a month
+/// that is a table scan per invoice per tenant. A nightly job folds events
+/// into this, and this is what the finance page and the invoice read.
+model UsageDaily {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  meter String
+  /// Midnight UTC of the day being summarised.
+  day      DateTime
+  quantity Int
+  /// Cost in kobo at the rate that applied on the day. Stored rather than
+  /// recomputed so that changing a price tomorrow cannot silently restate
+  /// last month's invoice.
+  costKobo Int
+
+  @@unique([tenantId, meter, day])
+  @@index([tenantId, day])
+}
+
+/// Prepaid balance, in kobo.
+///
+/// Prepaid rather than card-on-file: it matches how AI providers actually
+/// work, it removes failed-charge collection entirely, and in a market where
+/// card declines are ordinary it means a failed payment is a top-up that did
+/// not happen rather than a service interruption plus a debt.
+model TenantCredit {
+  id       String @id @default(cuid())
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  balanceKobo Int @default(0)
+
+  /// Below this, the low-balance webhook fires. Above zero on purpose —
+  /// warning a customer after they have already been cut off is not a warning.
+  lowBalanceKobo Int @default(500000)
+
+  /// How far past zero this tenant may go before writes are refused. A school
+  /// mid-term should not lose its register over a late top-up.
+  graceKobo Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@index([balanceKobo])
+}
+
+// Add to the existing Tenant model:
+//   usageEvents UsageEvent[]
+//   usageDaily  UsageDaily[]
+//   credit      TenantCredit?
