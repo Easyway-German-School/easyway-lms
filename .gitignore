@@ -34,3 +34,7 @@ tmp-*.mjs
 prisma/schema.prisma.recovered-backup
 prisma/schema.updates.prisma
 .vercel
+
+# Vendored side project — its own repo, ~2GB with four virtualenvs.
+# Kept beside the LMS for reference, never part of it.
+TRON/

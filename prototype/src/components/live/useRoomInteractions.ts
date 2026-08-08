@@ -241,15 +241,28 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
     };
   }, [room, role, publish]);
 
-  /** A participant holding the floor who leaves must not hold it forever. */
+  /**
+   * A participant holding the floor who leaves must not hold it forever.
+   *
+   * Hung off the departure event rather than checked on every re-render: the
+   * event says exactly who left, so there is nothing to scan and no chance of
+   * the check firing mid-render. Only the tutor acts, and the resulting
+   * broadcast is what clears it for everyone else.
+   */
   useEffect(() => {
-    if (!room || role !== "tutor" || !floor) return;
-    if (floor === room.localParticipant.identity) return;
-    if (!room.remoteParticipants.has(floor)) {
+    if (!room || role !== "tutor") return;
+
+    function onLeft(participant: RemoteParticipant) {
+      if (floorRef.current !== participant.identity) return;
       setFloorState(null);
       publish({ t: "floor", identity: null });
     }
-  }, [room, role, floor, revision, publish]);
+
+    room.on(RoomEvent.ParticipantDisconnected, onLeft);
+    return () => {
+      room.off(RoomEvent.ParticipantDisconnected, onLeft);
+    };
+  }, [room, role, publish]);
 
   // Reactions expire on their own; without this they accumulate for the whole
   // lesson and the last one never leaves the screen.
