@@ -22,6 +22,16 @@ const branchSelect = {
   mode: true,
 } as const;
 
+/**
+ * The last-resort list, for when the database cannot be reached at all.
+ *
+ * These ids are slugs, not the cuids `Student.branchId` is a foreign key to,
+ * so a signup submitted against this list cannot be stored against a real
+ * branch. That is accepted rather than fixed: if Prisma is down there is no
+ * id to offer that would be any better, and showing the school's branches
+ * beats showing an empty form. It matters only that this stays a genuine
+ * fallback — for a year it was the ONLY thing this route returned.
+ */
 function withFallbackIds() {
   return fallbackBranches.map((branch) => ({
     id: branch.name.toLowerCase().replace(/\s+/g, "-"),
@@ -29,12 +39,29 @@ function withFallbackIds() {
   }));
 }
 
+/**
+ * Whether there is a Branch table to read.
+ *
+ * This asked `sqlite_master` until the Postgres migration, at which point the
+ * query stopped returning nothing and started THROWING — the table does not
+ * exist on Postgres — so the catch below returned false on every single call.
+ * The consequence was not a visible failure, which is why it survived: this
+ * route simply never reached the database again. It served `fallbackBranches`
+ * to every caller, so
+ *
+ *   - the signup form offered four hardcoded branches whose ids are slugs
+ *     ("lagos"), not the cuids `Student.branchId` points at;
+ *   - any branch the office added, renamed or paused in /admin/branches was
+ *     invisible to every one of this route's four callers;
+ *   - `seedMissingBranches()` below could never run.
+ *
+ * Counting rows through Prisma asks the same question without naming an
+ * engine.
+ */
 async function branchTableExists() {
   try {
-    const rows = await prisma.$queryRaw<Array<{ name: string }>>`
-      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'Branch'
-    `;
-    return rows.some((row) => row.name === "Branch");
+    await prisma.branch.count();
+    return true;
   } catch {
     return false;
   }
