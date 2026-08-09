@@ -10,7 +10,7 @@ import PasswordInput from "@/components/PasswordInput";
 import PhotoCapture from "@/components/PhotoCapture";
 import SignupJourney from "@/components/SignupJourney";
 import { CheckCircleIcon, SignalIcon } from "@/components/icons";
-import { uploadImage } from "@/lib/upload";
+import { uploadErrorMessage, uploadImage } from "@/lib/upload";
 import {
   CONNECTION_OPTIONS,
   DEVICE_OPTIONS,
@@ -236,10 +236,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
     try {
       const uploadedUrl = await uploadImage(file);
       setPhotoUrl(uploadedUrl);
+      // The bytes are in storage now, so drop the File handle. Holding it is
+      // what let the submit path re-read a reference the phone had already
+      // invalidated.
+      setPhotoFile(null);
       setUploadMessage("Photo uploaded successfully.");
       return uploadedUrl;
     } catch (uploadError) {
-      const message = uploadError instanceof Error ? uploadError.message : "Upload failed";
+      const message = uploadErrorMessage(uploadError);
       setError(message);
       setUploadMessage("Photo upload failed. Please try another photo or contact support.");
       setPhotoFileName("");
@@ -306,9 +310,13 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
     setLoading(true);
 
     try {
-      // Upload the photo first and use the RETURNED url (state would be stale here).
+      // The photo goes up the moment it is chosen, so by here there is normally
+      // a URL already and nothing left to do. Only fall back to the File if
+      // that first upload failed — re-reading it unconditionally is what broke
+      // mobile signups, because a File is an OS handle rather than bytes and
+      // the phone invalidates it while the rest of the form is being filled in.
       let uploadedPhotoUrl = photoUrl;
-      if (photoFile) {
+      if (!uploadedPhotoUrl && photoFile) {
         uploadedPhotoUrl = await uploadImage(photoFile);
       }
 
@@ -393,7 +401,9 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         router.replace("/auth/signup/success");
       }, 750);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      // The photo retry above can land here, so route through the same mapper
+      // rather than showing a raw DOMException. Anything else keeps its message.
+      setError(uploadErrorMessage(err, "An error occurred"));
     } finally {
       setLoading(false);
     }

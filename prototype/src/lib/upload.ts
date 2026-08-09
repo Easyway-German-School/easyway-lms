@@ -123,6 +123,26 @@ export async function uploadImage(file: File): Promise<string> {
   return uploaded.url;
 }
 
+/**
+ * Turn an upload failure into a sentence the person can act on.
+ *
+ * A `File` is a handle to something the OS owns, not the bytes themselves, and
+ * phones invalidate that handle: iOS when the photo is still in iCloud or
+ * Safari gets backgrounded, Android when the picker app is killed and its
+ * `content://` URI is revoked. The browser then throws `NotReadableError`,
+ * whose own message — "typically due to permission problems that have occurred
+ * after a reference to a file was acquired" — means nothing to somebody halfway
+ * through signing up, and reads like the site is broken rather than like the
+ * photo needs picking again.
+ */
+export function uploadErrorMessage(error: unknown, fallback = "Upload failed"): string {
+  const name = error instanceof DOMException ? error.name : "";
+  if (name === "NotReadableError" || name === "NotFoundError") {
+    return "Your device released that photo before it finished uploading. Please select it again.";
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
 /** Guard shared by every avatar picker in the app. */
 export function validateImageFile(file: File, maxBytes = 5 * 1024 * 1024): string | null {
   if (!file.type.startsWith("image/")) return "Please choose an image file.";
