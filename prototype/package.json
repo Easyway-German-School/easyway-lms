@@ -19,7 +19,9 @@
     "check:live": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/check-live-presence.ts",
     "check:latency": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/check-latency.ts",
     "test:retention": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/test-retention.ts",
-    "check:guard": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/check-guard.ts"
+    "check:guard": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/check-guard.ts",
+    "backup": "node scripts/snapshot-db.mjs",
+    "backup:verify": "node scripts/verify-snapshot.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

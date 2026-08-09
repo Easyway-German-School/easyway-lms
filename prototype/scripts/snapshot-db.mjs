@@ -30,11 +30,29 @@ const prisma = new PrismaClient();
  * BigInt and Date do not survive JSON.stringify — BigInt throws, Date becomes
  * an ISO string that reads back as a string. Both are tagged so a future
  * restore can tell a real string from a serialised value.
+ *
+ * READS `this[key]`, NOT `value`.
+ *
+ * JSON.stringify calls `toJSON()` before it calls the replacer, so by the time
+ * a Date reaches `value` it is already a plain ISO string and `value instanceof
+ * Date` is never true. The first version of this file made exactly that
+ * mistake: every timestamp in the backup was written untagged, and a restore
+ * would have put strings where the schema wants dates — silently, because a
+ * string that looks like a date reads fine in a listing and only fails when
+ * something does arithmetic with it. `this` is the object being serialised and
+ * still holds the original value, which is why the replacer must not be an
+ * arrow function.
+ *
+ * Buffer has the same problem for the same reason, hence the same treatment.
  */
-function replacer(_key, value) {
+function replacer(key, value) {
+  const raw = this?.[key];
+  if (typeof raw === "bigint") return { __bigint: raw.toString() };
+  if (raw instanceof Date) return { __date: raw.toISOString() };
+  if (Buffer.isBuffer(raw)) return { __bytes: raw.toString("base64") };
+  // BigInt never reaches `value` intact either — it throws before the replacer
+  // returns — so it is caught above; this covers anything nested oddly.
   if (typeof value === "bigint") return { __bigint: value.toString() };
-  if (value instanceof Date) return { __date: value.toISOString() };
-  if (Buffer.isBuffer(value)) return { __bytes: value.toString("base64") };
   return value;
 }
 
@@ -68,10 +86,49 @@ for (const { table_name: table } of tables) {
 }
 
 writeFileSync(join(outDir, "_manifest.json"), JSON.stringify(manifest, null, 2));
-await prisma.$disconnect();
 
 console.log(`\n${tables.length - failures}/${tables.length} tables, ${manifest.totalRows} rows`);
 console.log(outDir);
+
+/**
+ * Check in, exactly as the GitHub job does.
+ *
+ * Without this the app has no way to know a backup happened, and the staleness
+ * alarm in /admin/security keeps reporting that none ever has. An alarm that is
+ * permanently red is an alarm people learn to ignore, and the morning it is
+ * telling the truth is the morning nobody looks.
+ *
+ * Recorded even on partial failure, as a failure — a run that half-worked must
+ * not read as silence.
+ */
+try {
+  await prisma.backupRun.create({
+    data: {
+      kind: "database",
+      status: failures > 0 ? "failed" : "success",
+      snapshotId: outDir,
+      sizeBytes: BigInt(manifest.totalRows),
+      detail: { tables: tables.length, rows: manifest.totalRows, local: true },
+      error: failures > 0 ? `${failures} table(s) could not be read` : null,
+      startedAt: new Date(manifest.takenAt),
+      finishedAt: new Date(),
+    },
+  });
+  console.log("recorded in BackupRun");
+} catch (error) {
+  console.warn("Could not record the run:", error.message.split("\n")[0]);
+}
+
+await prisma.$disconnect();
+
+/**
+ * Said plainly rather than buried in a README, because a local copy is not the
+ * backup this school needs and the gap should stay uncomfortable.
+ */
+console.log(
+  "\nNOTE: this copy is on this machine only. It survives a Neon incident and " +
+    "does not survive this laptop. The off-site job is .github/workflows/backup-database.yml.",
+);
 
 /**
  * A partial snapshot is worse than an obvious failure, because it looks like a

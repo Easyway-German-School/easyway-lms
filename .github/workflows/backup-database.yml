@@ -17,14 +17,50 @@
 # thing it backs up dies in the same email compromise, the same declined card,
 # the same suspension.
 #
+# -----------------------------------------------------------------------------
+# WHY THIS FILE WAS REWRITTEN (2026-08-09)
+# -----------------------------------------------------------------------------
+# It had run every night since 3 August and failed every night, in seventeen
+# seconds, and nobody found out. Three separate faults, each of which is the
+# kind that only shows up in the incident it ruins:
+#
+#  1. NONE of the secrets were ever set. restic exited with "Please specify
+#     repository location" and the log said nothing about which secret was
+#     missing, so the failure looked like a tooling problem rather than a
+#     ten-minute configuration job.
+#
+#  2. The step that reports failure to the app ALSO failed, because it needs
+#     APP_BASE_URL and CRON_SECRET, which were equally unset. So the one
+#     mechanism designed to notice a silent backup failure was itself silently
+#     failing. The staleness alarm never fired because it never heard anything
+#     at all — which is exactly the shape of the disaster backup-health.ts was
+#     written to prevent, achieved by a different route.
+#
+#  3. The dump was rejected if it came in under a megabyte. This school's dump
+#     is a fraction of that. So even fully configured, the workflow would have
+#     thrown away its own good backup and called it a failure. A size floor is
+#     a guess about how big the data ought to be; the check is now a content
+#     check, which is true at any size.
+#
+# It now degrades instead of collapsing. With no object-storage secrets at all
+# it still takes the dump, encrypts it, and keeps it as a GitHub artifact —
+# which is a different account from Neon, and therefore still satisfies the
+# point of the whole design. Restic remains the destination worth configuring,
+# and the log says so every run until it is.
+#
 # WHAT IT PRODUCES
 #
-# An encrypted, deduplicated restic snapshot in an S3-compatible bucket that
-# should be at a DIFFERENT VENDOR from Cloudflare R2 — Backblaze B2 is the
-# cheap default. restic encrypts client-side with RESTIC_PASSWORD, so the
-# storage provider holds ciphertext and nothing else. That is not paranoia:
-# these dumps contain passport scans, home addresses and payment records, and
-# a leaked bucket key must not be the same event as a leaked student database.
+# Preferred: an encrypted, deduplicated restic snapshot in an S3-compatible
+# bucket at a DIFFERENT VENDOR from Cloudflare R2 — Backblaze B2 is the cheap
+# default, and Cloudflare R2 itself is acceptable for the DATABASE dump since
+# the database lives at Neon. restic encrypts client-side with RESTIC_PASSWORD,
+# so the storage provider holds ciphertext and nothing else. That is not
+# paranoia: these dumps contain passport scans, home addresses and payment
+# records, and a leaked bucket key must not be the same event as a leaked
+# student database.
+#
+# Fallback: the same dump, encrypted with AES-256 under BACKUP_PASSPHRASE and
+# retained as a workflow artifact for 90 days.
 # =============================================================================
 
 name: Backup database
@@ -52,6 +88,42 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
 
     steps:
+      # -----------------------------------------------------------------------
+      # Say what is missing, by name, before doing anything else.
+      #
+      # The old failure was a restic error message about a flag nobody had been
+      # asked to pass. Naming the secret turns a puzzle into an errand.
+      # -----------------------------------------------------------------------
+      - name: Check the configuration
+        id: config
+        run: |
+          set -euo pipefail
+
+          missing=""
+          [ -n "${{ secrets.DIRECT_DATABASE_URL }}" ] || missing="$missing DIRECT_DATABASE_URL"
+
+          if [ -n "$missing" ]; then
+            echo "::error::Cannot back up. Missing repository secret(s):$missing"
+            echo "Set them under Settings → Secrets and variables → Actions." >&2
+            exit 1
+          fi
+
+          if [ -n "${RESTIC_REPOSITORY:-}" ] && [ -n "${RESTIC_PASSWORD:-}" ]; then
+            echo "destination=restic" >> "$GITHUB_OUTPUT"
+          else
+            echo "destination=artifact" >> "$GITHUB_OUTPUT"
+            echo "::warning::RESTIC_REPOSITORY/RESTIC_PASSWORD are not set. Falling back to an encrypted workflow artifact, retained 90 days. This is a stopgap: artifacts expire, cannot be pruned to a retention policy, and are capped in size. See docs/SECURITY.md for the twenty-minute setup."
+          fi
+
+          if [ -z "${{ secrets.BACKUP_PASSPHRASE }}" ] && [ -z "${RESTIC_PASSWORD:-}" ]; then
+            echo "::error::Neither RESTIC_PASSWORD nor BACKUP_PASSPHRASE is set. Refusing to write an unencrypted copy of a database containing passport scans and payment records."
+            exit 1
+          fi
+
+          if [ -z "${{ secrets.APP_BASE_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "::warning::APP_BASE_URL/CRON_SECRET are not set, so the app cannot be told this ran. The staleness alarm in /admin/security will keep reporting that no backup has ever succeeded — which, from the app's point of view, is the truth."
+          fi
+
       - name: Install pg_dump and restic
         run: |
           set -euo pipefail
@@ -69,12 +141,7 @@ jobs:
           pg_dump --version
           restic version
 
-      - name: Initialise the repository if this is the first run
-        run: |
-          set -euo pipefail
-          restic snapshots > /dev/null 2>&1 || restic init
-
-      - name: Dump and store
+      - name: Dump
         id: dump
         run: |
           set -euo pipefail
@@ -84,40 +151,74 @@ jobs:
           # not an error — it is a dump that silently disagrees with itself
           # across tables, which is worse than no dump at all.
           STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+          FILE="easyway-${STAMP}.dump"
 
           pg_dump \
             --format=custom \
             --compress=9 \
             --no-owner \
             --no-privileges \
-            --file="easyway-${STAMP}.dump" \
+            --file="$FILE" \
             "${{ secrets.DIRECT_DATABASE_URL }}"
 
-          SIZE="$(stat -c%s "easyway-${STAMP}.dump")"
-          echo "size_bytes=${SIZE}" >> "$GITHUB_OUTPUT"
+          echo "file=${FILE}" >> "$GITHUB_OUTPUT"
+          echo "size_bytes=$(stat -c%s "$FILE")" >> "$GITHUB_OUTPUT"
 
-          # A dump under a megabyte means something went wrong in a way pg_dump
-          # did not consider an error — an empty schema, a permissions problem,
-          # a connection string pointing somewhere unexpected. Better to fail
-          # loudly now than to discover it during a restore.
-          if [ "$SIZE" -lt 1000000 ]; then
-            echo "Dump is only ${SIZE} bytes — refusing to treat this as a good backup." >&2
+      # -----------------------------------------------------------------------
+      # A CONTENT check, not a size floor.
+      #
+      # The previous version refused any dump under a megabyte, on the theory
+      # that a tiny dump means something went wrong. It is a reasonable theory
+      # and it was wrong here: this school's dump is well under that, so the
+      # check would have discarded every good backup it was given. Worse, the
+      # threshold would have needed revisiting every time the school grew,
+      # which is precisely the size-dependent failure the header warns about.
+      #
+      # Asking pg_restore what is actually inside answers the real question —
+      # "did we dump the whole database or an empty schema" — and the answer
+      # does not change with the school's size.
+      # -----------------------------------------------------------------------
+      - name: Verify the dump has the school in it
+        run: |
+          set -euo pipefail
+          FILE="${{ steps.dump.outputs.file }}"
+
+          pg_restore --list "$FILE" > toc.txt
+
+          TABLES="$(grep -c 'TABLE DATA' toc.txt || true)"
+          echo "Tables with data in the dump: ${TABLES}"
+
+          # Forty-odd tables carry rows in this schema. Twenty is a floor that
+          # cannot be reached by an empty database, a wrong connection string or
+          # a permissions failure, and cannot be tripped by a quiet term.
+          if [ "${TABLES:-0}" -lt 20 ]; then
+            echo "::error::The dump contains only ${TABLES} tables with data. That is not this database — check DIRECT_DATABASE_URL."
             exit 1
           fi
+
+          for required in Student Payment User Grade Attendance; do
+            grep -q "TABLE DATA public \"\?${required}\"\?" toc.txt \
+              || grep -q "TABLE DATA public ${required} " toc.txt \
+              || { echo "::error::No ${required} data in the dump."; exit 1; }
+          done
+
+      - name: Store — restic
+        if: steps.config.outputs.destination == 'restic'
+        id: restic
+        run: |
+          set -euo pipefail
+          restic snapshots > /dev/null 2>&1 || restic init
 
           restic backup \
             --tag database \
             --tag "easyway" \
             --host easyway-lms \
-            "easyway-${STAMP}.dump" \
+            "${{ steps.dump.outputs.file }}" \
             --json | tee restic-out.json
 
           SNAPSHOT="$(grep -o '"snapshot_id":"[^"]*"' restic-out.json | tail -1 | cut -d'"' -f4)"
           echo "snapshot_id=${SNAPSHOT}" >> "$GITHUB_OUTPUT"
 
-      - name: Age out old snapshots
-        run: |
-          set -euo pipefail
           # Fourteen dailies covers "we noticed within a fortnight", which is
           # the realistic detection time for a quiet data problem. The monthlies
           # exist for the other kind of question — what did this student's
@@ -129,21 +230,57 @@ jobs:
             --keep-monthly 12 \
             --prune
 
-      - name: Verify the repository
-        run: |
-          set -euo pipefail
           # Reads 5% of the actual data rather than just the metadata. A repo
           # that lists snapshots happily can still hold corrupt packs, and the
           # moment to find that out is not during a restore.
           restic check --read-data-subset=5%
 
-      - name: Tell the app
-        if: always()
+      - name: Store — encrypted artifact
+        if: steps.config.outputs.destination == 'artifact'
         run: |
           set -euo pipefail
+          # AES-256 with a key derived by PBKDF2, so the artifact GitHub keeps
+          # is ciphertext. Decrypt with:
+          #   openssl enc -d -aes-256-cbc -pbkdf2 -in <file>.enc -out <file>
+          openssl enc -aes-256-cbc -pbkdf2 -salt \
+            -in "${{ steps.dump.outputs.file }}" \
+            -out "${{ steps.dump.outputs.file }}.enc" \
+            -pass pass:"${{ secrets.BACKUP_PASSPHRASE }}"
+          rm -f "${{ steps.dump.outputs.file }}"
+
+      - name: Keep the artifact
+        if: steps.config.outputs.destination == 'artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-backup-${{ github.run_id }}
+          path: "*.dump.enc"
+          retention-days: 90
+          if-no-files-found: error
+
+      # -----------------------------------------------------------------------
+      # Tell the app — and never let this step be the reason a good backup is
+      # recorded as a failure.
+      #
+      # The old version had no `|| true`, so a curl to an unset APP_BASE_URL
+      # exited 3 and marked the whole run failed. That inverted the meaning of
+      # the only signal anybody watches.
+      # -----------------------------------------------------------------------
+      - name: Tell the app
+        if: always()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+
+          if [ -z "${{ secrets.APP_BASE_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "APP_BASE_URL/CRON_SECRET not set — skipping the check-in."
+            exit 0
+          fi
+
           if [ "${{ job.status }}" = "success" ]; then
-            PAYLOAD=$(printf '{"kind":"database","status":"success","snapshotId":"%s","sizeBytes":%s}' \
-              "${{ steps.dump.outputs.snapshot_id }}" "${{ steps.dump.outputs.size_bytes }}")
+            PAYLOAD=$(printf '{"kind":"database","status":"success","snapshotId":"%s","sizeBytes":%s,"detail":{"destination":"%s"}}' \
+              "${{ steps.restic.outputs.snapshot_id }}" \
+              "${{ steps.dump.outputs.size_bytes }}" \
+              "${{ steps.config.outputs.destination }}")
           else
             PAYLOAD=$(printf '{"kind":"database","status":"failed","error":"Workflow run %s failed — see the Actions log."}' \
               "${{ github.run_id }}")
@@ -152,4 +289,4 @@ jobs:
           curl -fsS -X POST "${{ secrets.APP_BASE_URL }}/api/backup/report" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD"
+            -d "$PAYLOAD" || echo "::warning::Could not reach the app to record this run."
