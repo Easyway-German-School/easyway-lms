@@ -5,7 +5,23 @@ import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { lecturerCanSignIn } from "@/lib/lecturer-status";
 import { checkRateLimit, clearRateLimit, clientIp } from "@/lib/rate-limit";
+import { setTenantScope, runWithTenant, runUnscoped } from "@/lib/tenant/context";
 import { NextResponse } from "next/server";
+
+/**
+ * Run one query with whatever scope we have.
+ *
+ * Sign-in and session resolution both run in the gap where a tenant is being
+ * established rather than known, and the two halves of that gap need different
+ * treatment: once the user's tenant is in hand the query should be scoped to
+ * it, and before that it cannot be. Written once here so the two call sites
+ * below cannot disagree about which case they are in.
+ */
+function withScope<T>(tenantId: string | undefined, fn: () => T): T {
+  return tenantId
+    ? runWithTenant(tenantId, fn)
+    : runUnscoped("session callback resolving a user who carries no tenant", fn);
+}
 
 /**
  * The role a revoked tutor's session carries. Not a real role — every route
@@ -123,10 +139,21 @@ export const authOptions: AuthOptions = {
          * enumerate which accounts are inactive.
          */
         if (storedRole === "lecturer") {
-          const lecturer = await prisma.lecturer.findUnique({
-            where: { userId: user.id },
-            select: { status: true },
-          });
+          /**
+           * Unscoped because sign-in is the one moment there is no tenant to
+           * scope by — finding this person's own record is precisely how their
+           * tenant gets established. The lookup is by their own user id, which
+           * the password has just been checked against, so it can reach exactly
+           * one row and that row is theirs.
+           */
+          const lecturer = await runUnscoped(
+            "sign-in resolves the user's own tutor record before any tenant is known",
+            () =>
+              prisma.lecturer.findUnique({
+                where: { userId: user.id },
+                select: { status: true },
+              }),
+          );
           if (lecturer && !lecturerCanSignIn(lecturer.status)) {
             throw new Error(
               "This tutor account is no longer active. Contact the school office if you think this is wrong.",
@@ -316,10 +343,12 @@ export const authOptions: AuthOptions = {
          */
         if (session.user.role === "lecturer" && session.user.id) {
           try {
-            const lecturer = await prisma.lecturer.findUnique({
-              where: { userId: session.user.id as string },
-              select: { status: true },
-            });
+            const lecturer = await withScope(session.user.tenantId, () =>
+              prisma.lecturer.findUnique({
+                where: { userId: session.user.id as string },
+                select: { status: true },
+              }),
+            );
             if (lecturer && !lecturerCanSignIn(lecturer.status)) {
               session.user.role = INACTIVE_LECTURER_ROLE;
             }
@@ -336,8 +365,23 @@ export const authOptions: AuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
 };
 
+/**
+ * The one place a request's tenant is established.
+ *
+ * Every signed-in route and page in the app reaches its session through here or
+ * through requireAuthSession() below, so setting the scope at this single point
+ * scopes all of them — including the ones written after this, which is the
+ * whole reason it is here and not in each handler.
+ *
+ * Set unconditionally, including when there is no session and when the user
+ * carries no tenant. A gate that only sets the scope on success leaves the
+ * previous value in place on failure, and the previous value belongs to
+ * somebody else.
+ */
 export async function getServerAuthSession(): Promise<Session | null> {
-  return (await getServerSession(authOptions as never)) as Session | null;
+  const session = (await getServerSession(authOptions as never)) as Session | null;
+  setTenantScope(session?.user?.tenantId ?? null);
+  return session;
 }
 
 export async function requireAuthSession(): Promise<Session | null> {

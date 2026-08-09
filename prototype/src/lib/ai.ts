@@ -37,9 +37,33 @@ const CLAUDE_MODEL = "claude-opus-5";
  * Returns null rather than throwing, because every caller's answer to a
  * failure is the same: fall back to the mock and let the page render.
  */
+/**
+ * Why the last Claude call failed, for the one caller that can act on it.
+ *
+ * `callClaude` returns null for every failure because its other callers all
+ * respond the same way — fall back to the mock and let the page render. But
+ * "no credit on the account" and "the model gave a bad answer" need different
+ * words in front of an admin: one is fixed by topping up, the other by
+ * rewording. Telling somebody to reword their brief when the real problem is
+ * billing is how a working feature gets abandoned as broken.
+ *
+ * Module-level and last-write-wins, which is imprecise under concurrency and
+ * good enough: it is read immediately after an awaited call, and it only ever
+ * improves an error message.
+ */
+let lastClaudeFailure: string | null = null;
+
+export function claudeFailureHint(): string | null {
+  return lastClaudeFailure;
+}
+
 async function callClaude(prompt: string, maxTokens: number): Promise<string | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    lastClaudeFailure = "No ANTHROPIC_API_KEY is configured.";
+    return null;
+  }
+  lastClaudeFailure = null;
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -59,7 +83,17 @@ async function callClaude(prompt: string, maxTokens: number): Promise<string | n
     });
 
     if (!response.ok) {
-      console.error("Claude API error:", response.status, await response.text().catch(() => ""));
+      const detail = await response.text().catch(() => "");
+      console.error("Claude API error:", response.status, detail);
+      // The one failure worth naming precisely. A key that is present but
+      // unfunded looks identical to a working one from every check we can
+      // make without spending money, so this is the only place the truth
+      // becomes available.
+      lastClaudeFailure = /credit balance is too low/i.test(detail)
+        ? "Claude has no credit on the account. Top it up, or draft with the local model instead."
+        : response.status === 401 || response.status === 403
+          ? "Claude rejected the API key."
+          : `Claude returned ${response.status}.`;
       return null;
     }
 
@@ -391,6 +425,130 @@ Return JSON: {"title": "...", "message": "..."}${JSON_ONLY}`;
   // The server rejects titles over 120 characters, so a long one is trimmed
   // here rather than being offered and then refused on send.
   return { title: title.slice(0, 120), message };
+}
+
+/**
+ * Which engine the admin explicitly asked for.
+ *
+ * `auto` keeps the file's existing routing (local first, hosted if no local
+ * runtime, mock if neither). The other two are a deliberate override, because
+ * for this one feature the difference is visible in the output: the local 3b
+ * model is competent at extracting structure from figures and weak at writing
+ * prose somebody will read, and an email to three hundred students is entirely
+ * prose. Admins should be able to say so rather than editing an env var.
+ */
+export type EmailDraftEngine = "auto" | "claude" | "local";
+
+export type EmailDraftBlock =
+  | { type: "heading"; text: string }
+  | { type: "text"; text: string }
+  | { type: "callout"; text: string }
+  | { type: "button"; label: string; href: string };
+
+/**
+ * What each engine can actually do right now, for the composer's toggle.
+ *
+ * A disabled radio with a reason beside it is far better than one that looks
+ * available and silently produces the canned mock text — which is exactly the
+ * failure this codebase has already had once, when a present-but-unfunded
+ * Claude key made hosted the *preferred* provider and every caller fell
+ * through to its placeholder.
+ */
+export function emailDraftEngines(): Array<{ id: EmailDraftEngine; label: string; available: boolean; detail: string }> {
+  const claude = hasKey(process.env.ANTHROPIC_API_KEY);
+  const local = localModelAvailable();
+  return [
+    { id: "auto", label: "Automatic", available: claude || local, detail: local ? "Uses the local model first" : claude ? "Uses Claude" : "No engine reachable" },
+    { id: "claude", label: "Claude", available: claude, detail: claude ? `${CLAUDE_MODEL} — best prose, costs per send` : "No ANTHROPIC_API_KEY set" },
+    { id: "local", label: "Local model", available: local, detail: local ? `${getOllamaModel()} — free, blunter writing` : "No local runtime reachable" },
+  ];
+}
+
+/**
+ * Draft a whole campaign as BLOCKS rather than as HTML.
+ *
+ * Asking for typed objects instead of markup is what makes this dependable on
+ * a small model as well as a large one: a 3b model asked for an email table
+ * layout produces something that neither validates nor renders, while the same
+ * model asked for four labelled strings usually gets it right. It also means
+ * the result lands in the editor as editable blocks rather than as a wall of
+ * HTML nobody can safely touch.
+ */
+export async function draftEmailBlocks(input: {
+  brief: string;
+  audience?: string | null;
+  engine?: EmailDraftEngine;
+}): Promise<{ subject: string; blocks: EmailDraftBlock[]; engine: string } | null> {
+  const audience = input.audience?.trim() || "students at a German language school in Nigeria";
+
+  const prompt = `You are writing an email for EasyWay German Language School to ${audience}.
+
+What the school wants to say:
+"""
+${input.brief.slice(0, 2000)}
+"""
+
+Compose the email as a short sequence of blocks.
+
+Rules:
+- Plain, warm, direct English. Most readers are Nigerian adults learning German, reading on a phone.
+- Lead with the thing that changed. No throat-clearing, no "We hope this email finds you well".
+- No greeting block and no sign-off block — the template already adds "Hallo <name>," and the school's footer.
+- Never invent a date, time, price, venue or link that is not in the brief above.
+- Use {{name}} for the reader's first name and {{level}} for their class level if you want them mid-sentence.
+- Between 2 and 6 blocks. At most one "callout" and at most one "button".
+- A "button" href must be a portal path like /payments, /calendar or /dashboard.
+
+Block types: {"type":"heading","text":...} {"type":"text","text":...} {"type":"callout","text":...} {"type":"button","label":...,"href":...}
+
+Return JSON: {"subject": "...", "blocks": [ ... ]}${JSON_ONLY}`;
+
+  const engine = input.engine ?? "auto";
+  let raw: string | null = null;
+  let used = "";
+
+  if (engine === "claude") {
+    raw = await callClaude(prompt, 1200);
+    used = CLAUDE_MODEL;
+  } else if (engine === "local") {
+    raw = await callLocalModel(getOllamaModel(), prompt, 0.4);
+    used = getOllamaModel();
+  } else {
+    raw = await callModel(prompt, 1200);
+    used = activeModelName();
+  }
+
+  const parsed = parseJsonReply<{ subject?: unknown; blocks?: unknown }>(raw);
+  if (!parsed) return null;
+
+  const subject = typeof parsed.subject === "string" ? parsed.subject.trim().slice(0, 150) : "";
+  if (!Array.isArray(parsed.blocks)) return null;
+
+  // The model's output is treated exactly as hostile as a browser's: anything
+  // unrecognised is dropped rather than passed along to the renderer.
+  const blocks = parsed.blocks.flatMap((item): EmailDraftBlock[] => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const text = typeof row.text === "string" ? row.text.trim() : "";
+    switch (row.type) {
+      case "heading":
+        return text ? [{ type: "heading", text: text.slice(0, 200) }] : [];
+      case "text":
+        return text ? [{ type: "text", text: text.slice(0, 3000) }] : [];
+      case "callout":
+        return text ? [{ type: "callout", text: text.slice(0, 400) }] : [];
+      case "button": {
+        const label = typeof row.label === "string" ? row.label.trim().slice(0, 60) : "";
+        const href = typeof row.href === "string" ? row.href.trim().slice(0, 300) : "";
+        return label && href ? [{ type: "button", label, href }] : [];
+      }
+      default:
+        return [];
+    }
+  });
+
+  if (blocks.length === 0 || !subject) return null;
+  return { subject, blocks, engine: used };
 }
 
 export async function summarizeText(text: string): Promise<string> {

@@ -109,6 +109,21 @@ export const TENANT_OWNED_MODELS = [
    */
   "ApiKey",
   "IdempotencyRecord",
+
+  /**
+   * Billing. A tenant reads its own usage, its own balance and its own
+   * statement; nobody reads anybody else's. The nightly rollup and the
+   * operator's cross-tenant revenue view both go through runUnscoped, which is
+   * the correct amount of friction for the two jobs that need it.
+   */
+  "UsageEvent",
+  "UsageDaily",
+  "TenantCredit",
+  "CreditTransaction",
+
+  /** A partner's own endpoints and the deliveries made to them. */
+  "WebhookEndpoint",
+  "WebhookDelivery",
 ] as const;
 
 /**

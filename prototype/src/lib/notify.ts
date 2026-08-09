@@ -106,6 +106,19 @@ export type NotifyInput = {
    * with one line in it looks broken. Falls back to `message`.
    */
   emailBody?: string;
+  /**
+   * A ready-made email body, replacing the standard notification template.
+   *
+   * For the admin composer, whose whole point is a designed message: running
+   * its blocks back through `renderNotificationEmail` would throw the design
+   * away and re-render it as a title and a paragraph. Everything else about
+   * the send is unchanged — the same recipients, the same bell row, the same
+   * push, the same routing and per-person preferences.
+   *
+   * Given the recipient, so the caller can resolve merge fields per person.
+   * Returning null falls back to the standard template for that recipient.
+   */
+  emailHtmlFor?: (recipient: { id: string; email: string; name: string | null }) => string | null;
 };
 
 export type NotifyResult = {
@@ -305,16 +318,28 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
         // Somebody who has turned this kind's email off still gets the bell
         // and the push — only the mailbox is spared.
         if (!accepts(person.id, "email")) continue;
+
+        // A designed campaign supplies its own body; everything else gets the
+        // standard notification letterhead. Both now render through the same
+        // shell in email-brand.ts, so the two do not look like two schools.
+        const custom = input.emailHtmlFor?.({
+          id: person.id,
+          email: person.email,
+          name: person.name,
+        });
+
         await queueEmail({
           to: person.email,
           subject: input.title,
-          html: renderNotificationEmail({
-            name: person.name,
-            title: input.title,
-            body: input.emailBody ?? input.message,
-            link: input.link,
-            identity: plan.identity,
-          }),
+          html:
+            custom ??
+            renderNotificationEmail({
+              name: person.name,
+              title: input.title,
+              body: input.emailBody ?? input.message,
+              link: input.link,
+              identity: plan.identity,
+            }),
           type: kind,
           studentId: studentIdByUser.get(person.id) ?? null,
           identity: plan.identity,
