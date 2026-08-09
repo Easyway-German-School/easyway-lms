@@ -7,6 +7,7 @@ import AdminShell from "@/components/AdminShell";
 import EmailBlockEditor from "@/components/EmailBlockEditor";
 import { LEVELS } from "@/lib/levels";
 import { newBlock, type EmailBlock } from "@/lib/email-blocks";
+import { EMAIL_TEMPLATES, templateBlocks } from "@/lib/email-template-library";
 
 /**
  * The composer, and the queue dashboard beneath it.
@@ -160,6 +161,32 @@ export default function AdminEmailComposePage() {
 
   async function send() {
     if (!preview) return;
+
+    /**
+     * The unreplaced-placeholder check.
+     *
+     * Templates deliberately leave visible blanks like [Friday 00 Month]
+     * rather than plausible-looking real dates, precisely so that a forgotten
+     * one is obvious. This is the last chance to notice — "due by [date]" is a
+     * mistake you can only make once in front of three hundred students, and
+     * it is exactly the kind of thing that slips past on a busy morning.
+     */
+    const leftovers = [...new Set(
+      blocks.flatMap((b) => {
+        const text = [
+          "text" in b ? b.text : "",
+          "label" in b ? b.label : "",
+        ].join(" ");
+        return text.match(/\[[^\]\n]{1,40}\]/g) ?? [];
+      }),
+    )];
+
+    if (leftovers.length > 0) {
+      if (!confirm(
+        `${leftovers.length} placeholder${leftovers.length === 1 ? " is" : "s are"} still unfilled:\n\n${leftovers.join("\n")}\n\nSend anyway?`,
+      )) return;
+    }
+
     // Names all three channels, because this now reaches more than a mailbox
     // and an admin should know that before pressing the button.
     if (!confirm(`Send to ${preview.count} ${preview.count === 1 ? "person" : "people"}?\n\nEach gets it in their portal, as a push notification, and by email.`)) return;
@@ -255,6 +282,36 @@ export default function AdminEmailComposePage() {
               <option value="unpaid">Outstanding balance</option>
               <option value="paid">Fully paid</option>
             </select>
+          </div>
+
+          {/*
+            START FROM SOMETHING. Above the assistant, because picking a
+            template is the faster path and the one most sends should take —
+            an empty canvas is the reason most schools send three emails a
+            year. Replacing the blocks is destructive, so it asks first once
+            there is work to lose.
+          */}
+          <div className="mt-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Start from a template</p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {EMAIL_TEMPLATES.map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  onClick={() => {
+                    const hasWork = subject.trim() !== "" || blocks.length > 2;
+                    if (hasWork && !confirm(`Replace what you have written with the "${template.name}" template?`)) return;
+                    setSubject(template.subject);
+                    setBlocks(templateBlocks(template));
+                    setNotice(`Loaded "${template.name}". Replace anything in [square brackets] before you send.`);
+                  }}
+                  className="rounded-xl border bg-white p-3 text-left transition hover:border-slate-900"
+                >
+                  <p className="text-sm font-semibold text-slate-900">{template.name}</p>
+                  <p className="mt-0.5 text-xs leading-4 text-slate-500">{template.purpose}</p>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* WRITE IT FOR ME. Optional, above the real fields, exactly as on
