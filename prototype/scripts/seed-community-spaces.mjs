@@ -39,7 +39,7 @@ const STARTERS = {
      "New to this group? Tell us your name, why you're learning German, and what you're aiming for. We'll keep this thread going all term.",
      ["Hallo! I'm learning for an Ausbildung place in Cologne next year. Currently losing a fight with separable verbs.",
       "Hi everyone — my goal is the B1 exam by December so I can start my visa process."]],
-    ["Tips for the Goethe B1 speaking section?",
+    ["Tips for the B1 speaking section?",
      "My written German is fine but I freeze in the speaking exam. How did you prepare?",
      ["Record yourself answering a prompt for two minutes, then listen back. Painful but it works.",
       "Practise the connectors — 'einerseits… andererseits', 'meiner Meinung nach'. Examiners listen for structure.",

@@ -244,7 +244,7 @@ export default function LecturerSettingsPage() {
                 id="specialization"
                 value={specialization}
                 onChange={(event) => setSpecialization(event.target.value)}
-                placeholder="e.g. Goethe exam preparation, B1–B2"
+                placeholder="e.g. Exam preparation, B1–B2"
                 className={inputClass}
               />
             </div>

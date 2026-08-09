@@ -61,7 +61,7 @@ Output: lessonPackage { summary, objectives[], grammarFocus[], vocabulary[], mod
 ```
 Student {
   level: "A1"-"C2"
-  pathway: "Goethe exam mastery" | "Nursing career path" | "IT relocation track" | "Ausbildung & Vocational Route"
+  pathway: "Language training" | "Nursing career path" | "IT relocation track" | "Ausbildung & Vocational Route"
   examReadiness: 0-100 (integer)
 }
 ```
@@ -331,7 +331,7 @@ missions.push({
 - **No error-fixing missions** - Can't create "spot the mistake and fix it" tasks
 - **No micro-lesson generation** - No procedural creation of tiny grammar lessons (e.g., "dative prepositions in 2 minutes")
 - **No contextual German examples** - No real-world dialogue samples
-- **No Goethe-exam-style tasks** - Writing tasks not formatted to Goethe exam standards
+- **No exam-style tasks** - Writing tasks not formatted to certification exam standards
 - **No skill-specific drills** - Drills aren't mapped to specific grammar/vocab skills
 - **No progression scaffold** - No A1 → A2 → B1 difficulty progression within skill
 - **No common mistake tracking** - No database of errors students make on German tasks
@@ -407,9 +407,9 @@ const insights = {
 **File: [src/app/api/recommendations/route.ts](src/app/api/recommendations/route.ts)**
 ```typescript
 programs: {
-  "Goethe exam mastery": {
+  "Language training": {
     overview: "...",
-    nextAction: "Complete the Goethe writing drill for B2",
+    nextAction: "Complete the writing drill for B2",
     focus: "Sentence structure and exam vocabulary",
     score: 82,  // Dynamic calculation
     path: ["Review mock B2 essay feedback", "Practice speaking...", ...]

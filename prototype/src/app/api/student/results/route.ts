@@ -74,7 +74,7 @@ export async function GET() {
     }>();
 
     for (const g of exams) {
-      // A centre sitting (ÖSD, Goethe) belongs to no course, so group those
+      // A centre sitting (ÖSD, telc) belongs to no course, so group those
       // under the awarding body instead of dropping them from the results.
       const course = g.exam!.course;
       const groupId = course?.id ?? `body:${g.exam!.examBody ?? "external"}`;

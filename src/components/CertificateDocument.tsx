@@ -22,7 +22,7 @@ import type { CertificateView } from "@/lib/certificates";
  *   consequence the pay-in-full offer promises, made visible on the document.
  *
  * It is bilingual because the school's own Teilnahmebestätigung is: German
- * line first, English gloss underneath, exactly as a Goethe/ÖSD-facing document
+ * line first, English gloss underneath, exactly as an ÖSD-facing document
  * is read. A student forwarding this to a German employer or a consulate should
  * not have to explain what it says, and a student reading it at home should not
  * have to guess. The CEFR strip, the German grading scale and the RC number are
@@ -126,7 +126,7 @@ export default function CertificateDocument({
             </div>
             <p className="ewcert__school">{SCHOOL.name}</p>
             <p className="ewcert__sub">
-              {cert.branchName ? `${cert.branchName} Branch` : "Lagos"} &middot; Goethe &amp; ÖSD Examination
+              {cert.branchName ? `${cert.branchName} Branch` : "Lagos"} &middot; German Language &amp; Examination
               Preparation
             </p>
           </header>

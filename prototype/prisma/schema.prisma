@@ -1565,7 +1565,7 @@ model Exam {
   totalScore  Int      @default(100)
 
   /**
-   * ÖSD | Goethe | telc | internal — who awards the certificate.
+   * ÖSD | telc | internal — who awards the certificate.
    */
   examBody String  @default("internal")
   /**

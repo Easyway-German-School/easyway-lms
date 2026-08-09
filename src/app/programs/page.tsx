@@ -10,7 +10,7 @@ import TuitionCheckout from "@/components/TuitionCheckout";
 /**
  * The tuition checkout.
  *
- * Programs used to carry their own prices (Goethe ₦150k, Nursing ₦180k …) while
+ * Programs used to carry their own prices (Language ₦150k, Nursing ₦180k …) while
  * the paywall computed the fee from the student's LEVEL. The two disagreed: a
  * student on A1 could buy the ₦200,000 Ausbildung track and still be short of
  * the A1 deposit, or pay ₦180,000 against a ₦150,000 obligation. A pathway is

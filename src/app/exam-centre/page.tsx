@@ -35,7 +35,6 @@ type Me = { studentId: string; name: string | null; email: string | null; level:
 
 const BODY_TONE: Record<string, string> = {
   "ÖSD": "bg-red-100 text-red-700",
-  Goethe: "bg-blue-100 text-blue-700",
   telc: "bg-purple-100 text-purple-700",
   internal: "bg-[var(--surface-alt)] text-[var(--foreground-soft)]",
 };

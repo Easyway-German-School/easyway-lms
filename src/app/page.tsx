@@ -32,7 +32,7 @@ export default async function HomePage() {
                 {[
                   { title: 'Relocation-ready lessons', detail: 'German classes designed for everyday life, work, and visa success.' },
                   { title: 'Live conversation labs', detail: 'Practice speaking with instructors and small peer groups.' },
-                  { title: 'Exam preparation', detail: 'Structured A1–B2 support for Goethe, TELC, and OSD exams.' },
+                  { title: 'Exam preparation', detail: 'Structured A1–B2 support for internationally recognised German exams.' },
                   { title: 'Progress tracking', detail: 'Visual learning milestones with weekly performance insights.' },
                 ].map((feature) => (
                   <li key={feature.title} className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">

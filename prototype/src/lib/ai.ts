@@ -1509,7 +1509,7 @@ function generateNextStepsMock(score: number, feedback: Array<{ category: string
 // Claude Implementation
 async function gradeEssayWithClaude(essay: string) {
   const raw = await callClaude(
-    `Grade this German essay for a Goethe B2 exam. Return JSON with:
+    `Grade this German essay at B2 exam standard. Return JSON with:
 {
   "score": (0-100),
   "feedback": [
@@ -1580,7 +1580,7 @@ async function gradeEssayWithOllama(essay: string) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: getOllamaModel(),
-        prompt: `Grade this German essay for a Goethe B2 exam. Return only valid JSON with score (0-100), feedback array, and summary. Example output:
+        prompt: `Grade this German essay at B2 exam standard. Return only valid JSON with score (0-100), feedback array, and summary. Example output:
 {"score":80,"feedback":[{"category":"Grammar","comment":"...","score":78}],"summary":"..."}
 Essay:
 ${essay}`,

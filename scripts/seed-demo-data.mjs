@@ -125,10 +125,10 @@ async function seedMaterials() {
 }
 
 const EXAMS = [
-  ["Goethe-Zertifikat A1: Start Deutsch 1", "A1", -35],
-  ["Goethe-Zertifikat A2", "A2", -14],
+  ["ÖSD Zertifikat A1", "A1", -35],
+  ["ÖSD Zertifikat A2", "A2", -14],
   ["telc Deutsch B1", "B1", 12],
-  ["Goethe-Zertifikat B2", "B2", 26],
+  ["telc Deutsch B2", "B2", 26],
   ["ÖSD Zertifikat C1", "C1", 45],
 ];
 
@@ -293,7 +293,7 @@ async function seedProgress() {
 
 const ANNOUNCEMENTS = [
   ["New B1 speaking lab every Thursday", "Live conversation labs now run Thursdays at 18:00 at all branches. Places are limited to twelve learners per session.", "in_app"],
-  ["Goethe B2 registration closes soon", "Registration for the next Goethe B2 sitting closes at the end of this month. Speak to your branch coordinator to reserve a seat.", "in_app"],
+  ["B2 exam registration closes soon", "Registration for the next B2 sitting closes at the end of this month. Speak to your branch coordinator to reserve a seat.", "in_app"],
   ["Library expanded for A2 and B1", "Fresh grammar and listening material has been added to your course library. Check the Materials page for the latest uploads.", "in_app"],
 ];
 

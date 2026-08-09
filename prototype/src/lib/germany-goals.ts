@@ -145,7 +145,7 @@ export type GermanyGoal = {
  * Parameterised by level because "I passed B1" and "I passed C1" are not the
  * same sentence and should not be printed as though they were.
  */
-function examStage(level: string, exam = "Goethe / telc"): GoalStage {
+function examStage(level: string, exam = "ÖSD / telc"): GoalStage {
   return {
     id: "exam",
     voice: `I sat the ${level} exam and I passed.`,

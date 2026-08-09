@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
         address: address || currentAdmission.address,
         gender: gender || currentAdmission.gender,
         dob: dateOfBirth || currentAdmission.dob,
-        preferredExam: preferredExam || currentAdmission.preferredExam || "Goethe",
+        preferredExam: preferredExam || currentAdmission.preferredExam || "Not decided yet",
         branch: branch || currentAdmission.branch || (student.branch ? student.branch.name : undefined),
         photoUrl: photoUrl || currentAdmission.photoUrl,
       },

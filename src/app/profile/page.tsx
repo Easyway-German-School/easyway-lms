@@ -247,7 +247,7 @@ export default function ProfilePage() {
             ? new Date(user.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
             : "—",
           paymentStatus: student?.paymentStatus || "Pending",
-          preferredExam: admission?.preferredExam || "Goethe",
+          preferredExam: admission?.preferredExam || "Not decided yet",
           targetRoute: admission?.targetRoute || "—",
           emergencyContact: admission?.emergencyContactName
             ? `${admission.emergencyContactName} · ${admission.emergencyContactInfo ?? ""}`.trim()
@@ -838,7 +838,7 @@ export default function ProfilePage() {
                     onChange={(event) => setFormState((prev) => ({ ...prev, preferredExam: event.target.value }))}
                     className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
                   >
-                    <option value="Goethe">Goethe</option>
+                    <option value="Not decided yet">Not decided yet</option>
                     <option value="Internal Easyway exam">Internal Easyway exam</option>
                     <option value="OSD">OSD</option>
                   </select>

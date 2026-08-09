@@ -14,7 +14,7 @@ import { TargetIcon } from "@/components/icons";
 
 export default function EssayGrader() {
   const [essay, setEssay] = useState(
-    "Ich möchte meine Deutschkenntnisse verbessern und ein Goethe-Zertifikat erreichen. Das Goethe-Institut ist eine der besten Optionen, um ein international anerkanntes Zertifikat zu bekommen."
+    "Ich möchte meine Deutschkenntnisse verbessern und ein anerkanntes Sprachzertifikat erreichen. Ein international anerkanntes Zertifikat hilft mir bei meiner Bewerbung und bei meinem Visum."
   );
   const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
   const [summary, setSummary] = useState("Write your essay and click the challenge button to receive AI feedback.");

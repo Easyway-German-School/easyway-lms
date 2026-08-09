@@ -141,7 +141,7 @@ export const EMAIL_TEMPLATES: EmailTemplate[] = [
   {
     id: "exam-registration",
     name: "Exam registration open",
-    purpose: "Goethe/TELC/ÖSD registration is open and has a hard deadline.",
+    purpose: "Exam registration is open and has a hard deadline.",
     subject: "Exam registration is open — closes [date]",
     blocks: [
       { type: "heading", text: "Time to register for your {{level}} exam" },

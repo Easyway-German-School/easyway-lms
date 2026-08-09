@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
  * turning someone away on the day after taking their money.
  */
 
-export const EXAM_BODIES = ["ÖSD", "Goethe", "telc", "internal"] as const;
+export const EXAM_BODIES = ["ÖSD", "telc", "internal"] as const;
 
 /** A seat is held by any registration that has not been cancelled. */
 const HOLDING_STATUSES = ["registered", "confirmed", "completed"];

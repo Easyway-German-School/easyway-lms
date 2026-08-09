@@ -8,7 +8,7 @@ const courseStructure: Record<string, Array<{
     lessons: Array<{ title: string; type: string; content: string; duration: number }>
   }>
 }>> = {
-  "Goethe exam mastery": [
+  "Language training": [
     {
       title: "German A1 Foundations",
       description: "Build the core grammar, listening, and speaking habits for exam success.",
@@ -32,15 +32,15 @@ const courseStructure: Record<string, Array<{
       ]
     },
     {
-      title: "Goethe Essay Prep",
+      title: "Exam Essay Prep",
       description: "Structure paragraphs, improve linking phrases, and write clearer exam essays.",
       modules: [
         {
           title: "Module 1: Essay Structure",
           lessons: [
-            { title: "Lesson 1: Essay Planning Framework", type: "lesson", content: "Learn the Goethe exam essay structure: introduction, body, conclusion. Review sample essays.", duration: 20 },
+            { title: "Lesson 1: Essay Planning Framework", type: "lesson", content: "Learn the exam essay structure: introduction, body, conclusion. Review sample essays.", duration: 20 },
             { title: "Lesson 2: Linking Phrases", type: "lesson", content: "Master German transition words: Erstens, Außerdem, Schließlich, Daher.", duration: 15 },
-            { title: "Assignment 1: Write a sample essay", type: "assignment", content: "Write a 250-word essay on a Goethe exam topic.", duration: 45 },
+            { title: "Assignment 1: Write a sample essay", type: "assignment", content: "Write a 250-word essay on a typical exam topic.", duration: 45 },
           ]
         }
       ]
