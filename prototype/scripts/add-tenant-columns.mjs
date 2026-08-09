@@ -1,10 +1,11 @@
 /**
- * Adds `tenantId` (plus an index) to every model the tenant registry calls
- * tenant-owned, if it is not already there.
+ * Adds `tenantId` (plus an index and the relation Prisma needs on both sides)
+ * to every model the tenant registry calls tenant-owned, if it is not already
+ * there.
  *
- * Written as a script rather than done by hand because it is forty-five nearly
- * identical edits, and forty-five hand edits is forty-five chances to skip one
- * — which for this particular field means one table with no isolation at all.
+ * Written as a script rather than done by hand because it is nearly fifty
+ * identical edits, and fifty hand edits is fifty chances to skip one — which
+ * for this particular field means one table with no isolation at all.
  * Re-running it is safe: models that already carry the column are left alone.
  *
  *   node scripts/add-tenant-columns.mjs          # report only
@@ -12,6 +13,12 @@
  *
  * Review `git diff prisma/schema.prisma` afterwards. This edits the schema
  * only; it neither generates a client nor touches any database.
+ *
+ * The model list is READ FROM src/lib/tenant/registry.ts rather than repeated
+ * here. It used to be a copy, and the copy had already drifted — three models
+ * added to the registry never reached this list, so running it would have
+ * produced a schema that looked complete and left three tables unprotected.
+ * A second list of the same thing is a second thing to forget.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -19,23 +26,34 @@ import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const schemaPath = path.join(here, "..", "prisma", "schema.prisma");
+const registryPath = path.join(here, "..", "src", "lib", "tenant", "registry.ts");
 
-// Kept in step with src/lib/tenant/registry.ts. The isolation test asserts the
-// two agree, so a model added to one and not the other fails the suite.
-const TENANT_OWNED = [
-  "Student", "Lecturer", "Branch", "Class", "ClassSession", "PrivateClass",
-  "Course", "Module", "Lesson", "Material", "Pathway", "Enrollment", "Progress",
-  "Completion", "Grade", "Assignment", "AssignmentTarget", "AssignmentSubmission",
-  "Attendance", "Exam", "ExamRegistration", "Certificate", "Invoice", "Payment",
-  "Lead", "Notification", "NotificationSetting", "EmailLog", "EmailMessage",
-  "EmailSuppression", "PushSubscription", "Space", "Channel", "ChannelRead",
-  "Thread", "Comment", "ClassRecording", "VideoProgress", "MissionProgress",
-  "PersonalizedPlan", "JourneyEvent", "IntegrationConnector", "AdminAction",
-  "AuditLog", "BackupRun",
-  // Already carry a non-null tenantId of their own; listed so the registry and
-  // this script agree, and skipped by the "already present" check below.
-  "ApiKey", "IdempotencyRecord",
-];
+/** Pull the array out of the registry's TypeScript without compiling it. */
+function readRegistry() {
+  const source = readFileSync(registryPath, "utf8");
+  const block = /export const TENANT_OWNED_MODELS = \[([\s\S]*?)\] as const;/.exec(source);
+  if (!block) {
+    console.error(`Could not find TENANT_OWNED_MODELS in ${registryPath}.`);
+    process.exit(1);
+  }
+  // Strip comments first, so a model name mentioned in prose is not mistaken
+  // for an entry.
+  const body = block[1].replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  return [...body.matchAll(/"([A-Za-z0-9_]+)"/g)].map((m) => m[1]);
+}
+
+/**
+ * The back-relation field name on Tenant. English enough for the models this
+ * schema actually has — Class becomes classes, not classs.
+ */
+function pluralField(model) {
+  const name = model[0].toLowerCase() + model.slice(1);
+  if (/(s|x|z|ch|sh)$/.test(name)) return `${name}es`;
+  if (/[^aeiou]y$/.test(name)) return `${name.slice(0, -1)}ies`;
+  return `${name}s`;
+}
+
+const TENANT_OWNED = readRegistry();
 
 const write = process.argv.includes("--write");
 const source = readFileSync(schemaPath, "utf8");
@@ -82,11 +100,11 @@ while (i < lines.length) {
    * Nullable, and onDelete: Cascade.
    *
    * Nullable because the rows already in this database predate tenancy — the
-   * school's own 977 rows have no tenant until the backfill assigns them one,
-   * and a required column cannot be added to a populated table without a
-   * default that would be a lie. The backfill in the manual migration is what
-   * makes it effectively non-null; the isolation extension already refuses to
-   * query without a tenant, so a null here means "not reachable by any tenant
+   * school's own rows have no tenant until the backfill assigns them one, and
+   * a required column cannot be added to a populated table without a default
+   * that would be a lie. The backfill in the manual migration is what makes it
+   * effectively non-null; the isolation extension already refuses to query
+   * without a tenant, so a null here means "not reachable by any tenant
    * client", which is the correct failure direction.
    *
    * Cascade because deleting a tenant must take its data with it. That is a
@@ -108,6 +126,30 @@ while (i < lines.length) {
 
 for (const name of TENANT_OWNED) {
   if (!added.includes(name) && !skipped.includes(name)) missing.push(name);
+}
+
+/**
+ * Prisma relations are declared on both models. Without the list field here,
+ * every one of the fields added above fails validation with "missing an
+ * opposite relation field", and the schema does not compile at all — so this
+ * is not tidiness, it is the other half of the same edit.
+ */
+if (added.length) {
+  const start = out.findIndex((l) => /^model\s+Tenant\s*\{/.test(l));
+  if (start === -1) {
+    console.error("ERROR: no `model Tenant` in the schema. Nothing to relate to.");
+    process.exit(1);
+  }
+  let end = start + 1;
+  while (end < out.length && !/^\}/.test(out[end])) end++;
+
+  const existing = out.slice(start, end).join("\n");
+  const backRefs = added
+    .filter((model) => !new RegExp(`\\b${model}\\[\\]`).test(existing))
+    .map((model) => `  ${pluralField(model).padEnd(24)} ${model}[]`);
+
+  out.splice(end, 0, "", "  /// Back-relations for the tenant-owned tables. Generated by", "  /// scripts/add-tenant-columns.mjs; Prisma requires both sides.", ...backRefs);
+  console.log(`back-relations added to Tenant: ${backRefs.length}`);
 }
 
 console.log(`tenant column added to ${added.length} model(s)`);
