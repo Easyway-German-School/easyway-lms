@@ -95,10 +95,10 @@ function useLiveClassPoll(enabled = true): LiveClassValue {
 
   useEffect(() => {
     alive.current = true;
-    if (!enabled) {
-      setLoading(false);
-      return;
-    }
+    // No poll to wait for, so there is nothing to report as loading. Derived
+    // below rather than written here — an effect that only exists to correct a
+    // piece of state is a render where the state was wrong.
+    if (!enabled) return;
 
     void poll();
 
@@ -130,5 +130,8 @@ function useLiveClassPoll(enabled = true): LiveClassValue {
     };
   }, [enabled, poll]);
 
-  return useMemo(() => ({ live, loading, refresh: poll }), [live, loading, poll]);
+  return useMemo(
+    () => ({ live, loading: enabled && loading, refresh: poll }),
+    [live, enabled, loading, poll],
+  );
 }

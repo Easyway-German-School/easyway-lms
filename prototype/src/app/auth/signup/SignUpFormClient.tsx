@@ -8,6 +8,7 @@ import BrandLoader from "@/components/BrandLoader";
 import { countries, nigerianStates, packageOptions, professionOptions } from "@/app/auth/signup/options";
 import PasswordInput from "@/components/PasswordInput";
 import PhotoCapture from "@/components/PhotoCapture";
+import SignupJourney from "@/components/SignupJourney";
 import { CheckCircleIcon, SignalIcon } from "@/components/icons";
 import { uploadImage } from "@/lib/upload";
 import {
@@ -98,20 +99,32 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   // a campus question and a campus student never sees a bandwidth one.
   const isOnline = isOnlineBranch(selectedBranch);
 
-  const stepTitles = isOnline ? ["Program", "Your setup", "Launch"] : ["Program", "Profile", "Launch"];
-  const stepIntroText = (
-    isOnline
-      ? {
-          1: "Pick your level, your session, and your account details.",
-          2: "Tell us how you will be joining class so we can tune your video.",
-          3: "Review and finish — you go straight to your dashboard.",
-        }
-      : {
-          1: "Pick your branch, pathway, and account details.",
-          2: "Tell us about yourself so we can tailor your plan.",
-          3: "Review and finish your signup quickly.",
-        }
-  )[step] as string;
+  /**
+   * The three milestones, in the guide's voice.
+   *
+   * The copy carries the weight here, and every line is doing one job: telling
+   * somebody who has just decided to learn German that this is the beginning of
+   * something rather than an administrative hurdle. It names the destination
+   * ("Germany", "your first class") instead of the mechanism ("submit the
+   * form"), and it says what each answer is FOR — a student who knows why they
+   * are being asked for a date of birth answers it; one who does not, leaves.
+   *
+   * The online variant is genuinely different, not reworded: an online student
+   * is asked about their connection, and the reason for that question is worth
+   * saying out loud on a Nigerian line.
+   */
+  const milestones = isOnline
+    ? [
+        { label: "Program", stamp: "Chosen", line: "Willkommen! First — which level are you starting at, and when can you actually make class? Everything after this is shaped around that answer." },
+        { label: "Your setup", stamp: "Ready", line: "Now the part most schools skip: how you get online. Tell us honestly and we tune your video to your line, so your first lesson does not freeze." },
+        { label: "Launch", stamp: "Enrolled", line: "That is everything. Finish up and your dashboard, your timetable and your classmates are waiting on the other side." },
+      ]
+    : [
+        { label: "Program", stamp: "Chosen", line: "Willkommen! Let us start with where you are learning and where you are heading. Germany is the destination — this is choosing the road." },
+        { label: "Profile", stamp: "Known", line: "Now a little about you. Your tutor sees this, so it is how you stop being a row in a spreadsheet and start being a student they know." },
+        { label: "Launch", stamp: "Enrolled", line: "That is everything. Finish up and your dashboard, your timetable and your classmates are waiting on the other side." },
+      ];
+
   const isLastStep = step === stepCount;
   /**
    * DOB is now a real date picker, so the value arriving here is always
@@ -400,17 +413,31 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.12),_transparent_35%),linear-gradient(180deg,_#f5f5f5_0%,_#ffffff_100%)] px-4 py-12 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-5xl space-y-10">
-        <div className="rounded-[32px] bg-gradient-to-br from-[#0D7C7E] via-[#FF6600] to-[#FF8533] px-8 py-8 text-white shadow-[0_30px_90px_-30px_rgba(13,124,126,0.25)] sm:px-12">
+        {/*
+          This said "STUDENT SIGN IN" on the page where you create an account,
+          twice, and promised "a simpler signin experience". Nobody signing up
+          is signing in, and a school that cannot tell the difference on its own
+          enrolment page is not a confidence-inspiring place to send ₦400,000.
+        */}
+        <div className="rounded-[32px] bg-gradient-to-br from-[#0D7C7E] via-[#FF6600] to-[#FF8533] px-6 py-8 text-white shadow-[0_30px_90px_-30px_rgba(13,124,126,0.25)] sm:px-12">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-sky-100">EASYWAY LMS STUDENT SIGN IN</p>
-            <h1 className="mt-4 text-4xl font-semibold leading-tight sm:text-5xl">{pageTitle || "Student Sign In"}</h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-sky-100/90">
-              Secure your place, choose your pathway, and launch your learning progress with a simpler signin experience.
+            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-white/70">Enrolment · EasyWay German</p>
+            <h1 className="mt-4 text-3xl font-semibold leading-tight sm:text-5xl">{pageTitle || "Start your German journey"}</h1>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-white/85">
+              Three short steps and you are enrolled — your level, your class times, your tutor. Most people finish this
+              in under four minutes.
             </p>
           </div>
         </div>
 
-        <form onSubmit={handleSignUp} className="space-y-6 rounded-[32px] bg-white/95 p-8 shadow-[0_30px_80px_-24px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/70">
+        {/*
+          `p-8` unconditionally was costing 64px of a 375px screen, and the page
+          around it another 32. Measured: the companion's speech bubble was
+          being squeezed to 171px wide and wrapping to 211px tall — a paragraph
+          in a column three words across. Padding is a phone's scarcest
+          resource; it earns its place above sm and not below.
+        */}
+        <form onSubmit={handleSignUp} className="space-y-6 rounded-[32px] bg-white/95 p-4 shadow-[0_30px_80px_-24px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/70 sm:p-8">
           {error ? <div className="rounded-xl bg-rose-500/10 p-4 text-sm text-rose-700">{error}</div> : null}
           {successMessage && showSuccess ? (
             <div className="rounded-3xl border border-emerald-200/80 bg-emerald-500/10 p-5 text-sm text-emerald-900 shadow-lg shadow-emerald-500/10 transition-all duration-200">
@@ -424,30 +451,15 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
             </div>
           ) : null}
 
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-            <div className="mb-4 grid gap-3 sm:grid-cols-3">
-              {stepTitles.map((title, index) => {
-                const active = step === index + 1;
-                return (
-                  <div key={title} className="flex items-center gap-3">
-                    <span className={`h-9 w-9 shrink-0 rounded-full grid place-items-center text-sm font-semibold ${active ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--muted)]"}`}>
-                      {index + 1}
-                    </span>
-                    <div>
-                      <div className={`text-xs uppercase tracking-[0.24em] ${active ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}>{title}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-[var(--background)]">
-              <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${(step / stepCount) * 100}%` }} />
-            </div>
-            <div className="mt-4 rounded-3xl bg-white/80 p-4 text-sm text-[var(--muted)] shadow-sm">
-              <p className="font-semibold text-[var(--foreground)]">Step {step} of {stepCount}</p>
-              <p className="mt-1">{stepIntroText}</p>
-            </div>
-          </div>
+          {/* Replaced three numbered circles, a grey bar and "Step 1 of 3".
+              See SignupJourney for why that framing was the wrong one to open
+              an enrolment with. */}
+          <SignupJourney
+            milestones={milestones}
+            current={step}
+            ready={canAdvanceStep}
+            errored={Boolean(error)}
+          />
 
           {step === 1 ? (
             <div className="space-y-6">
@@ -849,23 +861,67 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
             </div>
           )}
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
-            <div className="flex gap-3">
-              {step > 1 ? (
-                <button type="button" onClick={() => setStep((current) => Math.max(1, current - 1))} className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Back</button>
-              ) : null}
-              {!isLastStep ? (
-                <button type="button" onClick={() => canAdvanceStep && setStep((current) => Math.min(stepCount, current + 1))} disabled={!canAdvanceStep} className="rounded-xl bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[#FF6600]/10 disabled:opacity-60 disabled:cursor-not-allowed">{nextButtonLabel}</button>
-              ) : null}
-            </div>
-            {isLastStep ? (
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <button type="submit" disabled={loading || uploadingPhoto} className="rounded-xl bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[#FF6600]/20 transition duration-200 hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60">{loading ? "Submitting…" : uploadingPhoto ? "Uploading files…" : "Finish signup"}</button>
-                <button type="button" onClick={() => router.push("/auth/signin")} className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Cancel</button>
+          {/*
+            THE FOOTER, REORDERED AROUND WHAT PEOPLE ACTUALLY TAP.
+
+            Two things were wrong with it. The primary action sat on the LEFT
+            beside Back — on a phone, in a column, that meant the first button
+            under your thumb was the one that goes backwards. And "Cancel" was
+            given equal visual weight to "Finish signup" on the last step, which
+            is a strange thing to offer somebody 90 seconds into enrolling.
+
+            Now: the way forward is full-width and first, Back is secondary
+            beside it, and leaving is a quiet text link. The disabled state also
+            says WHY it is disabled, because a greyed-out button with no
+            explanation is the single most common reason a form is abandoned —
+            the student cannot see which field they missed.
+          */}
+          <div className="space-y-3 border-t border-slate-200/70 pt-5">
+            {!isLastStep && !canAdvanceStep ? (
+              <p className="text-center text-xs text-[var(--muted)] sm:text-left">
+                Fill in the highlighted fields above to carry on.
+              </p>
+            ) : null}
+
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                {step > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setStep((current) => Math.max(1, current - 1))}
+                    className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                  >
+                    Back
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => router.push("/auth/signin")}
+                  className="text-sm font-medium text-[var(--muted)] underline-offset-4 transition hover:text-[var(--foreground)] hover:underline"
+                >
+                  I already have an account
+                </button>
               </div>
-            ) : (
-              <button type="button" onClick={() => router.push("/auth/signin")} className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Cancel</button>
-            )}
+
+              {!isLastStep ? (
+                <button
+                  type="button"
+                  onClick={() => canAdvanceStep && setStep((current) => Math.min(stepCount, current + 1))}
+                  disabled={!canAdvanceStep}
+                  className="w-full rounded-xl bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] px-8 py-3.5 text-sm font-bold text-white shadow-lg shadow-[#FF6600]/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none sm:w-auto"
+                >
+                  {nextButtonLabel}
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={loading || uploadingPhoto}
+                  className="w-full rounded-xl bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] px-8 py-3.5 text-sm font-bold text-white shadow-lg shadow-[#FF6600]/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  {loading ? "Enrolling you…" : uploadingPhoto ? "Uploading your photo…" : "Finish and enrol me"}
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </div>

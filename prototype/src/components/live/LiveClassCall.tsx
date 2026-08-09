@@ -117,7 +117,6 @@ export default function LiveClassCall() {
   const { live } = useLiveClass();
 
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
-  const [ringing, setRinging] = useState(false);
   const chimedFor = useRef<string | null>(null);
 
   // sessionStorage is not available during the server render, so the initial
@@ -125,11 +124,10 @@ export default function LiveClassCall() {
   // reading storage during render is a hydration mismatch.
   useEffect(() => setDismissed(readDismissed()), []);
 
-  const shouldRing = Boolean(live && !dismissed.has(live.id));
-
-  useEffect(() => {
-    setRinging(shouldRing);
-  }, [shouldRing]);
+  // Derived, not stored. Holding this in state and syncing it from an effect
+  // buys a render where the two disagree, and nothing ever needed to set it
+  // independently of the two things it is computed from.
+  const ringing = Boolean(live && !dismissed.has(live.id));
 
   // Chime and buzz once per class, not once per poll.
   useEffect(() => {

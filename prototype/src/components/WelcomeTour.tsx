@@ -252,6 +252,33 @@ export default function WelcomeTour() {
     return () => window.removeEventListener("resize", measure);
   }, []);
 
+  /**
+   * THE CARD IS MEASURED, NOT GUESSED.
+   *
+   * It used to be assumed 360px tall, and every other piece of geometry on the
+   * screen was derived from that number: where the sheet sits, whether the
+   * guide has room above the spotlight, whether the spotlight and the card
+   * overlap. On a phone the assumption was wrong in both directions at once —
+   * a step with a short body left a gap, and a step with a long one ran off the
+   * bottom of the screen while the layout still believed there were 360px of
+   * card, so the guide was placed against a card edge that was not there and
+   * the whole step read as "the tour has covered everything".
+   *
+   * A ResizeObserver on the card itself removes the guess. It fires before
+   * paint, so the first frame is already correct rather than jumping.
+   */
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [cardHeight, setCardHeight] = useState(340);
+  useEffect(() => {
+    const node = cardRef.current;
+    if (!node) return;
+    const update = () => setCardHeight(node.getBoundingClientRect().height);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [open, index, viewport.width]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -345,11 +372,24 @@ export default function WelcomeTour() {
     : null;
 
   const cardWidth = isMobile ? Math.min(viewport.width - 24, 460) : 420;
-  const guideSize = isMobile ? 104 : 150;
-  // Roughly how tall the card gets with its longest body text. Only used to
-  // keep it inside the viewport; the card itself is not measured because it
-  // has to be positioned in the same pass that renders it.
-  const CARD_HEIGHT = 360;
+  const guideSize = isMobile ? 92 : 150;
+
+  /**
+   * THE PHONE'S HARD BUDGET.
+   *
+   * A 375×812 screen is not a small desktop, it is a different problem: the
+   * card, the guide and the thing being pointed at all have to fit in 812px
+   * with none of them on top of the others, and the card is the only one of the
+   * three whose height we control. Capped at 42% of the viewport — on a short
+   * phone (667px) that is 280px, which is a stamp row, a title, three lines and
+   * the buttons, and it leaves 58% of the screen showing the portal the tour is
+   * describing.
+   *
+   * The cap is enforced with `maxHeight` and an internal scroll rather than by
+   * trimming the copy, so a long step gets shorter rather than clipped.
+   */
+  const mobileCardCap = Math.max(232, Math.round(viewport.height * 0.42));
+  const effectiveCardHeight = isMobile ? Math.min(cardHeight, mobileCardCap) : cardHeight;
 
   // On a phone the card owns one end of the screen; on a desktop it sits
   // beside the spotlight with the guide standing in the gap between them.
@@ -358,15 +398,22 @@ export default function WelcomeTour() {
 
   if (!hole) {
     cardLeft = (viewport.width - cardWidth) / 2;
-    cardTop = isMobile ? viewport.height - 400 : viewport.height / 2 - 190;
+    cardTop = isMobile
+      ? viewport.height - effectiveCardHeight - 16
+      : (viewport.height - effectiveCardHeight) / 2;
   } else if (isMobile) {
     cardLeft = (viewport.width - cardWidth) / 2;
     // Along the bottom, where a thumb is — unless the spotlight is down there
     // too, in which case the card moves to the top rather than sitting on top
     // of the thing it is describing. A target low in a long sidebar is the
     // normal case, not the exception.
-    const bottomCardTop = viewport.height - 340;
-    cardTop = hole.top + hole.height > bottomCardTop - 24 ? 16 : bottomCardTop;
+    //
+    // Both edges are now computed from the card's MEASURED height. The old
+    // fixed 340 was the bug: a taller step overflowed the bottom of the screen
+    // while the overlap test still thought it ended 340px down, so the card
+    // both ran off-screen and failed to notice it was covering the spotlight.
+    const bottomCardTop = viewport.height - effectiveCardHeight - 16;
+    cardTop = hole.top + hole.height > bottomCardTop - 20 ? 16 : bottomCardTop;
   } else {
     // Guide first, then the card beyond it. Placing the card first and backing
     // the guide out of it is what put the guide on top of the spotlight: the
@@ -377,8 +424,8 @@ export default function WelcomeTour() {
         ? hole.left + hole.width + guideSize + CARD_GAP * 2
         : Math.max(16, hole.left - cardWidth - guideSize - CARD_GAP * 2);
     cardTop = Math.min(
-      Math.max(16, hole.top + hole.height / 2 - CARD_HEIGHT / 2),
-      Math.max(16, viewport.height - CARD_HEIGHT - 16),
+      Math.max(16, hole.top + hole.height / 2 - effectiveCardHeight / 2),
+      Math.max(16, viewport.height - effectiveCardHeight - 16),
     );
   }
 
@@ -396,6 +443,17 @@ export default function WelcomeTour() {
 
   let guideLeft: number;
   let guideTop: number;
+  /**
+   * The guide is the FIRST thing to go, and that is the right order.
+   *
+   * On a phone, three things want the same 812 pixels and only two of them are
+   * load-bearing: the spotlight (what we are pointing at) and the card (what we
+   * are saying about it). The mascot is the charm. When there is genuinely
+   * nowhere to stand, the old code put it somewhere anyway — over the target,
+   * or over the card — and a step where the character is standing on the button
+   * it is describing is worse than a step with no character at all.
+   */
+  let guideVisible = true;
 
   if (!hole) {
     guideLeft = (viewport.width - guideSize) / 2;
@@ -426,21 +484,27 @@ export default function WelcomeTour() {
     // feet in the spotlight, which is the thing this whole branch exists to
     // avoid. The card holds one end of the screen, so only the other is free.
     const cardAtTop = cardTop < viewport.height / 2;
-    const freeAbove = hole.top - (cardAtTop ? cardTop + 300 : 12);
+    // Measured card, not a 300px stand-in. That constant was why the guide kept
+    // being placed into space the card was actually occupying.
+    const cardBottom = cardTop + effectiveCardHeight;
+    const freeAbove = hole.top - (cardAtTop ? cardBottom + 8 : 12);
     const freeBelow = (cardAtTop ? viewport.height - 12 : cardTop) - (hole.top + hole.height);
 
     guideLeft = Math.max(
       12,
       Math.min(viewport.width - guideSize - 12, hole.left + hole.width - guideSize * 0.9),
     );
-    guideTop =
-      freeAbove >= guideSize + 12
-        ? hole.top - guideSize - 12
-        : freeBelow >= guideSize + 12
-          ? hole.top + hole.height + 12
-          : // Neither fits: sit it off the spotlight's right edge and accept
-            // the tighter fit rather than covering the target.
-            Math.max(12, Math.min(viewport.height - guideSize - 12, hole.top - guideSize / 2));
+
+    if (freeAbove >= guideSize + 12) {
+      guideTop = hole.top - guideSize - 12;
+    } else if (freeBelow >= guideSize + 12) {
+      guideTop = hole.top + hole.height + 12;
+    } else {
+      // Neither gap fits. Previously it was wedged in anyway, on top of either
+      // the spotlight or the card. It now steps out of the frame entirely.
+      guideVisible = false;
+      guideTop = 0;
+    }
   }
 
   // The pointing hand sits at roughly 88% across and 55% down the artwork.
@@ -545,31 +609,36 @@ export default function WelcomeTour() {
             </svg>
           )}
 
-          {/* The guide */}
-          <motion.div
-            initial={false}
-            animate={{ left: guideLeft, top: guideTop }}
-            transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 180, damping: 22 }}
-            className="pointer-events-none absolute"
-            style={{ width: guideSize, height: guideSize }}
-          >
-            <TourGuide
-              angle={armAngle}
-              walking={walking}
-              celebrating={isLast}
-              className="h-full w-full drop-shadow-2xl"
-            />
-          </motion.div>
+          {/* The guide, when there is anywhere to stand. See `guideVisible`. */}
+          {guideVisible && (
+            <motion.div
+              initial={false}
+              animate={{ left: guideLeft, top: guideTop }}
+              transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 180, damping: 22 }}
+              className="pointer-events-none absolute"
+              style={{ width: guideSize, height: guideSize }}
+            >
+              <TourGuide
+                angle={armAngle}
+                walking={walking}
+                celebrating={isLast}
+                className="h-full w-full drop-shadow-2xl"
+              />
+            </motion.div>
+          )}
 
           {/* The card */}
           <motion.div
+            ref={cardRef}
             initial={false}
             animate={{ left: cardLeft, top: cardTop }}
             transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 200, damping: 26 }}
-            className="absolute overflow-hidden rounded-[26px] bg-[var(--surface)] shadow-2xl"
-            style={{ width: cardWidth }}
+            className="absolute flex flex-col overflow-hidden rounded-[26px] bg-[var(--surface)] shadow-2xl"
+            // The cap is the whole mobile fix. Without it a long step simply
+            // grows past the bottom of a phone, taking its buttons with it.
+            style={{ width: cardWidth, maxHeight: isMobile ? mobileCardCap : undefined }}
           >
-            <div className="h-1.5 w-full bg-[var(--border)]">
+            <div className="h-1.5 w-full shrink-0 bg-[var(--border)]">
               <motion.div
                 className="h-full bg-[var(--accent)]"
                 initial={false}
@@ -578,10 +647,14 @@ export default function WelcomeTour() {
               />
             </div>
 
-            <div className="p-5 sm:p-6">
+            {/* Scrolls INSIDE the cap rather than pushing the card off-screen,
+                so the "Show me" button is always reachable no matter how long
+                the step's copy is. `overscroll-contain` stops a flick at the
+                end of the text from scrolling the portal behind the tour. */}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
               {/* Stamps. Collected, not counted — a step you have done stays
                   visibly done, which is the whole difference from "3 of 6". */}
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {steps.map((s, i) => {
                   const done = i < index;
                   const current = i === index;
@@ -609,7 +682,7 @@ export default function WelcomeTour() {
                 key={`eyebrow-${step.id}`}
                 initial={reduceMotion ? {} : { opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-4 text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]"
+                className="mt-3 text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--accent)] sm:mt-4"
               >
                 {step.eyebrow}
               </motion.p>
@@ -629,12 +702,25 @@ export default function WelcomeTour() {
                 initial={reduceMotion ? {} : { opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
-                className="mt-2.5 min-h-[76px] text-sm leading-relaxed text-[var(--muted)]"
+                // The 76px floor stopped the desktop card resizing between
+                // steps. On a phone that reserved space is the difference
+                // between fitting and not, and there is no jitter to prevent
+                // because the sheet is anchored to the bottom edge anyway.
+                className="mt-2.5 text-sm leading-relaxed text-[var(--muted)] sm:min-h-[76px]"
               >
                 {step.body}
               </motion.p>
+            </div>
 
-              <div className="mt-5 flex items-center gap-2.5">
+            {/*
+              THE BUTTONS DO NOT SCROLL.
+              They sit outside the scrolling region, so "Show me" is in the same
+              place on every step regardless of how much copy is above it. A
+              primary action that moves — or that a student has to scroll a
+              modal to find — is how a tour gets abandoned on step two.
+            */}
+            <div className="shrink-0 border-t border-[var(--border)] p-4 pt-3 sm:border-0 sm:p-6 sm:pt-0">
+              <div className="flex items-center gap-2.5">
                 {index > 0 && (
                   <button
                     onClick={() => go(index - 1)}
