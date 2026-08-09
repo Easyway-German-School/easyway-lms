@@ -61,12 +61,37 @@ function buildTransport() {
    */
   if (preset && !process.env.SMTP_USER) return null;
 
-  const port = preset?.port ?? Number(process.env.SMTP_PORT || 587);
+  /**
+   * An explicit SMTP_PORT wins over the preset, exactly as SMTP_SECURE below
+   * already does.
+   *
+   * This was `preset?.port ?? SMTP_PORT`, so choosing a provider silently made
+   * the port unsettable — and that is not a theoretical inconvenience. Many
+   * networks (Nigerian consumer ISPs especially, but plenty of office and
+   * hosting firewalls too) block outbound 587 and 465 wholesale to stop spam
+   * from compromised machines. Measured on this one: Brevo 587 and 465 both
+   * hang with no connection and no error, Gmail 587 likewise — while Brevo's
+   * alternate 2525 answers immediately. Every provider publishes a port like
+   * 2525 for precisely this case, and there was no way to select it without
+   * abandoning the preset and hand-writing the host too.
+   *
+   * A blocked port fails as a silent hang rather than a refusal, which reads
+   * exactly like a wrong password. That is the trap this closes.
+   */
+  const portOverride = Number(process.env.SMTP_PORT);
+  const port = Number.isFinite(portOverride) && portOverride > 0
+    ? portOverride
+    : preset?.port ?? 587;
+
   // An explicit SMTP_SECURE still wins over the preset when it is set.
   const secure =
     process.env.SMTP_SECURE !== undefined && process.env.SMTP_SECURE !== ""
       ? envFlag(process.env.SMTP_SECURE)
-      : preset?.secure ?? port === 465;
+      : port === 465
+        ? true
+        : port === preset?.port
+          ? preset.secure
+          : false;
 
   return nodemailer.createTransport({
     host,

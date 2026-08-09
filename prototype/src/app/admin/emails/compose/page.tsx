@@ -26,6 +26,9 @@ const STATUS_TONE: Record<string, string> = {
   sending: "bg-blue-100 text-blue-700",
   failed: "bg-red-100 text-red-700",
   suppressed: "bg-amber-100 text-amber-700",
+  // Deliberately held back rather than failed — see the queue's "cancelled"
+  // status. Grey, because nothing went wrong and nobody needs to act.
+  cancelled: "bg-slate-100 text-slate-500",
 };
 
 export default function AdminEmailComposePage() {
