@@ -1,5 +1,18 @@
 import crypto from "node:crypto";
-import { prisma } from "@/lib/prisma";
+import { guardedPrisma } from "@/lib/prisma";
+
+/**
+ * THE ONE QUERY THAT CANNOT BE TENANT-SCOPED.
+ *
+ * Finding the key is precisely how the tenant gets identified, so scoping the
+ * lookup to a tenant would require knowing the answer before asking the
+ * question. It runs on the guarded-but-unscoped client for that reason and no
+ * other, and it is safe because the lookup key is a 256-bit secret: the caller
+ * has already proved which row they are entitled to by possessing it.
+ *
+ * The scope is established immediately afterwards, in requireApiKey(), and
+ * every query the handler goes on to make is filtered by it.
+ */
 
 /**
  * Partner API credentials.
@@ -126,7 +139,7 @@ export async function resolveApiKey(
     return { ok: false, reason: "malformed" };
   }
 
-  const row = await prisma.apiKey.findUnique({
+  const row = await guardedPrisma.apiKey.findUnique({
     where: { keyHash: hashApiKey(plaintext) },
     select: {
       id: true,
@@ -151,7 +164,7 @@ export async function resolveApiKey(
    * decommissioned — but it is not worth adding a write to the latency of
    * every request, and losing one on a crash costs nothing.
    */
-  void prisma.apiKey
+  void guardedPrisma.apiKey
     .update({ where: { id: row.id }, data: { lastUsedAt: new Date() } })
     .catch(() => {});
 

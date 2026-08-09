@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { resolveApiKey, hasScope, type ResolvedKey } from "@/lib/api/keys";
 import { apiError } from "@/lib/api/response";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
+import { setTenantScope } from "@/lib/tenant/context";
 
 /**
  * The door on every /api/v1 route.
@@ -104,6 +105,18 @@ export async function requireApiKey(
       response: rateLimitResponse(limit, "Rate limit exceeded for this API key.") as never,
     };
   }
+
+  /**
+   * The key has now said whose it is, so everything the handler does from here
+   * is scoped to that tenant. This is the API's equivalent of the session seam:
+   * one place, so no v1 route has to remember, including the ones written
+   * later.
+   *
+   * Safe as `enterWith` rather than a wrapper because we are well past this
+   * function's first await — the key lookup and the rate limit both awaited
+   * already. See the note on enterUnscoped in src/lib/tenant/context.ts.
+   */
+  setTenantScope(key.tenantId);
 
   return {
     ok: true,
