@@ -9,3 +9,17 @@ README.md
 **/.git.bak
 *.yaml
 
+# Build output. Vercel builds from source, and the webpack cache packs in here
+# run to 300MB+ each, which trips the 100MB-per-file upload limit.
+.next/
+**/.next/
+.vercel/
+**/.vercel/
+*.tsbuildinfo
+
+# Leftover nested copy from an old deploy attempt — not part of the app.
+prototype/prototype/
+
+# Unrelated local project with a vendored Python env.
+TRON/
+
