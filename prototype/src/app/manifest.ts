@@ -45,17 +45,30 @@ export default function manifest(): MetadataRoute.Manifest {
     lang: "en",
     dir: "ltr",
     categories: ["education", "productivity"],
+    /**
+     * TWO SETS, and the split is the whole point.
+     *
+     * `any` is the original full-bleed sticker, used wherever the icon is
+     * shown as-is — a browser tab, the desktop install dialog, a task
+     * switcher. Nothing crops it, so the banner survives and reads.
+     *
+     * `maskable` is the generated pair from scripts/build-app-icons.mjs: the
+     * emblem alone, no text, floating in the middle 62% of an opaque teal
+     * square. Android crops a home-screen icon to whatever shape the launcher
+     * prefers and guarantees only the centre 80% — so the launcher eats the
+     * teal margin instead of the mortarboard. Measured: the artwork's furthest
+     * pixel sits at radius 200.8px against the 204.8px the safe circle allows.
+     *
+     * Listing only `any` was costing the icon anyway: with no maskable
+     * candidate Android shrinks the art into a white circle, which is what
+     * makes an installed web app look like a bookmark instead of an app.
+     */
     icons: [
       { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
       { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-      /**
-       * Declared "any" and not "maskable" on purpose. A maskable icon must
-       * carry its own ~20% safe-area padding, and these are the square emblem
-       * drawn edge to edge — labelling them maskable would let Android crop
-       * into the logo to fit its circle mask. "any" costs a white backdrop
-       * behind the icon; "maskable" on unpadded art costs the logo.
-       */
       { src: "/apple-icon.png", sizes: "180x180", type: "image/png", purpose: "any" },
+      { src: "/icon-maskable-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+      { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
     /**
      * Long-press shortcuts on the installed icon.
