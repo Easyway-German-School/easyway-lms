@@ -17,7 +17,7 @@ import { NextResponse } from "next/server";
  * it, and before that it cannot be. Written once here so the two call sites
  * below cannot disagree about which case they are in.
  */
-function withScope<T>(tenantId: string | undefined, fn: () => T): T {
+function withScope<T>(tenantId: string | undefined, fn: () => Promise<T>): Promise<T> {
   return tenantId
     ? runWithTenant(tenantId, fn)
     : runUnscoped("session callback resolving a user who carries no tenant", fn);
@@ -148,8 +148,8 @@ export const authOptions: AuthOptions = {
            */
           const lecturer = await runUnscoped(
             "sign-in resolves the user's own tutor record before any tenant is known",
-            () =>
-              prisma.lecturer.findUnique({
+            async () =>
+              await prisma.lecturer.findUnique({
                 where: { userId: user.id },
                 select: { status: true },
               }),
@@ -343,8 +343,8 @@ export const authOptions: AuthOptions = {
          */
         if (session.user.role === "lecturer" && session.user.id) {
           try {
-            const lecturer = await withScope(session.user.tenantId, () =>
-              prisma.lecturer.findUnique({
+            const lecturer = await withScope(session.user.tenantId, async () =>
+              await prisma.lecturer.findUnique({
                 where: { userId: session.user.id as string },
                 select: { status: true },
               }),

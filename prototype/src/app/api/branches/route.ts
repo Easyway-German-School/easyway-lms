@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { setTenantScope } from "@/lib/tenant/context";
+import { resolveTenantId } from "@/lib/tenant/resolve";
 import { ONLINE_BRANCH_NAME } from "@/lib/online-branch";
 
 const fallbackBranches = [
@@ -87,6 +90,14 @@ async function seedMissingBranches() {
 
 export async function GET() {
   try {
+    /**
+     * Public and unauthenticated, so the tenant comes from the hostname. This
+     * list feeds the signup form's branch picker, and offering one school's
+     * branches on another school's sign-up page would put the student in the
+     * wrong place before they had typed anything.
+     */
+    setTenantScope(await resolveTenantId({ headers: await headers() }));
+
     const hasBranchTable = await branchTableExists();
     if (!hasBranchTable) {
       return NextResponse.json({ branches: withFallbackIds() });

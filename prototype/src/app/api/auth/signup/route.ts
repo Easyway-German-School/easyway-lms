@@ -6,6 +6,8 @@ import { notifyAdminsOfRegistration } from "@/lib/admin-alerts";
 import { linkLeadOnSignup } from "@/lib/leads";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
+import { setTenantScope } from "@/lib/tenant/context";
+import { resolveTenantId } from "@/lib/tenant/resolve";
 
 /**
  * Whether there is a Branch table to select from.
@@ -47,6 +49,15 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    /**
+     * Which school this person is registering at, decided by the hostname they
+     * arrived on. Set before anything else in the handler so that the User, the
+     * Student, the student code and the office alert are all written against
+     * the same tenant — a signup that half-lands in one school and half in
+     * another is worse than one that fails.
+     */
+    setTenantScope(await resolveTenantId(request));
+
     /**
      * Registration is open to the public, so it is metered by IP.
      *

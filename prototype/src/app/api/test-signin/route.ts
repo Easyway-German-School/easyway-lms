@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { assertDevOnly } from "@/lib/dev-only";
+import { withUnscoped } from "@/lib/tenant/context";
 
-export async function GET() {
+async function handleGET() {
+
   const blocked = assertDevOnly();
   if (blocked) return blocked;
 
@@ -53,3 +55,13 @@ export async function GET() {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+/**
+ * Wrapped rather than marked inside the body: the scope has to be
+ * established before the handler runs, not on its first line. See
+ * withUnscoped in src/lib/tenant/context.ts.
+ */
+export const GET = withUnscoped(
+  "development test-account fixture, refused outside development by assertDevOnly",
+  handleGET,
+);

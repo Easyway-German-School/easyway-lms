@@ -23,6 +23,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { withUnscoped } from "@/lib/tenant/context";
 
 export const dynamic = "force-dynamic";
 // The reconcile and retention passes talk to LiveKit and to the bucket, which
@@ -40,7 +41,7 @@ async function run(job: string, work: () => Promise<unknown>): Promise<JobResult
   }
 }
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   /**
    * Vercel signs its own cron requests with `Authorization: Bearer $CRON_SECRET`
    * as long as CRON_SECRET is set in the project's environment. Without a
@@ -51,6 +52,7 @@ export async function GET(request: NextRequest) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
 
   const results: JobResult[] = [];
 
@@ -147,3 +149,13 @@ export async function GET(request: NextRequest) {
     { status: failed.length ? 500 : 200 },
   );
 }
+
+/**
+ * Wrapped rather than marked inside the body: the scope has to be
+ * established before the handler runs, not on its first line. See
+ * withUnscoped in src/lib/tenant/context.ts.
+ */
+export const GET = withUnscoped(
+  "the platform cron dispatcher runs every periodic job for every tenant",
+  handleGET,
+);

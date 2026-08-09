@@ -6,6 +6,7 @@ import { classifyPaymentTransaction } from "@/lib/payment";
 import { settleExamFee } from "@/lib/exam-payments";
 import { enrollIfPathwayExists } from "@/lib/paystack-verify";
 import { KIND, notifyInBackground } from "@/lib/notify";
+import { withUnscoped } from "@/lib/tenant/context";
 
 // Paystack signs every webhook with HMAC SHA512 of the raw body, keyed by the
 // secret key, in the x-paystack-signature header. Without this check anyone who
@@ -37,7 +38,13 @@ function getPaymentDescription(paymentType: string, pathwayName: string) {
   return `Full payment for ${pathwayName}`;
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
+  /**
+   * Paystack knows nothing about tenants — it posts a payment reference and
+   * that reference is what identifies the school. So the lookup runs unscoped
+   * and the tenant comes off the record it finds, rather than the other way
+   * round.
+   */
   try {
     const body = await request.text();
 
@@ -367,3 +374,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
   }
 }
+
+/**
+ * Wrapped rather than marked inside the body: the scope has to be
+ * established before the handler runs, not on its first line. See
+ * withUnscoped in src/lib/tenant/context.ts.
+ */
+export const POST = withUnscoped(
+  "payment provider webhook carries no tenant; the payment record identifies it",
+  handlePOST,
+);

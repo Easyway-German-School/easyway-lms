@@ -15,6 +15,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    /**
+     * No tenant scope is set here, and none is needed: this route does its work
+     * over HTTP against another endpoint rather than touching the database, and
+     * async context does not survive a network hop. Whatever scope that request
+     * runs under is decided at the other end.
+     */
     const response = await fetch(`${process.env.NEXTAUTH_URL}/api/emails/send/fee-reminders`, {
       method: "POST",
       headers: {

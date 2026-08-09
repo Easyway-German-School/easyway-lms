@@ -3,10 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getStripe, stripeConfigured } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
+import { withUnscoped } from "@/lib/tenant/context";
 
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   // Answered before anything is read. On a deployment that takes payment
   // through Paystack this route is dead weight, and it should say so plainly
   // rather than throw an unconfigured-client error that reads like a bug.
@@ -165,3 +166,13 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ received: true });
 }
+
+/**
+ * Wrapped rather than marked inside the body: the scope has to be
+ * established before the handler runs, not on its first line. See
+ * withUnscoped in src/lib/tenant/context.ts.
+ */
+export const POST = withUnscoped(
+  "payment provider webhook carries no tenant; the payment record identifies it",
+  handlePOST,
+);
