@@ -3,6 +3,7 @@
 import { LecturerIcon, PencilIcon, TrendingDownIcon, TrendingUpIcon, WalletIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
@@ -51,6 +52,7 @@ type Overview = {
     // capability — the route drops the fields rather than sending zeros, so
     // there is nothing to accidentally render.
     atRisk: Array<{
+      id: string;
       name: string;
       email: string;
       level: string;
@@ -75,7 +77,16 @@ type Overview = {
       itemsSynced: number;
     }>;
   };
-  activity: Array<{ kind: "signup" | "payment" | "submission"; at: string; text: string }>;
+  /**
+   * `studentId` is absent — not null — for an admin without the `students`
+   * capability, so the row simply does not become a link for them.
+   */
+  activity: Array<{
+    kind: "signup" | "payment" | "submission";
+    at: string;
+    text: string;
+    studentId?: string;
+  }>;
 };
 
 function naira(value: number) {
@@ -238,14 +249,24 @@ export default function AdminHomePage() {
           <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-amber-300 bg-amber-50 p-5">
             <div>
               <p className="text-sm font-bold text-amber-900">No email provider is configured</p>
+              {/*
+                THE REMEDY HAS TO NAME THE RIGHT PLACE. This used to say
+                ".env.local", which is correct on a laptop and useless on the
+                deployed site — that file is gitignored and never uploaded, so
+                the one environment where this banner actually fires is the one
+                where the instruction could not be followed. A school reading
+                it would reasonably conclude the setting was already made.
+              */}
               <p className="mt-1 text-sm text-amber-800">
-                Registration alerts, fee reminders and enrolment invites are being queued but never delivered. Either set
-                <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">MAILERSEND_API_KEY</code>, or
-                use any ordinary mailbox over SMTP with
-                <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">EMAIL_PROVIDER=zoho</code>
-                plus <code className="font-mono text-xs">SMTP_USER</code> and{" "}
-                <code className="font-mono text-xs">SMTP_PASS</code> in{" "}
-                <code className="font-mono text-xs">.env.local</code>.
+                Registration confirmations, office alerts and fee reminders are being queued but never delivered. SMTP
+                needs <em>all</em> of{" "}
+                <code className="mx-0.5 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">EMAIL_PROVIDER</code>
+                <code className="mx-0.5 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">SMTP_USER</code>
+                <code className="mx-0.5 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">SMTP_PASS</code>
+                <code className="mx-0.5 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">SMTP_FROM</code> — a
+                username and password on their own build no transport at all. On the deployed site these live in the
+                hosting provider&apos;s environment variables, not in{" "}
+                <code className="font-mono text-xs">.env.local</code>, which is never uploaded.
               </p>
             </div>
             <button
@@ -424,9 +445,18 @@ export default function AdminHomePage() {
                 </thead>
                 <tbody>
                   {data.actionQueue.atRisk.map((student) => (
-                    <tr key={student.email || student.name} className="border-b border-[var(--border)]/60">
+                    <tr key={student.id || student.email || student.name} className="border-b border-[var(--border)]/60">
                       <td className="py-2.5">
-                        <p className="font-semibold text-[var(--foreground)]">{student.name}</p>
+                        {student.id ? (
+                          <Link
+                            href={`/admin/students/${student.id}`}
+                            className="font-semibold text-[var(--foreground)] underline-offset-4 hover:text-[var(--accent)] hover:underline"
+                          >
+                            {student.name}
+                          </Link>
+                        ) : (
+                          <p className="font-semibold text-[var(--foreground)]">{student.name}</p>
+                        )}
                         <p className="text-xs text-[var(--muted)]">{student.email}</p>
                       </td>
                       <td className="py-2.5 text-[var(--muted)]">{student.branch}</td>
@@ -515,25 +545,47 @@ export default function AdminHomePage() {
 
         <div className="grid gap-5 xl:grid-cols-[0.55fr_0.45fr]">
           {/* Activity feed */}
-          <SectionCard title="Live activity" hint="Newest first">
+          <SectionCard title="Live activity" hint="Newest first · click to open the file">
             <div className="space-y-3">
-              {(data?.activity ?? []).map((event, index) => (
-                <motion.div
-                  key={`${event.at}-${index}`}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.04 }}
-                  className="flex items-start gap-3 border-b border-[var(--border)]/50 pb-3 last:border-0"
-                >
-                  <span className="mt-0.5 text-[var(--accent)]">
-                    {event.kind === "payment" ? <WalletIcon /> : event.kind === "signup" ? <LecturerIcon /> : <PencilIcon />}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-[var(--foreground)]">{event.text}</p>
-                    <p className="mt-0.5 text-xs text-[var(--muted)]">{timeAgo(event.at)}</p>
-                  </div>
-                </motion.div>
-              ))}
+              {(data?.activity ?? []).map((event, index) => {
+                const row = (
+                  <>
+                    <span className="mt-0.5 text-[var(--accent)]">
+                      {event.kind === "payment" ? <WalletIcon /> : event.kind === "signup" ? <LecturerIcon /> : <PencilIcon />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-[var(--foreground)]">{event.text}</p>
+                      <p className="mt-0.5 text-xs text-[var(--muted)]">{timeAgo(event.at)}</p>
+                    </div>
+                    {event.studentId && (
+                      <span className="mt-0.5 shrink-0 text-xs font-semibold text-[var(--muted)] opacity-0 transition group-hover:opacity-100">
+                        Open →
+                      </span>
+                    )}
+                  </>
+                );
+
+                return (
+                  <motion.div
+                    key={`${event.at}-${index}`}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.04 }}
+                    className="border-b border-[var(--border)]/50 pb-3 last:border-0"
+                  >
+                    {event.studentId ? (
+                      <Link
+                        href={`/admin/students/${event.studentId}`}
+                        className="group -mx-2 flex items-start gap-3 rounded-xl px-2 py-1 transition hover:bg-[var(--accent)]/5"
+                      >
+                        {row}
+                      </Link>
+                    ) : (
+                      <div className="flex items-start gap-3">{row}</div>
+                    )}
+                  </motion.div>
+                );
+              })}
               {data?.activity.length === 0 && <p className="text-sm text-[var(--muted)]">Nothing has happened yet.</p>}
             </div>
           </SectionCard>

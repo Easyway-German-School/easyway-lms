@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-roles";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { activeTransport } from "@/lib/mailer";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -79,18 +80,31 @@ export async function GET() {
     }),
     prisma.payment.findMany({
       where: { status: "completed", createdAt: { gte: sixMonthsAgo } },
-      select: { amount: true, createdAt: true, method: true, student: { select: { user: { select: { name: true } } } } },
+      // `student.id` rides along so the feed entry can open the person it is
+      // about. Without it the front page could name someone and then offer no
+      // way to reach them — the reader had to memorise a name, open the
+      // roster and search for it.
+      select: {
+        amount: true,
+        createdAt: true,
+        method: true,
+        student: { select: { id: true, user: { select: { name: true } } } },
+      },
       orderBy: { createdAt: "desc" },
     }),
     prisma.student.findMany({
       take: 5,
       orderBy: { createdAt: "desc" },
-      select: { createdAt: true, level: true, user: { select: { name: true } }, branch: { select: { name: true } } },
+      select: { id: true, createdAt: true, level: true, user: { select: { name: true } }, branch: { select: { name: true } } },
     }),
     prisma.assignmentSubmission.findMany({
       take: 5,
       orderBy: { createdAt: "desc" },
-      select: { createdAt: true, student: { select: { user: { select: { name: true } } } }, assignment: { select: { title: true } } },
+      select: {
+        createdAt: true,
+        student: { select: { id: true, user: { select: { name: true } } } },
+        assignment: { select: { title: true } },
+      },
     }),
   ]);
 
@@ -100,7 +114,7 @@ export async function GET() {
   const cohorts = { unpaid: 0, registeredOnly: 0, depositPaid: 0, fullPaid: 0 };
   let expectedRevenue = 0;
   let collectedRevenue = 0;
-  const atRisk: Array<{ name: string; email: string; level: string; branch: string; paid: number; owed: number; daysEnrolled: number }> = [];
+  const atRisk: Array<{ id: string; name: string; email: string; level: string; branch: string; paid: number; owed: number; daysEnrolled: number }> = [];
   const byLevel: Record<string, number> = {};
   const byBranch: Record<string, { name: string; students: number; collected: number; expected: number }> = {};
 
@@ -137,6 +151,7 @@ export async function GET() {
     // without them, so this is the chase list.
     if (paid < deposit && daysEnrolled >= 14) {
       atRisk.push({
+        id: student.id,
         name: student.user?.name ?? "Unnamed",
         email: student.user?.email ?? "",
         level: student.level,
@@ -189,15 +204,28 @@ export async function GET() {
   // needs it too, so it is read here rather than duplicated.
   const feedShowsMoney = admin.can("payments");
 
+  /**
+   * `studentId` is only emitted to an admin who may open the file it points at.
+   * A `data_comm` manager legitimately sees the feed — it is the pulse of the
+   * school — but has no `students` capability, and a link that 403s on arrival
+   * is worse than no link. The field is dropped rather than nulled so the page
+   * renders a plain row for them with nothing to click.
+   */
+  const feedLinksToFiles = admin.can("students");
+  const linkTo = (studentId: string | null | undefined) =>
+    feedLinksToFiles && studentId ? { studentId } : {};
+
   const activity = [
     ...recentStudents.map((student) => ({
       kind: "signup" as const,
       at: student.createdAt.toISOString(),
+      ...linkTo(student.id),
       text: `${student.user?.name ?? "A new student"} enrolled${student.branch?.name ? ` at ${student.branch.name}` : ""} (${student.level})`,
     })),
     ...recentPayments.slice(0, 5).map((payment) => ({
       kind: "payment" as const,
       at: payment.createdAt.toISOString(),
+      ...linkTo(payment.student?.id),
       // THE THIRD PLACE THE SAME LEAK LIVED. Headline finance was gated, the
       // at-risk balances were not, and neither was this — a running feed of
       // "Running Student paid ₦180,000 via manual" on the front page of a
@@ -209,6 +237,7 @@ export async function GET() {
     ...recentSubmissions.map((submission) => ({
       kind: "submission" as const,
       at: submission.createdAt.toISOString(),
+      ...linkTo(submission.student?.id),
       text: `${submission.student?.user?.name ?? "A student"} submitted "${submission.assignment?.title ?? "an assignment"}"`,
     })),
   ]
@@ -310,6 +339,9 @@ export async function GET() {
         canSeeMoney
           ? student
           : {
+              // The id survives the money strip: it is not a balance, and it
+              // is what turns "chase this person" into a click.
+              id: student.id,
               name: student.name,
               email: student.email,
               level: student.level,
@@ -323,13 +355,29 @@ export async function GET() {
     },
 
     health: {
-      // Nothing has ever actually been delivered without this key — worth
-      // saying so on the front page rather than in a log file.
-      emailProvider: process.env.MAILERSEND_API_KEY?.trim()
-        ? { name: "MailerSend", configured: true }
-        : process.env.SMTP_HOST?.trim()
-        ? { name: "SMTP", configured: true }
-        : { name: "None", configured: false },
+      /**
+       * ASKED OF THE MAILER, NOT RE-DERIVED HERE.
+       *
+       * This used to test `MAILERSEND_API_KEY || SMTP_HOST` — its own second
+       * opinion about a question `src/lib/mailer.ts` already answers, and a
+       * wrong one in both directions. A school configured the supported way,
+       * with `EMAIL_PROVIDER=brevo` (which supplies the host from a preset, so
+       * SMTP_HOST is deliberately unset), was told on the front page that it
+       * had no email provider while mail was going out perfectly. And an
+       * SMTP_HOST with no credentials passed this check while `buildTransport`
+       * correctly refused it, so the banner stayed quiet on a server that could
+       * not deliver a thing.
+       *
+       * A health check that disagrees with the subsystem it reports on is worse
+       * than no health check: it teaches people to ignore the banner.
+       */
+      emailProvider: (() => {
+        const transport = activeTransport();
+        return {
+          name: transport === "mailersend" ? "MailerSend" : transport === "smtp" ? "SMTP" : "None",
+          configured: transport !== "none",
+        };
+      })(),
       integrations: connectors.map((connector) => ({
         id: connector.id,
         name: connector.name,

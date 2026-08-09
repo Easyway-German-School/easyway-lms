@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import AdminShell from "@/components/AdminShell";
 import { type StudentWithUser } from "@/types/admin";
 import PasswordInput from "@/components/PasswordInput";
@@ -695,7 +696,18 @@ export default function AdminStudentsPage() {
               ) : (
                 students.map((student) => (
                   <tr key={student.id}>
-                    <td className="px-6 py-4">{student.user.name}</td>
+                    {/* The name is the way into the person's file. It was plain
+                        text, so the only thing a row could do was be edited —
+                        the roster could tell you a student existed and nothing
+                        else about them. */}
+                    <td className="px-6 py-4">
+                      <Link
+                        href={`/admin/students/${student.id}`}
+                        className="font-semibold underline-offset-4 hover:text-[var(--accent)] hover:underline"
+                      >
+                        {student.user.name}
+                      </Link>
+                    </td>
                     <td className="px-6 py-4">{student.user.email}</td>
                     <td className="px-6 py-4">{student.branch?.name || "—"}</td>
                     <td className="px-6 py-4">{student.admission && typeof student.admission === "object" && (student.admission as any).classApplied ? String((student.admission as any).classApplied) : (student.level || "—")}</td>

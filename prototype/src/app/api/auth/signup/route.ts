@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { assignStudentCode } from "@/lib/student-code";
 import { notifyAdminsOfRegistration } from "@/lib/admin-alerts";
+import { sendRegistrationConfirmation } from "@/lib/registration-email";
 import { linkLeadOnSignup } from "@/lib/leads";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
@@ -341,6 +342,10 @@ export async function POST(request: NextRequest) {
     // outside the create call: a failure here must not cost someone their
     // account, and the backfill script can repair a missing code later.
     let studentCode: string | null = null;
+    // Kept outside the try so the office alert can deep-link to this exact
+    // person rather than dropping whoever it is on the roster to be searched
+    // for. Null when the lookup failed, and the alert falls back to the list.
+    let studentId: string | null = null;
     if (normalizedRole === "STUDENT") {
       try {
         const created = await prisma.student.findUnique({
@@ -348,6 +353,7 @@ export async function POST(request: NextRequest) {
           select: { id: true },
         });
         if (created) {
+          studentId = created.id;
           studentCode = await assignStudentCode(created.id, {
             level: normalizedLevel,
             batch: (normalizedAdmission as any)?.batch,
@@ -365,6 +371,7 @@ export async function POST(request: NextRequest) {
       const branchName = branchRow?.name ?? null;
 
       await notifyAdminsOfRegistration({
+        studentId,
         studentName: normalizedName,
         studentEmail: normalizedEmail,
         studentCode,
@@ -373,6 +380,26 @@ export async function POST(request: NextRequest) {
         pathway: normalizedPathway,
         branchName,
         classType: normalizedClassType,
+      });
+
+      /**
+       * And the student, who until now was told nothing at all.
+       *
+       * Last of the three side effects and, like the other two, unable to fail
+       * the signup: the account exists, the code is issued and the office has
+       * been told. Anything that goes wrong here is a courtesy that did not
+       * arrive, not a registration that did not happen.
+       */
+      await sendRegistrationConfirmation({
+        studentName: normalizedName,
+        studentEmail: normalizedEmail,
+        studentCode,
+        level: normalizedLevel,
+        sessionSlot: normalizedSessionSlot,
+        pathway: normalizedPathway,
+        branchName,
+        classType: normalizedClassType,
+        deliveryMode: normalizedDeliveryMode,
       });
     }
 
