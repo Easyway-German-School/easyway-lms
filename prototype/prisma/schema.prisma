@@ -98,6 +98,7 @@ model User {
   pushSubs          PushSubscription[]
   examRegistrations ExamRegistration[]
   notifications     Notification[]     @relation("NotificationRecipient")
+  notificationPrefs NotificationPreference[]
   sentNotifications Notification[]     @relation("NotificationSender")
   proposedActions   AdminAction[]      @relation("AdminActionCreator")
   executedActions   AdminAction[]      @relation("AdminActionExecutor")
@@ -1771,6 +1772,41 @@ model NotificationSetting {
   updatedBy String?
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
+}
+
+/**
+ * One person's own answer to "stop sending me this".
+ *
+ * SEPARATE FROM NotificationSetting, and the distinction matters. That table
+ * is the school's policy — an admin deciding that payment receipts email. This
+ * one is a tutor deciding they would rather not have their phone buzz for
+ * every material a colleague publishes. Merging them would mean a tutor
+ * muting something for the whole school, which is not a preference, it is an
+ * outage.
+ *
+ * A row can only ever NARROW the school's plan (see mutedChannelsFor in
+ * src/lib/notification-prefs.ts). Absent means "everything the policy allows",
+ * so the table starts empty and nobody's delivery changes until they say so.
+ */
+model NotificationPreference {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /** A KIND value from src/lib/notification-kinds.ts. */
+  kind String
+
+  /** False mutes this channel for this person and this kind. */
+  inApp Boolean @default(true)
+  push  Boolean @default(true)
+  email Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  /** One row per person per kind — the upsert target. */
+  @@unique([userId, kind])
+  @@index([userId])
 }
 
 model EmailSuppression {

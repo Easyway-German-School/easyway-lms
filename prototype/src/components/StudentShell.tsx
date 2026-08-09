@@ -100,8 +100,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
    * the portal is broken, so the entry is not there for them at all. While the
    * access state is still in flight `access` is null and this reads false —
    * the entry appears once we know, rather than flashing at everybody first.
+   *
+   * Class type is passed as well as delivery mode: a private student meets
+   * their tutor wherever the session is booked, video included, and the live
+   * endpoints have always let them in. Asking on mode alone is what used to
+   * hide the room from the one student whose tutor had booked it.
    */
-  const showsLiveClass = canAttendLive(access?.deliveryMode);
+  const showsLiveClass = canAttendLive(access?.deliveryMode, access?.classType);
   const visibleNavItems = navItems.filter((item) => showsLiveClass || !isLiveOnlyRoute(item.href));
 
   // Navigating is the end of the drawer's job.

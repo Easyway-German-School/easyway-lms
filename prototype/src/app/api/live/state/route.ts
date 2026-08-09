@@ -96,7 +96,7 @@ export async function GET() {
      * The exception is a private student, whose tutor may take the one-to-one
      * over video whatever their branch says.
      */
-    if (!canAttendLive(student.deliveryMode) && student.classType !== "private") {
+    if (!canAttendLive(student.deliveryMode, student.classType)) {
       return NextResponse.json({ live: null, role: "student" });
     }
 

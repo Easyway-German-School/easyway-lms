@@ -1,7 +1,114 @@
-/* Easyway LMS service worker — community push notifications. */
+/* Easyway LMS service worker — push notifications, and the offline shell. */
 
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+/**
+ * Bump this to retire every previously cached file.
+ *
+ * Caches are keyed by name, so a new version means a new cache, and `activate`
+ * deletes the old ones. Without that, a student who installed the app in
+ * August would still be served August's JavaScript in December.
+ */
+const CACHE = "easyway-v1";
+
+/**
+ * The one page worth having before the network is asked.
+ *
+ * Deliberately tiny. It is tempting to precache the dashboard, but every
+ * portal page is server-rendered per user — a cached copy is somebody's
+ * private timetable sitting in a shared cache, and the wrong person's data is
+ * far worse than an offline notice.
+ */
+const PRECACHE = ["/offline"];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(PRECACHE))
+      // A failed precache must not abort the install — push notifications and
+      // installability do not depend on it, and a service worker stuck in
+      // "installing" is worse than one with a cold cache.
+      .catch(() => undefined)
+      .then(() => self.skipWaiting()),
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim()),
+  );
+});
+
+/**
+ * WHAT IS AND IS NOT CACHED, and why the exclusions are the important half.
+ *
+ * A service worker sits in front of every request the app makes, so a careless
+ * fetch handler in a school portal is a data-leak mechanism rather than a
+ * performance feature. Three rules:
+ *
+ *   1. Only GET. A cached POST is meaningless and replaying one is dangerous.
+ *   2. Never /api/ and never /auth/. These carry one student's marks, one
+ *      tutor's roster, one person's session. On a shared phone — which in this
+ *      school is common — a cached API response is the previous user's data
+ *      handed to the next one.
+ *   3. Only same-origin. Paystack, LiveKit and the storage bucket manage their
+ *      own caching and must not be intercepted.
+ *
+ * What is left is the immutable build output under /_next/static/ (content
+ * hashed, so it can be cached forever and served cache-first) and navigations,
+ * which go to the network first and fall back to the offline page only when
+ * the network genuinely fails. Network-first matters: a stale cached shell
+ * would show a student yesterday's portal and look like the app was broken.
+ */
+self.addEventListener("fetch", (event) => {
+  const { request } = event;
+
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
+
+  /**
+   * Immutable build assets: cache-first, and fill the cache on first miss.
+   *
+   * The `webpack/` exclusion is for development only, and it is not cosmetic:
+   * hot-update chunks live under this same prefix, are written fresh on every
+   * edit, and are anything but immutable. Caching them means the next edit is
+   * served the previous edit's module and HMR appears to have stopped working
+   * — a failure that looks like a bug in whatever you were just editing.
+   */
+  if (url.pathname.startsWith("/_next/static/") && !url.pathname.startsWith("/_next/static/webpack/")) {
+    event.respondWith(
+      caches.match(request).then(
+        (hit) =>
+          hit ||
+          fetch(request).then((response) => {
+            if (response.ok) {
+              const copy = response.clone();
+              caches.open(CACHE).then((cache) => cache.put(request, copy));
+            }
+            return response;
+          }),
+      ),
+    );
+    return;
+  }
+
+  // Page navigations: network-first, offline notice as the last resort.
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request).catch(() =>
+        caches.match("/offline").then((hit) => hit || new Response("You are offline.", {
+          status: 503,
+          headers: { "Content-Type": "text/plain" },
+        })),
+      ),
+    );
+  }
+});
 
 self.addEventListener("push", (event) => {
   let payload = {};

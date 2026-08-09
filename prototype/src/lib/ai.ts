@@ -337,6 +337,62 @@ export async function parseUploadedContent(content: string): Promise<{
   return parseUploadedContentMock(content);
 }
 
+/**
+ * Turn a tutor's shorthand into an announcement their class will read.
+ *
+ * CLAUDE, NOT THE LOCAL MODEL, and that is a deliberate exception to this
+ * file's usual routing. A tutor is sitting on the page waiting, which puts
+ * this in the "interactive" bucket — and more to the point, the local 3b model
+ * is good at reading pre-computed figures and bad at prose. An announcement
+ * that reads as though a machine wrote it is worse than the tutor's own
+ * scribble, because the class can tell.
+ *
+ * Returns null on any failure. The caller keeps whatever the tutor typed and
+ * says the assistant is unavailable — a drafting aid that eats your text when
+ * the API is down would be used exactly once.
+ */
+export async function draftClassAnnouncement(input: {
+  notes: string;
+  cohortLabel?: string | null;
+  urgent?: boolean;
+}): Promise<{ title: string; message: string } | null> {
+  const audience = input.cohortLabel ? `the ${input.cohortLabel} class` : "their German class";
+
+  const prompt = `You are helping a German-language tutor in Nigeria write a short announcement to ${audience}.
+
+The tutor's notes:
+"""
+${input.notes.slice(0, 1500)}
+"""
+
+Write the announcement they meant to send.
+
+Rules:
+- Plain, warm, direct English. The students are Nigerian adults learning German; most read this on a phone.
+- Keep the MESSAGE under 60 words. Say the one thing that changed and what the student must do.
+- Never invent specifics. If the notes do not give a date, time, room or link, do not supply one.
+- No greeting line, no sign-off, no "Dear students". The portal already shows who sent it.
+- The TITLE is at most 8 words and names the thing itself ("Monday class moved to 4pm"), not the genre ("Important announcement").
+${input.urgent ? "- This one is urgent: lead with the change, not the context." : ""}
+
+Return JSON: {"title": "...", "message": "..."}${JSON_ONLY}`;
+
+  const parsed = parseJsonReply<{ title?: unknown; message?: unknown }>(
+    await callClaude(prompt, 600),
+  );
+  if (!parsed) return null;
+
+  const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
+  const message = typeof parsed.message === "string" ? parsed.message.trim() : "";
+  // A draft missing either half is not a partial success — the form has two
+  // required fields and half a draft would leave the tutor worse off.
+  if (!title || !message) return null;
+
+  // The server rejects titles over 120 characters, so a long one is trimmed
+  // here rather than being offered and then refused on send.
+  return { title: title.slice(0, 120), message };
+}
+
 export async function summarizeText(text: string): Promise<string> {
   const provider = getAIProvider("backoffice");
   // Either local runner: callLocalModel tries AnythingLLM before Ollama.

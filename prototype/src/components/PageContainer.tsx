@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import InstallPrompt from "@/components/InstallPrompt";
 import ThemeToggle from "@/components/ThemeToggle";
 
 export default function PageContainer({ children }: { children: React.ReactNode }) {
@@ -29,6 +30,10 @@ export default function PageContainer({ children }: { children: React.ReactNode 
         {children}
       </div>
       {!isAuthRoute ? <ThemeToggle /> : null}
+      {/* Wraps all three portals, so students, tutors and staff are each
+          offered the install from wherever they happen to be. It registers the
+          service worker too, which is why it is not itself gated on the route. */}
+      <InstallPrompt />
     </main>
   );
 }

@@ -12,6 +12,21 @@ describe("api key format", () => {
     expect(parts[1]).toBe("live");
   });
 
+  /**
+   * The regression guard for the bug that made this suite flaky.
+   *
+   * The secret was base64url, whose alphabet includes the `_` this format
+   * splits on, so about half of all generated keys had five or more parts and
+   * were rejected as malformed by resolveApiKey. One sample caught it only
+   * every other run; a thousand makes it certain.
+   */
+  it("never puts the delimiter inside the secret", () => {
+    for (let i = 0; i < 1000; i += 1) {
+      const parts = generateApiKey("live").plaintext.split("_");
+      expect(parts, `key ${i} split into ${parts.length} parts`).toHaveLength(4);
+    }
+  });
+
   it("makes test and live distinguishable by eye", () => {
     expect(generateApiKey("test").plaintext).toContain("ewk_test_");
     expect(generateApiKey("live").plaintext).toContain("ewk_live_");

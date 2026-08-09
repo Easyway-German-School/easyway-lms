@@ -29,6 +29,17 @@ const PROVIDER_PRESETS: Record<string, { host: string; port: number; secure: boo
   // Zoho requires SSL on 465 for SMTP.
   zoho: { host: "smtp.zoho.com", port: 465, secure: true },
   gmail: { host: "smtp.gmail.com", port: 465, secure: true },
+  /**
+   * Brevo relays on 587 with STARTTLS, so `secure` is FALSE here.
+   *
+   * That looks wrong and is not: `secure: true` means "wrap the socket in TLS
+   * from the first byte", which is port 465's behaviour. On 587 the connection
+   * opens in the clear and upgrades via STARTTLS, and forcing TLS immediately
+   * makes every send fail to connect. This codebase has already been bitten by
+   * exactly that — see the envFlag() comment above, where the string "false"
+   * was being read as true and doing this same damage.
+   */
+  brevo: { host: "smtp-relay.brevo.com", port: 587, secure: false },
 };
 
 function buildTransport() {

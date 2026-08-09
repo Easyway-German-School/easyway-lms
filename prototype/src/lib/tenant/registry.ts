@@ -58,6 +58,13 @@ export const TENANT_OWNED_MODELS = [
   "Lead",
   "Notification",
   "NotificationSetting",
+  /**
+   * One person's own delivery preferences. Tenant-owned because it is read as
+   * "my settings" — a query that must never be able to return, or overwrite,
+   * somebody at another school. It carries no student data itself, but the
+   * registry classifies by who may read a row, not by how sensitive it looks.
+   */
+  "NotificationPreference",
   "EmailLog",
   "EmailMessage",
   "EmailSuppression",
@@ -69,6 +76,18 @@ export const TENANT_OWNED_MODELS = [
   "Comment",
   "ClassRecording",
   "VideoProgress",
+  /**
+   * The live classroom. Added by the presence work and never classified, so
+   * this test has been failing since — which is exactly the oversight the test
+   * exists to catch, caught late.
+   *
+   * A session names a room and holds the join code that gets somebody INTO it;
+   * an invite names a student by id. Both are unambiguously one school's, and
+   * a leak here is not a privacy footnote — a join code readable across
+   * tenants is a stranger in a live lesson.
+   */
+  "LiveClassSession",
+  "LiveClassInvite",
   "MissionProgress",
   "PersonalizedPlan",
   "JourneyEvent",

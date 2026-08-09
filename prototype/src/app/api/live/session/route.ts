@@ -130,7 +130,7 @@ export async function GET(request: Request) {
        * now leans on a VERIFIED privateClassId — the membership check above
        * has already run — rather than on the caller simply claiming one.
        */
-      if (!canAttendLive(student.deliveryMode) && student.classType !== "private" && !privateClassId) {
+      if (!canAttendLive(student.deliveryMode, student.classType) && !privateClassId) {
         return NextResponse.json(
           {
             error: "Not an online class",

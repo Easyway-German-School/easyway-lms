@@ -4,6 +4,7 @@ import { sendPushToUsers } from "@/lib/push";
 import { queueEmail } from "@/lib/email-queue";
 import { renderNotificationEmail } from "@/lib/notification-email";
 import { planFor } from "@/lib/notification-routing";
+import { mutedChannelsFor, type MutedChannels } from "@/lib/notification-prefs";
 import { KIND as KINDS, type Severity } from "@/lib/notification-kinds";
 
 /**
@@ -222,9 +223,21 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   // a property of the kind, not of the recipient.
   const plan = await planFor(kind, shouldPush(input));
 
+  /**
+   * And what each RECIPIENT still accepts, which is the per-person half.
+   *
+   * Applied strictly after the plan and only ever to subtract: `plan` is the
+   * school's policy and this can narrow it, never widen it. Loaded in one
+   * query for the whole batch — see notification-prefs.ts.
+   */
+  const prefs = await mutedChannelsFor(targets, kind, severity);
+  const accepts = (userId: string, channel: keyof MutedChannels) =>
+    prefs.get(userId)?.[channel] ?? true;
+
   const now = new Date();
-  if (plan.inApp) await prisma.notification.createMany({
-    data: targets.map((userId) => {
+  const inAppTargets = plan.inApp ? targets.filter((id) => accepts(id, "inApp")) : [];
+  if (inAppTargets.length > 0) await prisma.notification.createMany({
+    data: inAppTargets.map((userId) => {
       const student = studentByUser.get(userId);
       return {
         userId,
@@ -248,11 +261,12 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   });
 
   let pushed = 0;
-  if (plan.push) {
+  const pushTargets = plan.push ? targets.filter((id) => accepts(id, "push")) : [];
+  if (pushTargets.length > 0) {
     // Best effort throughout: a push that fails must never lose the row that
     // is already saved, nor fail the request that triggered it.
     try {
-      const result = await sendPushToUsers(targets, {
+      const result = await sendPushToUsers(pushTargets, {
         title: input.title,
         body: input.message,
         url: input.link,
@@ -288,6 +302,9 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
 
       for (const person of people) {
         if (!person.email) continue;
+        // Somebody who has turned this kind's email off still gets the bell
+        // and the push — only the mailbox is spared.
+        if (!accepts(person.id, "email")) continue;
         await queueEmail({
           to: person.email,
           subject: input.title,
@@ -311,7 +328,10 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
     }
   }
 
-  return { batchId, created: plan.inApp ? targets.length : 0, skipped, pushed, queuedEmails };
+  // Rows actually written, not recipients considered. A tutor's announcements
+  // page reports `sentTo` from this, and counting people who had muted the
+  // kind would tell them thirty students were reached when twenty-eight were.
+  return { batchId, created: inAppTargets.length, skipped, pushed, queuedEmails };
 }
 
 /**

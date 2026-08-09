@@ -37,7 +37,24 @@ export type GeneratedKey = {
 
 export function generateApiKey(environment: ApiEnvironment): GeneratedKey {
   const prefix = crypto.randomBytes(4).toString("hex");
-  const secret = crypto.randomBytes(32).toString("base64url");
+  /**
+   * THE SECRET MUST NOT CONTAIN THE DELIMITER.
+   *
+   * base64url's alphabet is A–Z a–z 0–9 `-` `_` — and that underscore is the
+   * character this format splits on. A 43-character secret therefore contained
+   * at least one `_` about half the time (1 - (63/64)^43 ≈ 49%), which made
+   * `plaintext.split("_")` return five or more parts, which made
+   * `resolveApiKey` call the key malformed and reject it.
+   *
+   * So roughly every other key the school issued was dead on arrival: created
+   * fine, stored fine, shown to the partner once — and then refused on every
+   * request, with a reason deliberately indistinguishable from "no such key"
+   * so that nobody could tell it apart from a typo.
+   *
+   * Mapping `_` onto `-` costs one bit of alphabet (63 symbols, ~257 bits over
+   * 43 characters) and makes the documented four-part shape actually true.
+   */
+  const secret = crypto.randomBytes(32).toString("base64url").replace(/_/g, "-");
   const plaintext = `${KEY_NAMESPACE}_${environment}_${prefix}_${secret}`;
 
   return { plaintext, prefix, keyHash: hashApiKey(plaintext) };
@@ -90,8 +107,22 @@ export async function resolveApiKey(
 ): Promise<{ ok: true; key: ResolvedKey } | { ok: false; reason: KeyFailure }> {
   if (!plaintext) return { ok: false, reason: "missing" };
 
+  /**
+   * `>= 4`, not `=== 4`, and that is the repair rather than a loosening.
+   *
+   * Every key issued before the generator stopped emitting underscores (see
+   * generateApiKey) has a secret that may split into extra parts. Those keys
+   * are perfectly good — the lookup is by hash of the WHOLE plaintext, and
+   * nothing below reads `parts[3]` — they were only ever rejected by this
+   * shape check. An exact count here would leave every one of them dead with
+   * no way for the holder to tell why.
+   *
+   * The parts that carry meaning are still checked exactly: the namespace
+   * below, and the environment and prefix, which are drawn from fixed
+   * alphabets and cannot contain a delimiter.
+   */
   const parts = plaintext.split("_");
-  if (parts.length !== 4 || parts[0] !== KEY_NAMESPACE) {
+  if (parts.length < 4 || parts[0] !== KEY_NAMESPACE) {
     return { ok: false, reason: "malformed" };
   }
 

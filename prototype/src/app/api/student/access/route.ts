@@ -52,6 +52,10 @@ export async function GET() {
       tuitionFee: tuitionFeeFor(feeLookup),
       requiredDeposit: requiredDepositFor(feeLookup),
       deliveryMode: student.deliveryMode,
+      // Was selected above for the fee lookup and then dropped, so the portal
+      // could not tell a private student from a group one — and hid the live
+      // classroom from private students the server was happy to admit.
+      classType: student.classType,
     }),
   );
 }
