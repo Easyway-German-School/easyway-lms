@@ -210,6 +210,20 @@ export async function sendEmail({
   }
 }
 
+/**
+ * One delivered message, on the school's bill.
+ *
+ * Metered off the EmailLog row rather than off the send call, so the source
+ * event has an id that survives a retry: the same log row cannot be billed
+ * twice, and a send that failed is never billed at all because it never
+ * reaches here with status "sent".
+ */
+async function meterEmail(logId: string | null, status: string) {
+  if (status !== "sent" || !logId) return;
+  const { recordUsage } = await import("@/lib/usage/record");
+  void recordUsage({ meter: "email.sent", quantity: 1, sourceId: `emaillog:${logId}` });
+}
+
 async function logEmail(entry: {
   to: string;
   subject: string;
@@ -220,7 +234,7 @@ async function logEmail(entry: {
 }) {
   // Logging must never be the reason a send fails.
   try {
-    await prisma.emailLog.create({
+    const row = await prisma.emailLog.create({
       data: {
         recipientEmail: entry.to,
         subject: entry.subject,
@@ -229,7 +243,9 @@ async function logEmail(entry: {
         studentId: entry.studentId ?? null,
         errorMessage: entry.error ?? null,
       },
+      select: { id: true },
     });
+    await meterEmail(row.id, entry.status);
   } catch (err) {
     console.warn("Could not write EmailLog entry:", err);
   }

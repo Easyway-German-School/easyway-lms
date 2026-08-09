@@ -118,6 +118,31 @@ export async function requireApiKey(
    */
   setTenantScope(key.tenantId);
 
+  /**
+   * The request itself is billable — the one meter that prices the platform
+   * rather than passing a supplier's bill through, so that integration-heavy
+   * partners who use no AI still carry their share.
+   *
+   * Test keys are not metered. A sandbox that costs money is a sandbox nobody
+   * develops against, and the whole point of having one is that mistakes in it
+   * are free.
+   *
+   * Fire-and-forget: a billing write must never add latency to, or fail, the
+   * call it is measuring. The honest ceiling on this design is one row per
+   * request — fine while partners are few, and the first thing that should
+   * become an aggregated counter when they are not.
+   */
+  if (key.environment === "live") {
+    void import("@/lib/usage/record").then(({ recordUsage }) =>
+      recordUsage({
+        meter: "api.request",
+        quantity: 1,
+        sourceId: `apireq:${crypto.randomUUID()}`,
+        metadata: { keyPrefix: key.prefix, scope: requiredScope },
+      }),
+    );
+  }
+
   return {
     ok: true,
     ctx: { key, tenantId: key.tenantId, sandbox: key.environment === "test" },

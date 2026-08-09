@@ -119,6 +119,23 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * Fold yesterday's usage into the daily rollup and debit each school's
+   * balance.
+   *
+   * Yesterday rather than today, because a day that is still being written to
+   * would be restated on the next tick and every tick after — and a customer
+   * watching their balance move for reasons that keep changing has no way to
+   * check it. Both the rollup and the debit are keyed on the day, so running
+   * this hourly costs nothing and running it twice bills nothing twice.
+   */
+  results.push(
+    await run("usage-rollup", async () => {
+      const { rollUpUsage } = await import("@/lib/usage/record");
+      return rollUpUsage();
+    }),
+  );
+
+  /**
    * Summarise newly uploaded materials and turn them into quests.
    *
    * Last, and capped at three per tick, because it is the only job here that

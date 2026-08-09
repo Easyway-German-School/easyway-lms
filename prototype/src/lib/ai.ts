@@ -99,7 +99,33 @@ async function callClaude(prompt: string, maxTokens: number): Promise<string | n
 
     const data = (await response.json()) as {
       content?: Array<{ type?: string; text?: string }>;
+      usage?: { input_tokens?: number; output_tokens?: number };
+      id?: string;
     };
+
+    /**
+     * Metered from the provider's own count, not from an estimate of ours.
+     *
+     * The whole pricing argument is that a school can be shown the supplier
+     * bill their own actions produced, and a token count we guessed at would
+     * quietly stop being that. Input and output are summed because the meter
+     * prices them together; splitting them is a pricing change, not a
+     * measurement one.
+     *
+     * `data.id` is Anthropic's message id, which makes the idempotency key
+     * derivable from the response itself — replaying this response a year from
+     * now produces the same key and is refused as the duplicate it is.
+     */
+    const used = (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0);
+    if (used > 0 && data.id) {
+      const { recordUsage } = await import("@/lib/usage/record");
+      void recordUsage({
+        meter: "ai.tokens",
+        quantity: used,
+        sourceId: `claude:${data.id}`,
+        metadata: { model: CLAUDE_MODEL },
+      });
+    }
     // Take the first TEXT block by type rather than by position: a response can
     // lead with a non-text block, and content[0].text would then be undefined.
     const text = data.content?.find((block) => block.type === "text")?.text;
