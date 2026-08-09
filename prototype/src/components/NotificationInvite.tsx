@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import TuitionMascot from "@/components/TuitionMascot";
+import Mascot from "@/components/Mascot";
 import { usePushNotifications } from "@/lib/use-push";
 import { useMoment } from "@/lib/moment-queue";
 
@@ -121,7 +121,9 @@ export default function NotificationInvite({
           className="w-full max-w-md overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
         >
           <div className="flex items-end gap-3 bg-gradient-to-br from-[var(--accent)]/12 to-transparent px-6 pt-6">
-            <TuitionMascot pointing className="h-28 w-28 shrink-0" />
+            {/* It is ASKING for something, then thanking you for it. Two different
+                faces, and the change is the whole reward for saying yes. */}
+            <Mascot mood={justEnabled ? "cheerful" : "curious"} className="h-28 w-28 shrink-0" />
             <p className="mb-6 rounded-2xl rounded-bl-sm bg-[var(--surface)] px-4 py-3 text-sm shadow-sm">
               {justEnabled
                 ? "Perfect — I'll tap you on the shoulder. Bis bald!"

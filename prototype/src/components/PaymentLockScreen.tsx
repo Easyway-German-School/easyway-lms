@@ -6,7 +6,7 @@ import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import type { StudentAccess } from "@/lib/access";
-import TuitionMascot from "@/components/TuitionMascot";
+import Mascot from "@/components/Mascot";
 import GermanyJourney from "@/components/journey/GermanyJourney";
 
 /** Fixed, not random — random positions would differ between server and client. */
@@ -228,7 +228,11 @@ export default function PaymentLockScreen({
                 transition={{ type: "spring", stiffness: 80, damping: 15, delay: 0.25 }}
                 className="shrink-0"
               >
-                <TuitionMascot pointing className="h-44 w-44 sm:h-56 sm:w-56" />
+                {/* `concerned`, not cheerful and certainly not stern. This is the
+                    screen where somebody has hit a wall over money; a beaming
+                    mascot reads as gloating and a frowning one as blame. An
+                    awkward, attentive face is the only honest option. */}
+                <Mascot mood="concerned" className="h-44 w-44 sm:h-56 sm:w-56" />
               </motion.div>
 
               <motion.div

@@ -104,7 +104,7 @@ export default function EssayGrader() {
             </div>
 
             {score !== null && (
-              <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-[var(--success)]">
+              <div className="rounded-3xl border border-emerald-200 bg-emerald-500/10 p-4 text-sm text-[var(--success)]">
                 <p className="flex items-center gap-2 font-semibold"><TargetIcon /> Suggested next step</p>
                 <p className="mt-1">{nextStep || "Focus on the weakest category and practice targeted exercises."}</p>
               </div>

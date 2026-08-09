@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
-import SignupCompanion, { type CompanionMood } from "@/components/SignupCompanion";
+import Mascot, { type MascotMood } from "@/components/Mascot";
 import { CheckIcon } from "@/components/icons";
 
 /**
@@ -17,7 +17,7 @@ import { CheckIcon } from "@/components/icons";
  * Everything here is aimed at one number — how many people who start the form
  * finish it — and three ideas hold it up:
  *
- * 1. SOMEBODY IS ON THE OTHER SIDE OF THE FORM. The djinn (SignupCompanion)
+ * 1. SOMEBODY IS ON THE OTHER SIDE OF THE FORM. The djinn (Mascot)
  *    hovers beside the questions with a face that reacts to what the student is
  *    actually doing — waiting while a step is unfinished, pleased when one
  *    clears, cheering at the end. It wears the crest scholar's mortarboard, so
@@ -114,14 +114,14 @@ export default function SignupJourney({
    * exception. Getting this backwards produces a mascot grinning at somebody
    * who has just been told their email is already registered.
    */
-  const mood: CompanionMood = errored
+  const mood: MascotMood = errored
     ? "concerned"
     : current >= total
-      ? "cheering"
+      ? "celebrating"
       : justCleared
-        ? "pleased"
+        ? "cheerful"
         : ready
-          ? "pleased"
+          ? "smiling"
           : "thinking";
 
   /**
@@ -175,7 +175,7 @@ export default function SignupJourney({
               animate={reduceMotion ? {} : { x: walking ? [0, 5, 0] : 0 }}
               transition={{ duration: 0.7, ease: "easeInOut" }}
             >
-              <SignupCompanion mood={mood} className="h-full w-full drop-shadow-lg" />
+              <Mascot mood={mood} className="h-full w-full drop-shadow-lg" />
             </motion.div>
 
             {/* The step label rides beside the face on a phone, and inside the

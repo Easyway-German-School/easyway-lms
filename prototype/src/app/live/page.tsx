@@ -375,7 +375,7 @@ function LiveClassroomPageInner() {
 
     if (error) {
       return (
-        <div className="rounded-3xl border border-rose-200 bg-rose-50 p-8 text-sm text-rose-800">
+        <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-8 text-sm text-rose-600">
           <p className="text-base font-semibold">We could not open your classroom</p>
           <p className="mt-2">{error}</p>
           <Link href="/dashboard" className="mt-5 inline-flex rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white">
@@ -387,7 +387,7 @@ function LiveClassroomPageInner() {
 
     if (lockedMessage) {
       return (
-        <div className="rounded-3xl border border-amber-300 bg-amber-50 p-8 text-sm text-amber-900">
+        <div className="rounded-3xl border border-amber-500/40 bg-amber-500/10 p-8 text-sm text-amber-700">
           <p className="text-base font-semibold">Live classes are locked</p>
           <p className="mt-2">{lockedMessage}</p>
           <Link href="/programs" className="mt-5 inline-flex rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white">

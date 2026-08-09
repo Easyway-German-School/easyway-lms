@@ -38,11 +38,23 @@ type PrivateClass = {
 type Lecturer = { id: string; name: string };
 type Material = { id: string; title: string };
 
+/**
+ * Translucent tints rather than solid pastels.
+ *
+ * `bg-emerald-100` is a fixed near-white; on the Nacht and Dämmerung themes it
+ * lands as a bright chip glued to a dark card. A `/15` tint of the same hue
+ * takes its lightness from whatever it is sitting on, so one definition works
+ * on all three themes instead of looking correct on exactly one of them.
+ *
+ * Cancelled and postponed are also no longer the same colour. They mean
+ * opposite things to a student — one is gone, one is moving — and a tutor
+ * scanning a list needs to tell them apart at a glance.
+ */
 const STATUS_STYLES: Record<string, string> = {
-  scheduled: "bg-slate-100 text-slate-700",
-  completed: "bg-emerald-100 text-emerald-700",
-  cancelled: "bg-red-100 text-red-700",
-  postponed: "bg-red-100 text-red-700",
+  scheduled: "bg-[var(--surface-alt)] text-[var(--foreground-soft)]",
+  completed: "bg-emerald-500/15 text-emerald-600",
+  cancelled: "bg-rose-500/15 text-rose-600",
+  postponed: "bg-amber-500/15 text-amber-600",
 };
 
 /** datetime-local needs "YYYY-MM-DDTHH:mm" in LOCAL time, not an ISO UTC string. */
@@ -148,7 +160,7 @@ export default function LecturerPrivateClassesPage() {
       <div className="p-8">
         <div className="mb-6">
           <h1 className="text-3xl font-bold">Private classes</h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-[var(--muted)]">
             One-to-one students follow no group timetable, so what you book here is their whole
             calendar. They see changes straight away.
           </p>
@@ -158,26 +170,26 @@ export default function LecturerPrivateClassesPage() {
             list and whether they have answered. Nothing renders when idle. */}
         <TutorLivePanel className="mb-6" />
 
-        {error && <div className="mb-4 rounded bg-red-100 p-4 text-red-700">{error}</div>}
+        {error && <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-rose-600">{error}</div>}
 
         {loading ? (
-          <div className="py-12 text-center text-slate-500">Loading…</div>
+          <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
         ) : students.length === 0 ? (
           <div className="py-12 text-center">
             <PrivateClassIcon className="mx-auto h-9 w-9 text-[var(--muted)]" />
             <p className="mt-2 font-semibold">No private students yet</p>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-[var(--muted)]">
               A student becomes private when their class type is set to private on their record.
             </p>
           </div>
         ) : (
           <>
             <div className="mb-6">
-              <label className="block text-sm font-semibold text-slate-600">Student</label>
+              <label className="block text-sm font-semibold text-[var(--foreground-soft)]">Student</label>
               <select
                 value={studentId}
                 onChange={(e) => setStudentId(e.target.value)}
-                className="mt-1 rounded-lg border px-3 py-2 text-sm"
+                className="mt-1 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground)]"
               >
                 {students.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -187,59 +199,59 @@ export default function LecturerPrivateClassesPage() {
                 ))}
               </select>
               {selected?.studentCode && (
-                <p className="mt-1 font-mono text-xs text-slate-500">{selected.studentCode}</p>
+                <p className="mt-1 font-mono text-xs text-[var(--muted)]">{selected.studentCode}</p>
               )}
             </div>
 
-            <div className="mb-8 rounded-xl border bg-white p-6">
+            <div className="mb-8 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
               <h2 className="font-semibold">Book a class</h2>
               <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <label>
-                  <span className="text-xs font-medium text-slate-600">Date and time</span>
+                  <span className="text-xs font-medium text-[var(--foreground-soft)]">Date and time</span>
                   <input
                     type="datetime-local"
                     value={when}
                     onChange={(e) => setWhen(e.target.value)}
-                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground)]"
                   />
                 </label>
                 <label>
-                  <span className="text-xs font-medium text-slate-600">Minutes</span>
+                  <span className="text-xs font-medium text-[var(--foreground-soft)]">Minutes</span>
                   <input
                     type="number"
                     min={15}
                     step={15}
                     value={duration}
                     onChange={(e) => setDuration(Number(e.target.value))}
-                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground)]"
                   />
                 </label>
                 <label>
-                  <span className="text-xs font-medium text-slate-600">Tutor</span>
+                  <span className="text-xs font-medium text-[var(--foreground-soft)]">Tutor</span>
                   <select
                     value={lecturerId}
                     onChange={(e) => setLecturerId(e.target.value)}
-                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground)]"
                   >
                     <option value="">Me</option>
                     {lecturers.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                   </select>
                 </label>
                 <label className="sm:col-span-2">
-                  <span className="text-xs font-medium text-slate-600">Topic</span>
+                  <span className="text-xs font-medium text-[var(--foreground-soft)]">Topic</span>
                   <input
                     value={topic}
                     onChange={(e) => setTopic(e.target.value)}
                     placeholder="What this session covers"
-                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground)]"
                   />
                 </label>
                 <label>
-                  <span className="text-xs font-medium text-slate-600">Material</span>
+                  <span className="text-xs font-medium text-[var(--foreground-soft)]">Material</span>
                   <select
                     value={materialId}
                     onChange={(e) => setMaterialId(e.target.value)}
-                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground)]"
                   >
                     <option value="">None</option>
                     {materials.map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}
@@ -249,7 +261,7 @@ export default function LecturerPrivateClassesPage() {
               <button
                 onClick={book}
                 disabled={busy || !when}
-                className="mt-4 rounded-lg bg-slate-900 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                className="mt-4 rounded-lg bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
               >
                 {busy ? "Saving…" : "Book class"}
               </button>
@@ -257,7 +269,7 @@ export default function LecturerPrivateClassesPage() {
 
             <h2 className="mb-3 text-lg font-semibold">Booked sessions</h2>
             {classes.length === 0 ? (
-              <p className="py-8 text-center text-sm text-slate-500">
+              <p className="py-8 text-center text-sm text-[var(--muted)]">
                 Nothing booked for this student yet.
               </p>
             ) : (
@@ -266,20 +278,20 @@ export default function LecturerPrivateClassesPage() {
                   const start = new Date(c.scheduledAt);
                   const end = new Date(start.getTime() + c.durationMinutes * 60_000);
                   return (
-                    <div key={c.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-4">
+                    <div key={c.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-semibold">{start.toLocaleString()}</span>
-                          <span className="text-xs text-slate-500">
+                          <span className="text-xs text-[var(--muted)]">
                             to {end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </span>
                           <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[c.status] ?? STATUS_STYLES.scheduled}`}>
                             {c.status}
                           </span>
                         </div>
-                        <p className="mt-1 text-sm text-slate-600">
-                          {c.topic || <span className="italic text-slate-400">No topic set</span>}
-                          {c.lecturerName && <span className="text-slate-400"> · {c.lecturerName}</span>}
+                        <p className="mt-1 text-sm text-[var(--foreground-soft)]">
+                          {c.topic || <span className="italic text-[var(--muted)]">No topic set</span>}
+                          {c.lecturerName && <span className="text-[var(--muted)]"> · {c.lecturerName}</span>}
                         </p>
                         {c.materialTitle && <p className="mt-1 flex items-center gap-1.5 text-xs text-blue-600"><AttachmentIcon className="h-3.5 w-3.5" /> {c.materialTitle}</p>}
                       </div>
@@ -308,7 +320,7 @@ export default function LecturerPrivateClassesPage() {
                         value={c.status}
                         onChange={(e) => setStatus(c.id, e.target.value)}
                         disabled={busy}
-                        className="rounded-lg border px-3 py-1.5 text-sm"
+                        className="rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-1.5 text-sm text-[var(--foreground)]"
                       >
                         <option value="scheduled">Scheduled</option>
                         <option value="completed">Completed</option>

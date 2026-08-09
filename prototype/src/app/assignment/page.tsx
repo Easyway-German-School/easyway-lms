@@ -178,7 +178,7 @@ function AssignmentContent() {
               </button>
             </form>
           ) : (
-            <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm border border-emerald-200 space-y-4">
+            <div className="rounded-3xl bg-emerald-500/10 p-8 shadow-sm border border-emerald-200 space-y-4">
               <p className="flex items-center gap-2 text-2xl font-bold text-[var(--success)]"><CheckCircleIcon className="h-7 w-7" /> Assignment submitted!</p>
               <p className="text-emerald-600">Your work has been received. The instructor will review and provide feedback soon.</p>
               <Link href="/dashboard" className="inline-block px-6 py-2 bg-emerald-500 text-white font-semibold rounded-lg hover:bg-emerald-600">

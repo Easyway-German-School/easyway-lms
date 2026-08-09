@@ -99,7 +99,7 @@ function LessonContent() {
           </div>
         </header>
 
-        <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-800 shadow-sm">
+        <div className="rounded-3xl border border-emerald-200 bg-emerald-500/10 p-5 text-emerald-800 shadow-sm">
           <p className="text-sm font-semibold uppercase tracking-[0.2em]">Quest mission</p>
           <p className="mt-2 text-lg font-semibold">Complete this lesson to unlock your next power-up and keep the streak alive.</p>
         </div>
@@ -129,7 +129,7 @@ function LessonContent() {
 
         {/* Action */}
         {!completion?.completedAt && (
-          <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm space-y-4">
+          <div className="rounded-3xl bg-emerald-500/10 p-8 shadow-sm space-y-4">
             <h3 className="text-xl font-semibold text-slate-950">
               {lesson?.type === "assignment" ? "Submit Assignment" : "Complete this lesson"}
             </h3>
@@ -153,7 +153,7 @@ function LessonContent() {
         )}
 
         {completion?.completedAt && (
-          <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm border border-emerald-200">
+          <div className="rounded-3xl bg-emerald-500/10 p-8 shadow-sm border border-emerald-200">
             <p className="flex items-center gap-2 text-[var(--success)] font-semibold"><CheckCircleIcon className="h-5 w-5" /> You&apos;ve completed this lesson!</p>
             <p className="text-sm text-emerald-600 mt-2">Great progress. Move on to the next lesson.</p>
             {personalizedPlan ? (

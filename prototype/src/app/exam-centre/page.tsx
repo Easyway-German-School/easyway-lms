@@ -34,8 +34,8 @@ type Exam = {
 type Me = { studentId: string; name: string | null; email: string | null; level: string; studentCode: string | null };
 
 const BODY_TONE: Record<string, string> = {
-  "ÖSD": "bg-red-100 text-red-700",
-  Goethe: "bg-blue-100 text-blue-700",
+  "ÖSD": "bg-rose-500/15 text-red-700",
+  Goethe: "bg-sky-500/15 text-blue-700",
   telc: "bg-purple-100 text-purple-700",
   internal: "bg-[var(--surface-alt)] text-[var(--foreground-soft)]",
 };
@@ -116,7 +116,7 @@ export default function ExamCentrePage() {
         </div>
 
         {confirmation && (
-          <div className="mt-8 rounded-3xl border border-emerald-200 bg-emerald-50 p-6">
+          <div className="mt-8 rounded-3xl border border-emerald-200 bg-emerald-500/10 p-6">
             <p className="text-sm font-bold text-emerald-800">Seat confirmed</p>
             <p className="mt-2 text-sm text-[var(--success)]">
               Your seat number is <span className="font-mono font-bold">{confirmation.seatNumber}</span>.
@@ -128,7 +128,7 @@ export default function ExamCentrePage() {
           </div>
         )}
 
-        {error && <div className="mt-6 rounded-2xl bg-red-50 p-4 text-sm text-red-700">{error}</div>}
+        {error && <div className="mt-6 rounded-2xl bg-rose-500/10 p-4 text-sm text-red-700">{error}</div>}
 
         {me && (
           <p className="mt-6 rounded-2xl bg-[var(--surface)] p-4 text-sm text-[var(--muted)] shadow-sm">
@@ -164,10 +164,10 @@ export default function ExamCentrePage() {
                           <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{exam.level}</span>
                         )}
                         {exam.full && (
-                          <span className="rounded bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">FULL</span>
+                          <span className="rounded bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-red-700">FULL</span>
                         )}
                         {exam.deadlinePassed && !exam.full && (
-                          <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                          <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700">
                             REGISTRATION CLOSED
                           </span>
                         )}

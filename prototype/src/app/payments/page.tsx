@@ -113,7 +113,7 @@ export default function PaymentsPage() {
               {fullPaid ? (
                 <span
                   aria-disabled="true"
-                  className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-6 py-3 text-sm font-semibold text-emerald-700"
+                  className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-6 py-3 text-sm font-semibold text-emerald-600"
                 >
                   <CheckIcon className="h-4 w-4" /> Tuition fully paid
                 </span>
@@ -152,20 +152,20 @@ export default function PaymentsPage() {
 
               <div className="space-y-3 px-6 py-6 text-sm text-[var(--foreground)]">
                 {loading ? (
-                  <div className="rounded-3xl border border-[var(--border)] bg-white px-6 py-8 text-center text-sm text-[var(--muted)]">
+                  <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-6 py-8 text-center text-sm text-[var(--muted)]">
                     Loading payment history…
                   </div>
                 ) : error ? (
-                  <div className="rounded-3xl border border-rose-200 bg-rose-50 px-6 py-8 text-center text-sm text-rose-700">
+                  <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 px-6 py-8 text-center text-sm text-rose-600">
                     {error}
                   </div>
                 ) : payments.length === 0 ? (
-                  <div className="rounded-3xl border border-[var(--border)] bg-white px-6 py-8 text-center text-sm text-[var(--muted)]">
+                  <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-6 py-8 text-center text-sm text-[var(--muted)]">
                     No payments have been recorded yet. Click &quot;Make a payment&quot; to pay your next deposit or tuition balance.
                   </div>
                 ) : (
                   payments.map((payment) => (
-                    <div key={payment.id} className="grid grid-cols-5 gap-4 rounded-3xl border border-[var(--border)] bg-white px-4 py-4 shadow-sm">
+                    <div key={payment.id} className="grid grid-cols-5 gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 shadow-sm">
                       <span className="col-span-2">{payment.description || "Payment received"}</span>
                       <span className={payment.status.toLowerCase() === "completed" ? "text-emerald-600" : "text-[var(--accent)]"}>
                         {payment.status}

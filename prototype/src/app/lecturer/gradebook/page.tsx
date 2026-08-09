@@ -99,7 +99,7 @@ const LETTER_TONE: Record<string, string> = {
 };
 
 function toneFor(letter: string | null) {
-  return letter ? LETTER_TONE[letter] ?? "bg-slate-100 text-slate-700" : "bg-slate-100 text-slate-500";
+  return letter ? LETTER_TONE[letter] ?? "bg-[var(--surface-alt)] text-[var(--foreground-soft)]" : "bg-[var(--surface-alt)] text-[var(--muted)]";
 }
 
 /** A score's own colour, so a grid of numbers reads as a heat map at a glance. */

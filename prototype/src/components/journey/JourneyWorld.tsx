@@ -63,7 +63,7 @@ import {
   SparklesIcon,
   StarIcon,
 } from "@/components/icons";
-import TuitionMascot from "@/components/TuitionMascot";
+import Mascot from "@/components/Mascot";
 import GermanFlag from "@/components/journey/GermanFlag";
 import { Birds, Cloud, CrossingPlane, Landmark, SkyLight, paletteFor } from "@/components/journey/JourneyScenery";
 import type { GermanyGoal } from "@/lib/germany-goals";
@@ -503,7 +503,7 @@ function Guide({
             pointing rightwards, and a guide pointing away from the thing they
             are introducing is worse than no guide at all. */}
         <span className="mt-1 block" style={onLeft ? undefined : { transform: "scaleX(-1)" }}>
-          <TuitionMascot pointing className="h-[80px] w-[68px]" />
+          <Mascot mood="happy" pointAngle={0} className="h-[80px] w-[68px]" />
         </span>
       </div>
     </motion.div>

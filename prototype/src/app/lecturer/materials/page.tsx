@@ -333,7 +333,7 @@ export default function LecturerMaterials() {
                             onClick={() => setFormData({ ...formData, isRecording: option.value })}
                             className={`rounded-lg border px-4 py-2.5 text-left text-sm transition ${
                               formData.isRecording === option.value
-                                ? 'border-[var(--accent)] bg-white font-semibold text-[var(--foreground)]'
+                                ? 'border-[var(--accent)] bg-[var(--surface)] font-semibold text-[var(--foreground)]'
                                 : 'border-[var(--border)] bg-white/50 text-[var(--muted)]'
                             }`}
                           >

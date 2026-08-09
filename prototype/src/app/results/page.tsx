@@ -101,9 +101,9 @@ function label(type: string) {
 
 function gradeTone(grade: string) {
   if (grade === "A" || grade === "B") return "bg-[var(--success-soft)] text-[var(--success)]";
-  if (grade === "C") return "bg-amber-100 text-amber-700";
+  if (grade === "C") return "bg-amber-500/15 text-amber-700";
   if (grade === "D") return "bg-orange-100 text-orange-700";
-  return "bg-red-100 text-red-700";
+  return "bg-rose-500/15 text-red-700";
 }
 
 function barTone(score: number, passMark: number) {
@@ -125,7 +125,7 @@ function ScoreBar({ score, passMark }: { score: number; passMark: number }) {
       />
       {/* The pass mark, so a score reads as pass or fail at a glance. */}
       <div
-        className="absolute inset-y-0 w-px bg-slate-500/70"
+        className="absolute inset-y-0 w-px bg-[var(--border-strong)]"
         style={{ left: `${passMark}%` }}
         aria-hidden="true"
       />
@@ -277,7 +277,7 @@ export default function ResultsPage() {
             ))}
           </div>
         ) : error ? (
-          <div className="rounded-2xl bg-red-50 p-4 text-sm text-red-700">{error}</div>
+          <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-600">{error}</div>
         ) : !data || data.totalResults === 0 ? (
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center sm:p-10">
             <EmptyIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
@@ -404,7 +404,7 @@ export default function ResultsPage() {
                           style={{ width: `${Math.min(100, skill.average)}%` }}
                         />
                         <div
-                          className="absolute inset-y-0 w-px bg-slate-500/70"
+                          className="absolute inset-y-0 w-px bg-[var(--border-strong)]"
                           style={{ left: `${data.passMark}%` }}
                           aria-hidden
                         />

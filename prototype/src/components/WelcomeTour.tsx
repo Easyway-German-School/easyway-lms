@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import TourGuide from "@/components/TourGuide";
+import Mascot from "@/components/Mascot";
 import { CheckIcon } from "@/components/icons";
 import { useMoment } from "@/lib/moment-queue";
 
@@ -618,10 +618,10 @@ export default function WelcomeTour() {
               className="pointer-events-none absolute"
               style={{ width: guideSize, height: guideSize }}
             >
-              <TourGuide
-                angle={armAngle}
+              <Mascot
+                mood={isLast ? "celebrating" : walking ? "happy" : "greeting"}
+                pointAngle={armAngle}
                 walking={walking}
-                celebrating={isLast}
                 className="h-full w-full drop-shadow-2xl"
               />
             </motion.div>

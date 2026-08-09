@@ -360,7 +360,7 @@ export default function LecturerGrades() {
                             className={`rounded-full px-2 py-1 text-xs font-semibold ${
                               student.submissionMode === 'physical'
                                 ? 'bg-purple-100 text-purple-700'
-                                : 'bg-slate-100 text-slate-600'
+                                : 'bg-[var(--surface-alt)] text-[var(--foreground-soft)]'
                             }`}
                           >
                             {student.submissionMode === 'physical' ? 'Paper' : 'Platform'}

@@ -99,13 +99,13 @@ export default function LecturerAssignmentsPage() {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-3xl font-bold">Assignments</h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-[var(--muted)]">
               Set a document to hand in, or a timed quiz that marks itself.
             </p>
           </div>
           <button
             onClick={() => setOpen((v) => !v)}
-            className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white"
+            className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
           >
             {open ? "Cancel" : "New assignment"}
           </button>
@@ -121,24 +121,24 @@ export default function LecturerAssignmentsPage() {
         </div>
 
         {open && (
-          <div className="mb-8 rounded-xl border bg-white p-6">
+          <div className="mb-8 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="sm:col-span-2">
-                <span className="text-xs font-medium text-slate-600">Title</span>
+                <span className="text-xs font-medium text-[var(--foreground-soft)]">Title</span>
                 <input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
               </label>
               <label className="sm:col-span-2">
-                <span className="text-xs font-medium text-slate-600">Instructions</span>
+                <span className="text-xs font-medium text-[var(--foreground-soft)]">Instructions</span>
                 <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
               </label>
               <label>
-                <span className="text-xs font-medium text-slate-600">Level</span>
+                <span className="text-xs font-medium text-[var(--foreground-soft)]">Level</span>
                 <select value={level} onChange={(e) => setLevel(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
                   {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
                 </select>
               </label>
               <label>
-                <span className="text-xs font-medium text-slate-600">Type</span>
+                <span className="text-xs font-medium text-[var(--foreground-soft)]">Type</span>
                 <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
                   <option value="document">Document to hand in</option>
                   <option value="quiz">Timed quiz</option>
@@ -147,7 +147,7 @@ export default function LecturerAssignmentsPage() {
 
               {type === "quiz" && (
                 <label>
-                  <span className="text-xs font-medium text-slate-600">Time limit (minutes)</span>
+                  <span className="text-xs font-medium text-[var(--foreground-soft)]">Time limit (minutes)</span>
                   <input type="number" min={1} value={timeLimit} onChange={(e) => setTimeLimit(Number(e.target.value))} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
                 </label>
               )}
@@ -169,7 +169,7 @@ export default function LecturerAssignmentsPage() {
             <button
               onClick={create}
               disabled={saving || !title.trim()}
-              className="mt-6 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              className="mt-6 rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
             >
               {saving ? "Creating…" : "Create assignment"}
             </button>
@@ -177,25 +177,25 @@ export default function LecturerAssignmentsPage() {
         )}
 
         {loading ? (
-          <div className="py-12 text-center text-slate-500">Loading…</div>
+          <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
         ) : assignments.length === 0 ? (
-          <div className="py-12 text-center text-slate-500">No assignments set yet.</div>
+          <div className="py-12 text-center text-[var(--muted)]">No assignments set yet.</div>
         ) : (
           <div className="space-y-3">
             {assignments.map((a) => (
-              <div key={a.id} className="rounded-xl border bg-white p-5">
+              <div key={a.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${a.type === "quiz" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
                         {a.type}
                       </span>
-                      <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold">{a.level}</span>
+                      <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{a.level}</span>
                       {a.timeLimitMinutes && <span className="text-xs text-amber-700">⏱ {a.timeLimitMinutes} min</span>}
                     </div>
                     <h3 className="mt-1.5 font-semibold">{a.title}</h3>
                   </div>
-                  <p className="text-sm text-slate-500">
+                  <p className="text-sm text-[var(--muted)]">
                     {a.submissions.length} submitted
                   </p>
                 </div>
@@ -207,7 +207,7 @@ export default function LecturerAssignmentsPage() {
                         <span>
                           {s.student.user.name ?? "—"}
                           {s.student.studentCode && (
-                            <span className="ml-2 font-mono text-xs text-slate-400">{s.student.studentCode}</span>
+                            <span className="ml-2 font-mono text-xs text-[var(--muted)]">{s.student.studentCode}</span>
                           )}
                         </span>
                         <span className="font-semibold">{s.score ?? "—"}</span>
