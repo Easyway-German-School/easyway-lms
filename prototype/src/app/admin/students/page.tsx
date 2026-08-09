@@ -1,7 +1,8 @@
 ﻿"use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
 import { type StudentWithUser } from "@/types/admin";
 import PasswordInput from "@/components/PasswordInput";
@@ -54,16 +55,85 @@ const admissionLabelMap: Record<string, string> = {
   heardFrom: "Heard from",
 };
 
-export default function AdminStudentsPage() {
+/**
+ * How a highlighted row is drawn, per focus tone.
+ *
+ * The point is that somebody arriving from a dashboard tile can see at a glance
+ * which rows the number was about, without reading a single value — so the
+ * treatment is a left bar, a tinted background and bold text together rather
+ * than colour alone. Colour alone excludes anyone who cannot distinguish it,
+ * and this is a list people act on: ringing a student, chasing a fee.
+ */
+const FOCUS_TONE: Record<string, { row: string; text: string; chip: string; bar: string }> = {
+  danger: {
+    row: "bg-red-50/80",
+    text: "text-red-700",
+    chip: "bg-red-100 text-red-700 border-red-300",
+    bar: "before:bg-red-500",
+  },
+  warn: {
+    row: "bg-amber-50/80",
+    text: "text-amber-800",
+    chip: "bg-amber-100 text-amber-800 border-amber-300",
+    bar: "before:bg-amber-500",
+  },
+  good: {
+    row: "bg-emerald-50/70",
+    text: "text-emerald-700",
+    chip: "bg-emerald-100 text-emerald-700 border-emerald-300",
+    bar: "before:bg-emerald-500",
+  },
+  info: {
+    row: "bg-sky-50/70",
+    text: "text-sky-700",
+    chip: "bg-sky-100 text-sky-700 border-sky-300",
+    bar: "before:bg-sky-500",
+  },
+};
+
+type FocusMeta = { id: string; label: string; hint: string; tone: string };
+
+type StudentFinanceRow = {
+  cohort: string;
+  behindOnTuition: boolean;
+  lockedOut: boolean;
+  daysEnrolled: number;
+  agingBucket: string;
+  paid?: number;
+  owed?: number;
+  owedOnDeposit?: number;
+  tuitionFee?: number;
+  progressPercent?: number;
+};
+
+function StudentsRoster() {
+  const params = useSearchParams();
+
   const [students, setStudents] = useState<StudentWithUser[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
-  const [filterBranchId, setFilterBranchId] = useState<string>("");
-  const [filterTutorId, setFilterTutorId] = useState<string>("");
-  const [filterLevel, setFilterLevel] = useState<string>("");
-  const [filterBatch, setFilterBatch] = useState<string>("");
-  const [filterStatus, setFilterStatus] = useState<string>("");
-  const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>("");
-  const [search, setSearch] = useState<string>("");
+  /**
+   * SEEDED FROM THE URL, not reset to blank.
+   *
+   * This is the whole reason a dashboard figure can lead anywhere useful. The
+   * page used to start every filter empty and ignore the query string, so
+   * `/admin/students?focus=behind_tuition` rendered the complete roster and the
+   * reader was back to hunting for the seven people they had just clicked on.
+   */
+  const [filterBranchId, setFilterBranchId] = useState<string>(params.get("branchId") ?? "");
+  const [filterTutorId, setFilterTutorId] = useState<string>(params.get("tutorId") ?? "");
+  const [filterLevel, setFilterLevel] = useState<string>(params.get("level") ?? "");
+  const [filterBatch, setFilterBatch] = useState<string>(params.get("batch") ?? "");
+  const [filterStatus, setFilterStatus] = useState<string>(params.get("status") ?? "");
+  const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>(params.get("paymentStatus") ?? "");
+  const [search, setSearch] = useState<string>(params.get("search") ?? "");
+
+  /** The derived rule this view is pinned to, and the exact set it selected. */
+  const [focus, setFocus] = useState<string>(params.get("focus") ?? "");
+  const [focusIds] = useState<string>(params.get("ids") ?? "");
+  const [agingBucket, setAgingBucket] = useState<string>(params.get("agingBucket") ?? "");
+  const [focusMeta, setFocusMeta] = useState<FocusMeta | null>(null);
+  const [matchedIds, setMatchedIds] = useState<Set<string> | null>(null);
+  const [canSeeMoney, setCanSeeMoney] = useState(true);
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(20);
   const [loading, setLoading] = useState(true);
@@ -112,6 +182,9 @@ export default function AdminStudentsPage() {
     if (filterStatus) url.searchParams.set("status", filterStatus);
     if (filterPaymentStatus) url.searchParams.set("paymentStatus", filterPaymentStatus);
     if (search) url.searchParams.set("search", search);
+    if (focus) url.searchParams.set("focus", focus);
+    if (agingBucket) url.searchParams.set("agingBucket", agingBucket);
+    if (focusIds) url.searchParams.set("ids", focusIds);
     if (page) url.searchParams.set("page", String(page));
     if (pageSize) url.searchParams.set("pageSize", String(pageSize));
     const res = await fetch(url.toString());
@@ -119,8 +192,24 @@ export default function AdminStudentsPage() {
       const data = await res.json();
       setStudents(data.students || []);
       setTotalCount(typeof data.totalCount === "number" ? data.totalCount : 0);
+      // The wording comes back with the data rather than living in a lookup
+      // table here — one edit to the preset changes the tile and the banner.
+      setFocusMeta(data.focus ?? null);
+      setMatchedIds(Array.isArray(data.matchedIds) ? new Set<string>(data.matchedIds) : null);
+      setCanSeeMoney(data.canSeeMoney !== false);
     }
     setLoading(false);
+  }
+
+  function clearFocus() {
+    setFocus("");
+    setAgingBucket("");
+    setFocusMeta(null);
+    setMatchedIds(null);
+    setPage(1);
+    // Strip the query string so a refresh or a shared link does not silently
+    // re-apply a filter the reader has just dismissed.
+    window.history.replaceState(null, "", "/admin/students");
   }
 
   useEffect(() => {
@@ -129,11 +218,11 @@ export default function AdminStudentsPage() {
 
   useEffect(() => {
     loadStudents();
-  }, [filterBranchId, filterTutorId, filterLevel, filterBatch, filterStatus, filterPaymentStatus, search, page, pageSize]);
+  }, [filterBranchId, filterTutorId, filterLevel, filterBatch, filterStatus, filterPaymentStatus, search, focus, agingBucket, focusIds, page, pageSize]);
 
   useEffect(() => {
     setPage(1);
-  }, [filterBranchId, filterTutorId, filterLevel, filterStatus, filterPaymentStatus, search, pageSize]);
+  }, [filterBranchId, filterTutorId, filterLevel, filterStatus, filterPaymentStatus, search, focus, agingBucket, pageSize]);
 
   async function handleSaveStudent() {
     setStudentError("");
@@ -415,9 +504,40 @@ export default function AdminStudentsPage() {
     await loadStudents();
   }
 
+  const tone = FOCUS_TONE[focusMeta?.tone ?? "danger"] ?? FOCUS_TONE.danger;
+  const isHighlighted = (studentId: string) => Boolean(matchedIds?.has(studentId));
+
   return (
     <AdminShell>
       <div className="space-y-6">
+        {/*
+          THE BANNER IS NOT DECORATION.
+
+          A roster that silently shows 7 of 340 students is indistinguishable
+          from a roster that is broken, and the second reading is the one a
+          person reaches for when the list looks too short. So the filtered view
+          says which rule is applied, in the same words the dashboard tile used,
+          and offers one click out of it.
+        */}
+        {focusMeta && (
+          <div className={`flex flex-wrap items-center justify-between gap-4 rounded-3xl border p-5 ${tone.chip}`}>
+            <div className="min-w-0">
+              <p className="text-sm font-black uppercase tracking-[0.14em]">{focusMeta.label}</p>
+              <p className="mt-1 text-sm opacity-90">
+                {focusMeta.hint}. Showing {totalCount} {totalCount === 1 ? "student" : "students"} of the whole roster,
+                highlighted below.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={clearFocus}
+              className="shrink-0 rounded-full border border-current px-4 py-2 text-sm font-bold transition hover:bg-white/60"
+            >
+              Clear focus
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Admin</p>
@@ -524,12 +644,12 @@ export default function AdminStudentsPage() {
             <div className="flex items-end justify-end gap-2">
               {/* One at a time here; a whole cohort at once through the
                   importer, which is the launch-day case. */}
-              <a
+              <Link
                 href="/admin/students/import"
                 className="rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--foreground)]"
               >
                 Import many
-              </a>
+              </Link>
               <button
                 type="button"
                 className="rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white"
@@ -694,8 +814,18 @@ export default function AdminStudentsPage() {
                   <td colSpan={10} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No students found yet.</td>
                 </tr>
               ) : (
-                students.map((student) => (
-                  <tr key={student.id}>
+                students.map((student) => {
+                  const highlighted = isHighlighted(student.id);
+                  const money = (student as unknown as { _finance?: StudentFinanceRow })._finance;
+                  return (
+                  <tr
+                    key={student.id}
+                    className={
+                      highlighted
+                        ? `relative ${tone.row} before:absolute before:inset-y-0 before:left-0 before:w-1 ${tone.bar}`
+                        : undefined
+                    }
+                  >
                     {/* The name is the way into the person's file. It was plain
                         text, so the only thing a row could do was be edited —
                         the roster could tell you a student existed and nothing
@@ -703,10 +833,20 @@ export default function AdminStudentsPage() {
                     <td className="px-6 py-4">
                       <Link
                         href={`/admin/students/${student.id}`}
-                        className="font-semibold underline-offset-4 hover:text-[var(--accent)] hover:underline"
+                        className={`underline-offset-4 hover:underline ${
+                          highlighted ? `font-black ${tone.text}` : "font-semibold hover:text-[var(--accent)]"
+                        }`}
                       >
                         {student.user.name}
                       </Link>
+                      {highlighted && money && (
+                        <p className={`mt-0.5 text-xs font-bold ${tone.text}`}>
+                          {money.daysEnrolled}d enrolled
+                          {canSeeMoney && money.owedOnDeposit != null && money.owedOnDeposit > 0
+                            ? ` · ₦${money.owedOnDeposit.toLocaleString("en-NG")} short of deposit`
+                            : ""}
+                        </p>
+                      )}
                     </td>
                     <td className="px-6 py-4">{student.user.email}</td>
                     <td className="px-6 py-4">{student.branch?.name || "—"}</td>
@@ -725,8 +865,47 @@ export default function AdminStudentsPage() {
                       )}
                     </td>
                     <td className="px-6 py-4">{student.status || "active"}</td>
-                    <td className="px-6 py-4">{student.payments?.[0]?.status || "none"}</td>
-                    <td className="px-6 py-4 font-semibold">{student._paymentSummary ? `₦${student._paymentSummary.balance}` : "—"}</td>
+                    {/* The cohort, not the status of whichever transaction
+                        happened to be most recent — a student whose last
+                        payment failed reads as "failed" here while being paid
+                        in full, which is the opposite of what the office needs
+                        to know. */}
+                    <td className="px-6 py-4">
+                      {money ? (
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            money.cohort === "full_paid"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : money.cohort === "deposit_paid"
+                              ? "bg-sky-100 text-sky-700"
+                              : money.cohort === "registered_only"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-red-100 text-red-700"
+                          }`}
+                        >
+                          {money.cohort === "full_paid"
+                            ? "Paid in full"
+                            : money.cohort === "deposit_paid"
+                            ? "Deposit paid"
+                            : money.cohort === "registered_only"
+                            ? "Part paid"
+                            : "Nothing paid"}
+                        </span>
+                      ) : (
+                        student.payments?.[0]?.status || "none"
+                      )}
+                    </td>
+                    {/* Priced off the fee table, like every other outstanding
+                        figure in the portal. It used to be invoiced-minus-paid,
+                        which reads ₦0 for a student who never had an invoice
+                        raised — that is, for most of the people who owe money. */}
+                    <td className={`px-6 py-4 font-semibold ${highlighted ? tone.text : ""}`}>
+                      {!canSeeMoney
+                        ? "—"
+                        : money?.owed != null
+                        ? `₦${money.owed.toLocaleString("en-NG")}`
+                        : "—"}
+                    </td>
                     <td className="px-6 py-4 flex flex-wrap gap-2">
                       <button
                         className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
@@ -757,7 +936,8 @@ export default function AdminStudentsPage() {
                       </button>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
             </table>
@@ -871,5 +1051,21 @@ export default function AdminStudentsPage() {
         ) : null}
       </div>
     </AdminShell>
+  );
+}
+
+export default function AdminStudentsPage() {
+  // `useSearchParams` needs a Suspense boundary above it, or the whole route
+  // opts out of static rendering and the build fails.
+  return (
+    <Suspense
+      fallback={
+        <AdminShell>
+          <p className="p-6 text-sm text-[var(--muted)]">Loading the roster…</p>
+        </AdminShell>
+      }
+    >
+      <StudentsRoster />
+    </Suspense>
   );
 }

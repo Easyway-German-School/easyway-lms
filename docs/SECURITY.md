@@ -358,11 +358,21 @@ during rollout, not an oversight.
 
 ### 10.2 Who it applies to
 
-Any admin holding `payments` or `security` — in practice the super admins, plus
-anyone individually granted the payment book. A secretary marking a register is
-not asked for a code. That is a judgement call about where the risk actually
-sits: making the whole office set up an authenticator app on day one is how a
-security control gets resented and then worked around.
+Any admin holding `payments` or `security` — in practice the super admins,
+**every Accountant**, and anyone individually granted the payment book. A
+secretary marking a register is not asked for a code. That is a judgement call
+about where the risk actually sits: making the whole office set up an
+authenticator app on day one is how a security control gets resented and then
+worked around.
+
+The Accountant preset (`adminRole = "accountant"`, carrying `payments` and
+`reports`) is the first preset to hold one of these capabilities, so it is the
+first role other than super admin that must enrol. That is deliberate rather
+than incidental: the alternative — an accountant who has to be hand-granted
+`payments` one account at a time — reliably ends with the school signing the
+accountant in as a super admin instead, which hands over the student records,
+the staff list and the audit trail to solve a problem that was only ever about
+the fee book.
 
 To widen it, edit `shouldRequireMfa()` in `src/lib/mfa.ts`.
 

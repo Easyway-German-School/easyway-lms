@@ -14,12 +14,13 @@ import { beginRequestScope } from "@/lib/tenant/context";
  * matching how the office is actually staffed rather than per-endpoint.
  */
 
-export const ADMIN_ROLES = ["super", "secretary", "data_comm"] as const;
+export const ADMIN_ROLES = ["super", "secretary", "accountant", "data_comm"] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   super: "Super Admin",
   secretary: "Secretary",
+  accountant: "Accountant",
   data_comm: "Data & Communications Manager",
 };
 
@@ -41,18 +42,24 @@ export const CAPABILITIES = [
 export type Capability = (typeof CAPABILITIES)[number];
 
 /**
- * PAYMENTS IS SUPER-ONLY, and is not in any other preset.
+ * PAYMENTS BELONGS TO WHOEVER RUNS THE SCHOOL — AND TO THE ACCOUNTANT.
  *
- * It was on `data_comm` on the reasoning that whoever owns the reporting owns
- * the numbers. The school's decision is that the payment dashboard — every
- * student's balance, every transaction, the collected totals — belongs to the
- * person who runs the school and nobody else. `reports` still gives the data
- * manager the shape of things without the money in it.
+ * The earlier rule was that no preset carried `payments` at all: it had been on
+ * `data_comm` on the reasoning that whoever owns the reporting owns the
+ * numbers, and the school pulled it back so that every student's balance, every
+ * transaction and the collected totals sat with one person. That was the right
+ * call while there was nobody else whose job was the money.
  *
- * It can still be handed to a named person one at a time through the
- * per-person `grant` override below. That is a deliberate act by a super admin
- * against one account, which is a different thing from a whole preset carrying
- * it by default.
+ * There is now. An accountant who has to be hand-granted `payments` one account
+ * at a time is a preset that lies about how the office is staffed, and the
+ * likely outcome is the school stops bothering and signs the accountant in as a
+ * super admin — which hands over the student records, the staff list and the
+ * audit trail to close a gap that was only ever about the fee book. So the role
+ * exists, it carries the money and nothing else, and `secretary` and
+ * `data_comm` still do not.
+ *
+ * `security` stays out of every preset. See SUPER_ONLY_CAPABILITIES below: it
+ * has a separate reason that this change does not touch.
  */
 const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   // Runs the school: everything, including who else is an admin.
@@ -62,22 +69,37 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   // to money, staffing or bulk communications.
   secretary: ["students", "attendance", "classes", "exams", "materials", "branches"],
 
+  /**
+   * The fee book and what explains it. Narrow on purpose.
+   *
+   * `payments` is the job. `reports` comes with it because an accountant asked
+   * "why did Abuja collect less this month" needs the enrolment and attendance
+   * shape to answer, and refusing it would send them to ask a super admin for a
+   * screenshot. `students` is deliberately absent — the receivables screens
+   * name students and show their balances, which is the accountant's business,
+   * but editing a student record, moving them between branches or graduating
+   * them is not.
+   */
+  accountant: ["payments", "reports"],
+
   // Owns communications and the numbers, not the student records or the money.
   data_comm: ["community", "emails", "reports", "integrations"],
 };
 
 /**
- * Capabilities no preset may carry, however the presets are edited later.
- * Reaching one takes a deliberate per-person grant from a super admin.
- */
-/**
- * `security` sits beside `payments` here for a different reason.
+ * The capabilities that demand a second factor.
  *
- * The audit trail is how you find out what an admin did, and the restore
- * screen can put back a record somebody deleted on purpose. Both are ordinary
- * tools right up until the person being investigated is the one holding them.
- * It stays with whoever runs the school, and is granted one person at a time
- * or not at all.
+ * Read by `shouldRequireMfa` in src/lib/mfa.ts and by nothing else — it is not
+ * a restriction on the presets above, and since the Accountant role landed it
+ * is no longer true that only a super admin can hold one of these. The name is
+ * kept because the shape of the rule has not changed: whoever holds the money
+ * or the audit trail signs in with an authenticator, whatever their job title.
+ *
+ * `security` is here for its own reason. The audit trail is how you find out
+ * what an admin did, and the restore screen can put back a record somebody
+ * deleted on purpose. Both are ordinary tools right up until the person being
+ * investigated is the one holding them, so it stays out of every preset and is
+ * granted one person at a time or not at all.
  */
 export const SUPER_ONLY_CAPABILITIES: Capability[] = ["payments", "security"];
 

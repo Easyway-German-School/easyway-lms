@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-roles";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { activeTransport } from "@/lib/mailer";
+import {
+  BEHIND_TUITION_MIN_DAYS,
+  computeAll,
+  summariseReceivables,
+} from "@/lib/finance/receivables";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -109,61 +113,51 @@ export async function GET() {
   ]);
 
   // ---- Payment cohorts -------------------------------------------------
-  // Which side of the tuition paywall every student sits on. "Registered only"
-  // is the group the padlock is showing to, and the group worth chasing.
-  const cohorts = { unpaid: 0, registeredOnly: 0, depositPaid: 0, fullPaid: 0 };
-  let expectedRevenue = 0;
-  let collectedRevenue = 0;
-  const atRisk: Array<{ id: string; name: string; email: string; level: string; branch: string; paid: number; owed: number; daysEnrolled: number }> = [];
+  //
+  // COMPUTED IN src/lib/finance/receivables.ts, NOT HERE.
+  //
+  // The fee table, the deposit rate and the fortnight clock used to be applied
+  // in this loop and nowhere else, which is why every money figure on the
+  // dashboard was a dead end: the page could say "7 behind on tuition" and had
+  // no way to hand those seven to another screen, because no other screen could
+  // work out who they were. The rule lives in one module now and the students
+  // roster filters by the same one, so a tile can link to its own contents.
+  const finance = computeAll(
+    students.map((student) => ({
+      id: student.id,
+      level: student.level,
+      status: student.status,
+      classType: student.classType,
+      createdAt: student.createdAt,
+      branch: student.branch,
+      user: student.user,
+      payments: student.payments,
+    })),
+    now,
+  );
+
+  const summary = summariseReceivables(finance);
+  const cohorts = summary.cohortCounts;
+  const expectedRevenue = summary.expected;
+  const collectedRevenue = summary.collected;
+
   const byLevel: Record<string, number> = {};
-  const byBranch: Record<string, { name: string; students: number; collected: number; expected: number }> = {};
+  for (const row of finance) byLevel[row.level] = (byLevel[row.level] ?? 0) + 1;
 
-  for (const student of students) {
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
-    const fee = tuitionFeeFor(feeLookup);
-    const deposit = requiredDepositFor(feeLookup);
-    const paid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
-
-    expectedRevenue += fee;
-    collectedRevenue += paid;
-
-    if (paid <= 0) cohorts.unpaid += 1;
-    else if (paid >= fee) cohorts.fullPaid += 1;
-    else if (paid >= deposit) cohorts.depositPaid += 1;
-    else cohorts.registeredOnly += 1;
-
-    byLevel[student.level] = (byLevel[student.level] ?? 0) + 1;
-
-    const branchKey = student.branch?.id ?? "unassigned";
-    const branchEntry = byBranch[branchKey] ?? {
-      name: student.branch?.name ?? "Unassigned",
-      students: 0,
-      collected: 0,
-      expected: 0,
-    };
-    branchEntry.students += 1;
-    branchEntry.collected += paid;
-    branchEntry.expected += fee;
-    byBranch[branchKey] = branchEntry;
-
-    const daysEnrolled = Math.floor((now.getTime() - student.createdAt.getTime()) / DAY);
-    // Two weeks in and still short of the deposit: the class has started
-    // without them, so this is the chase list.
-    if (paid < deposit && daysEnrolled >= 14) {
-      atRisk.push({
-        id: student.id,
-        name: student.user?.name ?? "Unnamed",
-        email: student.user?.email ?? "",
-        level: student.level,
-        branch: student.branch?.name ?? "Unassigned",
-        paid,
-        owed: deposit - paid,
-        daysEnrolled,
-      });
-    }
-  }
-
-  atRisk.sort((a, b) => b.daysEnrolled - a.daysEnrolled);
+  const atRisk = finance
+    .filter((row) => row.behindOnTuition)
+    .sort((a, b) => b.daysEnrolled - a.daysEnrolled)
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      level: row.level,
+      branch: row.branch,
+      branchId: row.branchId,
+      paid: row.paid,
+      owed: row.owedOnDeposit,
+      daysEnrolled: row.daysEnrolled,
+    }));
 
   // ---- Revenue trend ---------------------------------------------------
   // Label is taken from the same Date that produced the key. Re-parsing
@@ -257,6 +251,26 @@ export async function GET() {
     adminRole: admin.adminRole,
     generatedAt: now.toISOString(),
 
+    /**
+     * WHAT THIS READER CAN ACTUALLY OPEN.
+     *
+     * Every figure on the dashboard is a link now, and a link that lands on
+     * "Not your area" is worse than a figure that was never clickable — it
+     * reads as the portal being broken rather than as a boundary. The page
+     * cannot work this out for itself; it knows the role name but not what the
+     * role grants, and a second copy of the grants table in the client is a
+     * second copy to forget to update. So the door list is sent with the data
+     * and the page picks each destination from it.
+     *
+     * An Accountant is the case that forced this: they hold `payments` and not
+     * `students`, so their at-risk rows lead into the finance workspace while a
+     * Secretary's lead to the student file.
+     */
+    viewer: {
+      adminRole: admin.adminRole,
+      capabilities: admin.capabilities,
+    },
+
     school: {
       students: students.length,
       activeStudents: students.filter((s) => s.status === "active").length,
@@ -273,21 +287,24 @@ export async function GET() {
 
     // Per-branch performance. Money columns follow the same capability rule as
     // the finance block, so a secretary sees head counts without revenue.
-    branchPerformance: Object.values(byBranch)
+    // `id` rides along so the row can link to its own roster rather than to a
+    // branch list the reader then has to search.
+    branchPerformance: summary.byBranch
       .map((branch) => ({
+        id: branch.key === "unassigned" ? null : branch.key,
         name: branch.name,
         students: branch.students,
         collected: canSeeMoney ? branch.collected : null,
         expected: canSeeMoney ? branch.expected : null,
-        collectionRate:
-          canSeeMoney && branch.expected > 0 ? Math.round((branch.collected / branch.expected) * 100) : null,
+        outstanding: canSeeMoney ? branch.outstanding : null,
+        collectionRate: canSeeMoney ? branch.collectionRate : null,
       }))
       .sort((a, b) => b.students - a.students),
 
     cohorts,
 
     // The whole point of the paywall: how many are stuck behind it.
-    lockedOut: cohorts.unpaid + cohorts.registeredOnly,
+    lockedOut: summary.lockedOut,
 
     attendance: {
       rate: attendanceRate,
@@ -321,6 +338,17 @@ export async function GET() {
     actionQueue: {
       atRiskCount: atRisk.length,
       /**
+       * The rule, in words, and the exact set it selected.
+       *
+       * The dashboard prints the rule under the tile so the number explains
+       * itself, and passes the ids to the roster so the destination is the
+       * same eight people even if somebody pays while the page is open. Both
+       * come from the count rather than being restated by the client, which is
+       * how the two used to drift.
+       */
+      atRiskRule: `Enrolled ${BEHIND_TUITION_MIN_DAYS}+ days and still short of the deposit`,
+      atRiskIds: atRisk.map((student) => student.id),
+      /**
        * THE BALANCES COME OFF FOR ANYONE WITHOUT `payments`.
        *
        * The `finance` block above was gated from the day sub-roles landed, and
@@ -346,6 +374,7 @@ export async function GET() {
               email: student.email,
               level: student.level,
               branch: student.branch,
+              branchId: student.branchId,
               daysEnrolled: student.daysEnrolled,
             },
       ),

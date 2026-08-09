@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
+
+const STATUSES = ["pending", "registered", "completed", "cancelled"] as const;
 
 type ExamRegistration = {
   id: string;
@@ -16,8 +19,18 @@ type ExamRegistration = {
   };
 };
 
-export default function AdminExamRegistrationsPage() {
+function ExamRegistrations() {
+  const params = useSearchParams();
   const [registrations, setRegistrations] = useState<ExamRegistration[]>([]);
+  /**
+   * The dashboard counts registrations awaiting confirmation and links here.
+   * The page had no filter at all, so it arrived showing every registration
+   * ever taken and the reader had to pick the pending ones out by eye.
+   */
+  const [statusFilter, setStatusFilter] = useState<string>(() => {
+    const requested = params.get("status");
+    return requested && (STATUSES as readonly string[]).includes(requested) ? requested : "";
+  });
   const [loading, setLoading] = useState(true);
   const [studentId, setStudentId] = useState("");
   const [examName, setExamName] = useState("");
@@ -38,6 +51,11 @@ export default function AdminExamRegistrationsPage() {
   useEffect(() => {
     loadRegistrations();
   }, []);
+
+  const visible = useMemo(
+    () => (statusFilter ? registrations.filter((row) => row.status === statusFilter) : registrations),
+    [registrations, statusFilter],
+  );
 
   async function handleSave() {
     setError("");
@@ -104,6 +122,37 @@ export default function AdminExamRegistrationsPage() {
           </div>
         </div>
 
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setStatusFilter("")}
+            className={`rounded-full border px-4 py-2 text-sm font-semibold capitalize transition ${
+              statusFilter === ""
+                ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                : "border-[var(--border)] bg-white hover:bg-slate-50"
+            }`}
+          >
+            All ({registrations.length})
+          </button>
+          {STATUSES.map((option) => {
+            const count = registrations.filter((registration) => registration.status === option).length;
+            return (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setStatusFilter(option)}
+                className={`rounded-full border px-4 py-2 text-sm font-semibold capitalize transition ${
+                  statusFilter === option
+                    ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                    : "border-[var(--border)] bg-white hover:bg-slate-50"
+                }`}
+              >
+                {option} ({count})
+              </button>
+            );
+          })}
+        </div>
+
         <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] shadow-sm">
           <table className="min-w-full divide-y divide-[var(--border)]">
             <thead className="bg-[var(--surface)] text-left text-sm uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -120,20 +169,22 @@ export default function AdminExamRegistrationsPage() {
                 <tr>
                   <td colSpan={5} className="px-6 py-10 text-center text-sm text-[var(--muted)]">Loading exam registrations…</td>
                 </tr>
-              ) : registrations.length === 0 ? (
+              ) : visible.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No registrations yet.</td>
+                  <td colSpan={5} className="px-6 py-10 text-center text-sm text-[var(--muted)]">
+                    {statusFilter ? `No ${statusFilter} registrations.` : "No registrations yet."}
+                  </td>
                 </tr>
               ) : (
-                registrations.map((registration) => (
-                  <tr key={registration.id}>
+                visible.map((registration) => (
+                  <tr key={registration.id} className={statusFilter ? "bg-[var(--accent)]/5" : undefined}>
                     <td className="px-6 py-4">
                       {registration.student.user.name || registration.student.user.email}
                       <div className="text-xs text-[var(--muted)]">{registration.student.user.email}</div>
                     </td>
                     <td className="px-6 py-4">{registration.examName}</td>
                     <td className="px-6 py-4">{new Date(registration.examDate).toLocaleDateString()}</td>
-                    <td className="px-6 py-4">{registration.status}</td>
+                    <td className="px-6 py-4 capitalize">{registration.status}</td>
                     <td className="px-6 py-4">{registration.notes || "—"}</td>
                   </tr>
                 ))
@@ -143,5 +194,20 @@ export default function AdminExamRegistrationsPage() {
         </div>
       </div>
     </AdminShell>
+  );
+}
+
+export default function AdminExamRegistrationsPage() {
+  // useSearchParams needs a Suspense boundary above it.
+  return (
+    <Suspense
+      fallback={
+        <AdminShell>
+          <p className="p-6 text-sm text-[var(--muted)]">Loading registrations…</p>
+        </AdminShell>
+      }
+    >
+      <ExamRegistrations />
+    </Suspense>
   );
 }

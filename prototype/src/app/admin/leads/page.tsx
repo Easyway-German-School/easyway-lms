@@ -4,7 +4,8 @@ import { EmptyIcon } from "@/components/icons";
 
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
 
 /**
@@ -42,12 +43,18 @@ const STATUS_TONE: Record<string, string> = {
 
 const STATUSES = ["new", "invited", "converted", "dropped"];
 
-export default function AdminLeadsPage() {
+function LeadsBoard() {
+  const params = useSearchParams();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [status, setStatus] = useState("new");
-  const [branchId, setBranchId] = useState("");
+  // Seeded from the URL so the dashboard's "Enquiries to invite" tile lands on
+  // the new leads rather than on whatever tab happened to be the default.
+  const [status, setStatus] = useState(() => {
+    const requested = params.get("status");
+    return requested && STATUSES.includes(requested) ? requested : "new";
+  });
+  const [branchId, setBranchId] = useState(params.get("branchId") ?? "");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
@@ -339,5 +346,20 @@ export default function AdminLeadsPage() {
         )}
       </div>
     </AdminShell>
+  );
+}
+
+export default function AdminLeadsPage() {
+  // useSearchParams needs a Suspense boundary above it.
+  return (
+    <Suspense
+      fallback={
+        <AdminShell>
+          <p className="p-6 text-sm text-[var(--muted)]">Loading enquiries…</p>
+        </AdminShell>
+      }
+    >
+      <LeadsBoard />
+    </Suspense>
   );
 }

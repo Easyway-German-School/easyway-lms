@@ -1,7 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
+
+/**
+ * AMOUNTS ARE WHOLE NAIRA.
+ *
+ * `Payment.amount` is written in naira — the Paystack boundary in
+ * src/lib/paystack-verify.ts divides kobo by 100 before it is stored, and the
+ * fee table quotes naira. This table divided by 100 again and printed the
+ * result next to the row's currency code, so a ₦150,000 tuition payment showed
+ * as "1500 USD": wrong by two orders of magnitude and in the wrong currency, on
+ * the one screen whose entire job is to state what a student paid.
+ */
+function naira(amount: number) {
+  return `₦${Math.round(amount).toLocaleString("en-NG")}`;
+}
 
 type PaymentRecord = {
   id: string;
@@ -17,22 +32,28 @@ type PaymentRecord = {
 
 type StudentOption = { id: string; user: { name?: string | null; email: string } };
 
-export default function AdminPaymentsPage() {
+function PaymentsLedger() {
+  const params = useSearchParams();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [studentId, setStudentId] = useState("");
   const [amount, setAmount] = useState(0);
-  const [currency, setCurrency] = useState("usd");
-  const [method, setMethod] = useState("card");
+  // NGN, not USD. The school prices in naira, charges in naira through
+  // Paystack and stores naira; a form defaulting to dollars only ever produced
+  // rows whose currency code contradicted their own amount.
+  const [currency, setCurrency] = useState("ngn");
+  const [method, setMethod] = useState("bank_transfer");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState("pending");
   const [formError, setFormError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<string>("");
-  const [filterMethod, setFilterMethod] = useState<string>("");
-  const [search, setSearch] = useState<string>("");
+  // Seeded from the URL: the finance workspace links straight to the pending
+  // and failed transactions, and to one payment method at a time.
+  const [filterStatus, setFilterStatus] = useState<string>(params.get("status") ?? "");
+  const [filterMethod, setFilterMethod] = useState<string>(params.get("method") ?? "");
+  const [search, setSearch] = useState<string>(params.get("search") ?? "");
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(20);
   const [totalCount, setTotalCount] = useState(0);
@@ -250,6 +271,7 @@ export default function AdminPaymentsPage() {
                   onChange={(event) => setCurrency(event.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
+                  <option value="ngn">NGN (₦)</option>
                   <option value="usd">USD</option>
                   <option value="eur">EUR</option>
                 </select>
@@ -261,9 +283,11 @@ export default function AdminPaymentsPage() {
                   onChange={(event) => setMethod(event.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="card">Card</option>
                   <option value="bank_transfer">Bank transfer</option>
                   <option value="cash">Cash</option>
+                  <option value="pos">POS</option>
+                  <option value="card">Card</option>
+                  <option value="paystack">Paystack</option>
                 </select>
               </label>
               <label className="space-y-2 text-sm md:col-span-2">
@@ -337,7 +361,7 @@ export default function AdminPaymentsPage() {
                       <td className="px-4 py-3">
                         {payment.student.user.name || payment.student.user.email}
                       </td>
-                      <td className="px-4 py-3">{payment.amount / 100} {payment.currency.toUpperCase()}</td>
+                      <td className="px-4 py-3 font-semibold">{naira(payment.amount)}</td>
                       <td className="px-4 py-3 capitalize">{payment.method}</td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
@@ -403,5 +427,20 @@ export default function AdminPaymentsPage() {
         </div>
       </div>
     </AdminShell>
+  );
+}
+
+export default function AdminPaymentsPage() {
+  // useSearchParams needs a Suspense boundary above it.
+  return (
+    <Suspense
+      fallback={
+        <AdminShell>
+          <p className="p-6 text-sm text-[var(--muted)]">Loading payments…</p>
+        </AdminShell>
+      }
+    >
+      <PaymentsLedger />
+    </Suspense>
   );
 }

@@ -28,6 +28,7 @@ import {
   MenuIcon,
   PaletteIcon,
   PaymentIcon,
+  PencilIcon,
   RobotIcon,
   RosterIcon,
   SendIcon,
@@ -38,14 +39,25 @@ import {
   UsersIcon,
   WalletIcon,
 } from '@/components/icons';
+import { capabilityForAdminPath } from '@/lib/admin-routes';
 
 type NavItem = {
-  capability?: string;
   label: string;
   href: string;
   icon: ReactNode;
   group?: string;
 };
+
+/**
+ * The capability each entry sits behind is no longer written here.
+ *
+ * It used to be a field on every nav item, which made this file one of two
+ * places that knew which admin page needs which capability — and the other
+ * place, the dashboard, had no such table at all, so its tiles linked wherever
+ * seemed reasonable and could land a reader on "Not your area". Both now read
+ * src/lib/admin-routes.ts, so a new page is classified once.
+ */
+const capabilityOf = (item: NavItem) => capabilityForAdminPath(item.href);
 
 // One icon per destination. Four of the Academics entries used to share the
 // same pair-of-people glyph and all three Exams entries the same page, so the
@@ -53,44 +65,45 @@ type NavItem = {
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: <DashboardIcon />, group: 'Main' },
 
-  { label: 'Students', href: '/admin/students', capability: 'students' as const, icon: <UsersIcon />, group: 'Academics' },
-  { label: 'Import students', href: '/admin/students/import', capability: 'students' as const, icon: <UserPlusIcon />, group: 'Academics' },
-  { label: 'Enquiries', href: '/admin/leads', capability: 'students' as const, icon: <InboxIcon />, group: 'Academics' },
-  { label: 'Branches', href: '/admin/branches', capability: 'branches' as const, icon: <BranchIcon />, group: 'Academics' },
-  { label: 'Tutors', href: '/admin/lecturer-invite', capability: 'staff' as const, icon: <LecturerIcon />, group: 'Academics' },
-  { label: 'Attendance', href: '/admin/attendance', capability: 'attendance' as const, icon: <AttendanceIcon />, group: 'Academics' },
-  { label: 'Cohort sign-off', href: '/admin/journey', capability: 'students' as const, icon: <MapIcon />, group: 'Academics' },
-  { label: 'Promotions', href: '/admin/promotions', capability: 'students' as const, icon: <LevelUpIcon />, group: 'Academics' },
+  { label: 'Students', href: '/admin/students', icon: <UsersIcon />, group: 'Academics' },
+  { label: 'Import students', href: '/admin/students/import', icon: <UserPlusIcon />, group: 'Academics' },
+  { label: 'Enquiries', href: '/admin/leads', icon: <InboxIcon />, group: 'Academics' },
+  { label: 'Branches', href: '/admin/branches', icon: <BranchIcon />, group: 'Academics' },
+  { label: 'Tutors', href: '/admin/lecturer-invite', icon: <LecturerIcon />, group: 'Academics' },
+  { label: 'Attendance', href: '/admin/attendance', icon: <AttendanceIcon />, group: 'Academics' },
+  { label: 'Cohort sign-off', href: '/admin/journey', icon: <MapIcon />, group: 'Academics' },
+  { label: 'Promotions', href: '/admin/promotions', icon: <LevelUpIcon />, group: 'Academics' },
 
-  { label: 'Exams', href: '/admin/exams', capability: 'exams' as const, icon: <ExamIcon />, group: 'Exams' },
-  { label: 'Exam centre', href: '/admin/exam-centre', capability: 'exams' as const, icon: <ExamCentreIcon />, group: 'Exams' },
-  { label: 'Exam Registrations', href: '/admin/exam-registrations', capability: 'exams' as const, icon: <RosterIcon />, group: 'Exams' },
+  { label: 'Exams', href: '/admin/exams', icon: <ExamIcon />, group: 'Exams' },
+  { label: 'Exam centre', href: '/admin/exam-centre', icon: <ExamCentreIcon />, group: 'Exams' },
+  { label: 'Exam Registrations', href: '/admin/exam-registrations', icon: <RosterIcon />, group: 'Exams' },
+  // The dashboard has counted unmarked work since it was built and had nowhere
+  // to send anybody. This is that somewhere.
+  { label: 'Marking queue', href: '/admin/marking', icon: <PencilIcon />, group: 'Exams' },
 
   // Course create/delete/import used to be on the demo page at `/lecturer`,
   // an admin screen sitting in the tutor portal. It lives here now, above the
   // Materials page that reads what it produces.
-  { label: 'Courses', href: '/admin/courses', capability: 'materials' as const, icon: <LessonBuilderIcon />, group: 'Content' },
-  { label: 'Materials', href: '/admin/materials', capability: 'materials' as const, icon: <BookOpenIcon />, group: 'Content' },
-  { label: 'Community', href: '/admin/community', capability: 'community' as const, icon: <CommunityIcon />, group: 'Content' },
+  { label: 'Courses', href: '/admin/courses', icon: <LessonBuilderIcon />, group: 'Content' },
+  { label: 'Materials', href: '/admin/materials', icon: <BookOpenIcon />, group: 'Content' },
+  { label: 'Community', href: '/admin/community', icon: <CommunityIcon />, group: 'Content' },
 
-  { label: 'Payments', href: '/admin/payments', capability: 'payments' as const, icon: <PaymentIcon />, group: 'Billing' },
-  // These three pages existed and were reachable from nowhere — built, then
-  // never added to the sidebar, so nobody in the office knew they were there.
-  { label: 'Finance overview', href: '/admin/finance', capability: 'payments' as const, icon: <WalletIcon />, group: 'Billing' },
-  { label: 'Reports', href: '/admin/reports', capability: 'reports' as const, icon: <TrendingUpIcon />, group: 'Billing' },
+  // Finance first: for an Accountant this is the whole portal, and the
+  // transaction list is what you open from it rather than the other way round.
+  { label: 'Finance', href: '/admin/finance', icon: <WalletIcon />, group: 'Billing' },
+  { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon />, group: 'Billing' },
+  { label: 'Reports', href: '/admin/reports', icon: <TrendingUpIcon />, group: 'Billing' },
 
   { label: 'Assistant', href: '/admin/assistant', icon: <RobotIcon />, group: 'Intelligence' },
 
-  { label: 'Email centre', href: '/admin/emails', capability: 'emails' as const, icon: <MailIcon />, group: 'Settings' },
-  { label: 'Compose email', href: '/admin/emails/compose', capability: 'emails' as const, icon: <SendIcon />, group: 'Settings' },
-  { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <BellIcon />, group: 'Settings' },
-  { label: 'Notification rules', href: '/admin/notification-settings', capability: 'emails' as const, icon: <SlidersIcon />, group: 'Settings' },
-  { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <ShieldIcon />, group: 'Settings' },
-  { label: 'Security & recovery', href: '/admin/security', capability: 'security' as const, icon: <KeyIcon />, group: 'Settings' },
-  { label: 'Integrations', href: '/admin/integrations', capability: 'integrations' as const, icon: <IntegrationIcon />, group: 'Settings' },
-  // Matches the capability its API now requires. A nav entry that leads
-  // somewhere its own endpoint refuses is worse than no nav entry.
-  { label: 'Personalization', href: '/admin/personalization', capability: 'reports' as const, icon: <PaletteIcon />, group: 'Settings' },
+  { label: 'Email centre', href: '/admin/emails', icon: <MailIcon />, group: 'Settings' },
+  { label: 'Compose email', href: '/admin/emails/compose', icon: <SendIcon />, group: 'Settings' },
+  { label: 'Notifications', href: '/admin/notifications', icon: <BellIcon />, group: 'Settings' },
+  { label: 'Notification rules', href: '/admin/notification-settings', icon: <SlidersIcon />, group: 'Settings' },
+  { label: 'Admin roles', href: '/admin/staff', icon: <ShieldIcon />, group: 'Settings' },
+  { label: 'Security & recovery', href: '/admin/security', icon: <KeyIcon />, group: 'Settings' },
+  { label: 'Integrations', href: '/admin/integrations', icon: <IntegrationIcon />, group: 'Settings' },
+  { label: 'Personalization', href: '/admin/personalization', icon: <PaletteIcon />, group: 'Settings' },
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
@@ -174,10 +187,9 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     .filter((item) => pathname === item.href || pathname.startsWith(item.href + '/'))
     .sort((a, b) => b.href.length - a.href.length)[0];
 
+  const currentCapability = currentArea ? capabilityOf(currentArea) : null;
   const blocked = Boolean(
-    currentArea?.capability &&
-      capabilities !== null &&
-      !capabilities.includes(currentArea.capability),
+    currentCapability && capabilities !== null && !capabilities.includes(currentCapability),
   );
 
   return (
@@ -234,11 +246,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           {groups.map((group) => {
             // Hide areas this admin's sub-role does not cover. The routes
             // enforce it too — this only avoids showing doors that 403.
-            const groupItems = navItems.filter(
-              (item) =>
-                item.group === group &&
-                (!item.capability || capabilities === null || capabilities.includes(item.capability)),
-            );
+            const groupItems = navItems.filter((item) => {
+              if (item.group !== group) return false;
+              const capability = capabilityOf(item);
+              return !capability || capabilities === null || capabilities.includes(capability);
+            });
             if (groupItems.length === 0) return null;
             return (
               <div key={group} className="mb-6">

@@ -49,8 +49,11 @@ type CapabilityOption = { value: string; label: string };
 
 const ROLE_SUMMARY: Record<string, string> = {
   super: "Everything, including who else is an admin.",
-  secretary: "Students, attendance, exams, materials and branches.",
-  data_comm: "Payments, community, emails, reports and integrations.",
+  secretary: "Students, attendance, exams, materials and branches. No money.",
+  accountant: "The fee book: payments, receivables and reports. No student records.",
+  // Was "Payments, community, …", which had been wrong since payments was
+  // pulled back to the people whose job is the money.
+  data_comm: "Community, emails, reports and integrations. No money.",
 };
 
 export default function AdminStaffPage() {
