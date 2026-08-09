@@ -37,6 +37,53 @@ export async function POST(request: Request) {
     const receiver = new WebhookReceiver(apiKey, apiSecret);
     const event = await receiver.receive(body, authorization);
 
+    /**
+     * The live-classroom meter, taken from LiveKit's own accounting.
+     *
+     * `participant_left` carries how long that person was actually connected,
+     * which is exactly the unit LiveKit bills us in: a tutor and nine students
+     * for an hour is 600 participant-minutes, not 60. Metering on the
+     * participant rather than the room is the difference between passing the
+     * real bill through and inventing a number that happens to look like it.
+     *
+     * The room name identifies the school, so the tenant is resolved from the
+     * live session rather than from any request context — a provider webhook
+     * has none.
+     */
+    if (event.event === "participant_left" && event.participant && event.room) {
+      const joinedAt = Number(event.participant.joinedAt ?? 0);
+      const seconds = joinedAt > 0 ? Math.max(0, Math.floor(Date.now() / 1000) - joinedAt) : 0;
+      const minutes = Math.ceil(seconds / 60);
+
+      if (minutes > 0) {
+        const { recordUsage } = await import("@/lib/usage/record");
+        const { guardedPrisma } = await import("@/lib/prisma");
+
+        const session = await guardedPrisma.liveClassSession.findFirst({
+          where: { roomName: event.room.name },
+          select: { tenantId: true },
+          orderBy: { startedAt: "desc" },
+        });
+
+        if (session?.tenantId) {
+          await recordUsage({
+            tenantId: session.tenantId,
+            meter: "live.participant_minutes",
+            quantity: minutes,
+            /**
+             * Room plus identity plus join time. LiveKit retries this webhook,
+             * and the same person rejoining later is a genuinely new billable
+             * stretch — so the join time has to be in the key, and it comes
+             * from the event rather than from our clock.
+             */
+            sourceId: `livekit:${event.room.name}:${event.participant.identity}:${joinedAt}`,
+            metadata: { room: event.room.name, identity: event.participant.identity, seconds },
+          });
+        }
+      }
+      return NextResponse.json({ ok: true, metered: minutes });
+    }
+
     if (event.event === "egress_ended" && event.egressInfo) {
       const info = event.egressInfo;
       const outcome = await finaliseRecording({

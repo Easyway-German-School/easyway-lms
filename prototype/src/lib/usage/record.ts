@@ -282,4 +282,85 @@ export function quote(meter: MeterName, quantity: number): number {
   return costKobo(meter, quantity);
 }
 
+/**
+ * Warn the schools whose credit is running out, once per dip.
+ *
+ * Not "cut them off". A school losing its register mid-term over a transfer
+ * that has not cleared is a worse failure than carrying them for a few days,
+ * and a platform that stops a lesson to chase an invoice is one nobody
+ * recommends. The warning fires while there is still time to act; the grace
+ * allowance covers the gap after that.
+ *
+ * `lowBalanceNotifiedAt` is what makes it once per dip rather than once per
+ * tick. It is cleared on top-up, so a school that runs low, pays, and runs low
+ * again is warned both times — which is the case where the warning matters
+ * most, and the one a simple "already warned" flag would miss.
+ */
+export async function warnLowBalances(): Promise<{ checked: number; warned: string[] }> {
+  const { emitWebhook } = await import("@/lib/webhooks");
+  const { notify } = await import("@/lib/notify");
+
+  const credits = await guardedPrisma.tenantCredit.findMany({
+    where: { lowBalanceNotifiedAt: null },
+    select: {
+      tenantId: true,
+      balanceKobo: true,
+      lowBalanceKobo: true,
+      tenant: { select: { name: true } },
+    },
+  });
+
+  const warned: string[] = [];
+
+  for (const credit of credits) {
+    if (credit.balanceKobo > credit.lowBalanceKobo) continue;
+
+    const naira = (Number(credit.balanceKobo) / 100).toLocaleString("en-NG", {
+      style: "currency",
+      currency: "NGN",
+      maximumFractionDigits: 0,
+    });
+
+    await emitWebhook(
+      "credit.low",
+      { balanceKobo: credit.balanceKobo.toString(), threshold: credit.lowBalanceKobo.toString() },
+      { tenantId: credit.tenantId },
+    );
+
+    await runWithTenantId(credit.tenantId, async () => {
+      await notify({
+        to: { audience: "admin", capability: "payments" },
+        title: "Platform credit is running low",
+        message:
+          `The balance is ${naira}. Top up from Platform billing to keep AI drafting, live classes ` +
+          `and email running. Nothing stops immediately — this is a heads-up, not a cut-off.`,
+        kind: "billing-low-balance",
+        severity: "warning",
+        link: "/admin/billing",
+        dedupeKey: `low-balance:${credit.tenantId}:${new Date().toISOString().slice(0, 10)}`,
+      });
+    });
+
+    await guardedPrisma.tenantCredit.update({
+      where: { tenantId: credit.tenantId },
+      data: { lowBalanceNotifiedAt: new Date() },
+    });
+
+    warned.push(credit.tenant?.name ?? credit.tenantId);
+  }
+
+  return { checked: credits.length, warned };
+}
+
+/**
+ * notify() fans out to the tenant's own admins, so it has to run inside that
+ * tenant's scope — this job spans every tenant and therefore has none of its
+ * own. Imported lazily to keep the context module out of this file's import
+ * cycle with prisma.
+ */
+async function runWithTenantId<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
+  const { runWithTenant } = await import("@/lib/tenant/context");
+  return runWithTenant(tenantId, fn);
+}
+
 export { METERS, PLACEHOLDER_RATES_KOBO };

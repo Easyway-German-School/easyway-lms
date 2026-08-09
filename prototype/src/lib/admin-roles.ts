@@ -1,5 +1,6 @@
 import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { beginRequestScope } from "@/lib/tenant/context";
 
 /**
  * Admin sub-roles.
@@ -168,6 +169,14 @@ export async function adminHasCapability(userId: string, capability: Capability)
 export async function requireCapability(
   capability: Capability,
 ): Promise<{ ok: true; admin: AdminContext; session: Session } | { ok: false; response: Response }> {
+  /**
+   * FIRST STATEMENT, BEFORE ANY AWAIT — including before the dynamic imports
+   * below, which are awaits like any other. This installs the scope holder in
+   * the calling route's context; requireAuthSession fills it in. See
+   * src/lib/tenant/context.ts for why the order is load-bearing.
+   */
+  beginRequestScope();
+
   // Imported here rather than at the top: this module is pulled into client
   // bundles for its label maps, and next-auth's server entry must not follow.
   const { requireAuthSession } = await import("@/lib/auth");
@@ -242,6 +251,8 @@ export async function requireAdmin(): Promise<
   | { ok: true; admin: AdminContext; session: Session }
   | { ok: false; response: Response }
 > {
+  beginRequestScope();
+
   const { requireAuthSession } = await import("@/lib/auth");
   const { NextResponse } = await import("next/server");
 

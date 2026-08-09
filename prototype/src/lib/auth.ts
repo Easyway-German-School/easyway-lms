@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { lecturerCanSignIn } from "@/lib/lecturer-status";
 import { checkRateLimit, clearRateLimit, clientIp } from "@/lib/rate-limit";
-import { setTenantScope, runWithTenant, runUnscoped } from "@/lib/tenant/context";
+import { setTenantScope, beginRequestScope, runWithTenant, runUnscoped } from "@/lib/tenant/context";
 import { NextResponse } from "next/server";
 
 /**
@@ -379,12 +379,16 @@ export const authOptions: AuthOptions = {
  * somebody else.
  */
 export async function getServerAuthSession(): Promise<Session | null> {
+  // Before the await, for the reason in src/lib/tenant/context.ts: this is the
+  // half that reaches the caller.
+  beginRequestScope();
   const session = (await getServerSession(authOptions as never)) as Session | null;
   setTenantScope(session?.user?.tenantId ?? null);
   return session;
 }
 
 export async function requireAuthSession(): Promise<Session | null> {
+  beginRequestScope();
   const session = await getServerAuthSession();
   if (!session?.user?.id) return null;
   return session;

@@ -128,10 +128,51 @@ async function handleGET(request: NextRequest) {
    * check it. Both the rollup and the debit are keyed on the day, so running
    * this hourly costs nothing and running it twice bills nothing twice.
    */
+  /**
+   * The two meters that are readings rather than events — what is stored, and
+   * who was active. Taken BEFORE the rollup so today's reading is in the ledger
+   * when yesterday's day is folded.
+   */
+  results.push(
+    await run("meter-storage", async () => {
+      const { meterStorage } = await import("@/lib/usage/daily-meters");
+      return meterStorage();
+    }),
+  );
+
+  results.push(
+    await run("meter-active-students", async () => {
+      const { meterActiveStudents } = await import("@/lib/usage/daily-meters");
+      return meterActiveStudents();
+    }),
+  );
+
   results.push(
     await run("usage-rollup", async () => {
       const { rollUpUsage } = await import("@/lib/usage/record");
       return rollUpUsage();
+    }),
+  );
+
+  /**
+   * Deliver queued webhooks, and warn any school whose balance is running out.
+   *
+   * The low-balance warning is deliberately not "you have been cut off". A
+   * school mid-term losing its register over a late transfer would be a worse
+   * failure than carrying them for a few days, so this warns while there is
+   * still time to act and the grace allowance does the rest.
+   */
+  results.push(
+    await run("webhooks", async () => {
+      const { deliverPendingWebhooks } = await import("@/lib/webhooks");
+      return deliverPendingWebhooks(25);
+    }),
+  );
+
+  results.push(
+    await run("low-balance-warnings", async () => {
+      const { warnLowBalances } = await import("@/lib/usage/record");
+      return warnLowBalances();
     }),
   );
 

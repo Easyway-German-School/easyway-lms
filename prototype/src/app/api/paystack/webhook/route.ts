@@ -7,6 +7,7 @@ import { settleExamFee } from "@/lib/exam-payments";
 import { enrollIfPathwayExists } from "@/lib/paystack-verify";
 import { KIND, notifyInBackground } from "@/lib/notify";
 import { withUnscoped } from "@/lib/tenant/context";
+import { emitWebhook } from "@/lib/webhooks";
 
 // Paystack signs every webhook with HMAC SHA512 of the raw body, keyed by the
 // secret key, in the x-paystack-signature header. Without this check anyone who
@@ -82,6 +83,34 @@ async function handlePOST(request: Request) {
     // redirect alone loses the payment whenever someone closes the tab on
     // Paystack's success page — the money is taken and the seat stays unpaid.
     // settleExamFee is idempotent, so both paths arriving is harmless.
+    /**
+     * A school topping up its platform credit, which is a different kind of
+     * money from everything else that arrives here.
+     *
+     * Every other payment on this endpoint is a student paying the school. This
+     * one is the school paying us, so it must never reach the student payment
+     * path — a top-up recorded as tuition would credit some student with
+     * ₦50,000 they never paid, and the reconciliation would be a nightmare.
+     * Branched first and returned immediately for that reason.
+     *
+     * `creditTenant` is idempotent on the Paystack reference, so Paystack's
+     * retries and the browser callback both landing is harmless.
+     */
+    if (metadata.kind === "platform_topup" && metadata.tenantId) {
+      const { creditTenant } = await import("@/lib/usage/record");
+      const result = await creditTenant({
+        tenantId: String(metadata.tenantId),
+        amountKobo: BigInt(Math.round(Number(data.amount || 0))),
+        reference: String(data.reference || ""),
+        kind: "topup",
+        note: "Paystack top-up",
+      });
+      return NextResponse.json({
+        received: true,
+        topup: { applied: result.applied, balanceKobo: result.balanceKobo.toString() },
+      });
+    }
+
     if (metadata.kind === "exam_fee" && metadata.registrationId) {
       const amount = Math.round(Number(data.amount || 0) / 100);
       const result = await settleExamFee({
@@ -225,6 +254,27 @@ async function handlePOST(request: Request) {
         paymentIntentId: paymentReference,
       },
     });
+
+    /**
+     * Tell any system the school has plugged in.
+     *
+     * Queued rather than sent, and it cannot throw, so a partner's endpoint
+     * being down has no bearing on whether this payment was recorded. The
+     * tenant comes from the student, because a provider webhook carries none.
+     */
+    await emitWebhook(
+      "payment.recorded",
+      {
+        paymentId: payment.id,
+        studentId: student.id,
+        studentCode: student.studentCode,
+        amount: paymentAmount,
+        currency: "NGN",
+        type: effectivePaymentType,
+        reference: paymentReference,
+      },
+      { tenantId: student.tenantId ?? undefined },
+    );
 
     await enrollIfPathwayExists({ studentId: student.id, pathwayId, reference: paymentReference });
 

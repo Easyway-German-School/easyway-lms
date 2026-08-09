@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { resolveApiKey, hasScope, type ResolvedKey } from "@/lib/api/keys";
 import { apiError } from "@/lib/api/response";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
-import { setTenantScope } from "@/lib/tenant/context";
+import { setTenantScope, beginRequestScope } from "@/lib/tenant/context";
 
 /**
  * The door on every /api/v1 route.
@@ -46,6 +46,18 @@ export async function requireApiKey(
   request: NextRequest,
   requiredScope: string,
 ): Promise<ApiGate> {
+  /**
+   * FIRST STATEMENT, BEFORE ANY AWAIT.
+   *
+   * This installs the empty scope holder in the CALLER's async context — the
+   * route handler's. Everything below fills it in by reference once the key
+   * says whose it is. Move this after the first `await` and the handler's
+   * queries see no tenant at all, which is how this was originally written and
+   * why every v1 endpoint returned 500 while /me, which touches only a global
+   * model, passed. See src/lib/tenant/context.ts.
+   */
+  beginRequestScope();
+
   const presented = bearerFrom(request) ?? request.headers.get("x-api-key");
 
   /**
@@ -112,9 +124,10 @@ export async function requireApiKey(
    * one place, so no v1 route has to remember, including the ones written
    * later.
    *
-   * Safe as `enterWith` rather than a wrapper because we are well past this
-   * function's first await — the key lookup and the rate limit both awaited
-   * already. See the note on enterUnscoped in src/lib/tenant/context.ts.
+   * This FILLS IN the holder installed at the top — it does not install a new
+   * one. By this point we are past several awaits, and a fresh `enterWith` here
+   * would attach to this function's own continuation and never reach the route
+   * handler that called it.
    */
   setTenantScope(key.tenantId);
 

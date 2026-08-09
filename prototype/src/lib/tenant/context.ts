@@ -16,22 +16,40 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * context throws instead of returning everything.
  */
 
-export type TenantScope =
-  /** A signed-in request, or one authenticated by an API key. */
-  | { kind: "tenant"; tenantId: string }
+/**
+ * MUTABLE, and that is the whole mechanism.
+ *
+ * `enterWith` only reaches the caller if it runs before the callee's first
+ * `await` — after that it attaches to the callee's own continuation and the
+ * caller never sees it. Measured, not assumed:
+ *
+ *   gate awaits first, then enterWith  →  caller sees undefined
+ *   gate enterWith with no await       →  caller sees the value
+ *
+ * Every gate here has to await something (the session, the key lookup) before
+ * it knows the tenant, so pushing the finished value up is impossible. So the
+ * gate installs an empty holder SYNCHRONOUSLY — which does reach the caller —
+ * and fills it in by reference once the answer arrives. The caller is holding
+ * the same object, so it sees the tenant appear.
+ *
+ * This is per-request safe because each gate call installs its own holder in
+ * its own async context; five concurrent requests get five holders. Verified
+ * under concurrency rather than reasoned about.
+ */
+export type TenantScope = {
   /**
-   * Deliberately spanning every tenant: the nightly cron, the backup runner,
-   * operator tooling, migrations. Carries a written reason so that "what ran
-   * across all tenants last Tuesday, and why" is an answerable question.
+   * tenant   — a signed-in request, or one authenticated by an API key.
+   * unscoped — deliberately spanning every tenant: the nightly cron, the backup
+   *            runner, operator tooling. Carries a written reason so that "what
+   *            ran across all tenants last Tuesday, and why" is answerable.
+   * none     — explicitly nobody. What a holder starts as, and what a request
+   *            with no session settles at. Distinct from "no scope at all"
+   *            because it is a positive statement.
    */
-  | { kind: "unscoped"; reason: string }
-  /**
-   * Explicitly nobody. Set by the auth seam when a request has no session, or
-   * has one whose user carries no tenant. Distinct from "no scope at all"
-   * because it is a positive statement — it overwrites whatever was there,
-   * which is what stops a scope leaking from one request into the next.
-   */
-  | { kind: "none" };
+  kind: "tenant" | "unscoped" | "none";
+  tenantId?: string;
+  reason?: string;
+};
 
 /**
  * Pinned to globalThis, for the same reason the Prisma client is.
@@ -55,18 +73,71 @@ const storage =
 globalForTenant.__easywayTenantStore = storage;
 
 /**
- * `enterWith` rather than `run`, for the reason given in audit-context.ts: the
- * caller is a gate that returns rather than a wrapper that takes a callback,
- * and rewriting every route handler into a callback would be a large diff whose
- * only effect is stylistic.
+ * Install an empty scope for this request. MUST be the first statement of a
+ * gate, before any `await`.
  *
- * It is called unconditionally by the auth seam — including with `null` — so
- * that every request states its scope rather than inheriting one. A gate that
- * only sets the scope on success would leave the previous value in place on
- * failure, and the previous value belongs to somebody else.
+ * This is the half that reaches the caller. Everything after it — the session
+ * lookup, the key lookup — fills the holder in by reference.
+ *
+ * Starting at `none` rather than leaving it unset is what stops one request
+ * inheriting another's scope: a gate that installed nothing on the failure path
+ * would leave whatever was there, and whatever was there belongs to somebody
+ * else.
+ */
+export function beginRequestScope(): TenantScope {
+  const existing = storage.getStore();
+
+  /**
+   * JOIN an existing holder rather than replacing it.
+   *
+   * The gates nest: requireCapability calls requireAuthSession calls
+   * getServerAuthSession, and each of them begins the scope because each can
+   * also be the outermost one. If every call installed a FRESH holder, the
+   * innermost would be the one that got filled in and the route — holding the
+   * outermost — would still see nothing. That is exactly what happened: the v1
+   * routes worked, because their gate is one level deep, and every admin route
+   * returned 500.
+   *
+   * An `unscoped` holder is left completely alone. A deliberate cross-tenant
+   * job that happens to call a gate must not have its exemption quietly
+   * downgraded.
+   */
+  if (existing) {
+    if (existing.kind === "unscoped") return existing;
+    existing.kind = "none";
+    existing.tenantId = undefined;
+    existing.reason = undefined;
+    return existing;
+  }
+
+  const holder: TenantScope = { kind: "none" };
+  storage.enterWith(holder);
+  return holder;
+}
+
+/**
+ * Fill in the scope once the tenant is known.
+ *
+ * Mutates the holder a gate already installed. If there is none — a page or a
+ * script calling this directly — it installs one, which works there because
+ * such a caller is the top of its own context.
+ *
+ * Called unconditionally by the auth seam, including with `null`, so that every
+ * request states its scope rather than inheriting one.
  */
 export function setTenantScope(tenantId: string | null | undefined): void {
-  storage.enterWith(tenantId ? { kind: "tenant", tenantId } : { kind: "none" });
+  const holder = storage.getStore();
+  const next: TenantScope = tenantId
+    ? { kind: "tenant", tenantId }
+    : { kind: "none" };
+
+  if (holder) {
+    holder.kind = next.kind;
+    holder.tenantId = next.tenantId;
+    holder.reason = undefined;
+    return;
+  }
+  storage.enterWith(next);
 }
 
 /** For scripts, jobs and tests, which have a clean top-level to wrap. */
@@ -107,19 +178,22 @@ export function runUnscoped<T>(reason: string, fn: () => Promise<T>): Promise<T>
 /**
  * The non-callback form, for a gate that has already decided and returns.
  *
- * NOT SAFE AS THE FIRST STATEMENT OF A ROUTE HANDLER. `enterWith` attaches the
- * scope to the async resource that is currently running, and at the top of a
- * handler that resource still belongs to the caller — the work below it runs
- * somewhere the scope was never set, and the first query throws. It becomes
- * reliable only once the handler has awaited something of its own.
- *
- * That is too subtle to depend on, so route handlers use `withUnscoped()`
- * below. This stays for gates that are already past an await, which is every
- * gate that has just looked something up.
+ * Mutates the holder if a gate installed one, exactly like setTenantScope, so
+ * it reaches the caller for the same reason. Without a holder it installs one,
+ * which only works when called before the caller's first await — so a route
+ * handler should use `withUnscoped()` below rather than calling this on its
+ * first line.
  */
 export function enterUnscoped(reason: string): void {
   if (!reason || reason.trim().length < 10) {
     throw new Error("enterUnscoped() requires a reason.");
+  }
+  const holder = storage.getStore();
+  if (holder) {
+    holder.kind = "unscoped";
+    holder.reason = reason;
+    holder.tenantId = undefined;
+    return;
   }
   storage.enterWith({ kind: "unscoped", reason });
 }
@@ -161,7 +235,7 @@ export function currentScope(): TenantScope | undefined {
 
 export function currentTenantId(): string | null {
   const scope = storage.getStore();
-  return scope?.kind === "tenant" ? scope.tenantId : null;
+  return scope?.kind === "tenant" ? (scope.tenantId ?? null) : null;
 }
 
 /**
