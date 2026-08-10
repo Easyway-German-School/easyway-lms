@@ -23,6 +23,11 @@ import {
   type EmploymentType,
   type LecturerStatus,
 } from "@/lib/lecturer-status";
+import {
+  LECTURER_FEATURES,
+  LECTURER_FEATURE_HINTS,
+  LECTURER_FEATURE_LABELS,
+} from "@/lib/lecturer-features";
 
 /**
  * Tutors.
@@ -54,6 +59,8 @@ type Tutor = {
   assignment: LecturerAssignment;
   assignmentLabel: string;
   studentCount: number;
+  /** Which optional areas of the portal this tutor may open. */
+  features: string[];
 };
 
 type PrivateStudent = {
@@ -150,6 +157,74 @@ function AssignmentFields({
         onChange={(next) => set("batches", next)}
         emptyMeans="Nothing selected — this tutor takes every batch."
       />
+    </div>
+  );
+}
+
+/**
+ * WHAT THIS TUTOR CAN OPEN — a different question from what they teach.
+ *
+ * Deliberately its own block, below the assignment and visually separated,
+ * because the two get confused otherwise. "Assign a class type: online" says
+ * this tutor's students take online classes. It does not say this tutor is the
+ * person who runs the video call, and in most schools it is one or two people
+ * who do — everybody else prepares material and marks work.
+ *
+ * Note the inverted empty rule against every picker above it. Elsewhere on this
+ * form, nothing selected means "everything", because an unset assignment should
+ * not silently narrow a tutor's roster. Here nothing selected means nothing,
+ * because an access list that grows when you clear it is a trap.
+ */
+function PortalAccessFields({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <p className="text-sm font-bold text-[var(--foreground)]">Portal access</p>
+      <p className="mt-1 text-xs text-[var(--muted)]">
+        Not every tutor takes live or private classes. Tick only what this one should see — the sidebar entry
+        disappears for the rest, and the pages refuse them if they follow an old link.
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {LECTURER_FEATURES.map((feature) => {
+          const on = value.includes(feature);
+          return (
+            <button
+              key={feature}
+              type="button"
+              onClick={() => onChange(on ? value.filter((entry) => entry !== feature) : [...value, feature])}
+              className={`rounded-2xl border p-3 text-left transition ${
+                on
+                  ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                  : "border-[var(--border)] bg-[var(--background)] hover:border-slate-300"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  className={`grid h-4 w-4 shrink-0 place-items-center rounded border text-[10px] font-black ${
+                    on ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-slate-300"
+                  }`}
+                >
+                  {on ? "✓" : ""}
+                </span>
+                <span className="text-sm font-semibold">{LECTURER_FEATURE_LABELS[feature]}</span>
+              </span>
+              <span className="mt-1.5 block text-[11px] leading-4 text-[var(--muted)]">
+                {LECTURER_FEATURE_HINTS[feature]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {value.length === 0 && (
+        <p className="mt-2 text-xs font-semibold text-amber-700">
+          Nothing ticked — this tutor gets none of these three areas.
+        </p>
+      )}
     </div>
   );
 }
@@ -447,6 +522,9 @@ export default function AdminTutorsPage() {
     startedAt: "",
   });
   const [newAssignment, setNewAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
+  // A new tutor starts with everything, matching what every tutor created
+  // before this field had. The office takes areas away deliberately.
+  const [newFeatures, setNewFeatures] = useState<string[]>([...LECTURER_FEATURES]);
   const [creating, setCreating] = useState(false);
   const [createPhotoFile, setCreatePhotoFile] = useState<File | null>(null);
   const [createPhotoUrl, setCreatePhotoUrl] = useState<string | null>(null);
@@ -457,6 +535,7 @@ export default function AdminTutorsPage() {
   const [editPhotoUrl, setEditPhotoUrl] = useState<string | null>(null);
   const [uploadingEditPhoto, setUploadingEditPhoto] = useState(false);
   const [editAssignment, setEditAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
+  const [editFeatures, setEditFeatures] = useState<string[]>([...LECTURER_FEATURES]);
   const [savingEdit, setSavingEdit] = useState(false);
 
   /**
@@ -551,7 +630,12 @@ export default function AdminTutorsPage() {
       const res = await fetch("/api/admin/lecturers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, ...newAssignment, photoUrl: uploadedPhotoUrl ?? undefined }),
+        body: JSON.stringify({
+          ...form,
+          ...newAssignment,
+          features: newFeatures,
+          photoUrl: uploadedPhotoUrl ?? undefined,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not create the tutor account");
@@ -597,7 +681,12 @@ export default function AdminTutorsPage() {
       const res = await fetch("/api/admin/lecturers", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lecturerId: editingId, ...editAssignment, photoUrl: uploadedPhotoUrl ?? undefined }),
+        body: JSON.stringify({
+          lecturerId: editingId,
+          ...editAssignment,
+          features: editFeatures,
+          photoUrl: uploadedPhotoUrl ?? undefined,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save the assignment");
@@ -745,6 +834,7 @@ export default function AdminTutorsPage() {
                         onClick={() => {
                           setEditingId(isEditing ? "" : tutor.id);
                           setEditAssignment(tutor.assignment);
+                          setEditFeatures(tutor.features ?? [...LECTURER_FEATURES]);
                         }}
                         className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold text-[var(--foreground)]"
                       >
@@ -806,6 +896,10 @@ export default function AdminTutorsPage() {
                       </div>
 
                       <AssignmentFields branches={branches} value={editAssignment} onChange={setEditAssignment} />
+
+                      <div className="mt-5">
+                        <PortalAccessFields value={editFeatures} onChange={setEditFeatures} />
+                      </div>
 
                       {editAssignment.classTypes.includes("private") ? (
                         <PrivateStudentSearch
@@ -952,6 +1046,10 @@ export default function AdminTutorsPage() {
               level. Nobody adds them by hand.
             </p>
             <AssignmentFields branches={branches} value={newAssignment} onChange={setNewAssignment} />
+
+            <div className="mt-5">
+              <PortalAccessFields value={newFeatures} onChange={setNewFeatures} />
+            </div>
           </div>
 
           <button

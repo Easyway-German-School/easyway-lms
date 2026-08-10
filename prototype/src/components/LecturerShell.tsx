@@ -26,7 +26,10 @@ import {
   SettingsIcon,
   TimetableIcon,
   UsersIcon,
+  FilmIcon,
+  ShieldIcon,
 } from "@/components/icons";
+import { featureForLecturerPath, LECTURER_FEATURE_LABELS } from "@/lib/lecturer-features";
 
 type NavItem = {
   label: string;
@@ -48,6 +51,10 @@ const navItems: NavItem[] = [
   { label: 'Private classes', href: '/lecturer/private-classes', icon: <PrivateClassIcon /> },
   { label: 'Assignments', href: '/lecturer/assignments', icon: <AssignmentIcon /> },
   { label: 'Materials', href: '/lecturer/materials', icon: <BookOpenIcon /> },
+  // Tutors had no way to watch back a class they taught. The students have had
+  // the shelf-style library since it was built; this is the same library,
+  // scoped to the classes this tutor actually takes.
+  { label: 'Recordings', href: '/lecturer/recordings', icon: <FilmIcon /> },
   { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon /> },
   { label: 'Exam/Test', href: '/lecturer/grades', icon: <ExamIcon /> },
   // Tutors already had access to every space server-side (isStaffRole in
@@ -69,6 +76,12 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [revoked, setRevoked] = useState(false);
+  /**
+   * Which optional areas this tutor may reach. Null while unknown, and null
+   * means everything shows — a slow or failed lookup must not blank out a
+   * tutor's own sidebar mid-lesson, and the routes enforce it regardless.
+   */
+  const [features, setFeatures] = useState<string[] | null>(null);
   // Below lg the sidebar is a drawer. A tutor marking attendance on their
   // phone had 288px of the 375px screen taken by a sidebar they could not
   // dismiss.
@@ -92,7 +105,9 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
     fetch("/api/lecturer/status", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!cancelled && data && data.active === false) setRevoked(true);
+        if (cancelled || !data) return;
+        if (data.active === false) setRevoked(true);
+        if (Array.isArray(data.features)) setFeatures(data.features);
       })
       .catch(() => {});
     return () => {
@@ -114,6 +129,26 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
       </div>
     );
   }
+
+  /**
+   * THE DOOR, not just the signpost — the same reasoning as AdminShell.
+   *
+   * Hiding a sidebar entry is presentation. It is not access control, and on
+   * its own it leaves a tutor who follows an old bookmark or their own browser
+   * history staring at a live classroom page that spins forever or a private
+   * class list that renders empty. Both read as the portal being broken rather
+   * than as a boundary, and the resulting bug report is a fair one.
+   */
+  const visibleToThisTutor = (item: NavItem) => {
+    const feature = featureForLecturerPath(item.href);
+    return !feature || features === null || features.includes(feature);
+  };
+
+  const blockedFeature = (() => {
+    const feature = featureForLecturerPath(pathname);
+    if (!feature || features === null || features.includes(feature)) return null;
+    return feature;
+  })();
 
   return (
     <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(10,124,255,0.10),_transparent_30%),linear-gradient(135deg,_#f7faff_0%,_#eef3ff_100%)] text-[var(--foreground)]">
@@ -158,7 +193,7 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
 
         <nav className="flex-1 overflow-y-auto p-3">
           <div className="space-y-1">
-            {navItems.map((item) => {
+            {navItems.filter(visibleToThisTutor).map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + '/');
               return (
                 <button
@@ -219,7 +254,35 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
           <NotificationCenter />
         </header>
 
-        {children}
+        {blockedFeature ? (
+          <div className="p-6">
+            <div className="mx-auto mt-10 max-w-lg rounded-[28px] border border-slate-200 bg-white p-8 text-center shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
+              <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                <ShieldIcon className="h-7 w-7" />
+              </span>
+              <h1 className="mt-4 text-xl font-bold text-slate-900">Not part of your role</h1>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                The school has not given you{' '}
+                <strong className="font-semibold text-slate-800">
+                  {LECTURER_FEATURE_LABELS[blockedFeature]}
+                </strong>
+                . Nothing is broken — not every tutor takes these, so the office decides who does.
+              </p>
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                An admin can switch it on from your tutor record, without changing anybody else&rsquo;s.
+              </p>
+              <button
+                type="button"
+                onClick={() => router.push('/lecturer/dashboard')}
+                className="mt-5 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white transition hover:brightness-110"
+              >
+                Back to my dashboard
+              </button>
+            </div>
+          </div>
+        ) : (
+          children
+        )}
       </main>
     </div>
   );

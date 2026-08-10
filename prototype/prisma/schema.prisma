@@ -1490,6 +1490,21 @@ model Lecturer {
   classTypes   Json? // ["physical", "online", "private"]
   batches      Json? // ["January", … "December"]
 
+  /**
+   * Which optional areas of the portal this tutor may reach:
+   * ["live_classes", "private_classes", "recordings"].
+   *
+   * A DIFFERENT QUESTION FROM `classTypes` ABOVE, which is what they teach.
+   * Not every tutor runs the video call — a school may have one person who
+   * takes every live session while others prepare the material — and a tutor
+   * who only teaches in a physical room may still need to watch recordings
+   * back. See src/lib/lecturer-features.ts.
+   *
+   * Null means all of them, so every tutor created before this keeps the
+   * portal they had. An empty array is a real answer and means none.
+   */
+  features Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

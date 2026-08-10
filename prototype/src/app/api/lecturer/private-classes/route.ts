@@ -1,6 +1,7 @@
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { lecturerCan } from "@/lib/lecturer-features";
 
 /**
  * Booking and editing one-to-one classes.
@@ -25,12 +26,29 @@ async function requireStaff(): Promise<LecturerPrivateClassesAuth> {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { id: true, role: true, lecturer: { select: { id: true } } },
+    select: { id: true, role: true, lecturer: { select: { id: true, features: true } } },
   });
 
   const role = (user?.role ?? "").toLowerCase();
   if (role !== "lecturer" && role !== "admin") {
     return { error: NextResponse.json({ error: "Staff access required" }, { status: 403 }) };
+  }
+
+  /**
+   * A tutor the school has not put on private tuition does not get this list,
+   * whichever way they arrive at it. Admins are exempt — this toggle is about
+   * how the teaching staff is organised, not about who may audit it.
+   */
+  if (role === "lecturer" && user?.lecturer && !lecturerCan(user.lecturer.features, "private_classes")) {
+    return {
+      error: NextResponse.json(
+        {
+          error: "Not your area",
+          message: "The school has not given you private classes. Ask the office if this is wrong.",
+        },
+        { status: 403 },
+      ),
+    };
   }
 
   return { userId: user!.id, role, lecturerId: user?.lecturer?.id ?? null };

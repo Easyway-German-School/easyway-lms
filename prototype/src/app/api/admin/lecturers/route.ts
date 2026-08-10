@@ -20,6 +20,7 @@ import {
   LECTURER_STATUS_META,
   readLecturerStatus,
 } from "@/lib/lecturer-status";
+import { lecturerFeatures, parseLecturerFeatures } from "@/lib/lecturer-features";
 
 /**
  * Tutor administration.
@@ -138,6 +139,10 @@ export async function GET() {
         status: readLecturerStatus(lecturer.status),
         statusNote: lecturer.statusNote,
         statusChangedAt: lecturer.statusChangedAt,
+        // Resolved rather than raw, so the admin form shows the same answer the
+        // tutor's own portal acts on — including the null-means-everything
+        // default, which a raw column would render as no boxes ticked.
+        features: lecturerFeatures(lecturer.features),
         employmentType: lecturer.employmentType,
         startedAt: lecturer.startedAt,
         assignment,
@@ -208,6 +213,9 @@ export async function POST(request: NextRequest) {
           statusChangedAt: new Date(),
           employmentType,
           startedAt,
+          // Absent from the form means everything, which is what a tutor
+          // created before this field has. The office narrows it deliberately.
+          features: parseLecturerFeatures(body?.features),
           ...assignment,
         },
       },
@@ -306,6 +314,15 @@ export async function PATCH(request: NextRequest) {
     if (statusChanged) data.statusChangedAt = new Date();
   }
   if (typeof body.statusNote === "string") data.statusNote = body.statusNote.trim() || null;
+
+  /**
+   * Which optional areas this tutor may reach. Only written when the key is
+   * actually present, so a form that does not carry the checkboxes cannot
+   * silently reset a tutor to "everything" — or to nothing.
+   */
+  if (body.features !== undefined) {
+    data.features = parseLecturerFeatures(body.features);
+  }
 
   // The assignment fields move as a set. Sending any one of them rewrites all
   // of them, so a half-submitted form can never leave a tutor assigned to a
