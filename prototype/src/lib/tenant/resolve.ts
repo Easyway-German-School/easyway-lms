@@ -66,7 +66,7 @@ export async function resolveTenantId(request: {
      * and a student the office cannot see.
      */
     throw new Error(
-      `No tenant for host "${host}" and no tenant with slug "${DEFAULT_SLUG}". Run prisma/migrations/manual/001_tenant_platform.`,
+      `No tenant for host "${host}" and no tenant with slug "${DEFAULT_SLUG}". Run prisma/manual/001_tenant_platform.`,
     );
   }
 

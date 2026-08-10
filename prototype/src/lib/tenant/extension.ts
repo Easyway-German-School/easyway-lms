@@ -11,7 +11,7 @@ import { isolationMode, type TenantScope } from "@/lib/tenant/context";
  * not an available option.
  *
  * There are two layers, and this is the inner one. Postgres row-level security
- * (see prisma/migrations/manual/) is the outer one and covers anything that
+ * (see prisma/manual/) is the outer one and covers anything that
  * bypasses Prisma entirely, including raw SQL and a psql session. Neither layer
  * is trusted to be sufficient alone: this one is ergonomic but only applies to
  * code that goes through it, and RLS is absolute but easy to misconfigure. The

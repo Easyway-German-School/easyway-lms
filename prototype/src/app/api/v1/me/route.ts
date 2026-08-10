@@ -13,7 +13,7 @@ import { apiOk, apiError } from "@/lib/api/response";
  * It is also the only v1 endpoint that can exist today. The data endpoints —
  * students, enrolments, payments — must read through the tenant-scoped client,
  * and that depends on the `tenantId` columns which are staged and unapplied
- * (see prisma/migrations/manual/001_tenant_platform). Writing them now against
+ * (see prisma/manual/001_tenant_platform). Writing them now against
  * unscoped queries would mean writing the isolation bug on purpose and hoping
  * to remember to fix it. This proves the whole chain — key parsing, hashing,
  * lookup, revocation, expiry, scopes, rate limiting, the envelope — and the
