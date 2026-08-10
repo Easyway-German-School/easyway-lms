@@ -35,6 +35,7 @@ export const KIND = {
   materialPublished: "material.published",
   assignmentDue: "assignment.due",
   resultPublished: "result.published",
+  certificateIssued: "certificate.issued",
   classStarting: "class.starting",
   lecturerMessage: "lecturer.message",
   leadCaptured: "lead.captured",

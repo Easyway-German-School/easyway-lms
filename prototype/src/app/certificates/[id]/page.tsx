@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import CertificateDocument from "@/components/CertificateDocument";
 import { safeJson } from "@/lib/safe-json";
 import type { CertificateView } from "@/lib/certificates";
+import { DEFAULT_CERTIFICATE_TEMPLATE, type CertificateTemplate } from "@/lib/certificate-template";
 
 /**
  * One certificate, full size, ready to print or save as PDF.
@@ -36,6 +37,10 @@ export default function CertificatePrintPage() {
   const [cert, setCert] = useState<CertificateView | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
   const [origin, setOrigin] = useState("");
+  // The school's own wording, from the same response as the certificate — this
+  // is the page people actually print, so it must not fall back to the
+  // built-in defaults while the roster thumbnail shows the edited version.
+  const [template, setTemplate] = useState<CertificateTemplate>(DEFAULT_CERTIFICATE_TEMPLATE);
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -53,6 +58,7 @@ export default function CertificatePrintPage() {
           setState("missing");
           return;
         }
+        if (json?.template) setTemplate(json.template as CertificateTemplate);
         setCert(found);
         setState("ready");
       } catch {
@@ -119,7 +125,7 @@ export default function CertificatePrintPage() {
       </div>
 
       <div className="mx-auto max-w-[1180px] px-6 print:max-w-none print:px-0">
-        <CertificateDocument certificate={cert} verifyBaseUrl={origin} />
+        <CertificateDocument certificate={cert} verifyBaseUrl={origin} template={template} />
       </div>
 
       <p className="mx-auto mt-6 max-w-[1180px] px-6 text-xs text-[var(--muted)] print:hidden">

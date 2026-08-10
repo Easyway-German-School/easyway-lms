@@ -7,6 +7,7 @@ import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import CertificateDocument from "@/components/CertificateDocument";
 import LockedCertificate, { type LockedIdentity } from "@/components/LockedCertificate";
+import { DEFAULT_CERTIFICATE_TEMPLATE, type CertificateTemplate } from "@/lib/certificate-template";
 import TuitionNudge from "@/components/TuitionNudge";
 import { safeJson } from "@/lib/safe-json";
 import type { CertificateView } from "@/lib/certificates";
@@ -30,6 +31,8 @@ type Payload = {
   pending: string | null;
   certificates: CertificateView[];
   identity?: LockedIdentity;
+  /** The school's own wording and signatories, edited at /admin/certificates. */
+  template?: CertificateTemplate;
 };
 
 export default function CertificatesPage() {
@@ -57,6 +60,9 @@ export default function CertificatesPage() {
   }, []);
 
   const certificates = data?.certificates ?? [];
+  // Falls back to the built-in defaults, so a school that has never opened the
+  // editor still renders a complete document rather than an empty frame.
+  const template = data?.template ?? DEFAULT_CERTIFICATE_TEMPLATE;
 
   return (
     <StudentShell>
@@ -96,6 +102,7 @@ export default function CertificatesPage() {
                     level={data.level}
                     reason={data.pending}
                     outstanding={data.outstanding}
+                    template={template}
                   />
                 ) : (
                   <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-6 py-12 text-center">
@@ -117,7 +124,7 @@ export default function CertificatesPage() {
             ) : (
               <div className="mt-10 grid gap-8 xl:grid-cols-2">
                 {certificates.map((cert) => (
-                  <CertificateCard key={cert.id} cert={cert} />
+                  <CertificateCard key={cert.id} cert={cert} template={template} />
                 ))}
               </div>
             )}
@@ -139,12 +146,12 @@ export default function CertificatesPage() {
   );
 }
 
-function CertificateCard({ cert }: { cert: CertificateView }) {
+function CertificateCard({ cert, template }: { cert: CertificateView; template: CertificateTemplate }) {
   return (
     <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5 shadow-sm">
       {/* The thumbnail IS the certificate — same component, same numbers. */}
       <Link href={`/certificates/${cert.id}`} className="block overflow-hidden rounded-2xl shadow-lg">
-        <CertificateDocument certificate={cert} />
+        <CertificateDocument certificate={cert} template={template} />
       </Link>
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">

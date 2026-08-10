@@ -216,6 +216,7 @@ model Tenant {
   assignmentSubmissions    AssignmentSubmission[]
   emailMessages            EmailMessage[]
   notificationSettings     NotificationSetting[]
+  certificateTemplates     CertificateTemplate[]
   notificationPreferences  NotificationPreference[]
   emailSuppressions        EmailSuppression[]
   privateClasses           PrivateClass[]
@@ -2074,6 +2075,41 @@ model EmailMessage {
  * settings page — an admin turning one thing off must not require seventeen
  * rows to exist first.
  */
+/**
+ * The wording, signatories and colours printed on a certificate.
+ *
+ * One row per school. Everything the document says other than the student's own
+ * facts lives here, so the office can correct an address, rename a signatory or
+ * reword the citation without a deploy — the previous template had all of it
+ * hardcoded in the component, which meant a change of Head of Department was a
+ * code change.
+ *
+ * Stored as a single JSON blob rather than thirty columns. The shape is small,
+ * always read as a whole, never queried across rows, and every field is a
+ * string — so columns would buy nothing and cost a migration each time the
+ * design gains a line. Parsed and merged over the defaults by
+ * src/lib/certificate-template.ts, which means a half-filled row still renders
+ * a complete document.
+ */
+model CertificateTemplate {
+  id  String @id @default(cuid())
+  /** Reserved for future named templates; today there is one, "default". */
+  key String @default("default")
+
+  settings Json?
+
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([key])
+}
+
 model NotificationSetting {
   id String @id @default(cuid())
 

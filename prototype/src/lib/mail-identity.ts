@@ -164,6 +164,7 @@ export const KIND_LABELS: Record<string, string> = {
   [KIND.materialPublished]: "New material published",
   [KIND.assignmentDue]: "Assignment due",
   [KIND.resultPublished]: "A result is released",
+  [KIND.certificateIssued]: "Certificate issued",
   [KIND.classStarting]: "Class starting soon",
   [KIND.lecturerMessage]: "Message from a tutor",
   [KIND.leadCaptured]: "New enquiry",
@@ -183,7 +184,7 @@ export const KIND_GROUPS: Array<{ group: string; kinds: string[] }> = [
   },
   {
     group: "Progress",
-    kinds: [KIND.resultPublished, KIND.examRegistered, KIND.levelAdvance],
+    kinds: [KIND.resultPublished, KIND.certificateIssued, KIND.examRegistered, KIND.levelAdvance],
   },
   {
     group: "Office",

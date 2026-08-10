@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import CertificateDocument from "@/components/CertificateDocument";
 import { CheckCircleIcon, LockIcon, SparklesIcon } from "@/components/icons";
 import type { CertificateView } from "@/lib/certificates";
+import { DEFAULT_CERTIFICATE_TEMPLATE, type CertificateTemplate } from "@/lib/certificate-template";
 
 /**
  * The certificate a student has not earned yet — shown anyway, sealed.
@@ -79,12 +80,15 @@ export default function LockedCertificate({
   level,
   reason,
   outstanding,
+  template = DEFAULT_CERTIFICATE_TEMPLATE,
 }: {
   identity: LockedIdentity;
   level: string;
   /** Why it is still locked, from the certificates endpoint. */
   reason: string | null;
   outstanding: number;
+  /** The school's own wording, so the sealed preview matches the real thing. */
+  template?: CertificateTemplate;
 }) {
   const cert = previewCertificate(identity, level);
   const owesDeposit = Boolean(reason?.toLowerCase().includes("deposit"));
@@ -122,7 +126,7 @@ export default function LockedCertificate({
         <div className="relative">
           <div className="overflow-hidden rounded-2xl shadow-2xl">
             <div className="scale-[1.02] blur-[3px] saturate-[0.85] transition duration-500 [transform-origin:center] group-hover:blur-[2px]">
-              <CertificateDocument certificate={cert} />
+              <CertificateDocument certificate={cert} template={template} />
             </div>
           </div>
 

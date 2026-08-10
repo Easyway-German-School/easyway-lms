@@ -17,6 +17,9 @@ import type { Capability } from "@/lib/admin-roles";
  */
 const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   { prefix: "/admin/students", capability: "students" },
+  // A certificate is a statement about a named student's result, so it sits
+  // with whoever holds the student records.
+  { prefix: "/admin/certificates", capability: "students" },
   { prefix: "/admin/leads", capability: "students" },
   { prefix: "/admin/journey", capability: "students" },
   { prefix: "/admin/promotions", capability: "students" },

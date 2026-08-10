@@ -59,6 +59,11 @@ export const TENANT_OWNED_MODELS = [
   "Notification",
   "NotificationSetting",
   /**
+   * The certificate wording and signatories. Tenant-owned because one school's
+   * Head of Department must never appear on another school's document.
+   */
+  "CertificateTemplate",
+  /**
    * One person's own delivery preferences. Tenant-owned because it is read as
    * "my settings" — a query that must never be able to return, or overwrite,
    * somebody at another school. It carries no student data itself, but the

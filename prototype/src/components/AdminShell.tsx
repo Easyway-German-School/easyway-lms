@@ -11,6 +11,7 @@ import {
   SlidersIcon,
   BookOpenIcon,
   BranchIcon,
+  CertificateIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CommunityIcon,
@@ -73,6 +74,7 @@ const navItems: NavItem[] = [
   { label: 'Attendance', href: '/admin/attendance', icon: <AttendanceIcon />, group: 'Academics' },
   { label: 'Cohort sign-off', href: '/admin/journey', icon: <MapIcon />, group: 'Academics' },
   { label: 'Promotions', href: '/admin/promotions', icon: <LevelUpIcon />, group: 'Academics' },
+  { label: 'Certificates', href: '/admin/certificates', icon: <CertificateIcon />, group: 'Academics' },
 
   { label: 'Exams', href: '/admin/exams', icon: <ExamIcon />, group: 'Exams' },
   { label: 'Exam centre', href: '/admin/exam-centre', icon: <ExamCentreIcon />, group: 'Exams' },
