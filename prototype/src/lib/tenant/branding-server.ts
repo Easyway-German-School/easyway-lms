@@ -23,6 +23,32 @@ import {
  */
 
 /**
+ * A two-letter monogram for a tenant that has supplied no artwork.
+ *
+ * Prefers a capital inside the first word, so a camel-cased name like
+ * "BrightStar" reads "BS" rather than "BR"; otherwise it takes the initial of
+ * each word. Two letters at most — three in a 44px square is a smudge, and the
+ * emblem is the real fallback anyway.
+ */
+function initialsOf(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return DEFAULT_BRANDING.initials;
+
+  const inner = words[0].match(/[A-Z]/g);
+  if (words.length === 1 && inner && inner.length >= 2) {
+    return inner.slice(0, 2).join("");
+  }
+
+  return (
+    words
+      .map((word) => word[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2) || DEFAULT_BRANDING.initials
+  );
+}
+
+/**
  * Resolved branding per host, cached briefly.
  *
  * Same reasoning as the tenant-id cache next door: this is read on essentially
@@ -52,9 +78,11 @@ export async function brandingForHost(host: string): Promise<Branding> {
     select: { name: true, brandName: true, logoUrl: true, primaryColor: true },
   });
 
+  const displayName = tenant ? tenant.brandName?.trim() || tenant.name : "";
+
   const value: Branding = tenant
     ? {
-        name: tenant.brandName?.trim() || tenant.name,
+        name: displayName,
         logoUrl: isSafeLogo(tenant.logoUrl) ? tenant.logoUrl : DEFAULT_BRANDING.logoUrl,
         /**
          * A custom lockup is NOT reused as the square mark. They are different
@@ -63,6 +91,11 @@ export async function brandingForHost(host: string): Promise<Branding> {
          * generic mark rather than getting a broken one.
          */
         markUrl: DEFAULT_BRANDING.markUrl,
+        /**
+         * Derived only for a real tenant. EasyWay's own is the carried "EW" in
+         * DEFAULT_BRANDING, which word initials would have got wrong.
+         */
+        initials: initialsOf(displayName),
         primaryColor: isSafeColor(tenant.primaryColor) ? tenant.primaryColor.trim() : null,
       }
     : DEFAULT_BRANDING;

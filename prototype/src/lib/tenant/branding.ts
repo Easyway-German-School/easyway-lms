@@ -17,14 +17,28 @@ export type Branding = {
   name: string;
   logoUrl: string;
   markUrl: string;
+  /**
+   * The monogram shown when no artwork loads at all. Carried rather than
+   * derived from `name`, because deriving it gets EasyWay's own wrong: word
+   * initials of "Easyway German Language School" give "EG", and the product has
+   * always shown "EW". A default brand should never be a guess.
+   */
+  initials: string;
   /** Null when the tenant has not chosen one, which means "leave the CSS alone". */
   primaryColor: string | null;
 };
 
+/**
+ * The name here is the school's full one, matching layout.tsx, the manifest and
+ * every email — NOT the shortened form on the emblem. The emblem was shortened
+ * to fit its banner, which is a layout constraint and not a rename, and this
+ * string is what feeds `alt` text and the no-artwork fallback.
+ */
 export const DEFAULT_BRANDING: Branding = {
-  name: "EasyWay Language School",
+  name: "Easyway German Language School",
   logoUrl: "/logo.png",
   markUrl: "/logo-mark.png",
+  initials: "EW",
   primaryColor: null,
 };
 

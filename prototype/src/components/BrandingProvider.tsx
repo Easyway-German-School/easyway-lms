@@ -67,6 +67,7 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
           name: data.name ?? DEFAULT_BRANDING.name,
           logoUrl: data.logoUrl ?? DEFAULT_BRANDING.logoUrl,
           markUrl: data.markUrl ?? DEFAULT_BRANDING.markUrl,
+          initials: data.initials ?? DEFAULT_BRANDING.initials,
           primaryColor: null,
           ready: true,
         });

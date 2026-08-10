@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
       name: branding.name,
       logoUrl: branding.logoUrl,
       markUrl: branding.markUrl,
+      initials: branding.initials,
       css: brandingCss(branding.primaryColor),
     },
     {

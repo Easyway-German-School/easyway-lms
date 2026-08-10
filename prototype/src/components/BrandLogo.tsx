@@ -48,28 +48,21 @@ function useImageAvailable(src: string): boolean | null {
   return available;
 }
 
-/**
- * Initials from the school's name — "EW" for EasyWay, and something correct
- * rather than "EW" for anybody else. Two letters at most: three initials in a
- * 44px square is a smudge, and the emblem is the real fallback anyway.
- */
-function initialsOf(name: string): string {
-  const letters = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase();
-  return letters.slice(0, 2) || "EW";
-}
-
-function Monogram({ className, name }: { className: string; name: string }) {
+function Monogram({
+  className,
+  name,
+  initials,
+}: {
+  className: string;
+  name: string;
+  initials: string;
+}) {
   return (
     <div
       className={`${className} flex items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-strong)] font-semibold text-white shadow-lg shadow-[var(--accent)]/20`}
       aria-label={name}
     >
-      {initialsOf(name)}
+      {initials}
     </div>
   );
 }
@@ -107,7 +100,7 @@ export default function BrandLogo({
       );
     }
 
-    return <Monogram className={`${box} shrink-0 text-sm`} name={branding.name} />;
+    return <Monogram className={`${box} shrink-0 text-sm`} name={branding.name} initials={branding.initials} />;
   }
 
   // Wordmark. Height-constrained and width-auto so the lockup keeps its
@@ -131,7 +124,7 @@ export default function BrandLogo({
 
   return (
     <div className="flex items-center gap-3">
-      <Monogram className="h-11 w-11 text-sm" name={branding.name} />
+      <Monogram className="h-11 w-11 text-sm" name={branding.name} initials={branding.initials} />
       <div className="leading-tight">
         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">{firstWord}</p>
         {restWords.length > 0 && (
