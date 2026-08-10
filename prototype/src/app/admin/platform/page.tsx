@@ -6,6 +6,7 @@ import {
   AlertIcon,
   CheckCircleIcon,
   KeyIcon,
+  PaletteIcon,
   PlusIcon,
   RefreshIcon,
   ShieldIcon,
@@ -29,6 +30,8 @@ type Tenant = {
   plan: string;
   domain: string | null;
   brandName: string | null;
+  logoUrl: string | null;
+  primaryColor: string | null;
   trialEndsAt: string | null;
   createdAt: string;
   credit: { balanceKobo: string; lowBalanceKobo: string } | null;
@@ -168,6 +171,51 @@ export default function PlatformConsolePage() {
     try {
       await fetch(`/api/platform/keys/${keyId}`, { method: "DELETE" });
       if (selected) await loadKeys(selected);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * The branding form is seeded from the selected school and then owned by the
+   * form, not re-derived on every render. Re-deriving would overwrite whatever
+   * the operator was halfway through typing each time `loadTenants` returned.
+   */
+  const [brand, setBrand] = useState({ brandName: "", logoUrl: "", primaryColor: "", domain: "" });
+  const [brandSaved, setBrandSaved] = useState(false);
+
+  useEffect(() => {
+    const tenant = tenants.find((t) => t.id === selected);
+    if (!tenant) return;
+    setBrand({
+      brandName: tenant.brandName ?? "",
+      logoUrl: tenant.logoUrl ?? "",
+      primaryColor: tenant.primaryColor ?? "",
+      domain: tenant.domain ?? "",
+    });
+    setBrandSaved(false);
+    // Seeding is keyed on WHICH school is selected, not on the tenants array —
+    // adding `tenants` here would re-seed (and so discard) the form on every
+    // background refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
+  async function saveBranding() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/platform/tenants/${selected}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(brand),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not save.");
+      setBrandSaved(true);
+      setError(null);
+      await loadTenants();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
     } finally {
       setBusy(false);
     }
@@ -317,6 +365,100 @@ export default function PlatformConsolePage() {
             Create
           </button>
         </section>
+
+        {current && (
+          <section className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <PaletteIcon className="h-5 w-5" />
+              How {current.name} looks
+            </h2>
+            <p className="text-sm text-[var(--muted)]">
+              Applied to everyone arriving on this school&apos;s own domain. Leave any of it blank
+              and they get the standard EasyWay presentation.
+            </p>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-xs font-semibold text-[var(--muted)]">Display name</span>
+                <input
+                  value={brand.brandName}
+                  onChange={(e) => setBrand({ ...brand, brandName: e.target.value })}
+                  placeholder={current.name}
+                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
+                />
+                <span className="block text-xs text-[var(--muted)]">
+                  What students see. The name above is what invoices say.
+                </span>
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-xs font-semibold text-[var(--muted)]">Domain</span>
+                <input
+                  value={brand.domain}
+                  onChange={(e) => setBrand({ ...brand, domain: e.target.value })}
+                  placeholder="lms.theirschool.com"
+                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2 font-mono text-sm"
+                />
+                <span className="block text-xs text-[var(--muted)]">
+                  Nothing below applies until they point this at us.
+                </span>
+              </label>
+
+              <label className="space-y-1 sm:col-span-2">
+                <span className="text-xs font-semibold text-[var(--muted)]">Logo URL</span>
+                <input
+                  value={brand.logoUrl}
+                  onChange={(e) => setBrand({ ...brand, logoUrl: e.target.value })}
+                  placeholder="https://… or /uploads/…"
+                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2 font-mono text-sm"
+                />
+                <span className="block text-xs text-[var(--muted)]">
+                  A horizontal lockup. Must be https — plain http is blocked as mixed content and
+                  would simply never appear. The square emblem stays ours.
+                </span>
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-xs font-semibold text-[var(--muted)]">Brand colour</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={brand.primaryColor || "#FF6600"}
+                    onChange={(e) => setBrand({ ...brand, primaryColor: e.target.value })}
+                    className="h-10 w-14 shrink-0 cursor-pointer rounded-xl border border-[var(--border)]"
+                  />
+                  <input
+                    value={brand.primaryColor}
+                    onChange={(e) => setBrand({ ...brand, primaryColor: e.target.value })}
+                    placeholder="#FF6600"
+                    className="w-full rounded-xl border border-[var(--border)] px-3 py-2 font-mono text-sm"
+                  />
+                </div>
+                <span className="block text-xs text-[var(--muted)]">
+                  One colour. The teal it pairs with stays fixed — deriving a second colour from
+                  one picked value is what makes a product look generated.
+                </span>
+              </label>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={saveBranding}
+                className="rounded-full bg-[var(--primary)] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Save
+              </button>
+              {brandSaved && (
+                <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                  <CheckCircleIcon className="h-4 w-4" />
+                  Saved. Their users see it within the minute.
+                </span>
+              )}
+            </div>
+          </section>
+        )}
 
         {current && (
           <section className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">

@@ -26,6 +26,11 @@ export async function GET() {
       plan: true,
       domain: true,
       brandName: true,
+      // Sent so the console can edit them in place. They are public-facing
+      // values by nature — a logo and a colour are what a visitor sees before
+      // they sign in — so there is nothing here to withhold from an operator.
+      logoUrl: true,
+      primaryColor: true,
       trialEndsAt: true,
       createdAt: true,
       credit: { select: { balanceKobo: true, lowBalanceKobo: true } },

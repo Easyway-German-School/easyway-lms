@@ -62,6 +62,10 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
 
   { prefix: "/admin/security", capability: "security" },
   { prefix: "/admin/integrations", capability: "integrations" },
+  // Outbound event delivery, as opposed to the inbound connectors on
+  // /admin/integrations. Same desk, same capability — the routes behind it
+  // already ask for exactly this one.
+  { prefix: "/admin/webhooks", capability: "integrations" },
 ];
 
 const SORTED = [...AREA_CAPABILITIES].sort((a, b) => b.prefix.length - a.prefix.length);

@@ -49,11 +49,39 @@ const BAND = { x: 22, y: 407, width: 468, height: 86 };
 /** The banner's own fill, sampled from the artwork rather than picked. */
 const BANNER_FILL = { r: 1, g: 77, b: 99 };
 
-const TEXT = "EASYWAY GERMAN LANGUAGE SCHOOL";
+/**
+ * "GERMAN" IS DROPPED ON PURPOSE, AND THAT IS WHAT BUYS THE WEIGHT.
+ *
+ * Thirty characters across a 468px band forces the label down to a size where
+ * the emblem reads as a badge with a grey smudge under it — which is exactly
+ * what it looked like at the 72px the small loader draws. Seven fewer
+ * characters is not a cosmetic saving: every character removed is width the
+ * remaining ones get back, so the same band now carries roughly a third more
+ * cap height at the same margins.
+ */
+const TEXT = "EASYWAY LANGUAGE SCHOOL";
 
-/** How much of the band the text may occupy. The rest is breathing room. */
-const MAX_TEXT_WIDTH = BAND.width * 0.94;
-const MAX_TEXT_HEIGHT = BAND.height * 0.62;
+/**
+ * How much of the band the text may occupy. The rest is breathing room.
+ *
+ * WIDTH IS WHAT BINDS, at both label lengths. Twenty-three characters of Arial
+ * Black still run out of band long before they run out of band height — the
+ * final size lands at 26px, where the caps are about 19px tall in an 86px band.
+ * So the only thing that made the old label small was its character count, and
+ * the only thing that made this one bigger was dropping a word.
+ *
+ * The height cap is therefore slack rather than the active constraint, and is
+ * kept as a guard for a future shorter label: at 0.62 a name like "EASYWAY"
+ * alone would have been held back by a number nobody would have thought to
+ * look at. 0.76 is measured against the band's true teal extent (y 401-499),
+ * not the conservative interior box.
+ *
+ * Do not reach for a condensed face to buy more weight here. Impact or
+ * Haettenschweiler would fit half again as much cap height, and both wreck the
+ * 32px favicon, which is the size at which this label has to survive.
+ */
+const MAX_TEXT_WIDTH = BAND.width * 0.96;
+const MAX_TEXT_HEIGHT = BAND.height * 0.76;
 
 /**
  * Fonts to ask for, in order. librsvg falls through the list, so naming

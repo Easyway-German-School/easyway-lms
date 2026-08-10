@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useBranding } from "@/components/BrandingProvider";
 
 /**
  * The school's logo.
@@ -22,8 +23,14 @@ import { useEffect, useState } from "react";
  * before React attaches the handler, leaving a broken-image icon on screen.
  */
 
-const WORDMARK_SRC = "/logo.png";
-const MARK_SRC = "/logo-mark.png";
+/**
+ * These are the fallbacks, not the answer. The tenant's own lockup and mark
+ * come from BrandingProvider and default to exactly these, so a school that has
+ * chosen no artwork renders precisely what this file rendered before it was
+ * tenant-aware.
+ */
+const DEFAULT_WORDMARK_SRC = "/logo.png";
+const DEFAULT_MARK_SRC = "/logo-mark.png";
 
 /** Resolves once per src; returns null while still checking. */
 function useImageAvailable(src: string): boolean | null {
@@ -41,13 +48,28 @@ function useImageAvailable(src: string): boolean | null {
   return available;
 }
 
-function Monogram({ className }: { className: string }) {
+/**
+ * Initials from the school's name — "EW" for EasyWay, and something correct
+ * rather than "EW" for anybody else. Two letters at most: three initials in a
+ * 44px square is a smudge, and the emblem is the real fallback anyway.
+ */
+function initialsOf(name: string): string {
+  const letters = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase();
+  return letters.slice(0, 2) || "EW";
+}
+
+function Monogram({ className, name }: { className: string; name: string }) {
   return (
     <div
       className={`${className} flex items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-strong)] font-semibold text-white shadow-lg shadow-[var(--accent)]/20`}
-      aria-label="Easyway German Language School"
+      aria-label={name}
     >
-      EW
+      {initialsOf(name)}
     </div>
   );
 }
@@ -59,6 +81,10 @@ export default function BrandLogo({
   variant?: "wordmark" | "mark";
   className?: string;
 }) {
+  const branding = useBranding();
+  const WORDMARK_SRC = branding.logoUrl || DEFAULT_WORDMARK_SRC;
+  const MARK_SRC = branding.markUrl || DEFAULT_MARK_SRC;
+
   const hasWordmark = useImageAvailable(WORDMARK_SRC);
   const hasMark = useImageAvailable(MARK_SRC);
 
@@ -67,7 +93,7 @@ export default function BrandLogo({
 
     if (hasMark) {
       // eslint-disable-next-line @next/next/no-img-element
-      return <img src={MARK_SRC} alt="Easyway German Language School" className={`${box} shrink-0 rounded-2xl object-contain`} />;
+      return <img src={MARK_SRC} alt={branding.name} className={`${box} shrink-0 rounded-2xl object-contain`} />;
     }
 
     // No dedicated emblem: crop the left edge of the lockup, which is where
@@ -76,12 +102,12 @@ export default function BrandLogo({
       return (
         <div className={`${box} shrink-0 overflow-hidden rounded-2xl bg-white`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={WORDMARK_SRC} alt="Easyway German Language School" className="h-full w-auto max-w-none object-cover object-left" />
+          <img src={WORDMARK_SRC} alt={branding.name} className="h-full w-auto max-w-none object-cover object-left" />
         </div>
       );
     }
 
-    return <Monogram className={`${box} shrink-0 text-sm`} />;
+    return <Monogram className={`${box} shrink-0 text-sm`} name={branding.name} />;
   }
 
   // Wordmark. Height-constrained and width-auto so the lockup keeps its
@@ -90,17 +116,27 @@ export default function BrandLogo({
 
   if (hasWordmark) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={WORDMARK_SRC} alt="Easyway German Language School" className={`${box} w-auto max-w-full shrink-0 object-contain`} />;
+    return <img src={WORDMARK_SRC} alt={branding.name} className={`${box} w-auto max-w-full shrink-0 object-contain`} />;
   }
 
-  // While probing, and when there is no artwork at all, show the monogram
-  // beside the name so the header never collapses to empty space.
+  /**
+   * While probing, and when there is no artwork at all, the monogram sits
+   * beside the name so the header never collapses to empty space.
+   *
+   * The name is split on its first word rather than hardcoded, so a tenant
+   * called "Bright Star Academy" reads "BRIGHT / Star Academy" instead of
+   * somebody else's school name in a fallback nobody remembered to update.
+   */
+  const [firstWord, ...restWords] = branding.name.split(" ");
+
   return (
     <div className="flex items-center gap-3">
-      <Monogram className="h-11 w-11 text-sm" />
+      <Monogram className="h-11 w-11 text-sm" name={branding.name} />
       <div className="leading-tight">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">Easyway</p>
-        <p className="text-xs font-bold text-slate-900">German Language School</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">{firstWord}</p>
+        {restWords.length > 0 && (
+          <p className="text-xs font-bold text-slate-900">{restWords.join(" ")}</p>
+        )}
       </div>
     </div>
   );

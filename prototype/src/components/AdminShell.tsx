@@ -24,6 +24,7 @@ import {
   LecturerIcon,
   LessonBuilderIcon,
   LevelUpIcon,
+  LinkIcon,
   MailIcon,
   MapIcon,
   MenuIcon,
@@ -125,6 +126,10 @@ const navItems: NavItem[] = [
   { label: 'Admin roles', href: '/admin/staff', icon: <ShieldIcon />, group: 'Settings' },
   { label: 'Security & recovery', href: '/admin/security', icon: <KeyIcon />, group: 'Settings' },
   { label: 'Integrations', href: '/admin/integrations', icon: <IntegrationIcon />, group: 'Settings' },
+  // Built with the platform layer and reachable only by POSTing JSON by hand
+  // until now. The office that needs to notice an endpoint has gone quiet is
+  // not the office that will open a terminal to check.
+  { label: 'Webhooks', href: '/admin/webhooks', icon: <LinkIcon />, group: 'Settings' },
   { label: 'Personalization', href: '/admin/personalization', icon: <PaletteIcon />, group: 'Settings' },
 
   // Last, and its own group, because it is not part of running a school. This
