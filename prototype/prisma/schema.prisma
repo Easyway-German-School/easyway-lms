@@ -117,6 +117,9 @@ model User {
   executedActions   AdminAction[]      @relation("AdminActionExecutor")
   auditEvents       AuditLog[]         @relation("AuditActor")
   auditRestores     AuditLog[]         @relation("AuditRestorer")
+  supportTickets    SupportTicket[]    @relation("SupportTicketAuthor")
+  assignedTickets   SupportTicket[]    @relation("SupportTicketAssignee")
+  supportReplies    SupportTicketMessage[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -223,6 +226,8 @@ model Tenant {
   liveClassSessions        LiveClassSession[]
   liveClassInvites         LiveClassInvite[]
   leads                    Lead[]
+  supportTickets           SupportTicket[]
+  supportTicketMessages    SupportTicketMessage[]
   certificates             Certificate[]
   adminActions             AdminAction[]
   auditLogs                AuditLog[]
@@ -482,6 +487,7 @@ model Student {
   convertedFromLead     Lead?
   journeyEvents         JourneyEvent[]
   liveInvites           LiveClassInvite[]
+  supportTickets        SupportTicket[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -2418,6 +2424,118 @@ model Lead {
 
   @@index([status, createdAt])
   @@index([branchId, interestedLevel])
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+// ---------------------------------------------------------------------------
+// The help desk.
+//
+// SEPARATE FROM `Lead`, and the two live next to each other so the distinction
+// stays obvious. A Lead is a stranger who wants to buy something; a ticket is a
+// student who already has and cannot make it work. They land on the same admin
+// screen because the same person answers both — but a ticket must never be
+// counted in the enrolment funnel, and a lead must never appear as an
+// unanswered support request.
+//
+// WHY A THREAD RATHER THAN A MESSAGE. The thing a student actually wants is not
+// to file a complaint, it is to get an answer — which means the office replies,
+// the student clarifies, and the office replies again. Storing one body on the
+// ticket would have forced that conversation into email, where the school then
+// cannot see it, and the whole reason this exists is that support conversations
+// were happening on WhatsApp where nothing is recorded.
+// ---------------------------------------------------------------------------
+
+model SupportTicket {
+  id String @id @default(cuid())
+
+  /**
+   * Keyed on User, not Student. Tutors hit problems too, and a desk that can
+   * only hear from students would push staff back onto WhatsApp — which is the
+   * exact thing this replaces.
+   */
+  userId String
+  user   User   @relation("SupportTicketAuthor", fields: [userId], references: [id], onDelete: Cascade)
+
+  /**
+   * Set when the asker is a student, so the office can open their file without
+   * a second lookup and can filter the queue by branch and level.
+   */
+  studentId String?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+
+  subject String
+  /** account | payment | classes | technical | other — how the queue is sorted. */
+  topic String @default("other")
+  /** open | pending | resolved */
+  status String @default("open")
+
+  /**
+   * WHERE THEY WERE STANDING WHEN THEY ASKED.
+   *
+   * Captured automatically rather than typed. Half of all support messages are
+   * some version of "this page is not working", and the single most useful fact
+   * — which page — is the one a frustrated person is least likely to include.
+   */
+  fromPath String?
+
+  /** The admin who picked it up. Null while it is nobody's in particular. */
+  assignedToId String?
+  assignedTo   User?   @relation("SupportTicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  /**
+   * Two unread flags rather than one, because "unread" means different things
+   * to the two sides and a single flag would make each side clear the other's.
+   * These are what drive the ping on the sidebar at both ends.
+   */
+  unreadForAdmin Boolean @default(true)
+  unreadForUser  Boolean @default(false)
+
+  /** Sort key for the queue. Denormalised so the list needs no join to order. */
+  lastMessageAt DateTime @default(now())
+  resolvedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages SupportTicketMessage[]
+
+  @@index([status, lastMessageAt])
+  @@index([userId, createdAt])
+  @@index([unreadForAdmin, status])
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+model SupportTicketMessage {
+  id String @id @default(cuid())
+
+  ticketId String
+  ticket   SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  /**
+   * Which side wrote it, snapshotted at the time. Read from the author's role
+   * instead and a student who is later made an admin would retroactively turn
+   * every question they ever asked into an official answer.
+   */
+  authorRole String
+
+  body String
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId String?

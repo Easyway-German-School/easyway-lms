@@ -234,6 +234,39 @@ export async function markInviteJoined(sessionId: string, studentId: string): Pr
   });
 }
 
+/**
+ * WHO WAS ACTUALLY IN THE ROOM.
+ *
+ * An invite row used to be created only when a tutor RANG somebody — which is
+ * how a private booking works and how a catch-up works, and which meant a
+ * forty-student cohort class produced no record of attendance whatsoever. The
+ * question "who came to Tuesday's class?" had no answer, so the end screen had
+ * nothing to report and the activity tracker had nothing to count.
+ *
+ * Turning up now writes the row itself. Deliberately NOT `addInvites`: that one
+ * bumps `ringCount` and pushes the row back to "invited", which is right for a
+ * tutor ringing again and exactly wrong for somebody who is already here.
+ *
+ * `joinedAt` is only set on the first arrival — a student who drops off a bad
+ * line and comes back three times should read as one attendance beginning when
+ * they first walked in, not as having arrived at the end.
+ */
+export async function recordAttendance(sessionId: string, studentId: string): Promise<void> {
+  const existing = await prisma.liveClassInvite.findUnique({
+    where: { sessionId_studentId: { sessionId, studentId } },
+    select: { joinedAt: true },
+  });
+
+  await prisma.liveClassInvite.upsert({
+    where: { sessionId_studentId: { sessionId, studentId } },
+    update: { status: "joined", joinedAt: existing?.joinedAt ?? new Date() },
+    // ringCount 0 is what separates "walked in" from "was rung once and came".
+    // The tutor's roster reads that number, and claiming a ring that never
+    // happened would make the ring button look broken.
+    create: { sessionId, studentId, status: "joined", joinedAt: new Date(), ringCount: 0 },
+  });
+}
+
 /** The student said no. Stops the popup ringing at them and tells the tutor. */
 export async function declineInvite(sessionId: string, studentId: string): Promise<void> {
   await prisma.liveClassInvite.updateMany({

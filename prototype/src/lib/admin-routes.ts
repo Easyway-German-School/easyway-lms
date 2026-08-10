@@ -21,6 +21,9 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // with whoever holds the student records.
   { prefix: "/admin/certificates", capability: "students" },
   { prefix: "/admin/leads", capability: "students" },
+  // The help desk sits with whoever holds the student records: answering a
+  // ticket almost always means opening the asker's file.
+  { prefix: "/admin/enquiries", capability: "students" },
   { prefix: "/admin/journey", capability: "students" },
   { prefix: "/admin/promotions", capability: "students" },
 
@@ -38,6 +41,15 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
 
   { prefix: "/admin/payments", capability: "payments" },
   { prefix: "/admin/finance", capability: "payments" },
+  // What the school owes the platform, as opposed to what students owe the
+  // school. Same desk reads both — it is the bursar who checks an invoice — so
+  // it sits behind the same capability rather than inventing a tenth.
+  //
+  // `/admin/platform` is deliberately NOT in this table. It is not a school
+  // area at all, and it is gated on User.platformRole rather than on any
+  // capability a school can grant. Adding it here would let a school's super
+  // admin hand out the cross-tenant console with a checkbox.
+  { prefix: "/admin/billing", capability: "payments" },
   { prefix: "/admin/reports", capability: "reports" },
   { prefix: "/admin/personalization", capability: "reports" },
 

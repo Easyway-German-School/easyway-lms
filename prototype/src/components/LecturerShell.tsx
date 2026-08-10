@@ -4,6 +4,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from "@/components/BrandLogo";
+import HelpLauncher from "@/components/HelpLauncher";
 import NotificationCenter from "@/components/NotificationCenter";
 import {
   AssignmentIcon,
@@ -284,6 +285,11 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
           children
         )}
       </main>
+
+      {/* Tutors get the same desk. A tutor whose roster is wrong or whose
+          classroom will not open has exactly the same problem a student does,
+          and pushing staff onto WhatsApp is what this replaced. */}
+      <HelpLauncher />
     </div>
   );
 }

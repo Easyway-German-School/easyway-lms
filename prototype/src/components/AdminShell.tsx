@@ -27,13 +27,16 @@ import {
   MailIcon,
   MapIcon,
   MenuIcon,
+  PackageIcon,
   PaletteIcon,
   PaymentIcon,
   PencilIcon,
+  PulseIcon,
   RobotIcon,
   RosterIcon,
   SendIcon,
   ShieldIcon,
+  TicketIcon,
   KeyIcon,
   TrendingUpIcon,
   UserPlusIcon,
@@ -47,6 +50,13 @@ type NavItem = {
   href: string;
   icon: ReactNode;
   group?: string;
+  /**
+   * Shown only to a platform operator — somebody who runs the system the
+   * schools sit on, rather than any one school. Separate from `capability`
+   * because no school can grant it: it is a column set from a shell, and the
+   * routes behind these entries answer 404 to everybody else.
+   */
+  platformOnly?: boolean;
 };
 
 /**
@@ -68,7 +78,12 @@ const navItems: NavItem[] = [
 
   { label: 'Students', href: '/admin/students', icon: <UsersIcon />, group: 'Academics' },
   { label: 'Import students', href: '/admin/students/import', icon: <UserPlusIcon />, group: 'Academics' },
-  { label: 'Enquiries', href: '/admin/leads', icon: <InboxIcon />, group: 'Academics' },
+  // Two different things that both used to be called "Enquiries". A ticket is
+  // a student who is already here and stuck; a lead is a stranger the school is
+  // trying to enrol. One label for both is how a help request ends up counted
+  // as a conversion opportunity.
+  { label: 'Enquiries', href: '/admin/enquiries', icon: <InboxIcon />, group: 'Academics' },
+  { label: 'Lead funnel', href: '/admin/leads', icon: <TicketIcon />, group: 'Academics' },
   { label: 'Branches', href: '/admin/branches', icon: <BranchIcon />, group: 'Academics' },
   { label: 'Tutors', href: '/admin/lecturer-invite', icon: <LecturerIcon />, group: 'Academics' },
   { label: 'Attendance', href: '/admin/attendance', icon: <AttendanceIcon />, group: 'Academics' },
@@ -95,6 +110,11 @@ const navItems: NavItem[] = [
   { label: 'Finance', href: '/admin/finance', icon: <WalletIcon />, group: 'Billing' },
   { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon />, group: 'Billing' },
   { label: 'Reports', href: '/admin/reports', icon: <TrendingUpIcon />, group: 'Billing' },
+  // The other direction of money: what this school owes for running on the
+  // platform, itemised by meter. It had been built and reachable only by typing
+  // the URL, which meant the one screen that justifies the invoice was the one
+  // screen the person paying it could not find.
+  { label: 'Platform usage', href: '/admin/billing', icon: <PulseIcon />, group: 'Billing' },
 
   { label: 'Assistant', href: '/admin/assistant', icon: <RobotIcon />, group: 'Intelligence' },
 
@@ -106,6 +126,10 @@ const navItems: NavItem[] = [
   { label: 'Security & recovery', href: '/admin/security', icon: <KeyIcon />, group: 'Settings' },
   { label: 'Integrations', href: '/admin/integrations', icon: <IntegrationIcon />, group: 'Settings' },
   { label: 'Personalization', href: '/admin/personalization', icon: <PaletteIcon />, group: 'Settings' },
+
+  // Last, and its own group, because it is not part of running a school. This
+  // is the console for the business that sells the software to schools.
+  { label: 'Schools & API keys', href: '/admin/platform', icon: <PackageIcon />, group: 'Platform', platformOnly: true },
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
@@ -120,6 +144,15 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   // items away on first paint.
   const [capabilities, setCapabilities] = useState<string[] | null>(null);
   const [adminRoleLabel, setAdminRoleLabel] = useState<string | null>(null);
+  /**
+   * Note the opposite default to `capabilities`. Unknown capabilities show
+   * everything, so a failed lookup never blanks out somebody's own portal.
+   * Unknown platform role shows nothing, because this door leads out of the
+   * school entirely and almost nobody holds it.
+   */
+  const [platformOperator, setPlatformOperator] = useState(false);
+  /** Help requests nobody in the office has opened yet. Drives the ping. */
+  const [unreadEnquiries, setUnreadEnquiries] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,6 +163,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         const data = await res.json();
         setCapabilities(data.capabilities ?? null);
         setAdminRoleLabel(data.label ?? null);
+        setPlatformOperator(Boolean(data.platformOperator));
       } catch {
         /* Leave the sidebar fully visible; the routes still enforce access. */
       }
@@ -137,7 +171,35 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     return () => { cancelled = true; };
   }, []);
 
-  const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings'];
+  /**
+   * THE PING.
+   *
+   * A help desk that has to be visited to be checked is a help desk that gets
+   * checked on Fridays. `?count=1` is two indexed counts and no rows, which is
+   * cheap enough to ask for on a two-minute clock from every admin page — and
+   * the route refuses anybody without the `students` capability, so an
+   * accountant is neither shown the badge nor charged the query.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/admin/enquiries?count=1', { cache: 'no-store' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        setUnreadEnquiries(Number(data.unread) || 0);
+      } catch {
+        /* A missing badge is not worth a console full of noise. */
+      }
+    };
+
+    poll();
+    const timer = window.setInterval(poll, 120_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+
+  const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings', 'Platform'];
 
   useEffect(() => {
     setDrawerOpen(false);
@@ -250,6 +312,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             // enforce it too — this only avoids showing doors that 403.
             const groupItems = navItems.filter((item) => {
               if (item.group !== group) return false;
+              if (item.platformOnly && !platformOperator) return false;
               const capability = capabilityOf(item);
               return !capability || capabilities === null || capabilities.includes(capability);
             });
@@ -262,6 +325,9 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 <div className="space-y-1">
                   {groupItems.map((item) => {
                     const active = pathname === item.href || pathname.startsWith(item.href + '/');
+                    // One badge in the whole sidebar, and it is on the one
+                    // entry where a number means "somebody is waiting".
+                    const badge = item.href === '/admin/enquiries' ? unreadEnquiries : 0;
                     return (
                       <button
                         key={item.href}
@@ -274,13 +340,24 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                         }`}
                       >
                         <span
-                          className={`flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-base shadow-sm transition ${
+                          className={`relative flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-base shadow-sm transition ${
                             active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-slate-300'
                           }`}
                         >
                           {item.icon}
+                          {/* Collapsed, the label is gone and the count with
+                              it — so the icon itself carries a dot, which is
+                              the only thing that still fits. */}
+                          {badge > 0 && collapsed ? (
+                            <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-white lg:block" />
+                          ) : null}
                         </span>
-                        {!collapsed && <span className="font-medium">{item.label}</span>}
+                        {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
+                        {!collapsed && badge > 0 ? (
+                          <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-bold text-white">
+                            {badge > 99 ? '99+' : badge}
+                          </span>
+                        ) : null}
                       </button>
                     );
                   })}

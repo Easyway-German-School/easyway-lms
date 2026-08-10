@@ -10,9 +10,9 @@ import {
   announceLiveSession,
   liveSessionByCode,
   liveSessionForStudent,
-  markInviteJoined,
   mayJoinPrivateRoom,
   openLiveSession,
+  recordAttendance,
   LIVE_HEARTBEAT_MS,
 } from "@/lib/live-presence";
 import {
@@ -280,10 +280,15 @@ export async function GET(request: Request) {
         opened,
         opened.kind === "private" ? { studentIds: await studentIdsForPrivateClass(privateClassId!) } : {},
       );
-    } else if (liveSession?.invited && student) {
-      // Turning up answers the call, so the tutor's roster stops showing this
-      // student as still ringing.
-      await markInviteJoined(liveSession.id, student.id);
+    } else if (liveSession && student) {
+      /**
+       * Turning up answers the call, so the tutor's roster stops showing this
+       * student as still ringing — and, for a cohort class nobody was rung
+       * for, this is the ONLY record that they attended at all. It used to run
+       * behind `liveSession.invited`, which meant the ordinary case of forty
+       * students walking into their own timetabled lesson left no trace.
+       */
+      await recordAttendance(liveSession.id, student.id);
     }
 
     // Online students told us their connection at signup; start them there

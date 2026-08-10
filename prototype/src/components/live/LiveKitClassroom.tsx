@@ -23,6 +23,8 @@ import {
   ReactionBar,
   ReactionLayer,
 } from "./ClassroomInteractions";
+import { FloorLight, HandFlag, SpeakingWave } from "./SpeakingIndicators";
+import { useAudioLevels, type AudioLevelStore } from "./useAudioLevels";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -40,6 +42,25 @@ import {
 } from "livekit-client";
 import { qualityModesFor, qualitySpec, type QualityMode, type RoomRole } from "@/lib/live-classroom";
 
+/**
+ * HOW THIS PERSON'S LESSON ENDED, which is not the same question as whether it
+ * ended. The end screen says three different things and offers three different
+ * ways forward depending on this one field:
+ *
+ *   self    — they pressed Leave. The class may well still be running, so the
+ *             screen offers a way straight back in.
+ *   ended   — the tutor closed the class. There is nothing to go back to; the
+ *             recording is the offer instead.
+ *   dropped — the connection went and did not recover. The worst case to get
+ *             wrong: telling somebody the class ended when their WiFi died is
+ *             how a student stops trusting the portal.
+ */
+export type LeaveOutcome = {
+  reason: "self" | "ended" | "dropped";
+  /** How long this person was actually in the room, not how long the class ran. */
+  durationMs: number;
+};
+
 type LiveKitClassroomProps = {
   url: string;
   token: string;
@@ -47,7 +68,7 @@ type LiveKitClassroomProps = {
   displayName: string;
   role: RoomRole;
   initialQuality: QualityMode;
-  onLeave: () => void;
+  onLeave: (outcome: LeaveOutcome) => void;
 };
 
 type Status = "connecting" | "connected" | "reconnecting" | "disconnected" | "failed";
@@ -89,6 +110,9 @@ function ParticipantTile({
   large,
   isSpeaking,
   revision,
+  levels,
+  handPosition,
+  light,
 }: {
   participant: Participant;
   mode: QualityMode;
@@ -99,6 +123,11 @@ function ParticipantTile({
    * that is the whole point — see the comment inside.
    */
   revision: number;
+  levels: AudioLevelStore;
+  /** 1-based place in the hand queue, or null for a hand that is down. */
+  handPosition: number | null;
+  /** Set on the ONE tile that currently owns the travelling green light. */
+  light: { label: string; tone: "floor" | "speaking" } | null;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -178,12 +207,29 @@ function ParticipantTile({
   const tutor = isTutor(participant);
   const initials = (participant.name || participant.identity || "?").slice(0, 1).toUpperCase();
 
+  /**
+   * The cubicle's own border says which of four things is true about the person
+   * in it, in the order that matters when two are true at once: they have been
+   * given the floor, they are waiting for it, they are talking, or none of the
+   * above. Floor outranks hand because a tutor who has just called on somebody
+   * should not still see them ringed as "waiting".
+   */
+  const ring = light?.tone === "floor"
+    ? "ring-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.18)]"
+    : handPosition !== null
+      ? "ring-amber-400"
+      : isSpeaking
+        ? "ring-[var(--accent)]"
+        : "ring-white/10";
+
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl bg-slate-900 ring-2 transition ${
-        isSpeaking ? "ring-[var(--accent)]" : "ring-white/10"
-      } ${large ? "aspect-video w-full" : TILE_SIZE[mode]}`}
+      className={`relative overflow-hidden rounded-2xl bg-slate-900 ring-2 transition ${ring} ${
+        large ? "aspect-video w-full" : TILE_SIZE[mode]
+      }`}
     >
+      {light ? <FloorLight label={light.label} tone={light.tone} /> : null}
+      {handPosition !== null ? <HandFlag position={handPosition} /> : null}
       <video
         ref={videoRef}
         autoPlay
@@ -197,6 +243,10 @@ function ParticipantTile({
         The mark sits on the main stage only — once per screen, not once per
         tile. It is also the one piece of branding that survives into the
         recording, since the tape is a composite of what the room looked like.
+
+        Moved off the top-right corner, which the raised-hand flag now owns. A
+        logo overlapping a hand somebody is waiting behind is the wrong thing to
+        keep in that corner, and the mark still lands in the recording here.
       */}
       {large ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -204,7 +254,7 @@ function ParticipantTile({
           src="/logo-mark.png"
           alt=""
           aria-hidden="true"
-          className="pointer-events-none absolute right-3 top-3 h-8 w-8 object-contain opacity-70 drop-shadow-[0_2px_6px_rgba(0,0,0,0.6)]"
+          className="pointer-events-none absolute bottom-10 right-3 h-8 w-8 object-contain opacity-70 drop-shadow-[0_2px_6px_rgba(0,0,0,0.6)]"
         />
       ) : null}
 
@@ -218,7 +268,18 @@ function ParticipantTile({
       ) : null}
 
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
-        {micMuted ? <SpeakerOffIcon className="h-3.5 w-3.5 shrink-0 text-rose-400" /> : null}
+        {/*
+          The meter replaces the microphone icon rather than sitting beside it,
+          because they answer the same question and only one of them can be
+          true. A muted mic shows the crossed speaker; a live one shows how loud
+          this person is right now, which is the only version of "your
+          microphone is working" a student will believe.
+        */}
+        {micMuted ? (
+          <SpeakerOffIcon className="h-3.5 w-3.5 shrink-0 text-rose-400" />
+        ) : (
+          <SpeakingWave store={levels} identity={participant.identity} size={large ? "lg" : "sm"} />
+        )}
         <span className="truncate text-[11px] font-medium text-white">
           {participant instanceof LocalParticipant ? "You" : participant.name || participant.identity}
         </span>
@@ -268,6 +329,17 @@ const AUTO_STEP_COOLDOWN_MS = 15_000;
 const MANUAL_OVERRIDE_MS = 90_000;
 /** How long a new speaker must hold the floor before the stage moves to them. */
 const STAGE_DWELL_MS = 1500;
+/**
+ * The green light is allowed to move sooner than the stage does.
+ *
+ * Moving the picture is expensive — it changes what everyone is looking at, so
+ * it waits. Moving a small light is cheap and is the thing you glance at to
+ * follow a conversation, so it tracks nearly live. Different jobs, different
+ * dwell times; giving them one constant made one of them wrong.
+ */
+const LIGHT_DWELL_MS = 600;
+/** But it lingers before going dark, so a breath does not switch it off. */
+const LIGHT_RELEASE_MS = 1400;
 
 export default function LiveKitClassroom({
   url,
@@ -294,6 +366,8 @@ export default function LiveKitClassroom({
   const [deviceNotice, setDeviceNotice] = useState<string | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [stageIdentity, setStageIdentity] = useState<string | null>(null);
+  /** Which tile the travelling green light is parked on. */
+  const [lightIdentity, setLightIdentity] = useState<string | null>(null);
   const [immersive, setImmersive] = useState(false);
   const [panel, setPanel] = useState<"hands" | "chat" | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -302,6 +376,27 @@ export default function LiveKitClassroom({
   // take it as a prop so their attach effect re-runs — see ParticipantTile.
   const [revision, forceRender] = useState(0);
   const bump = useCallback(() => forceRender((n) => n + 1), []);
+
+  /** When this person actually got in. Set on Connected, read by the end screen. */
+  const joinedAtRef = useRef<number>(Date.now());
+  /** A departure is reported once. Three paths lead here and they can race. */
+  const leftRef = useRef(false);
+
+  const finish = useCallback(
+    (reason: LeaveOutcome["reason"]) => {
+      if (leftRef.current) return;
+      leftRef.current = true;
+      onLeave({ reason, durationMs: Date.now() - joinedAtRef.current });
+    },
+    [onLeave],
+  );
+
+  // Read by the room's event handlers, which are wired once at connect time and
+  // must not re-subscribe every time the parent re-renders a new `onLeave`.
+  const finishRef = useRef(finish);
+  useEffect(() => {
+    finishRef.current = finish;
+  }, [finish]);
 
   // The downgrade ticker reads all of its inputs from refs. It has to run on a
   // clock rather than on the quality event — "Poor for ten seconds" is not
@@ -363,12 +458,27 @@ export default function LiveKitClassroom({
     room
       .on(RoomEvent.Connected, () => {
         if (cancelled) return;
+        // The clock the end screen reports starts here, not at mount: the
+        // seconds spent negotiating a connection are not minutes of lesson.
+        joinedAtRef.current = Date.now();
         setStatus("connected");
         bump();
       })
       .on(RoomEvent.Reconnecting, () => setStatus("reconnecting"))
       .on(RoomEvent.Reconnected, () => setStatus("connected"))
-      .on(RoomEvent.Disconnected, () => setStatus("disconnected"))
+      .on(RoomEvent.Disconnected, () => {
+        setStatus("disconnected");
+        /**
+         * `cancelled` is set by the cleanup below BEFORE it disconnects, so an
+         * unmount cannot come through here — and `finish` refuses a second
+         * call, so pressing Leave (which disconnects deliberately) does not
+         * report the same departure twice.
+         *
+         * Anything left is a real drop: livekit-client only emits this after
+         * its own reconnection attempts have failed, so it is not a wobble.
+         */
+        if (!cancelled) finishRef.current("dropped");
+      })
       .on(RoomEvent.ParticipantConnected, bump)
       .on(RoomEvent.ParticipantDisconnected, bump)
       .on(RoomEvent.TrackSubscribed, bump)
@@ -566,12 +676,38 @@ export default function LiveKitClassroom({
     setScreenSharing(next);
   }, [screenSharing]);
 
-  const leave = useCallback(() => {
-    roomRef.current?.disconnect();
-    onLeave();
-  }, [onLeave]);
-
   const interactions = useRoomInteractions(roomRef.current, role, revision);
+  const levels = useAudioLevels(roomRef.current, revision);
+
+  /**
+   * Leaving, and why the tutor's version is awaited.
+   *
+   * A tutor pressing Leave ends the class for everybody, and the only thing
+   * that tells the other thirty browsers so is a data message — which travels
+   * over the same connection this function is about to close. Sending it and
+   * disconnecting in the same tick loses it often enough to matter, and the
+   * failure is invisible: the tutor's screen looks right while the class sits
+   * in a room that will never speak again.
+   */
+  const leave = useCallback(async () => {
+    if (role === "tutor") await interactions.announceEnd();
+    roomRef.current?.disconnect();
+    finish("self");
+  }, [role, interactions, finish]);
+
+  /**
+   * The tutor said it is over, so this browser stops being in a classroom.
+   *
+   * Deliberately not "show a banner and let them sit there": a room where the
+   * teaching has stopped is indistinguishable from one where everybody has
+   * their camera off, and that ambiguity is the thing the end screen exists to
+   * remove.
+   */
+  useEffect(() => {
+    if (!interactions.ended) return;
+    roomRef.current?.disconnect();
+    finish("ended");
+  }, [interactions.ended, finish]);
 
   /**
    * Edge-to-edge.
@@ -652,6 +788,58 @@ export default function LiveKitClassroom({
   const myHandPosition = interactions.myHandRaised
     ? interactions.hands.findIndex((hand) => hand.mine) + 1
     : null;
+
+  /**
+   * Queue position by identity, so a tile can wear its own number.
+   *
+   * Built from the same sorted list the panel renders, which is what keeps the
+   * "3" on somebody's face and the "3" in the queue the same 3. Deriving it
+   * separately is how those two drift apart.
+   */
+  const handPositions = new Map(interactions.hands.map((hand, index) => [hand.identity, index + 1]));
+
+  /**
+   * WHERE THE GREEN LIGHT GOES.
+   *
+   * Two sources, and the order between them is the point. A floor the tutor
+   * granted is a DECISION and outranks everything — the light stays on that
+   * person even while somebody else coughs, because the whole reason the floor
+   * exists is to stop the room following whoever is loudest. Only when nobody
+   * has been given the floor does the light fall back to tracking the active
+   * speaker, which is what makes it useful in an ordinary open-floor lesson
+   * where the tutor never touches the queue at all.
+   *
+   * `activeSpeakers` comes from the SFU already sorted by loudness, so index 0
+   * is the person the room is actually listening to.
+   */
+  const speakerIdentity = room?.activeSpeakers?.[0]?.identity ?? null;
+  const lightCandidate = interactions.floor ?? (participants.length > 1 ? speakerIdentity : null);
+
+  /**
+   * It arrives quickly and leaves slowly.
+   *
+   * A light that switched off in the gap between two sentences would blink
+   * through a lesson; one that took as long as the stage to move would always
+   * be pointing at the previous speaker. Hence two constants rather than one —
+   * and a granted floor skips the wait entirely, because a tutor who has just
+   * clicked "Call on" is owed an immediate answer.
+   */
+  useEffect(() => {
+    if (lightCandidate === lightIdentity) return;
+    const delay = lightCandidate === null ? LIGHT_RELEASE_MS : interactions.floor ? 0 : LIGHT_DWELL_MS;
+    const timer = window.setTimeout(() => setLightIdentity(lightCandidate), delay);
+    return () => window.clearTimeout(timer);
+  }, [lightCandidate, lightIdentity, interactions.floor]);
+
+  /** The label on the light, and which of its two looks it wears. */
+  const lightFor = (participant: Participant) => {
+    if (participant.identity !== lightIdentity) return null;
+    const mine = participant.identity === room?.localParticipant.identity;
+    if (interactions.floor === participant.identity) {
+      return { label: mine ? "You have the floor" : "Has the floor", tone: "floor" as const };
+    }
+    return { label: mine ? "You are speaking" : "Speaking", tone: "speaking" as const };
+  };
 
   return (
     <div
@@ -783,6 +971,9 @@ export default function LiveKitClassroom({
                       large
                       isSpeaking={speakingIds.has(stageParticipant.identity)}
                       revision={revision}
+                      levels={levels}
+                      handPosition={handPositions.get(stageParticipant.identity) ?? null}
+                      light={lightFor(stageParticipant)}
                     />
                   </motion.div>
                 </AnimatePresence>
@@ -801,6 +992,9 @@ export default function LiveKitClassroom({
                       mode={mode}
                       isSpeaking={speakingIds.has(participant.identity)}
                       revision={revision}
+                      levels={levels}
+                      handPosition={handPositions.get(participant.identity) ?? null}
+                      light={lightFor(participant)}
                     />
                   </div>
                 ))}

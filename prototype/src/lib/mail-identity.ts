@@ -104,6 +104,12 @@ const IDENTITY_BY_KIND: Partial<Record<string, MailIdentityKey>> = {
   [KIND.gatewayError]: "support",
   [KIND.leadCaptured]: "support",
   [KIND.levelAdvance]: "support",
+  // Both sides of a help-desk thread. `support` is the whole point: a student
+  // who hits reply on the office's answer must reach the office, not a
+  // mailbox nobody opens — which is the exact failure that sent them to
+  // WhatsApp in the first place.
+  [KIND.supportTicket]: "support",
+  [KIND.supportReply]: "support",
 
   // Emitted by the system. Receipts and confirmations.
   [KIND.paymentReceived]: "noreply",
@@ -168,6 +174,8 @@ export const KIND_LABELS: Record<string, string> = {
   [KIND.classStarting]: "Class starting soon",
   [KIND.lecturerMessage]: "Message from a tutor",
   [KIND.leadCaptured]: "New enquiry",
+  [KIND.supportTicket]: "Help request from a student",
+  [KIND.supportReply]: "The office answered your question",
   [KIND.announcement]: "Announcement from the office",
   [KIND.general]: "General",
 };
@@ -188,6 +196,14 @@ export const KIND_GROUPS: Array<{ group: string; kinds: string[] }> = [
   },
   {
     group: "Office",
-    kinds: [KIND.announcement, KIND.studentRegistered, KIND.studentImported, KIND.leadCaptured, KIND.general],
+    kinds: [
+      KIND.announcement,
+      KIND.supportTicket,
+      KIND.supportReply,
+      KIND.studentRegistered,
+      KIND.studentImported,
+      KIND.leadCaptured,
+      KIND.general,
+    ],
   },
 ];

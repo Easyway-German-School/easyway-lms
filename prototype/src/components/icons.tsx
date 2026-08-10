@@ -905,3 +905,49 @@ export const ListIcon = icon("ListIcon", (
 export const PlaneIcon = icon("PlaneIcon", (
   <path d="M10.5 19.5 12 15l7.5-2.2a1.8 1.8 0 0 0 0-3.4L4 4.5l2.5 6L11 12l-4.5 1.5L4 12.2l.8 3.3-.8 3.3 3.2-1.6z" />
 ));
+
+/* --------------------------------------------------------------- the help desk */
+
+/**
+ * The question mark that sits in the corner of the student portal.
+ *
+ * A circle rather than a bare glyph on purpose: at 16px a lone "?" reads as
+ * punctuation left behind by mistake, and this one has to be recognisable as a
+ * button from across a sidebar.
+ */
+export const HelpIcon = icon("HelpIcon", (
+  <>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.2a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2-2.4 3.6" />
+    <path d="M12 17.2h.01" strokeWidth="2.4" />
+  </>
+));
+
+/** One request in the office's queue. */
+export const TicketIcon = icon("TicketIcon", (
+  <>
+    <path d="M3.5 8.5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v1.2a2.3 2.3 0 0 0 0 4.6v1.2a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-1.2a2.3 2.3 0 0 0 0-4.6z" />
+    <path d="M14 6.5v11" strokeDasharray="2 2.4" />
+  </>
+));
+
+/* ------------------------------------------------------------ activity tracker */
+
+/** Bars: the shape of a count over time. */
+export const BarChartIcon = icon("BarChartIcon", (
+  <>
+    <path d="M4 20h16" />
+    <rect x="5.5" y="12" width="3.6" height="5" rx="1" />
+    <rect x="10.2" y="8" width="3.6" height="9" rx="1" />
+    <rect x="14.9" y="4.5" width="3.6" height="12.5" rx="1" />
+  </>
+));
+
+/** Storage, as in how much tape the school is holding. */
+export const DatabaseIcon = icon("DatabaseIcon", (
+  <>
+    <ellipse cx="12" cy="6" rx="7.5" ry="3" />
+    <path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6" />
+    <path d="M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3" />
+  </>
+));

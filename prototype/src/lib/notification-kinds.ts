@@ -39,6 +39,10 @@ export const KIND = {
   classStarting: "class.starting",
   lecturerMessage: "lecturer.message",
   leadCaptured: "lead.captured",
+  /** A student asked the office for help, or wrote back on a thread. */
+  supportTicket: "support.ticket",
+  /** The office answered. This is the one the student is waiting on. */
+  supportReply: "support.reply",
   announcement: "announcement",
   general: "general",
 } as const;

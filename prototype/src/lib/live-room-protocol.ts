@@ -162,6 +162,21 @@ export type LiveMessage =
   /** Tutor only: put every hand down at once. */
   | { t: "handsCleared" }
   /**
+   * Tutor only: the lesson is over.
+   *
+   * Ending a class writes `endedAt` on the server, and nothing about that
+   * reaches the thirty browsers already sitting in the room — the SFU does not
+   * close a room because a database row changed. Students were therefore left
+   * looking at a still-connected classroom of frozen tiles with no idea it had
+   * finished, which is the exact ambiguity this whole protocol exists to
+   * remove. So the tutor says it out loud on the way out, and everyone lands on
+   * the end screen together.
+   *
+   * Ephemeral by nature and that is fine: somebody who joins after this was
+   * sent finds no live session to join at all.
+   */
+  | { t: "ended" }
+  /**
    * Tutor only, and the fix for late joiners. Room-wide state is not durable
    * anywhere, so whenever somebody arrives the tutor simply says how things
    * currently are. Cheap, and it converges even if a message is dropped,
@@ -227,6 +242,11 @@ export function decodeMessage(payload: Uint8Array, senderRole: RoomRole): LiveMe
 
     case "handsCleared":
       return tutorOnly ? { t: "handsCleared" } : null;
+
+    // Guarded like every other tutor-only message: a student who could forge
+    // this would be able to end the lesson for the whole class.
+    case "ended":
+      return tutorOnly ? { t: "ended" } : null;
 
     case "state":
       if (!tutorOnly || !isRoomMode(message.mode)) return null;

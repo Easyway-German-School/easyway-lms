@@ -10,7 +10,8 @@ import BrandLoader from "@/components/BrandLoader";
 import StudentShell from "@/components/StudentShell";
 import LecturerShell from "@/components/LecturerShell";
 import JitsiClassroom from "@/components/live/JitsiClassroom";
-import LiveKitClassroom from "@/components/live/LiveKitClassroom";
+import LiveKitClassroom, { type LeaveOutcome } from "@/components/live/LiveKitClassroom";
+import SessionEndScreen from "@/components/live/SessionEndScreen";
 import PreflightCheck from "@/components/live/PreflightCheck";
 import JoinByCode from "@/components/live/JoinByCode";
 import LiveClassCode from "@/components/live/LiveClassCode";
@@ -257,6 +258,15 @@ function LiveClassroomPageInner() {
   const [loading, setLoading] = useState(true);
   const [joined, setJoined] = useState(false);
   const [mode, setMode] = useState<QualityMode>("medium");
+  /**
+   * Set the moment somebody leaves, and the reason they left with it.
+   *
+   * This is what stopped the old behaviour: leaving simply flipped `joined`
+   * back to false, which re-rendered the lobby — and for a student whose class
+   * had just ended, the lobby's own "nothing is live" branch then told them
+   * there was no class, which is a lousy way to be thanked for attending one.
+   */
+  const [ended, setEnded] = useState<LeaveOutcome | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -363,10 +373,29 @@ function LiveClassroomPageInner() {
     }).catch(() => {});
   }, []);
 
-  const handleLeave = useCallback(() => {
-    if (isTutor) endClass();
-    setJoined(false);
-  }, [isTutor, endClass]);
+  const handleLeave = useCallback(
+    (outcome: LeaveOutcome) => {
+      /**
+       * A TUTOR WHO DROPPED HAS NOT ENDED THE CLASS.
+       *
+       * Only a deliberate departure closes the session. A tutor whose laptop
+       * lost WiFi for thirty seconds would otherwise have their own lesson
+       * closed underneath them and forty students sent home — and the heartbeat
+       * expiry already covers the case where they really are gone for good,
+       * which is precisely why it exists.
+       */
+      if (isTutor && outcome.reason === "self") endClass();
+      setJoined(false);
+      setEnded(outcome);
+    },
+    [isTutor, endClass],
+  );
+
+  /** Going back in is a fresh join, so the end screen has to get out of the way. */
+  const handleRejoin = useCallback(() => {
+    setEnded(null);
+    setJoined(true);
+  }, []);
 
   const body = (() => {
     if (loading) {
@@ -394,6 +423,27 @@ function LiveClassroomPageInner() {
             Pay tuition now
           </Link>
         </div>
+      );
+    }
+
+    /**
+     * ORDERED ABOVE `notLive` ON PURPOSE.
+     *
+     * By the time a class has ended, the session poll would happily start
+     * reporting "no class in session" — so if the not-live screen came first,
+     * the thank-you would be replaced by a notice that nothing is happening,
+     * which is the exact bug this screen exists to fix. Having just been in the
+     * room outranks the room now being empty.
+     */
+    if (ended && session) {
+      return (
+        <SessionEndScreen
+          role={session.role}
+          title={session.displayName}
+          liveSessionId={session.liveSessionId}
+          outcome={ended}
+          onRejoin={handleRejoin}
+        />
       );
     }
 
@@ -425,7 +475,11 @@ function LiveClassroomPageInner() {
         displayName={session.displayName}
         participantName={session.participantName}
         audioFirst={mode === "audio"}
-        onLeave={handleLeave}
+        // The Jitsi fallback embeds somebody else's UI and tells us nothing
+        // about why it closed, so the only honest reason is "they left". The
+        // end screen degrades to its simplest form rather than being skipped:
+        // a way out is worth more than an accurate duration.
+        onLeave={() => handleLeave({ reason: "self", durationMs: 0 })}
       />
     );
   })();

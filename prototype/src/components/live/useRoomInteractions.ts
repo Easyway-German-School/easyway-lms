@@ -63,6 +63,8 @@ export type RoomInteractions = {
   reactions: FloatingReaction[];
   chat: ChatLine[];
   unreadChat: number;
+  /** The tutor has said the lesson is over. One-way: it never goes back. */
+  ended: boolean;
   react: (kind: ReactionKind) => void;
   toggleHand: () => void;
   sendChat: (text: string) => void;
@@ -71,6 +73,12 @@ export type RoomInteractions = {
   setMode: (mode: RoomMode) => void;
   grantFloor: (identity: string | null) => void;
   clearHands: () => void;
+  /**
+   * Tutor only. Awaited by the caller before disconnecting: the data channel
+   * goes down with the connection, so a fire-and-forget send here would be a
+   * coin flip on whether the class ever heard the lesson had ended.
+   */
+  announceEnd: () => Promise<void>;
 };
 
 function displayName(participant: Participant): string {
@@ -83,6 +91,7 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const [chat, setChat] = useState<ChatLine[]>([]);
   const [unreadChat, setUnreadChat] = useState(0);
+  const [ended, setEnded] = useState(false);
   const lastReactionRef = useRef(0);
 
   // Mirrors for the announce-to-late-joiners path, which fires from an event
@@ -97,11 +106,13 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
   }, [floor]);
 
   const publish = useCallback(
-    (message: LiveMessage) => {
-      if (!room) return;
+    (message: LiveMessage): Promise<void> => {
+      if (!room) return Promise.resolve();
       // `reliable: true` — these are all events where being dropped is worse
       // than being late. A lost hand-raise is a student who never gets called.
-      room.localParticipant.publishData(encodeMessage(message), { reliable: true }).catch(() => {
+      // The promise is returned rather than swallowed so the one caller that
+      // has to wait for the send (announceEnd) can; everyone else ignores it.
+      return room.localParticipant.publishData(encodeMessage(message), { reliable: true }).catch(() => {
         // A classroom must not break because a side-channel message failed.
       });
     },
@@ -208,6 +219,10 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
         case "state":
           setModeState(message.mode);
           setFloorState(message.floor);
+          break;
+
+        case "ended":
+          setEnded(true);
           break;
       }
     }
@@ -351,6 +366,11 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
     }
   }, [role, room, publish]);
 
+  const announceEnd = useCallback(async () => {
+    if (role !== "tutor") return;
+    await publish({ t: "ended" });
+  }, [role, publish]);
+
   return {
     mode,
     floor,
@@ -360,6 +380,7 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
     reactions,
     chat,
     unreadChat,
+    ended,
     react,
     toggleHand,
     sendChat,
@@ -367,5 +388,6 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
     setMode,
     grantFloor,
     clearHands,
+    announceEnd,
   };
 }

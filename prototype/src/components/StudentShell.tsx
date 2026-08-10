@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
+import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
 import LiveClassCall from "@/components/live/LiveClassCall";
 import MomentDock from "@/components/MomentDock";
@@ -344,6 +345,14 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           badge) is one tap away from anywhere in the portal. The community is
           itself a paid feature, so it goes away entirely while locked. */}
       {pathname !== "/community" && hasAccess && <CommunityLauncher />}
+
+      {/*
+        Deliberately NOT behind `hasAccess`. A student who cannot get into the
+        portal because their payment has not landed is precisely the student who
+        most needs to reach the office, and gating the help button behind the
+        thing they need help with is how a paywall turns into a dead end.
+      */}
+      <HelpLauncher />
 
       {/* Whatever the queue held back. Bottom left, because the community
           launcher and the theme switch already own the other corner. */}

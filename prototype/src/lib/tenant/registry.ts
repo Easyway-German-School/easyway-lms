@@ -93,6 +93,14 @@ export const TENANT_OWNED_MODELS = [
    */
   "LiveClassSession",
   "LiveClassInvite",
+  /**
+   * The help desk. A ticket names a student and quotes whatever they were
+   * struggling with — often a payment or an account problem — and the thread on
+   * it is a conversation between one school's office and one school's student.
+   * There is no reading of either that another tenant has any business doing.
+   */
+  "SupportTicket",
+  "SupportTicketMessage",
   "MissionProgress",
   "PersonalizedPlan",
   "JourneyEvent",
