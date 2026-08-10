@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from '@/components/BrandLogo';
 import NotificationCenter from '@/components/NotificationCenter';
+import SignOutButton from '@/components/SignOutButton';
 import {
   AttendanceIcon,
   BellIcon,
@@ -373,8 +374,14 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         </nav>
 
         {/* Footer */}
-        <div className={`border-t border-slate-200/70 p-4 ${collapsed ? 'text-center' : ''}`}>
-          <p className="text-xs text-slate-500">{collapsed ? 'v1' : 'Professional admin panel'}</p>
+        <div className="border-t border-slate-200/70 p-3">
+          {/* Of the three portals this is the one that most needs a way out —
+              an admin left signed in on an office machine exposes every
+              student record, payment and staff account in the school. */}
+          <SignOutButton callbackUrl="/auth/admin" collapsed={collapsed} tone="slate" portalLabel="the admin portal" />
+          <p className={`mt-2 px-3 text-xs text-slate-500 ${collapsed ? 'lg:text-center' : ''}`}>
+            {collapsed ? 'v1' : 'Professional admin panel'}
+          </p>
         </div>
       </aside>
 

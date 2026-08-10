@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
 import HelpLauncher from "@/components/HelpLauncher";
@@ -9,6 +10,7 @@ import LiveClassCall from "@/components/live/LiveClassCall";
 import MomentDock from "@/components/MomentDock";
 import NotificationCenter from "@/components/NotificationCenter";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
+import SignOutButton from "@/components/SignOutButton";
 import { MomentQueueProvider } from "@/lib/moment-queue";
 import { canAttendLive, isLiveOnlyRoute, isTuitionGatedRoute } from "@/lib/access";
 import { LiveClassProvider, useLiveClass } from "@/lib/useLiveClass";
@@ -86,6 +88,7 @@ export default function StudentShell({ children }: { children: React.ReactNode }
 function StudentShellBody({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { status } = useSession();
   const { live } = useLiveClass();
   const [collapsed, setCollapsed] = useState(false);
   // Below lg the sidebar is a drawer, not a column. It used to be a fixed 288px
@@ -114,6 +117,21 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
+
+  /**
+   * Signed out means signed out — the same guard AdminShell has always had.
+   *
+   * Without this, tapping Back after signing out re-rendered the whole student
+   * portal: sidebar, dashboard, quest board and all. Nothing real was in it,
+   * because every fetch on this side is gated on `authenticated` and the APIs
+   * refuse an anonymous caller anyway — but a shell full of zeroes and "Welcome
+   * back, Learner" reads as *still signed in*, which is the one thing sign-out
+   * has to disprove. On a shared phone that is the difference between handing
+   * the device over and worrying about it.
+   */
+  useEffect(() => {
+    if (status === "unauthenticated") router.replace("/auth/signin");
+  }, [router, status]);
 
   // The welcome tour spotlights real sidebar buttons, which on a phone live
   // inside the drawer. It asks; the shell decides — the drawer's state stays
@@ -265,8 +283,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           </div>
         </nav>
 
-        <div className={`border-t border-[var(--border)] p-4 ${collapsed ? "text-center" : ""}`}>
-          <p className="text-xs text-[var(--muted)]">{collapsed ? "v1" : "AI-ready student workspace"}</p>
+        {/* The way out. Phones get shared and cybercafé machines get walked away
+            from, so this is not decoration — it was missing entirely until now. */}
+        <div className="border-t border-[var(--border)] p-3">
+          <SignOutButton callbackUrl="/auth/signin" collapsed={collapsed} portalLabel="the student portal" />
+          <p className={`mt-2 px-3 text-xs text-[var(--muted)] ${collapsed ? "lg:text-center" : ""}`}>
+            {collapsed ? "v1" : "AI-ready student workspace"}
+          </p>
         </div>
       </aside>
 

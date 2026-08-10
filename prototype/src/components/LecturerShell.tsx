@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from "@/components/BrandLogo";
 import HelpLauncher from "@/components/HelpLauncher";
 import NotificationCenter from "@/components/NotificationCenter";
+import SignOutButton from "@/components/SignOutButton";
 import {
   AssignmentIcon,
   AttendanceIcon,
@@ -215,8 +216,11 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
           </div>
         </nav>
 
-        <div className={`border-t border-slate-200/70 p-4 ${collapsed ? 'text-center' : ''}`}>
-          <p className="text-xs text-slate-500">{collapsed ? 'v1' : 'AI-ready lecturer workspace'}</p>
+        <div className="border-t border-slate-200/70 p-3">
+          <SignOutButton callbackUrl="/auth/lecturer/signin" collapsed={collapsed} tone="slate" portalLabel="the tutor portal" />
+          <p className={`mt-2 px-3 text-xs text-slate-500 ${collapsed ? 'lg:text-center' : ''}`}>
+            {collapsed ? 'v1' : 'AI-ready lecturer workspace'}
+          </p>
         </div>
       </aside>
 
