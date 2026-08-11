@@ -152,6 +152,8 @@ function StudentsRoster() {
   const [newClassType, setNewClassType] = useState("group");
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
   const [studentError, setStudentError] = useState("");
+  /** Which row's tutor select is mid-save, so it can be disabled while it is. */
+  const [savingTutorFor, setSavingTutorFor] = useState("");
   const [selectedAdmission, setSelectedAdmission] = useState<AdmissionData>(null);
   const [selectedStudentName, setSelectedStudentName] = useState("");
 
@@ -281,6 +283,36 @@ function StudentsRoster() {
     setNewStatus("active");
     setShowStudentForm(false);
     await loadStudents();
+  }
+
+  /**
+   * Change who teaches one student, from the row itself.
+   *
+   * Deliberately not behind the Edit form. "Who is this student's tutor?" is
+   * the question this page gets asked about a whole column at a time — the
+   * office reassigning a sitting, or checking that a new tutor picked up their
+   * class — and making each one a four-click round trip through a modal is how
+   * it stops being done at all. The same endpoint the tutor's own screen uses,
+   * so both people are notified either way.
+   */
+  async function changeTutor(studentId: string, lecturerId: string) {
+    setStudentError("");
+    setSavingTutorFor(studentId);
+    try {
+      const res = await fetch("/api/admin/lecturers/students", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId, lecturerId: lecturerId || null }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setStudentError(data?.error || "Unable to change this student's tutor.");
+        return;
+      }
+      await loadStudents();
+    } finally {
+      setSavingTutorFor("");
+    }
   }
 
   async function handleUpdateStudentStatus(studentId: string, status: string) {
@@ -718,6 +750,29 @@ function StudentsRoster() {
                   ))}
                 </select>
               </label>
+              {/* The state behind this field existed and was posted with every
+                  save; the control itself was never rendered, so the form
+                  quietly sent whatever it had loaded and no tutor could be set
+                  from here at all. */}
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Tutor</span>
+                <select
+                  value={newTutorId}
+                  onChange={(event) => setNewTutorId(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">No tutor assigned</option>
+                  {lecturers.map((lecturer) => (
+                    <option key={lecturer.id} value={lecturer.id}>
+                      {lecturer.user.name || lecturer.user.email}
+                    </option>
+                  ))}
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Naming a tutor here puts this student on that tutor&apos;s roster, register and gradebook whatever
+                  their class assignment says. Leave it empty and the student is found by branch, level and sitting.
+                </span>
+              </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Status</span>
                 <select
@@ -798,6 +853,10 @@ function StudentsRoster() {
                     conversation with somebody joining a spouse — and until now
                     it lived only inside the student's own journey map. */}
                 <th className="px-6 py-4">Goal</th>
+                {/* Who teaches them. It was on the filter bar but nowhere in
+                    the list, so the office could ask for one tutor's students
+                    and still not see, for any given student, whose they were. */}
+                <th className="px-6 py-4">Tutor</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4">Payment</th>
                 <th className="px-6 py-4">Balance</th>
@@ -807,11 +866,11 @@ function StudentsRoster() {
             <tbody className="divide-y divide-[var(--border)] bg-[var(--background)]">
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="px-6 py-10 text-center text-sm text-[var(--muted)]">Loading students…</td>
+                  <td colSpan={11} className="px-6 py-10 text-center text-sm text-[var(--muted)]">Loading students…</td>
                 </tr>
               ) : students.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No students found yet.</td>
+                  <td colSpan={11} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No students found yet.</td>
                 </tr>
               ) : (
                 students.map((student) => {
@@ -863,6 +922,45 @@ function StudentsRoster() {
                       ) : (
                         <span className="text-xs text-[var(--muted)]">Not asked yet</span>
                       )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <select
+                        aria-label={`Tutor for ${student.user.name || student.user.email}`}
+                        value={student.tutor?.id || ""}
+                        disabled={savingTutorFor === student.id}
+                        onChange={(event) => changeTutor(student.id, event.target.value)}
+                        className={`w-44 rounded-lg border px-2 py-1.5 text-xs ${
+                          student.tutor
+                            ? "border-[var(--border)] bg-[var(--background)]"
+                            : "border-amber-300 bg-amber-50 text-amber-800"
+                        }`}
+                      >
+                        {/* "No tutor" is a real state and is worth looking
+                            wrong: a student nobody teaches will not appear on
+                            any register until somebody notices. */}
+                        <option value="">No tutor</option>
+                        {/* The student's own tutor is listed first and
+                            unconditionally. The tutor list and the student list
+                            are two separate fetches, and a select holding a
+                            value none of its options match renders as the first
+                            one — which would read "No tutor" in amber for a
+                            student who has one. */}
+                        {(student.tutor &&
+                        !lecturers.some((lecturer) => lecturer.id === student.tutor?.id)
+                          ? [
+                              {
+                                id: student.tutor.id,
+                                user: { name: student.tutor.user?.name, email: student.tutor.user?.email ?? "" },
+                              },
+                              ...lecturers,
+                            ]
+                          : lecturers
+                        ).map((lecturer) => (
+                          <option key={lecturer.id} value={lecturer.id}>
+                            {lecturer.user.name || lecturer.user.email}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td className="px-6 py-4">{student.status || "active"}</td>
                     {/* The cohort, not the status of whichever transaction

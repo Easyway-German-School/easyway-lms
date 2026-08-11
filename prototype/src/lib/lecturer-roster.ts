@@ -1,8 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import {
-  matchesBatch,
+  belongsToLecturer,
+  isAssigned,
   readAssignment,
-  studentWhereForAssignment,
+  studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
 
 /**
@@ -13,8 +14,10 @@ import {
  * exactly the kind of duplication that ends with a gradebook showing a
  * different class from the register. There is one answer and it lives here.
  *
- * The admin-set assignment is the only source. A tutor cannot widen their own
- * roster by any route, because nothing they can send reaches this query.
+ * The admin decides, by either of the two routes in
+ * `studentWhereForLecturer` — the class assignment, or naming a student on
+ * this tutor. A tutor cannot widen their own roster by any route, because
+ * nothing they can send reaches this query.
  */
 
 export type RosterStudent = {
@@ -26,6 +29,14 @@ export type RosterStudent = {
   level: string;
   sessionSlot: string;
   branchId: string | null;
+  /**
+   * True when the office put this student on this tutor by name rather than
+   * the student falling into their class. Worth showing: it is the difference
+   * between "my A2 morning group" and "the one student I was asked to cover",
+   * and a tutor who cannot tell them apart will wonder why a stranger is on
+   * their register.
+   */
+  namedByOffice: boolean;
 };
 
 export type Roster =
@@ -71,7 +82,7 @@ export async function resolveRoster(userId: string): Promise<Roster> {
   if (!lecturer) return { ok: false, reason: "no-profile" };
 
   const assignment = readAssignment(lecturer);
-  const where = studentWhereForAssignment(assignment);
+  const where = studentWhereForLecturer(assignment, lecturer.id);
   if (!where) return { ok: false, reason: "unassigned" };
 
   const rows = await prisma.student.findMany({
@@ -84,27 +95,35 @@ export async function resolveRoster(userId: string): Promise<Roster> {
       studentCode: true,
       branchId: true,
       admission: true,
+      tutorId: true,
       user: { select: { name: true, email: true } },
     },
     orderBy: { createdAt: "asc" },
   });
 
-  return {
-    ok: true,
-    lecturerId: lecturer.id,
-    // Batch lives in the admission JSON blob, which cannot be filtered in the
-    // query, so it is applied here.
-    students: rows
-      .filter((row) => matchesBatch(assignment, row.admission))
-      .map((row) => ({
-        id: row.id,
-        userId: row.userId,
-        name: row.user.name || row.user.email,
-        email: row.user.email,
-        studentCode: row.studentCode,
-        level: row.level,
-        sessionSlot: row.sessionSlot,
-        branchId: row.branchId,
-      })),
-  };
+  // Batch lives in the admission JSON blob, which cannot be filtered in the
+  // query, so it is applied here — and skipped for anybody named directly.
+  const students = rows
+    .filter((row) => belongsToLecturer(assignment, lecturer.id, row))
+    .map((row) => ({
+      id: row.id,
+      userId: row.userId,
+      name: row.user.name || row.user.email,
+      email: row.user.email,
+      studentCode: row.studentCode,
+      level: row.level,
+      sessionSlot: row.sessionSlot,
+      branchId: row.branchId,
+      namedByOffice: row.tutorId === lecturer.id,
+    }));
+
+  /**
+   * "Unassigned" means the office has told this tutor nothing at all — no
+   * class AND nobody by name. A tutor who was given one named student has an
+   * assignment in every sense that matters, and telling them to go and ask the
+   * office for one would send them to argue about a thing they already have.
+   */
+  if (!students.length && !isAssigned(assignment)) return { ok: false, reason: "unassigned" };
+
+  return { ok: true, lecturerId: lecturer.id, students };
 }

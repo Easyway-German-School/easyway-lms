@@ -9,6 +9,7 @@ import {
   focusPreset,
   type StudentFinance,
 } from "@/lib/finance/receivables";
+import { setStudentTutor } from "@/lib/tutor-pairing";
 
 export async function GET(request: Request) {
   const gate = await requireCapability("students");
@@ -344,19 +345,31 @@ export async function PATCH(request: Request) {
       level?: string;
       branchId?: string | null;
       status?: string;
-      tutorId?: string | null;
       classType?: string;
       sessionSlot?: string;
     };
     if (level) updateStudent.level = level;
     if (body.branchId !== undefined) updateStudent.branchId = branchId;
-    if (body.tutorId !== undefined) updateStudent.tutorId = tutorId;
     if (status) updateStudent.status = status;
     if (classType) updateStudent.classType = classType;
     if (sessionSlot) updateStudent.sessionSlot = sessionSlot;
 
     await prisma.user.update({ where: { id: student.userId }, data: updateUser });
     await prisma.student.update({ where: { id: studentId }, data: updateStudent });
+
+    /**
+     * The tutor moves through the shared pairing helper rather than being one
+     * more column in the update above, so that changing a tutor from this form
+     * notifies the student and the tutor exactly as it does from the tutor's
+     * own screen. It runs after the rest: the notification tells the tutor to
+     * go and look at a roster, which should already be right when they do.
+     */
+    if (body.tutorId !== undefined) {
+      const paired = await setStudentTutor({ studentId, lecturerId: tutorId });
+      if (!paired.ok) {
+        return NextResponse.json({ error: paired.error }, { status: paired.status });
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

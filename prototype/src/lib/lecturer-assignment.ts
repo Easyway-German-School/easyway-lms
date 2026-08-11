@@ -175,6 +175,57 @@ export function studentWhereForAssignment(assignment: LecturerAssignment): Recor
   return where;
 }
 
+/**
+ * The whole roster: the class an admin described, PLUS anybody the office put
+ * on this tutor by name.
+ *
+ * WHY THERE ARE TWO ROUTES IN. The assignment above describes a class — Lagos,
+ * A2, morning — and finds its students by matching. That is right for the
+ * ordinary case and wrong for every exception: a student who moved sitting
+ * mid-term, an online student in a cohort nobody else takes, a one-to-one
+ * pairing, a tutor covering one named person while a colleague is away. None
+ * of those can be expressed as a rule over branch + level, and before this the
+ * office had no way to say them at all — a tutor created for one student saw
+ * an empty roster and concluded the portal was broken.
+ *
+ * `Student.tutorId` is that second route. It was already in the schema, and
+ * already written by the private-class pairing screen, but nothing on the
+ * reading side ever looked at it: the column set a tutor who could not see
+ * them. This is the join that makes it mean something.
+ *
+ * A named student is IN, whatever the assignment says. The office naming
+ * somebody is a deliberate act and outranks a pattern match — a rule that let
+ * the branch filter overrule it would silently drop precisely the students who
+ * needed naming in the first place.
+ */
+export function studentWhereForLecturer(
+  assignment: LecturerAssignment,
+  lecturerId?: string | null,
+): Record<string, unknown> | null {
+  const cohort = studentWhereForAssignment(assignment);
+  const named = lecturerId ? { tutorId: lecturerId } : null;
+
+  if (cohort && named) return { OR: [cohort, named] };
+  return cohort ?? named;
+}
+
+/**
+ * The in-memory half of the same question, applied after the rows come back.
+ *
+ * Batch cannot be filtered in SQL (it lives in the admission JSON), so it runs
+ * here — and a named student must skip that filter too, for the same reason
+ * they skip the branch one. Callers must select `tutorId` for this to work;
+ * without it every named student silently falls through to the batch check.
+ */
+export function belongsToLecturer(
+  assignment: LecturerAssignment,
+  lecturerId: string | null | undefined,
+  student: { tutorId?: string | null; admission?: unknown },
+): boolean {
+  if (lecturerId && student.tutorId && student.tutorId === lecturerId) return true;
+  return matchesBatch(assignment, student.admission);
+}
+
 /** Batch lives in the admission JSON, so it is filtered in memory. */
 export function matchesBatch(assignment: LecturerAssignment, admission: unknown): boolean {
   if (!assignment.batches.length) return true;

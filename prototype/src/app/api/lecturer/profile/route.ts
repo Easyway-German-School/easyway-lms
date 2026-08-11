@@ -7,9 +7,9 @@ import { cohortRoomName } from "@/lib/live-classroom";
 import {
   describeAssignment,
   isAssigned,
-  matchesBatch,
+  belongsToLecturer,
   readAssignment,
-  studentWhereForAssignment,
+  studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
@@ -77,7 +77,7 @@ export async function GET() {
   // helper the roster and attendance use, so all three agree about who is in
   // this tutor's class.
   const assignment = readAssignment(lecturer);
-  const where = studentWhereForAssignment(assignment);
+  const where = studentWhereForLecturer(assignment, lecturer.id);
 
   const roster = where
     ? (
@@ -89,12 +89,13 @@ export async function GET() {
             level: true,
             sessionSlot: true,
             admission: true,
+            tutorId: true,
             branch: { select: { name: true } },
             user: { select: { name: true, email: true } },
           },
           orderBy: { createdAt: "asc" },
         })
-      ).filter((student) => matchesBatch(assignment, student.admission))
+      ).filter((student) => belongsToLecturer(assignment, lecturer.id, student))
     : [];
 
   return NextResponse.json({

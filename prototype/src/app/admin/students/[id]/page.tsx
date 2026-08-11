@@ -233,6 +233,113 @@ function Card({ title, hint, children }: { title: string; hint?: string; childre
   );
 }
 
+/**
+ * The one field on this file that is also a control.
+ *
+ * Everything else here is a read-out, and deliberately so — a file people ring
+ * students from should not be a form you can fat-finger. The tutor is the
+ * exception because it is the field most often WRONG at exactly this moment:
+ * somebody has the student's file open precisely because that student says
+ * they cannot see their class, and the answer is nearly always that nobody was
+ * ever put in front of them. Making that a trip to another screen is what kept
+ * it unfixed.
+ */
+function TutorField({
+  studentId,
+  current,
+  onChanged,
+}: {
+  studentId: string;
+  current: { id: string; name: string; status: string } | null;
+  onChanged: () => void;
+}) {
+  const [tutors, setTutors] = useState<Array<{ id: string; name: string }>>([]);
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const response = await fetch("/api/admin/lecturers", { cache: "no-store" });
+      if (!response.ok || cancelled) return;
+      const payload = await response.json().catch(() => ({}));
+      if (cancelled) return;
+      setTutors(
+        (payload.lecturers || []).map((tutor: { id: string; user: { name: string | null; email: string } }) => ({
+          id: tutor.id,
+          name: tutor.user.name || tutor.user.email,
+        })),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function change(lecturerId: string) {
+    setSaving(true);
+    setProblem("");
+    try {
+      const response = await fetch("/api/admin/lecturers/students", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId, lecturerId: lecturerId || null }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Could not change this student's tutor");
+      }
+      onChanged();
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "Could not change this student's tutor");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /**
+   * The current tutor is always an option, even before the list has arrived.
+   *
+   * Without this the select spends its first second holding a value none of
+   * its options match, which a browser renders as the first option — so a
+   * student who HAS a tutor flashes "Not assigned" in amber at somebody who is
+   * very likely reading this field to find out exactly that.
+   */
+  const options = current
+    ? [{ id: current.id, name: current.name }, ...tutors.filter((tutor) => tutor.id !== current.id)]
+    : tutors;
+
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Tutor</p>
+      <select
+        aria-label="Tutor"
+        value={current?.id ?? ""}
+        disabled={saving}
+        onChange={(event) => change(event.target.value)}
+        className={`mt-1 w-full rounded-lg border px-2 py-1.5 text-sm font-semibold ${
+          current
+            ? "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)]"
+            : "border-amber-300 bg-amber-50 text-amber-800"
+        }`}
+      >
+        <option value="">Not assigned</option>
+        {options.map((tutor) => (
+          <option key={tutor.id} value={tutor.id}>
+            {tutor.name}
+          </option>
+        ))}
+      </select>
+      {current && current.status && current.status !== "active" ? (
+        <p className="mt-1 text-[11px] font-semibold text-amber-700">
+          This tutor is {current.status.replace("_", " ")}.
+        </p>
+      ) : null}
+      {problem ? <p className="mt-1 text-[11px] font-semibold text-red-600">{problem}</p> : null}
+    </div>
+  );
+}
+
 function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
@@ -559,17 +666,14 @@ export default function StudentDossierPage() {
                 }
               />
               <Field label="Pathway" value={identity.pathway} />
-              <Field
-                label="Tutor"
-                value={
+              <TutorField
+                studentId={identity.id}
+                current={
                   identity.tutor
-                    ? `${identity.tutor.name}${
-                        identity.tutor.status && identity.tutor.status !== "active"
-                          ? ` (${identity.tutor.status.replace("_", " ")})`
-                          : ""
-                      }`
-                    : "Not assigned"
+                    ? { id: identity.tutor.id, name: identity.tutor.name, status: identity.tutor.status }
+                    : null
                 }
+                onChanged={() => void load(false)}
               />
               <Field label="Exam readiness" value={`${identity.examReadiness}%`} />
               <Field label="Registered" value={when(identity.registeredAt)} />

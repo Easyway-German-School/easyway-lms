@@ -9,8 +9,8 @@ import {
   describeAssignment,
   isAssigned,
   readAssignment,
-  studentWhereForAssignment,
-  matchesBatch,
+  studentWhereForLecturer,
+  belongsToLecturer,
   type CourseLevel,
 } from "@/lib/lecturer-assignment";
 import { KIND, notify } from "@/lib/notify";
@@ -98,15 +98,26 @@ async function syncLecturerClasses(lecturerId: string, levels: string[]) {
   }
 }
 
-/** How many students an assignment currently reaches. */
-async function countStudents(assignment: ReturnType<typeof readAssignment>) {
-  const where = studentWhereForAssignment(assignment);
+/**
+ * How many students this tutor actually has — the class description AND
+ * anybody the office named onto them.
+ *
+ * It counted only the description before, so a tutor created for one named
+ * student read "0 students" on their own card while that student sat on their
+ * register. Two different answers to the same question on two screens is how
+ * an office stops trusting either.
+ */
+async function countStudents(assignment: ReturnType<typeof readAssignment>, lecturerId: string) {
+  const where = studentWhereForLecturer(assignment, lecturerId);
   if (!where) return 0;
   if (!assignment.batches.length) {
     return prisma.student.count({ where: where as any });
   }
-  const rows = await prisma.student.findMany({ where: where as any, select: { admission: true } });
-  return rows.filter((row) => matchesBatch(assignment, row.admission)).length;
+  const rows = await prisma.student.findMany({
+    where: where as any,
+    select: { admission: true, tutorId: true },
+  });
+  return rows.filter((row) => belongsToLecturer(assignment, lecturerId, row)).length;
 }
 
 export async function GET() {
@@ -147,7 +158,7 @@ export async function GET() {
         startedAt: lecturer.startedAt,
         assignment,
         assignmentLabel: describeAssignment(assignment, branchNames),
-        studentCount: await countStudents(assignment),
+        studentCount: await countStudents(assignment, lecturer.id),
         classes: lecturer.classes.map((klass) => ({
           id: klass.id,
           name: klass.name,

@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
-  isAssigned,
+  belongsToLecturer,
   readAssignment,
-  studentWhereForAssignment,
+  studentWhereForLecturer,
   type AssignmentSource,
 } from "@/lib/lecturer-assignment";
 
@@ -60,15 +60,22 @@ async function requireLecturer(): Promise<LecturerMessagesAuth> {
  * turn up to a locked room. Nothing errored, so nobody would have found it
  * until somebody complained.
  */
-async function cohortStudents(lecturer: AssignmentSource) {
+async function cohortStudents(lecturer: AssignmentSource & { id: string }) {
   const assignment = readAssignment(lecturer);
-  const where = studentWhereForAssignment(assignment);
-  if (!where || !isAssigned(assignment)) return [];
+  const where = studentWhereForLecturer(assignment, lecturer.id);
+  if (!where) return [];
 
-  return prisma.student.findMany({
+  const rows = await prisma.student.findMany({
     where: { ...(where as Record<string, unknown>), status: "active" } as never,
-    select: { id: true, user: { select: { name: true, email: true } } },
+    select: {
+      id: true,
+      admission: true,
+      tutorId: true,
+      user: { select: { name: true, email: true } },
+    },
   });
+
+  return rows.filter((student) => belongsToLecturer(assignment, lecturer.id, student));
 }
 
 /** GET — what this tutor has already sent, newest first, grouped per send. */

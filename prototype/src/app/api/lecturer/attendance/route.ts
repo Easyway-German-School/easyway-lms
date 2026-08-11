@@ -3,7 +3,7 @@ import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { dayKey } from '@/lib/class-sessions';
-import { readAssignment, studentWhereForAssignment } from '@/lib/lecturer-assignment';
+import { readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
 
 export async function GET(req: NextRequest) {
   try {
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
      * attendance for the whole school.
      */
     const lecturer = await prisma.lecturer.findUnique({ where: { id: lecturerId } });
-    const where = studentWhereForAssignment(readAssignment(lecturer));
+    const where = studentWhereForLecturer(readAssignment(lecturer), lecturerId);
     if (!where) {
       return NextResponse.json(
         { error: 'You have no class assigned yet. The school office sets this.' },

@@ -4,11 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import {
+  belongsToLecturer,
   describeAssignment,
   isAssigned,
-  matchesBatch,
   readAssignment,
-  studentWhereForAssignment,
+  studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
@@ -47,9 +47,9 @@ export async function GET() {
     }
 
     const assignment = readAssignment(lecturer);
-    const where = studentWhereForAssignment(assignment);
+    const where = studentWhereForLecturer(assignment, lecturer.id);
 
-    if (!where || !isAssigned(assignment)) {
+    if (!where) {
       return NextResponse.json({
         assigned: false,
         cohortLabel: null,
@@ -80,8 +80,9 @@ export async function GET() {
     const branchNames = new Map(branches.map((branch) => [branch.id, branch.name]));
 
     const rows = students
-      // Batch lives inside the admission JSON, which SQLite cannot filter on.
-      .filter((student) => matchesBatch(assignment, student.admission))
+      // Batch lives inside the admission JSON, which cannot be filtered on in
+      // the query. A student named onto this tutor skips the check entirely.
+      .filter((student) => belongsToLecturer(assignment, lecturer.id, student))
       .map((student) => {
         const admission =
           typeof student.admission === "object" && student.admission !== null
@@ -119,6 +120,10 @@ export async function GET() {
           deliveryMode: student.deliveryMode,
           status: student.status,
           pathway: student.pathway,
+          // Named onto this tutor by the office rather than matched into the
+          // class. Shown as a tag so a tutor is never surprised by a student
+          // their class description does not explain.
+          namedByOffice: student.tutorId === lecturer.id,
           joinedAt: student.user.createdAt.toISOString(),
           phone: typeof admission.phone === "string" ? admission.phone : null,
           city: typeof admission.city === "string" ? admission.city : null,
@@ -140,9 +145,24 @@ export async function GET() {
       branches.filter((branch) => branch.mode === "online").map((branch) => branch.id),
     );
 
+    // No class described AND nobody named: the office has said nothing at all.
+    if (!rows.length && !isAssigned(assignment)) {
+      return NextResponse.json({
+        assigned: false,
+        cohortLabel: null,
+        students: [],
+        message:
+          "You have not been assigned a class yet. The school office sets this — ask them to add your branch and level.",
+      });
+    }
+
     return NextResponse.json({
       assigned: true,
-      cohortLabel: describeAssignment(assignment, branchNames),
+      // A tutor who has only named students has no class description to show,
+      // and "No class assigned" over a list of their students reads as a bug.
+      cohortLabel: isAssigned(assignment)
+        ? describeAssignment(assignment, branchNames)
+        : `${rows.length} student${rows.length === 1 ? "" : "s"} assigned to you by the office`,
       assignment,
       isOnlineBranch: assignment.branchIds.some((id) => onlineBranchIds.has(id)),
       students: rows,

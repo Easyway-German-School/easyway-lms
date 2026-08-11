@@ -63,18 +63,22 @@ type Tutor = {
   features: string[];
 };
 
-type PrivateStudent = {
+type RosterStudent = {
   id: string;
   name: string;
   email: string;
   studentCode: string | null;
   level: string;
+  sessionSlot: string;
+  classType: string;
+  deliveryMode: string;
   branchName: string | null;
   totalPaid: number;
   tuitionFee: number;
   hasPaid: boolean;
   currentTutorId: string | null;
   currentTutorName: string | null;
+  namedByOffice: boolean;
 };
 
 const EMPTY_ASSIGNMENT: LecturerAssignment = {
@@ -377,127 +381,219 @@ function StatusPanel({
   );
 }
 
+/** One student, drawn the same way in the roster and in the search results. */
+function StudentLine({
+  student,
+  right,
+}: {
+  student: RosterStudent;
+  right: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-[var(--foreground)]">{student.name}</p>
+        <p className="truncate text-xs text-[var(--muted)]">
+          {student.studentCode || student.email} · {student.level} · {student.sessionSlot}
+          {student.branchName ? ` · ${student.branchName}` : ""}
+          {student.classType === "private" ? " · private" : ""}
+        </p>
+      </div>
+
+      <span
+        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+          student.hasPaid ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/15 text-amber-800"
+        }`}
+      >
+        {student.hasPaid ? "Paid" : `${naira(Math.max(0, student.tuitionFee - student.totalPaid))} owing`}
+      </span>
+
+      {right}
+    </div>
+  );
+}
+
 /**
- * The private-class pairing panel.
+ * Who this tutor teaches, and the one place to change it.
  *
- * Only appears once "Private" is one of the class types, because that is the
- * only case where a student needs naming individually — every other kind of
- * class finds its students from branch + level automatically.
+ * REPLACES A PRIVATE-ONLY PANEL THAT WAS HIDDEN MOST OF THE TIME. The old
+ * version only appeared once "Private" was ticked in the class types, on the
+ * theory that a one-to-one student is the only kind who needs naming. That
+ * theory is wrong the first time a real class does not line up with its
+ * description — an online A2 student whose only tutor takes the afternoon
+ * sitting is in nobody's class, and the office had no way to say otherwise.
+ *
+ * So it is always shown, it lists the class as it actually stands, and it
+ * marks which students arrived by which route: matched by the class
+ * description above, or named here. Naming is reversible from the same line,
+ * which is the part that makes it safe to use.
  */
-function PrivateStudentSearch({ lecturerId, tutorName }: { lecturerId: string; tutorName: string }) {
+function ClassRoster({
+  lecturerId,
+  tutorName,
+  onChanged,
+}: {
+  lecturerId: string;
+  tutorName: string;
+  onChanged: () => void;
+}) {
   const [query, setQuery] = useState("");
-  const [students, setStudents] = useState<PrivateStudent[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [assigningId, setAssigningId] = useState("");
+  const [roster, setRoster] = useState<RosterStudent[]>([]);
+  const [results, setResults] = useState<RosterStudent[]>([]);
+  const [hasClassAssignment, setHasClassAssignment] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
 
-  const search = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/lecturers/private-students?q=${encodeURIComponent(query)}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/admin/lecturers/students?lecturerId=${encodeURIComponent(lecturerId)}&q=${encodeURIComponent(query)}`,
+        { cache: "no-store" },
+      );
       const data = await res.json().catch(() => ({}));
-      setStudents(data.students || []);
+      setRoster(data.roster || []);
+      setResults(data.results || []);
+      setHasClassAssignment(Boolean(data.hasClassAssignment));
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [lecturerId, query]);
 
   useEffect(() => {
     // Debounced so typing a name does not fire a request per keystroke.
-    const timer = window.setTimeout(search, 250);
+    const timer = window.setTimeout(load, 250);
     return () => window.clearTimeout(timer);
-  }, [search]);
+  }, [load]);
 
-  async function assign(student: PrivateStudent) {
-    setAssigningId(student.id);
+  async function pair(student: RosterStudent, lecturer: string | null) {
+    setBusyId(student.id);
     setMessage("");
     try {
-      const res = await fetch("/api/admin/lecturers/private-students", {
+      const res = await fetch("/api/admin/lecturers/students", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId: student.id, lecturerId }),
+        body: JSON.stringify({ studentId: student.id, lecturerId: lecturer }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not assign this student");
-      setMessage(`${student.name} has been assigned to ${tutorName} and notified.`);
-      await search();
+      if (!res.ok) throw new Error(data.error || "Could not change this student's tutor");
+      setMessage(
+        lecturer
+          ? `${student.name} is now assigned to ${tutorName}. Both have been notified.`
+          : `${student.name} has been removed from ${tutorName}'s class.`,
+      );
+      await load();
+      // The tutor card above shows a student count, and it is now wrong.
+      onChanged();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not assign this student");
+      setMessage(error instanceof Error ? error.message : "Could not change this student's tutor");
     } finally {
-      setAssigningId("");
+      setBusyId("");
     }
   }
 
+  const named = roster.filter((student) => student.namedByOffice);
+  const matched = roster.filter((student) => !student.namedByOffice);
+  const rosterIds = new Set(roster.map((student) => student.id));
+
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
-      <p className="text-sm font-semibold text-[var(--foreground)]">Private students</p>
+      <p className="text-sm font-semibold text-[var(--foreground)]">Students in this tutor&apos;s class</p>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        Search students on a private package and pair one with this tutor. They are notified with the tutor&apos;s name.
+        Students matching the class above are added automatically. Anyone else can be named here — use it for a student
+        whose sitting or branch does not line up, for one-to-one students, and for cover.
       </p>
 
-      <input
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search by name, email or student code…"
-        className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
-      />
+      {loading && !roster.length ? <p className="mt-3 text-xs text-[var(--muted)]">Loading the class…</p> : null}
 
       {message ? (
         <p className="mt-3 rounded-xl bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-800">{message}</p>
       ) : null}
 
+      <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
+        <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[var(--accent)]">
+          {matched.length} from the class description
+        </span>
+        <span className="rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)]">
+          {named.length} named individually
+        </span>
+      </div>
+
+      {!hasClassAssignment && !named.length ? (
+        <p className="mt-3 rounded-xl bg-amber-500/10 px-4 py-2.5 text-xs text-amber-800">
+          This tutor has no branch and level set above, and nobody named below — so their portal will tell them they
+          have no class. Set the class, name a student, or both.
+        </p>
+      ) : null}
+
+      {roster.length ? (
+        <div className="mt-4 space-y-2">
+          {roster.map((student) => (
+            <StudentLine
+              key={student.id}
+              student={student}
+              right={
+                student.namedByOffice ? (
+                  <button
+                    type="button"
+                    onClick={() => pair(student, null)}
+                    disabled={busyId === student.id}
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)] disabled:opacity-60"
+                  >
+                    {busyId === student.id ? "Removing…" : "Remove"}
+                  </button>
+                ) : (
+                  <span
+                    className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-semibold text-[var(--accent)]"
+                    title="In this class because they match the branch, level and sitting set above."
+                  >
+                    Matched
+                  </span>
+                )
+              }
+            />
+          ))}
+        </div>
+      ) : null}
+
+      <p className="mt-5 text-sm font-semibold text-[var(--foreground)]">Add a student</p>
+      <input
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search the whole school by name, email or student code…"
+        className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
+      />
+
       <div className="mt-3 space-y-2">
-        {loading ? <p className="text-xs text-[var(--muted)]">Searching…</p> : null}
-        {!loading && students.length === 0 ? (
+        {results.filter((student) => !rosterIds.has(student.id)).length === 0 ? (
           <p className="text-xs text-[var(--muted)]">
-            No students on a private package match. A student gets one by choosing the private-class package at signup or
-            checkout.
+            {query ? "Nobody else matches that search." : "Search to find a student to add."}
           </p>
         ) : null}
 
-        {students.map((student) => (
-          <div
-            key={student.id}
-            className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-[var(--foreground)]">{student.name}</p>
-              <p className="truncate text-xs text-[var(--muted)]">
-                {student.studentCode || student.email} · {student.level}
-                {student.branchName ? ` · ${student.branchName}` : ""}
-              </p>
-            </div>
-
-            <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                student.hasPaid ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/15 text-amber-800"
-              }`}
-            >
-              {student.hasPaid ? "Paid" : `${naira(student.tuitionFee - student.totalPaid)} owing`}
-            </span>
-
-            {student.currentTutorId === lecturerId ? (
-              <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-semibold text-[var(--accent)]">
-                Assigned
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => assign(student)}
-                disabled={assigningId === student.id}
-                className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-              >
-                {assigningId === student.id
-                  ? "Assigning…"
-                  : student.currentTutorName
-                    ? `Move from ${student.currentTutorName}`
-                    : "Assign"}
-              </button>
-            )}
-          </div>
-        ))}
+        {results
+          .filter((student) => !rosterIds.has(student.id))
+          .map((student) => (
+            <StudentLine
+              key={student.id}
+              student={student}
+              right={
+                <button
+                  type="button"
+                  onClick={() => pair(student, lecturerId)}
+                  disabled={busyId === student.id}
+                  className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {busyId === student.id
+                    ? "Assigning…"
+                    : student.currentTutorName
+                      ? `Move from ${student.currentTutorName}`
+                      : "Add to class"}
+                </button>
+              }
+            />
+          ))}
       </div>
     </div>
   );
@@ -901,12 +997,15 @@ export default function AdminTutorsPage() {
                         <PortalAccessFields value={editFeatures} onChange={setEditFeatures} />
                       </div>
 
-                      {editAssignment.classTypes.includes("private") ? (
-                        <PrivateStudentSearch
-                          lecturerId={tutor.id}
-                          tutorName={tutor.user.name || tutor.user.email}
-                        />
-                      ) : null}
+                      {/* Always shown. The pairing screen used to be hidden
+                          behind the "Private" class type, so the one mechanism
+                          that fixes a class the description cannot express was
+                          invisible to the people who needed it. */}
+                      <ClassRoster
+                        lecturerId={tutor.id}
+                        tutorName={tutor.user.name || tutor.user.email}
+                        onChanged={load}
+                      />
 
                       <div className="flex flex-wrap gap-3">
                         <button

@@ -3,7 +3,7 @@ import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
-import { isAssigned, matchesBatch, readAssignment, studentWhereForAssignment } from '@/lib/lecturer-assignment';
+import { belongsToLecturer, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
 
 function serialise(material: {
@@ -161,13 +161,14 @@ export async function POST(req: NextRequest) {
      */
     const lecturer = await prisma.lecturer.findUnique({ where: { id: lecturerId } });
     const assignment = readAssignment(lecturer);
-    if (isAssigned(assignment)) {
+    const audience = studentWhereForLecturer(assignment, lecturerId);
+    if (audience) {
       const recipients = await prisma.student.findMany({
-        where: (studentWhereForAssignment(assignment) ?? {}) as any,
-        select: { id: true, admission: true },
+        where: audience as any,
+        select: { id: true, admission: true, tutorId: true },
       });
       const studentIds = recipients
-        .filter((student) => matchesBatch(assignment, student.admission))
+        .filter((student) => belongsToLecturer(assignment, lecturerId, student))
         .map((student) => student.id);
 
       if (studentIds.length) {

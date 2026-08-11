@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { KIND, notify } from "@/lib/notify";
+import {
+  belongsToLecturer,
+  describeAssignment,
+  isAssigned,
+  readAssignment,
+  studentWhereForLecturer,
+  type AssignmentSource,
+} from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
 
@@ -28,38 +36,35 @@ async function resolveLecturer(userId: string) {
   });
 }
 
-/** Every student this tutor is allowed to address. */
-async function reachableStudents(lecturer: {
-  id: string;
-  branchId: string | null;
-  level: string | null;
-  sessionSlot: string | null;
-}) {
-  const clauses = [];
+/**
+ * Every student this tutor is allowed to address.
+ *
+ * Read through the shared helper like the roster, the register and the
+ * gradebook. This route used to build its own clause from the three legacy
+ * primary columns — one branch, one level, one sitting — so a tutor assigned
+ * to two levels could only ever announce to the first of them, and the other
+ * class turned up to a room nobody had told them about.
+ */
+async function reachableStudents(lecturer: AssignmentSource & { id: string }) {
+  const assignment = readAssignment(lecturer);
+  const where = studentWhereForLecturer(assignment, lecturer.id);
+  if (!where) return [];
 
-  // The group cohort: branch + level + sitting.
-  if (lecturer.branchId && lecturer.level) {
-    clauses.push({
-      branchId: lecturer.branchId,
-      level: lecturer.level,
-      ...(lecturer.sessionSlot ? { sessionSlot: lecturer.sessionSlot } : {}),
-    });
-  }
-
-  // Private students follow the tutor, not the timetable.
-  clauses.push({ tutorId: lecturer.id });
-
-  return prisma.student.findMany({
-    where: { status: "active", OR: clauses },
+  const rows = await prisma.student.findMany({
+    where: { ...(where as Record<string, unknown>), status: "active" } as never,
     select: {
       id: true,
       level: true,
       sessionSlot: true,
       classType: true,
+      admission: true,
+      tutorId: true,
       user: { select: { name: true, email: true } },
     },
     orderBy: { user: { name: "asc" } },
   });
+
+  return rows.filter((student) => belongsToLecturer(assignment, lecturer.id, student));
 }
 
 export async function GET() {
@@ -103,14 +108,20 @@ export async function GET() {
     }
   }
 
+  // Somebody to talk to is what "assigned" means here — a tutor given one
+  // named student has an audience, and a compose box that refuses to open for
+  // them is the same bug as an empty roster.
+  const branches = await prisma.branch.findMany({ select: { id: true, name: true } });
+  const cohortDescription = describeAssignment(
+    readAssignment(lecturer),
+    new Map(branches.map((branch) => [branch.id, branch.name])),
+  );
+
   return NextResponse.json({
-    assigned: Boolean(lecturer.branchId && lecturer.level),
-    cohortLabel:
-      lecturer.branchId && lecturer.level
-        ? `${lecturer.branch?.name ?? "Your branch"} · ${lecturer.level}${
-            lecturer.sessionSlot ? ` · ${lecturer.sessionSlot}` : ""
-          }`
-        : null,
+    assigned: students.length > 0,
+    cohortLabel: isAssigned(readAssignment(lecturer))
+      ? cohortDescription
+      : `${students.length} student${students.length === 1 ? "" : "s"} assigned to you`,
     students: students.map((s) => ({
       id: s.id,
       name: s.user.name ?? s.user.email,

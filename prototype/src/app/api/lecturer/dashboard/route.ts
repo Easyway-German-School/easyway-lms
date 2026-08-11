@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
+  belongsToLecturer,
   describeAssignment,
   isAssigned,
-  matchesBatch,
   readAssignment,
-  studentWhereForAssignment,
+  studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,7 @@ export async function GET() {
     }
 
     const assignment = readAssignment(lecturer);
-    const where = studentWhereForAssignment(assignment);
+    const where = studentWhereForLecturer(assignment, lecturer.id);
 
     const branches = await prisma.branch.findMany({ select: { id: true, name: true } });
     const assignmentLabel = describeAssignment(
@@ -51,7 +51,20 @@ export async function GET() {
       new Map(branches.map((branch) => [branch.id, branch.name])),
     );
 
-    if (!where || !isAssigned(assignment)) {
+    const students = where
+      ? await prisma.student.findMany({
+          where: where as any,
+          select: { id: true, admission: true, tutorId: true },
+        })
+      : [];
+    const studentIds = students
+      .filter((student) => belongsToLecturer(assignment, lecturer.id, student))
+      .map((student) => student.id);
+
+    // Nothing described and nobody named — the office has not set this tutor
+    // up at all. A tutor with named students but no class falls through, which
+    // is the point: they have a roster and every figure below is about it.
+    if (!studentIds.length && !isAssigned(assignment)) {
       return NextResponse.json({
         assigned: false,
         assignmentLabel,
@@ -63,14 +76,6 @@ export async function GET() {
         message: "You have not been assigned a class yet. The school office sets this.",
       });
     }
-
-    const students = await prisma.student.findMany({
-      where: where as any,
-      select: { id: true, admission: true },
-    });
-    const studentIds = students
-      .filter((student) => matchesBatch(assignment, student.admission))
-      .map((student) => student.id);
 
     // Attendance is keyed on (studentId, date), so a tutor's own class is
     // found through their students — not through a Class row the register
@@ -147,7 +152,9 @@ export async function GET() {
 
     return NextResponse.json({
       assigned: true,
-      assignmentLabel,
+      assignmentLabel: isAssigned(assignment)
+        ? assignmentLabel
+        : "Students assigned to you individually by the office",
       // What they teach, not how many Class template rows exist.
       totalClasses: assignment.levels.length * Math.max(1, assignment.branchIds.length),
       totalStudents: studentIds.length,
