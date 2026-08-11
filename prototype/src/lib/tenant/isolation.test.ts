@@ -8,6 +8,7 @@ import {
   assertRegistryCoversSchema,
 } from "./registry";
 import { tenantClient, unscopedClient, TenantIsolationError } from "./client";
+import { createTenantExtension } from "./extension";
 import { METERS, PLACEHOLDER_RATES_KOBO, costKobo, meterKey, type MeterName } from "@/lib/usage/meter";
 
 /**
@@ -76,6 +77,100 @@ describe("the unscoped escape hatch is deliberately awkward", () => {
 
   it("allows a real explanation", () => {
     expect(() => unscopedClient("nightly backup runner spans every tenant by design")).not.toThrow();
+  });
+});
+
+/**
+ * The nested-write hole, pinned.
+ *
+ * A Prisma extension is handed the top-level model only, so a Lecturer created
+ * inside `user.create` was written with no tenant — invisible to the school
+ * that had just created it, and holding a session that made its owner's whole
+ * portal throw. It was found in production rather than here, which is what
+ * these cases are for.
+ */
+describe("nested creates inherit the tenant", () => {
+  /** Drive the extension directly and return the args it would have run. */
+  async function rewrite(model: string, operation: string, args: unknown) {
+    const extension = createTenantExtension(() => ({
+      kind: "tenant" as const,
+      tenantId: "tenant_a",
+    }));
+    let captured: any;
+    await extension.query.$allModels.$allOperations({
+      model,
+      operation,
+      args,
+      query: async (next: unknown) => {
+        captured = next;
+        return next;
+      },
+    } as never);
+    return captured;
+  }
+
+  it("stamps a tenant-owned row created through a global one", async () => {
+    // User is global; Lecturer is not. This is the exact shape the admin tutor
+    // route sends, and the exact shape that produced ownerless tutors.
+    const out = await rewrite("User", "create", {
+      data: {
+        email: "tutor@example.test",
+        lecturer: { create: { level: "A1" } },
+      },
+    });
+
+    expect(out.data.lecturer.create.tenantId).toBe("tenant_a");
+  });
+
+  it("leaves the global row's own columns alone", async () => {
+    const out = await rewrite("User", "create", {
+      data: { email: "tutor@example.test", lecturer: { create: { level: "A1" } } },
+    });
+
+    // User carries a tenantId column but is not tenant-owned: whoever creates
+    // the user decides, and the extension must not quietly overrule them.
+    expect(out.data.tenantId).toBeUndefined();
+  });
+
+  it("stamps a list of nested rows, and nested rows of those", async () => {
+    const out = await rewrite("User", "create", {
+      data: {
+        email: "student@example.test",
+        student: {
+          create: {
+            level: "A1",
+            payments: { create: [{ amount: 1 }, { amount: 2 }] },
+          },
+        },
+      },
+    });
+
+    expect(out.data.student.create.tenantId).toBe("tenant_a");
+    expect(out.data.student.create.payments.create.map((row: any) => row.tenantId)).toEqual([
+      "tenant_a",
+      "tenant_a",
+    ]);
+  });
+
+  it("stamps createMany and connectOrCreate as well as create", async () => {
+    const out = await rewrite("Student", "update", {
+      where: { id: "s1" },
+      data: {
+        grades: { createMany: { data: [{ score: 1 }, { score: 2 }] } },
+        certificates: { connectOrCreate: { where: { id: "c1" }, create: { title: "A1" } } },
+      },
+    });
+
+    expect(out.data.grades.createMany.data.every((row: any) => row.tenantId === "tenant_a")).toBe(true);
+    expect(out.data.certificates.connectOrCreate.create.tenantId).toBe("tenant_a");
+  });
+
+  it("does not touch connect, which names a row rather than writing one", async () => {
+    const out = await rewrite("User", "create", {
+      data: { email: "x@example.test", student: { connect: { id: "s1" } } },
+    });
+
+    expect(out.data.student).toEqual({ connect: { id: "s1" } });
   });
 });
 

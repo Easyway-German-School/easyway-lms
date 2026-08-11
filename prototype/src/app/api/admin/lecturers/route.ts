@@ -214,6 +214,14 @@ export async function POST(request: NextRequest) {
       name,
       password: hashedPassword,
       role: "LECTURER",
+      /**
+       * SET EXPLICITLY. `User` is a global model, so the isolation extension
+       * never stamps it — a tutor created without this line got a session with
+       * no tenant, which in strict mode makes every query in their portal
+       * throw, and the portal bounces them back to the sign-in form. That is
+       * what "I created a tutor and their login does nothing" was.
+       */
+      tenantId: gate.session.user.tenantId,
       lecturer: {
         create: {
           specialization: specialization || null,

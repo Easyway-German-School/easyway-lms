@@ -7,7 +7,7 @@ import { sendRegistrationConfirmation } from "@/lib/registration-email";
 import { linkLeadOnSignup } from "@/lib/leads";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
-import { setTenantScope } from "@/lib/tenant/context";
+import { currentTenantId, setTenantScope } from "@/lib/tenant/context";
 import { resolveTenantId } from "@/lib/tenant/resolve";
 
 /**
@@ -313,6 +313,11 @@ export async function POST(request: NextRequest) {
           name: normalizedName,
           password: hashedPassword,
           role: normalizedRole,
+          // `User` is a global model, so nothing stamps this for us — see the
+          // note on the same line in the admin tutor route. Without it a
+          // student signs up successfully and then holds a session with no
+          // tenant, which locks them out of their own portal.
+          tenantId: currentTenantId(),
           student: {
             create: ({
               level: normalizedLevel,
