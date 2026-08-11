@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { signOut, useSession } from "next-auth/react";
 import { ExitIcon } from "@/components/icons";
 
@@ -76,6 +77,9 @@ export default function SignOutButton({
   const { data: session } = useSession();
   const [confirming, setConfirming] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  // Portalling needs document, which does not exist during the server render.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const who = session?.user?.name || session?.user?.email || null;
 
@@ -118,8 +122,18 @@ export default function SignOutButton({
       </button>
 
       {/* Confirm, because this button lives one row below the last nav entry and
-          a mis-tap during a live class costs a student the room. */}
-      {confirming && (
+          a mis-tap during a live class costs a student the room.
+
+          PORTALLED TO <body>, AND THAT IS LOAD-BEARING. This component renders
+          inside the sidebar <aside>, which carries `translate-x-0` for its
+          drawer animation — and a transform makes an element the containing
+          block for every `position: fixed` descendant. Rendered in place, the
+          dialog was therefore pinned to the 272px sidebar rather than the
+          viewport: a squeezed column of text down the left edge, with the
+          backdrop dimming only the sidebar it was already sitting on. It read
+          as correct in the DOM and was wrong on screen, which is why a
+          screenshot caught it and reading innerText did not. */}
+      {confirming && mounted && createPortal(
         <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm">
           <div
             role="dialog"
@@ -156,7 +170,8 @@ export default function SignOutButton({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
