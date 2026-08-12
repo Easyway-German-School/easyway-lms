@@ -5,6 +5,7 @@ import { signOut } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from "@/components/BrandLogo";
 import HelpLauncher from "@/components/HelpLauncher";
+import PortalUpdates from "@/components/PortalUpdates";
 import NotificationCenter from "@/components/NotificationCenter";
 import SignOutButton from "@/components/SignOutButton";
 import {
@@ -293,6 +294,13 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
       {/* Tutors get the same desk. A tutor whose roster is wrong or whose
           classroom will not open has exactly the same problem a student does,
           and pushing staff onto WhatsApp is what this replaced. */}
+
+      {/*
+        Message popups, mounted once per shell so they follow the reader onto
+        every page rather than living on the community screen they are about.
+        See PortalUpdates for why the card carries the real message text.
+      */}
+      <PortalUpdates />
       <HelpLauncher />
     </div>
   );

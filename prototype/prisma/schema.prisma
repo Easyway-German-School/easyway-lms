@@ -105,8 +105,8 @@ model User {
   lecturer          Lecturer?
   sessions          Session[]
   missionProgress   MissionProgress[]
-  threads           Thread[]
-  comments          Comment[]
+  messages          Message[]
+  moderatedMessages Message[]          @relation("MessageModerator")
   channelReads      ChannelRead[]
   pushSubs          PushSubscription[]
   examRegistrations ExamRegistration[]
@@ -211,8 +211,7 @@ model Tenant {
   channels                 Channel[]
   channelReads             ChannelRead[]
   pushSubscriptions        PushSubscription[]
-  threads                  Thread[]
-  comments                 Comment[]
+  messages                 Message[]
   classSessions            ClassSession[]
   assignments              Assignment[]
   assignmentTargets        AssignmentTarget[]
@@ -1645,11 +1644,26 @@ enum Role {
 // "Abuja · A1" are separate communities even though the syllabus matches.
 // ---------------------------------------------------------------------------
 
+/**
+ * A cohort's community, keyed on the three things that actually make a cohort.
+ *
+ * `sessionSlot` joined the key because branch + level was never a class. Lagos
+ * runs A1 in the morning, the afternoon and the evening as three separate
+ * classes with three different tutors and three sets of students who never meet
+ * — and they were all being dropped into one shared room, where a morning
+ * student saw questions about an evening lesson they had not sat and answers
+ * from a tutor who is not theirs.
+ *
+ * Adding it to the unique key is what makes the separation real rather than a
+ * filter somebody can forget to apply: there is now exactly one space per
+ * (branch, level, sitting), and a student resolves to theirs and to no other.
+ */
 model Space {
   id          String   @id @default(cuid())
   branchId    String
   branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
   level       String
+  sessionSlot String   @default("morning")
   name        String
   description String?
   createdAt   DateTime @default(now())
@@ -1657,7 +1671,7 @@ model Space {
 
   channels Channel[]
 
-  @@unique([branchId, level])
+  @@unique([branchId, level, sessionSlot])
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId String?
@@ -1678,8 +1692,8 @@ model Channel {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  threads Thread[]
-  reads   ChannelRead[]
+  messages Message[]
+  reads    ChannelRead[]
 
   @@unique([spaceId, slug])
 
@@ -1736,44 +1750,72 @@ model PushSubscription {
   @@index([tenantId])
 }
 
-model Thread {
-  id             String   @id @default(cuid())
-  channelId      String
-  channel        Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  authorId       String
-  author         User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  title          String
-  body           String
-  pinned         Boolean  @default(false)
-  lastActivityAt DateTime @default(now())
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  comments Comment[]
-
-  @@index([channelId, lastActivityAt])
-
-  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
-  tenantId String?
-  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@index([tenantId])
-}
-
-model Comment {
-  id        String    @id @default(cuid())
-  threadId  String
-  thread    Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+/**
+ * One message in a cohort's group chat.
+ *
+ * THIS REPLACED Thread + Comment, AND THE REASON IS NOT TIDINESS.
+ *
+ * The old shape was a forum: you opened a thread with a title, people replied
+ * underneath, and the reply tree could nest without limit. Students did not use
+ * it, and the reason is obvious in hindsight — nobody composes a titled post to
+ * ask "was there homework?". They send a message. A forum asks you to decide
+ * where your sentence belongs before you are allowed to say it, and that one
+ * demand is enough to stop most people posting at all.
+ *
+ * So a channel is now a running conversation, in time order, exactly like the
+ * app every one of these students already has open on their phone.
+ *
+ *   - `replyToId` is a QUOTE, not a branch. WhatsApp quotes one message and
+ *     renders it above the reply; it never nests. The old `CommentChildren`
+ *     self-relation could nest forever, which reads as a wall of indentation on
+ *     a 375px screen — the width most of this school actually uses.
+ *   - `hiddenAt` rather than a delete. The school has to be able to take a
+ *     message off the wall without destroying the evidence that it was sent,
+ *     because the times you most need to remove something are exactly the times
+ *     somebody will later ask what it said.
+ *   - `attachmentUrl` is one optional image. Students photograph their homework;
+ *     a chat that cannot carry that is a chat they will abandon for WhatsApp,
+ *     which is the outcome this whole feature exists to prevent.
+ */
+model Message {
+  id        String  @id @default(cuid())
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
   authorId  String
-  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  parentId  String?
-  parent    Comment?  @relation("CommentChildren", fields: [parentId], references: [id], onDelete: Cascade)
-  children  Comment[] @relation("CommentChildren")
-  body      String
+  author    User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  body String
+
+  /** The message this one quotes. Null for an ordinary message. */
+  replyToId String?
+  replyTo   Message?  @relation("MessageQuote", fields: [replyToId], references: [id], onDelete: SetNull)
+  quotedBy  Message[] @relation("MessageQuote")
+
+  /** One optional image or file, stored through the shared upload path. */
+  attachmentUrl  String?
+  attachmentType String?
+  attachmentName String?
+
+  /**
+   * Moderation, kept as a soft hide. A hidden message stops rendering for
+   * students and stays fully readable to staff, with who hid it and why.
+   */
+  hiddenAt     DateTime?
+  hiddenById   String?
+  hiddenBy     User?     @relation("MessageModerator", fields: [hiddenById], references: [id], onDelete: SetNull)
+  hiddenReason String?
+
+  /** Set when the author edits, so the bubble can say so rather than lie. */
+  editedAt  DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  @@index([threadId, createdAt])
+  /**
+   * The read cursor and the poll both order by this, and both need the newest
+   * page of one channel cheaply. It is the only access pattern that matters.
+   */
+  @@index([channelId, createdAt])
+  @@index([authorId])
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId String?

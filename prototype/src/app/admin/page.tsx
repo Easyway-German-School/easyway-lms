@@ -22,7 +22,7 @@ type Overview = {
     branches: number;
     lecturers: number;
     materials: number;
-    threads: number;
+    messages: number;
     comments: number;
     examRegistrations: number;
     byLevel: Record<string, number>;
@@ -868,7 +868,7 @@ export default function AdminHomePage() {
                     { label: "Branches", value: data.school.branches, href: to("/admin/branches") },
                     { label: "Materials", value: data.school.materials, href: to("/admin/materials", "/admin/courses") },
                     { label: "Private students", value: data.school.privateStudents, href: focusHref("private") },
-                    { label: "Community threads", value: data.school.threads, href: to("/admin/community") },
+                    { label: "Community messages", value: data.school.messages, href: to("/admin/community") },
                     { label: "Enquiries", value: data.leads.total, href: to("/admin/leads") },
                   ].map((item) =>
                     item.href ? (

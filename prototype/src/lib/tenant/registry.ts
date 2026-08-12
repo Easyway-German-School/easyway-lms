@@ -77,8 +77,7 @@ export const TENANT_OWNED_MODELS = [
   "Space",
   "Channel",
   "ChannelRead",
-  "Thread",
-  "Comment",
+  "Message",
   "ClassRecording",
   "VideoProgress",
   /**

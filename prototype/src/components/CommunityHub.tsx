@@ -1,11 +1,40 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { usePushNotifications } from "@/lib/use-push";
-import { ArrowLeftIcon, BellIcon, BellOffIcon, BranchIcon, CommunityIcon, PinIcon } from "@/components/icons";
+import {
+  ArrowLeftIcon,
+  BellIcon,
+  BellOffIcon,
+  BranchIcon,
+  CommunityIcon,
+  SendIcon,
+} from "@/components/icons";
 
 /**
- * Discord-style channel rail + Reddit-style threads.
+ * THE COHORT'S GROUP CHAT.
+ *
+ * This replaced a Discord-style channel rail wrapped around Reddit-style
+ * threads, and the reason is that almost nobody posted. A forum asks you to
+ * choose a title and a place before it lets you speak, and that single demand is
+ * enough to stop a nervous student asking whether there was homework. Every one
+ * of these students already runs a group chat on their phone all day. So the
+ * room is now a running conversation in time order, and the only thing between
+ * a student and saying something is a text box.
+ *
+ * Three decisions worth keeping:
+ *
+ *   - The channel rail survives, because a cohort genuinely has more than one
+ *     conversation and burying the tutor's announcements under chat would be
+ *     worse than the forum was. Announcements is read-only for students.
+ *   - Sending is OPTIMISTIC. On the connections this school actually runs on,
+ *     waiting for a round trip before your own words appear makes the app feel
+ *     broken, and people press send twice.
+ *   - New messages arrive by POLLING while the room is open. Not elegant; see
+ *     the note in /api/portal/updates for why a held-open stream is the wrong
+ *     shape on Vercel. It backs off hard when the tab is hidden, which is what
+ *     keeps it cheap.
  *
  * Rendered both full-page (/community) and inside the floating launcher panel,
  * so it takes a `compact` flag rather than duplicating the UI.
@@ -18,641 +47,706 @@ type Channel = {
   description: string | null;
   kind: string;
   unreadCount: number;
-  _count: { threads: number };
+  _count: { messages: number };
 };
 
 type Space = {
   id: string;
   name: string;
   level: string;
+  sessionSlot: string;
   description: string | null;
   branch: { id: string; name: string };
   channels: Channel[];
 };
 
-type Author = { id: string; name: string | null; role: string };
-
-type Thread = {
-  id: string;
-  title: string;
-  body: string;
-  pinned: boolean;
-  createdAt: string;
-  lastActivityAt: string;
-  author: Author;
-  _count: { comments: number };
-  optimistic?: boolean;
-};
-
-type CommentNode = {
+type ChatMessage = {
   id: string;
   body: string;
+  hidden: boolean;
+  hiddenReason: string | null;
+  mine: boolean;
   createdAt: string;
-  author: Author;
-  children: CommentNode[];
-  optimistic?: boolean;
+  editedAt: string | null;
+  attachment: { url: string; type: string | null; name: string | null } | null;
+  author: { id: string; name: string; role: string };
+  replyTo: { id: string; author: string; body: string; hidden: boolean } | null;
+  /** Set on a bubble we have drawn but the server has not confirmed. */
+  pending?: boolean;
+  failed?: boolean;
 };
+
+/** How often an open room asks for new messages. */
+const POLL_ACTIVE_MS = 4_000;
+/** And how often when the tab is in the background. */
+const POLL_HIDDEN_MS = 30_000;
 
 function initials(name: string | null) {
   if (!name) return "?";
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
 }
 
-function timeAgo(iso: string) {
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-  return new Date(iso).toLocaleDateString();
+/**
+ * A colour per person, derived from their id.
+ *
+ * The point is not decoration. In a group chat the thing you do fifty times a
+ * minute is work out who is talking, and a stable colour does that faster than
+ * reading a name — which is exactly why every messaging app does it.
+ */
+const NAME_COLOURS = [
+  "text-rose-500",
+  "text-amber-600",
+  "text-emerald-600",
+  "text-sky-600",
+  "text-violet-600",
+  "text-fuchsia-600",
+  "text-teal-600",
+];
+
+function colourFor(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return NAME_COLOURS[hash % NAME_COLOURS.length];
 }
 
-function RoleBadge({ role }: { role: string }) {
-  const r = String(role || "").toLowerCase();
-  if (r !== "lecturer" && r !== "admin") return null;
-  return (
-    <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">
-      {r === "admin" ? "Staff" : "Tutor"}
-    </span>
-  );
+function timeOf(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function Avatar({ name, size = 32 }: { name: string | null; size?: number }) {
-  return (
-    <div
-      className="flex shrink-0 items-center justify-center rounded-full bg-[var(--accent-strong)] font-semibold text-white"
-      style={{ width: size, height: size, fontSize: size * 0.36 }}
-      aria-hidden="true"
-    >
-      {initials(name)}
-    </div>
-  );
+/** "Today" / "Yesterday" / a date — the separator every chat has. */
+function dayLabel(iso: string) {
+  const date = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 86_400_000);
+  const same = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (same(date, today)) return "Today";
+  if (same(date, yesterday)) return "Yesterday";
+  return date.toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" });
 }
 
-function Skeleton({ lines = 3 }: { lines?: number }) {
-  return (
-    <div className="space-y-3" aria-hidden="true">
-      {Array.from({ length: lines }).map((_, i) => (
-        <div key={i} className="animate-pulse rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div className="h-3 w-1/3 rounded bg-[var(--surface-alt)]" />
-          <div className="mt-3 h-3 w-4/5 rounded bg-[var(--surface-alt)]" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function CommentThread({
-  nodes,
-  depth = 0,
-  onReply,
-  replyingTo,
-  replyText,
-  setReplyText,
-  submitReply,
-  busy,
-}: {
-  nodes: CommentNode[];
-  depth?: number;
-  onReply: (id: string | null) => void;
-  replyingTo: string | null;
-  replyText: string;
-  setReplyText: (v: string) => void;
-  submitReply: (parentId: string | null) => void;
-  busy: boolean;
-}) {
-  return (
-    <div className={depth > 0 ? "mt-3 space-y-3 border-l-2 border-[var(--border)] pl-4" : "space-y-3"}>
-      {nodes.map((node) => (
-        <div key={node.id} className={node.optimistic ? "opacity-60" : ""}>
-          <div className="flex gap-3">
-            <Avatar name={node.author.name} size={28} />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold">{node.author.name ?? "Member"}</span>
-                <RoleBadge role={node.author.role} />
-                <span className="text-xs text-[var(--muted)]">{timeAgo(node.createdAt)}</span>
-              </div>
-              <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{node.body}</p>
-              {depth < 4 && (
-                <button
-                  onClick={() => onReply(replyingTo === node.id ? null : node.id)}
-                  className="mt-1 text-xs font-semibold text-[var(--accent)] hover:underline"
-                >
-                  {replyingTo === node.id ? "Cancel" : "Reply"}
-                </button>
-              )}
-
-              {replyingTo === node.id && (
-                <div className="mt-2 flex gap-2">
-                  <input
-                    autoFocus
-                    value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitReply(node.id); } }}
-                    placeholder="Write a reply…"
-                    className="flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm outline-none focus:border-[var(--accent)]"
-                  />
-                  <button
-                    onClick={() => submitReply(node.id)}
-                    disabled={busy || !replyText.trim()}
-                    className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                  >
-                    Send
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-          {node.children.length > 0 && (
-            <CommentThread
-              nodes={node.children}
-              depth={depth + 1}
-              onReply={onReply}
-              replyingTo={replyingTo}
-              replyText={replyText}
-              setReplyText={setReplyText}
-              submitReply={submitReply}
-              busy={busy}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
+const SLOT_LABEL: Record<string, string> = {
+  morning: "Morning",
+  afternoon: "Afternoon",
+  evening: "Evening",
+};
 
 /**
- * Opt-in for lock-screen notifications. Sits at the foot of the channel rail
- * rather than interrupting on load — permission is only ever asked for on a
- * deliberate tap, because a reflexive "Block" cannot be undone from the app.
+ * The Suspense boundary is required, not decorative: `useSearchParams` opts the
+ * tree into client rendering and Next refuses to infer the boundary. This
+ * component is mounted from the floating launcher inside all three portal
+ * shells as well as from /community, so putting it here means no caller has to
+ * remember.
  */
-function NotifyToggle({ compact }: { compact: boolean }) {
-  const { supported, enabled, busy, enable, disable, error } = usePushNotifications();
-  if (!supported) return null;
-
+export default function CommunityHub({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="mt-3 border-t border-[var(--border)] px-2 pt-3">
-      <button
-        type="button"
-        onClick={enabled ? disable : enable}
-        disabled={busy}
-        className={`flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold transition disabled:opacity-50 ${
-          enabled ? "text-[var(--accent)]" : "text-[var(--muted)] hover:bg-[var(--surface)]"
-        }`}
-      >
-        {enabled ? <BellIcon className="h-3.5 w-3.5 shrink-0" /> : <BellOffIcon className="h-3.5 w-3.5 shrink-0" />}
-        <span className="truncate">
-          {busy ? "One moment…" : enabled ? "Notifications on" : compact ? "Notify me" : "Turn on notifications"}
-        </span>
-      </button>
-      {error && <p className="px-2 pb-1 text-[10px] leading-4 text-red-500">{error}</p>}
-    </div>
+    <Suspense
+      fallback={
+        <div className="grid h-64 place-items-center rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-sm text-[var(--muted)]">
+          Opening your class group…
+        </div>
+      }
+    >
+      <CommunityHubInner compact={compact} />
+    </Suspense>
   );
 }
 
-export default function CommunityHub({ compact = false }: { compact?: boolean }) {
+function CommunityHubInner({ compact = false }: { compact?: boolean }) {
+  const searchParams = useSearchParams();
+  const deepLinkChannel = searchParams?.get("channel") ?? null;
+
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [isStaff, setIsStaff] = useState(false);
-  const [scopeNote, setScopeNote] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [canPost, setCanPost] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingRoom, setLoadingRoom] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showRail, setShowRail] = useState(!compact);
 
-  const [spaceId, setSpaceId] = useState<string | null>(null);
-  const [channelId, setChannelId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  /** Newest confirmed message id — the cursor the poll asks from. */
+  const cursorRef = useRef<string | null>(null);
 
-  const [threads, setThreads] = useState<Thread[]>([]);
-  const [threadsLoading, setThreadsLoading] = useState(false);
-  const [openThreadId, setOpenThreadId] = useState<string | null>(null);
-  const [comments, setComments] = useState<CommentNode[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const push = usePushNotifications();
 
-  const [composerOpen, setComposerOpen] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newBody, setNewBody] = useState("");
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [replyText, setReplyText] = useState("");
-  const [rootReply, setRootReply] = useState("");
-  const [busy, setBusy] = useState(false);
-  const listRef = useRef<HTMLDivElement>(null);
-
-  // Load the spaces this member is allowed to see.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/community/spaces", { cache: "no-store" });
-        if (!res.ok) throw new Error("Unable to load your community");
-        const data = await res.json();
-        if (cancelled) return;
-
-        setSpaces(data.spaces ?? []);
-        setIsStaff(Boolean(data.isStaff));
-        if ((data.spaces ?? []).length === 0) {
-          setScopeNote(
-            data.scope?.branchId
-              ? "No community has been set up for your level yet."
-              : "Your branch hasn't been set, so we can't place you in a community yet. Please contact your branch coordinator.",
-          );
-        }
-        const first = (data.spaces ?? [])[0];
-        if (first) {
-          setSpaceId(first.id);
-          setChannelId(first.channels[0]?.id ?? null);
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Something went wrong");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const activeSpace = useMemo(() => spaces.find((s) => s.id === spaceId) ?? null, [spaces, spaceId]);
-  const activeChannel = useMemo(
-    () => activeSpace?.channels.find((c) => c.id === channelId) ?? null,
-    [activeSpace, channelId],
+  const channels = useMemo(() => spaces.flatMap((space) => space.channels), [spaces]);
+  const active = useMemo(() => channels.find((c) => c.id === activeId) ?? null, [channels, activeId]);
+  const activeSpace = useMemo(
+    () => spaces.find((space) => space.channels.some((c) => c.id === activeId)) ?? null,
+    [spaces, activeId],
   );
 
-  const loadThreads = useCallback(async (id: string) => {
-    setThreadsLoading(true);
-    setOpenThreadId(null);
+  /* ---------------------------------------------------------------- spaces */
+
+  const loadSpaces = useCallback(async () => {
     try {
-      const res = await fetch(`/api/community/threads?channelId=${encodeURIComponent(id)}`, {
-        cache: "no-store",
-      });
+      const res = await fetch("/api/community/spaces", { cache: "no-store" });
       const data = await res.json();
-      setThreads(res.ok ? data.threads ?? [] : []);
-      if (!res.ok) setError(data.error ?? "Unable to load this channel");
-      else setError(null);
-    } catch {
-      setError("Unable to load this channel");
-    } finally {
-      setThreadsLoading(false);
+      if (!res.ok) throw new Error(data.error || "Could not load your community");
+
+      const list: Space[] = data.spaces ?? [];
+      setSpaces(list);
+      setIsStaff(Boolean(data.isStaff));
+
+      setActiveId((current) => {
+        if (current) return current;
+        const all = list.flatMap((space) => space.channels);
+        // A notification opens the room it came from; otherwise land in the
+        // room people actually talk in rather than the announcement board.
+        const wanted = deepLinkChannel ? all.find((c) => c.id === deepLinkChannel) : undefined;
+        return (wanted ?? all.find((c) => c.slug === "general") ?? all[0])?.id ?? null;
+      });
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load your community");
     }
-  }, []);
+  }, [deepLinkChannel]);
 
-  useEffect(() => { if (channelId) loadThreads(channelId); }, [channelId, loadThreads]);
-
-  // Mirror of `spaces` for effects that need to read it without depending on
-  // it — depending on it directly would re-run them on every badge update.
-  const spacesRef = useRef(spaces);
-  useEffect(() => { spacesRef.current = spaces; }, [spaces]);
-
-  // Opening a channel clears its badge. Zeroed locally first so the red dot
-  // vanishes on tap rather than after a round-trip; the server call just makes
-  // it stick. The event tells the floating launcher to refresh its own count.
   useEffect(() => {
-    if (!channelId) return;
+    void loadSpaces();
+  }, [loadSpaces]);
 
-    // Nothing unread means nothing to clear. Skipping the write matters: every
-    // POST here touches the SQLite file, and simply viewing a channel should
-    // not be a database write.
-    const current = spacesRef.current
-      .flatMap((space) => space.channels)
-      .find((c) => c.id === channelId);
-    if (!current || current.unreadCount === 0) return;
+  /* -------------------------------------------------------------- messages */
 
-    setSpaces((prev) =>
-      prev.map((space) => ({
+  const markRead = useCallback(async (channelId: string) => {
+    await fetch("/api/community/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channelId }),
+    }).catch(() => {});
+    setSpaces((current) =>
+      current.map((space) => ({
         ...space,
         channels: space.channels.map((c) => (c.id === channelId ? { ...c, unreadCount: 0 } : c)),
       })),
     );
+  }, []);
 
-    fetch("/api/community/read", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channelId }),
-    })
-      .then(() => window.dispatchEvent(new Event("easyway:unread-changed")))
-      .catch(() => {
-        /* Badge state is not worth surfacing an error for. */
-      });
-  }, [channelId]);
+  // Opening a room: newest page, jump to the bottom, clear the badge.
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
 
-  async function openThread(id: string) {
-    setOpenThreadId(id);
-    setDetailLoading(true);
-    setComments([]);
-    try {
-      const res = await fetch(`/api/community/threads/${id}`);
-      const data = await res.json();
-      if (res.ok) setComments(data.comments ?? []);
-    } finally {
-      setDetailLoading(false);
-    }
-  }
+    setLoadingRoom(true);
+    setMessages([]);
+    setReplyTo(null);
+    cursorRef.current = null;
 
-  async function createThread() {
-    if (!channelId || !newTitle.trim() || !newBody.trim()) return;
-    setBusy(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/community/messages?channelId=${activeId}`, { cache: "no-store" });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error(data.error || "Could not open this room");
 
-    // Optimistic: show it immediately, reconcile when the server answers.
-    const temp: Thread = {
-      id: `temp-${Date.now()}`,
-      title: newTitle.trim(),
-      body: newBody.trim(),
-      pinned: false,
-      createdAt: new Date().toISOString(),
-      lastActivityAt: new Date().toISOString(),
-      author: { id: "me", name: "You", role: "student" },
-      _count: { comments: 0 },
-      optimistic: true,
+        const list: ChatMessage[] = data.messages ?? [];
+        setMessages(list);
+        setCanPost(data.canPost !== false);
+        setHasMore(Boolean(data.hasMore));
+        cursorRef.current = list.length ? list[list.length - 1].id : null;
+        void markRead(activeId);
+      } catch (roomError) {
+        if (!cancelled) setError(roomError instanceof Error ? roomError.message : "Could not open this room");
+      } finally {
+        if (!cancelled) setLoadingRoom(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
     };
-    setThreads((prev) => [temp, ...prev]);
-    const titleSent = newTitle, bodySent = newBody;
-    setNewTitle(""); setNewBody(""); setComposerOpen(false);
-    listRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [activeId, markRead]);
+
+  /**
+   * The poll.
+   *
+   * Asks only for what arrived after the newest message we hold, so the answer
+   * is an empty array almost every time. It reschedules itself rather than
+   * running on a fixed interval, which stops a slow response stacking requests
+   * on a bad connection — the exact condition under which stacking hurts most.
+   */
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    async function tick() {
+      if (cancelled) return;
+      try {
+        const cursor = cursorRef.current;
+        const query = cursor ? `&after=${encodeURIComponent(cursor)}` : "";
+        const res = await fetch(`/api/community/messages?channelId=${activeId}${query}`, { cache: "no-store" });
+        const data = await res.json();
+
+        if (!cancelled && res.ok && (data.messages?.length ?? 0) > 0) {
+          const incoming: ChatMessage[] = data.messages;
+          setMessages((current) => {
+            // The server's copy of our own optimistic bubble arrives here too.
+            const known = new Set(current.map((m) => m.id));
+            const fresh = incoming.filter((m) => !known.has(m.id));
+            return fresh.length ? [...current, ...fresh] : current;
+          });
+          cursorRef.current = incoming[incoming.length - 1].id;
+          if (document.visibilityState === "visible") void markRead(activeId!);
+        }
+      } catch {
+        // A failed poll is a blip. The next one is four seconds away.
+      } finally {
+        if (!cancelled) {
+          timer = window.setTimeout(
+            tick,
+            document.visibilityState === "visible" ? POLL_ACTIVE_MS : POLL_HIDDEN_MS,
+          );
+        }
+      }
+    }
+
+    timer = window.setTimeout(tick, POLL_ACTIVE_MS);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [activeId, markRead]);
+
+  /**
+   * Follow the conversation, but only if the reader was already at the bottom.
+   *
+   * Yanking somebody down to a new message while they are reading back through
+   * yesterday is the single most irritating thing a chat can do.
+   */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+    if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages]);
+
+  const loadOlder = useCallback(async () => {
+    if (!activeId || !messages.length || loadingOlder) return;
+    setLoadingOlder(true);
+    const el = scrollRef.current;
+    const previousHeight = el?.scrollHeight ?? 0;
 
     try {
-      const res = await fetch("/api/community/threads", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channelId, title: titleSent, body: bodySent }),
-      });
+      const res = await fetch(
+        `/api/community/messages?channelId=${activeId}&before=${encodeURIComponent(messages[0].id)}`,
+        { cache: "no-store" },
+      );
       const data = await res.json();
       if (res.ok) {
-        setThreads((prev) => prev.map((t) => (t.id === temp.id ? data.thread : t)));
-      } else {
-        setThreads((prev) => prev.filter((t) => t.id !== temp.id));
-        setError(data.error ?? "Could not post your thread");
+        setMessages((current) => [...(data.messages ?? []), ...current]);
+        setHasMore(Boolean(data.hasMore));
+        // Hold the reader's place: without this, prepending jumps them to the top.
+        requestAnimationFrame(() => {
+          if (el) el.scrollTop = el.scrollHeight - previousHeight;
+        });
       }
     } catch {
-      setThreads((prev) => prev.filter((t) => t.id !== temp.id));
-      setError("Could not post your thread");
+      // Nothing to say — the button is still there to try again.
     } finally {
-      setBusy(false);
+      setLoadingOlder(false);
     }
-  }
+  }, [activeId, messages, loadingOlder]);
 
-  async function submitReply(parentId: string | null) {
-    const text = parentId ? replyText : rootReply;
-    if (!openThreadId || !text.trim()) return;
-    setBusy(true);
+  /* ----------------------------------------------------------------- send */
 
-    const temp: CommentNode = {
-      id: `temp-${Date.now()}`,
-      body: text.trim(),
-      createdAt: new Date().toISOString(),
-      author: { id: "me", name: "You", role: "student" },
-      children: [],
-      optimistic: true,
-    };
+  const send = useCallback(async () => {
+    const text = draft.trim();
+    if (!text || !activeId) return;
 
-    const graft = (nodes: CommentNode[]): CommentNode[] =>
-      nodes.map((n) =>
-        n.id === parentId ? { ...n, children: [...n.children, temp] } : { ...n, children: graft(n.children) },
-      );
-    setComments((prev) => (parentId ? graft(prev) : [...prev, temp]));
-    if (parentId) { setReplyText(""); setReplyingTo(null); } else setRootReply("");
+    const tempId = `pending-${Date.now()}`;
+    const quoted = replyTo;
+
+    setMessages((current) => [
+      ...current,
+      {
+        id: tempId,
+        body: text,
+        hidden: false,
+        hiddenReason: null,
+        mine: true,
+        createdAt: new Date().toISOString(),
+        editedAt: null,
+        attachment: null,
+        author: { id: "me", name: "You", role: "student" },
+        replyTo: quoted
+          ? { id: quoted.id, author: quoted.author.name, body: quoted.body.slice(0, 180), hidden: false }
+          : null,
+        pending: true,
+      },
+    ]);
+    setDraft("");
+    setReplyTo(null);
 
     try {
-      const res = await fetch("/api/community/comments", {
+      const res = await fetch("/api/community/messages", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ threadId: openThreadId, body: temp.body, parentId }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: activeId, body: text, replyToId: quoted?.id ?? null }),
       });
-      if (res.ok) {
-        await openThread(openThreadId);
-        setThreads((prev) =>
-          prev.map((t) => (t.id === openThreadId ? { ...t, _count: { comments: t._count.comments + 1 } } : t)),
-        );
-      }
-    } finally {
-      setBusy(false);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Message not sent");
+
+      // Swap the placeholder for the real row, which carries the id the poll
+      // needs as its cursor.
+      setMessages((current) => current.map((m) => (m.id === tempId ? data.message : m)));
+      cursorRef.current = data.message.id;
+    } catch (sendError) {
+      /**
+       * A failed message stays on screen, marked, with the text recoverable.
+       * Silently dropping it is how somebody discovers an hour later that the
+       * question they asked was never asked.
+       */
+      setMessages((current) => current.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)));
+      setError(sendError instanceof Error ? sendError.message : "Message not sent");
     }
-  }
+  }, [draft, activeId, replyTo]);
 
-  if (loading) {
-    return <div className={compact ? "p-4" : "p-8"}><Skeleton lines={4} /></div>;
-  }
+  const remove = useCallback(async (message: ChatMessage) => {
+    if (!confirm(message.mine ? "Delete your message?" : "Remove this message for everyone?")) return;
+    const res = await fetch(`/api/community/messages/${message.id}`, { method: "DELETE" });
+    if (res.ok) {
+      setMessages((current) =>
+        current.map((m) =>
+          m.id === message.id
+            ? { ...m, hidden: true, body: isStaff ? m.body : "", hiddenReason: "Removed" }
+            : m,
+        ),
+      );
+    }
+  }, [isStaff]);
 
-  if (spaces.length === 0) {
+  /* ----------------------------------------------------------------- view */
+
+  if (error && !spaces.length) {
     return (
-      <div className={`${compact ? "p-6" : "p-10"} text-center`}>
-        <BranchIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
-        <h3 className="mt-3 text-lg font-semibold">No community yet</h3>
-        <p className="mt-2 text-sm text-[var(--muted)]">{scopeNote ?? error ?? "Nothing to show."}</p>
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+        <CommunityIcon className="mx-auto h-8 w-8 text-[var(--muted)]" />
+        <p className="mt-3 text-sm font-semibold text-[var(--foreground)]">{error}</p>
       </div>
     );
   }
 
-  const openThreadData = threads.find((t) => t.id === openThreadId) ?? null;
-
-  // Mirrors the server rule in /api/community/threads: announcement channels
-  // are broadcast-only, so students get no composer there.
-  const canPost = !(activeChannel?.kind === "announcement" && !isStaff);
+  if (!spaces.length) {
+    return (
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+        <CommunityIcon className="mx-auto h-8 w-8 text-[var(--muted)]" />
+        <p className="mt-3 text-sm font-semibold text-[var(--foreground)]">Your class group is being set up</p>
+        <p className="mx-auto mt-1.5 max-w-sm text-sm text-[var(--muted)]">
+          Once the office has confirmed your branch, level and class time, your group opens here automatically.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    // In compact mode the hub floats over a page, so it has to stay inside the
-    // viewport on a laptop or a phone rather than running off the top.
-    <div className={`flex flex-col sm:flex-row ${compact ? "h-[min(32rem,60vh)]" : "h-[calc(100vh-13rem)] min-h-[34rem]"} overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]`}>
-      {/* Channel rail */}
-      <aside className={`${compact ? "w-40" : "sm:w-64 w-full"} shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-alt)] p-3`}>
-        {isStaff && spaces.length > 1 && (
-          <select
-            value={spaceId ?? ""}
-            onChange={(e) => {
-              const s = spaces.find((x) => x.id === e.target.value);
-              setSpaceId(e.target.value);
-              setChannelId(s?.channels[0]?.id ?? null);
-            }}
-            className="mb-3 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-xs font-semibold outline-none"
-          >
-            {spaces.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        )}
+    <div
+      className={`flex overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] ${
+        compact ? "h-[30rem]" : "h-[calc(100vh-16rem)] min-h-[32rem]"
+      }`}
+    >
+      {/* ------------------------------------------------------- channel rail */}
+      <aside
+        className={`${
+          showRail ? "flex" : "hidden"
+        } w-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface-alt)] sm:flex sm:w-64`}
+      >
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {spaces.map((space) => (
+            <div key={space.id} className="mb-3">
+              <div className="px-2 py-1.5">
+                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">
+                  <BranchIcon className="h-3 w-3" />
+                  {space.branch?.name}
+                </p>
+                {/*
+                  The sitting is on the label, not implied. Three A1 rooms that
+                  differ only in the time of day are indistinguishable without
+                  it — which is the confusion this whole change exists to end.
+                */}
+                <p className="mt-0.5 text-sm font-semibold text-[var(--foreground)]">
+                  {space.level} · {SLOT_LABEL[space.sessionSlot] ?? space.sessionSlot}
+                </p>
+              </div>
 
-        <div className="px-2 pb-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">
-            {activeSpace?.branch.name}
-          </p>
-          <p className="text-sm font-bold leading-tight">{activeSpace?.level} community</p>
+              {space.channels.map((channel) => {
+                const selected = channel.id === activeId;
+                return (
+                  <button
+                    key={channel.id}
+                    onClick={() => {
+                      setActiveId(channel.id);
+                      if (compact) setShowRail(false);
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition ${
+                      selected
+                        ? "bg-[var(--accent)] font-semibold text-white"
+                        : "text-[var(--foreground)] hover:bg-[var(--surface)]"
+                    }`}
+                  >
+                    <span className={selected ? "text-white/70" : "text-[var(--muted)]"}>#</span>
+                    <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+                    {channel.unreadCount > 0 && !selected ? (
+                      <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold text-white">
+                        {channel.unreadCount > 99 ? "99+" : channel.unreadCount}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
 
-        <nav className="mt-2 space-y-1">
-          {activeSpace?.channels.map((c) => {
-            const active = c.id === channelId;
-            return (
-              <button
-                key={c.id}
-                onClick={() => setChannelId(c.id)}
-                className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm transition ${
-                  active ? "bg-[var(--accent)] font-semibold text-white" : "hover:bg-[var(--surface)]"
-                }`}
-              >
-                <span className={`truncate ${!active && c.unreadCount > 0 ? "font-bold" : ""}`}>
-                  <span className={active ? "text-white/70" : "text-[var(--muted)]"}>#</span> {c.name}
-                </span>
-                {/* Unread wins the slot: a red count is the thing that pulls
-                    someone back in, the plain thread total is just context. */}
-                {c.unreadCount > 0 && !active ? (
-                  <span className="shrink-0 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                    {c.unreadCount > 99 ? "99+" : c.unreadCount}
-                  </span>
-                ) : c._count.threads > 0 ? (
-                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${active ? "bg-white/25 text-white" : "bg-[var(--surface)] text-[var(--muted)]"}`}>
-                    {c._count.threads}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </nav>
-
-        <NotifyToggle compact={compact} />
+        <button
+          onClick={push.enabled ? push.disable : push.enable}
+          disabled={!push.supported || push.busy}
+          className="m-2 flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface)] disabled:opacity-40"
+        >
+          {push.enabled ? <BellOffIcon className="h-3.5 w-3.5" /> : <BellIcon className="h-3.5 w-3.5" />}
+          {push.enabled ? "Mute this device" : "Notify me on this device"}
+        </button>
       </aside>
 
-      {/* Content */}
-      <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-bold">
-              <span className="text-[var(--muted)]">#</span> {activeChannel?.name ?? "Select a channel"}
-            </h2>
-            {activeChannel?.description && !compact && (
-              <p className="truncate text-xs text-[var(--muted)]">{activeChannel.description}</p>
-            )}
+      {/* ------------------------------------------------------------- room */}
+      <section className={`${showRail && compact ? "hidden" : "flex"} min-w-0 flex-1 flex-col sm:flex`}>
+        <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
+          <button
+            onClick={() => setShowRail(true)}
+            aria-label="All channels"
+            className="rounded-lg p-1.5 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] sm:hidden"
+          >
+            <ArrowLeftIcon className="h-4 w-4" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-[var(--foreground)]">
+              # {active?.name ?? "Community"}
+            </p>
+            <p className="truncate text-xs text-[var(--muted)]">
+              {activeSpace
+                ? `${activeSpace.branch?.name} · ${activeSpace.level} · ${
+                    SLOT_LABEL[activeSpace.sessionSlot] ?? activeSpace.sessionSlot
+                  }`
+                : active?.description}
+            </p>
           </div>
-          {openThreadId ? (
-            <button onClick={() => setOpenThreadId(null)} className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--surface-alt)]">
-              <ArrowLeftIcon className="h-3.5 w-3.5" /> Back
-            </button>
-          ) : canPost ? (
-            <button onClick={() => setComposerOpen((v) => !v)} className="shrink-0 rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white">
-              {composerOpen ? "Cancel" : "New post"}
-            </button>
-          ) : (
-            <span className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)]">
-              Tutors only
-            </span>
-          )}
         </header>
 
-        <div ref={listRef} className="flex-1 overflow-y-auto p-4">
-          {/* Composer */}
-          {composerOpen && !openThreadId && (
-            <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-              <input
-                autoFocus
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="Title — what's your question?"
-                className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold outline-none focus:border-[var(--accent)]"
-              />
-              <textarea
-                value={newBody}
-                onChange={(e) => setNewBody(e.target.value)}
-                rows={3}
-                placeholder="Add some detail…"
-                className="mt-2 w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-              />
+        <div ref={scrollRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
+          {hasMore ? (
+            <div className="pb-2 text-center">
               <button
-                onClick={createThread}
-                disabled={busy || !newTitle.trim() || !newBody.trim()}
-                className="mt-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                onClick={loadOlder}
+                disabled={loadingOlder}
+                className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)] disabled:opacity-40"
               >
-                Post
+                {loadingOlder ? "Loading…" : "Load earlier messages"}
               </button>
             </div>
-          )}
+          ) : null}
 
-          {/* Thread detail */}
-          {openThreadId && openThreadData ? (
-            <div>
-              <article className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-                <div className="flex items-center gap-2">
-                  <Avatar name={openThreadData.author.name} size={30} />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">{openThreadData.author.name ?? "Member"}</span>
-                      <RoleBadge role={openThreadData.author.role} />
-                    </div>
-                    <span className="text-xs text-[var(--muted)]">{timeAgo(openThreadData.createdAt)}</span>
-                  </div>
-                </div>
-                <h3 className="mt-3 text-lg font-bold">{openThreadData.title}</h3>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{openThreadData.body}</p>
-              </article>
-
-              <div className="mt-4 flex gap-2">
-                <input
-                  value={rootReply}
-                  onChange={(e) => setRootReply(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitReply(null); } }}
-                  placeholder="Write a reply…"
-                  className="flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm outline-none focus:border-[var(--accent)]"
-                />
-                <button
-                  onClick={() => submitReply(null)}
-                  disabled={busy || !rootReply.trim()}
-                  className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  Send
-                </button>
-              </div>
-
-              <div className="mt-5">
-                {detailLoading ? <Skeleton lines={2} /> : comments.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-[var(--muted)]">No replies yet — be the first.</p>
-                ) : (
-                  <CommentThread
-                    nodes={comments}
-                    onReply={setReplyingTo}
-                    replyingTo={replyingTo}
-                    replyText={replyText}
-                    setReplyText={setReplyText}
-                    submitReply={submitReply}
-                    busy={busy}
-                  />
-                )}
-              </div>
-            </div>
-          ) : threadsLoading ? (
-            <Skeleton lines={3} />
-          ) : threads.length === 0 ? (
-            <div className="py-14 text-center">
-              <CommunityIcon className="mx-auto h-9 w-9 text-[var(--muted)]" />
-              <p className="mt-3 text-sm font-semibold">Nothing here yet</p>
+          {loadingRoom ? (
+            <p className="py-10 text-center text-sm text-[var(--muted)]">Opening the room…</p>
+          ) : messages.length === 0 ? (
+            <div className="py-12 text-center">
+              <CommunityIcon className="mx-auto h-8 w-8 text-[var(--muted)]" />
+              <p className="mt-3 text-sm font-semibold text-[var(--foreground)]">No messages yet</p>
               <p className="mt-1 text-sm text-[var(--muted)]">
-                {canPost
-                  ? `Start the first conversation in #${activeChannel?.name}.`
-                  : "Your tutors will post class news here."}
+                {canPost ? "Say hallo — be the first one in." : "Your tutor will post class news here."}
               </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {threads.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => !t.optimistic && openThread(t.id)}
-                  className={`block w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--accent)] ${t.optimistic ? "opacity-60" : ""}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <Avatar name={t.author.name} size={32} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {t.pinned && <PinIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />}
-                        <span className="truncate text-sm font-bold">{t.title}</span>
-                        <RoleBadge role={t.author.role} />
+            messages.map((message, index) => {
+              const previous = messages[index - 1];
+              const newDay = !previous || dayLabel(previous.createdAt) !== dayLabel(message.createdAt);
+              /**
+               * Consecutive messages from one person lose the repeated name and
+               * avatar. It is what turns a list of records into a conversation,
+               * and it buys back a lot of vertical space on a phone.
+               */
+              const grouped =
+                !newDay &&
+                previous?.author.id === message.author.id &&
+                new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() < 5 * 60_000;
+
+              return (
+                <div key={message.id}>
+                  {newDay ? (
+                    <div className="my-4 flex items-center gap-3">
+                      <span className="h-px flex-1 bg-[var(--border)]" />
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">
+                        {dayLabel(message.createdAt)}
+                      </span>
+                      <span className="h-px flex-1 bg-[var(--border)]" />
+                    </div>
+                  ) : null}
+
+                  <div className={`group flex gap-2 ${message.mine ? "flex-row-reverse" : ""}`}>
+                    {!message.mine ? (
+                      <div className="w-8 shrink-0">
+                        {!grouped ? (
+                          <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--accent-soft)] text-[11px] font-bold text-[var(--accent)]">
+                            {initials(message.author.name)}
+                          </span>
+                        ) : null}
                       </div>
-                      <p className="mt-1 line-clamp-2 text-sm text-[var(--muted)]">{t.body}</p>
-                      <div className="mt-2 flex items-center gap-3 text-xs text-[var(--muted)]">
-                        <span>{t.author.name ?? "Member"}</span>
-                        <span>{timeAgo(t.lastActivityAt)}</span>
-                        <span className="font-semibold text-[var(--accent)]">
-                          {t._count.comments} {t._count.comments === 1 ? "reply" : "replies"}
-                        </span>
+                    ) : null}
+
+                    <div className={`max-w-[78%] min-w-0 ${message.mine ? "items-end" : ""}`}>
+                      {!grouped && !message.mine ? (
+                        <p className="mb-0.5 flex items-center gap-1.5 text-xs font-semibold">
+                          <span className={colourFor(message.author.id)}>{message.author.name}</span>
+                          {message.author.role === "lecturer" || message.author.role === "admin" ? (
+                            <span className="rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                              {message.author.role === "admin" ? "Office" : "Tutor"}
+                            </span>
+                          ) : null}
+                        </p>
+                      ) : null}
+
+                      <div
+                        className={`rounded-2xl px-3 py-2 text-sm leading-6 ${
+                          message.hidden
+                            ? "border border-dashed border-[var(--border)] bg-transparent italic text-[var(--muted)]"
+                            : message.mine
+                              ? "bg-[var(--accent)] text-white"
+                              : "bg-[var(--surface-alt)] text-[var(--foreground)]"
+                        } ${message.failed ? "ring-1 ring-rose-400" : ""} ${message.pending ? "opacity-60" : ""}`}
+                      >
+                        {message.replyTo ? (
+                          <div
+                            className={`mb-1.5 rounded-lg border-l-2 px-2 py-1 text-xs ${
+                              message.mine
+                                ? "border-white/60 bg-white/15 text-white/85"
+                                : "border-[var(--accent)] bg-[var(--surface)] text-[var(--muted)]"
+                            }`}
+                          >
+                            <p className="font-semibold">{message.replyTo.author}</p>
+                            <p className="truncate">
+                              {message.replyTo.hidden ? "Message removed" : message.replyTo.body}
+                            </p>
+                          </div>
+                        ) : null}
+
+                        {message.hidden ? (
+                          <p>{message.hiddenReason || "This message was removed"}</p>
+                        ) : (
+                          <p className="whitespace-pre-wrap break-words">{message.body}</p>
+                        )}
+
+                        {message.attachment ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={message.attachment.url}
+                            alt={message.attachment.name ?? "Attachment"}
+                            className="mt-2 max-h-64 rounded-xl object-cover"
+                          />
+                        ) : null}
+
+                        <p
+                          className={`mt-1 text-[10px] ${
+                            message.mine && !message.hidden ? "text-white/70" : "text-[var(--muted)]"
+                          }`}
+                        >
+                          {timeOf(message.createdAt)}
+                          {message.editedAt ? " · edited" : ""}
+                          {message.pending ? " · sending…" : ""}
+                          {message.failed ? " · not sent" : ""}
+                        </p>
                       </div>
+
+                      {!message.hidden && !message.pending ? (
+                        <div
+                          className={`mt-0.5 flex gap-2 opacity-0 transition group-hover:opacity-100 ${
+                            message.mine ? "justify-end" : ""
+                          }`}
+                        >
+                          <button
+                            onClick={() => {
+                              setReplyTo(message);
+                              composerRef.current?.focus();
+                            }}
+                            className="text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--accent)]"
+                          >
+                            Reply
+                          </button>
+                          {message.mine || isStaff ? (
+                            <button
+                              onClick={() => void remove(message)}
+                              className="text-[11px] font-semibold text-[var(--muted)] hover:text-rose-500"
+                            >
+                              {message.mine ? "Delete" : "Remove"}
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
-                </button>
-              ))}
-            </div>
+                </div>
+              );
+            })
           )}
+          <div ref={bottomRef} />
         </div>
+
+        {/* ------------------------------------------------------- composer */}
+        {canPost ? (
+          <div className="border-t border-[var(--border)] p-3">
+            {replyTo ? (
+              <div className="mb-2 flex items-start gap-2 rounded-xl border-l-2 border-[var(--accent)] bg-[var(--surface-alt)] px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-[var(--accent)]">Replying to {replyTo.author.name}</p>
+                  <p className="truncate text-xs text-[var(--muted)]">{replyTo.body}</p>
+                </div>
+                <button
+                  onClick={() => setReplyTo(null)}
+                  aria-label="Cancel reply"
+                  className="shrink-0 text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : null}
+
+            <div className="flex items-end gap-2">
+              <textarea
+                ref={composerRef}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  // Enter sends, Shift+Enter breaks the line — the convention
+                  // everybody already has in their fingers. Not on a phone,
+                  // where Enter is the only way to get a new line at all.
+                  if (event.key === "Enter" && !event.shiftKey && window.innerWidth >= 640) {
+                    event.preventDefault();
+                    void send();
+                  }
+                }}
+                rows={1}
+                placeholder={`Message #${active?.name ?? ""}`}
+                className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+              />
+              <button
+                onClick={() => void send()}
+                disabled={!draft.trim()}
+                aria-label="Send"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white transition hover:brightness-110 disabled:opacity-30"
+              >
+                <SendIcon className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="border-t border-[var(--border)] px-4 py-3 text-center text-xs text-[var(--muted)]">
+            Only your tutor and the branch office post in this channel.
+          </p>
+        )}
       </section>
     </div>
   );

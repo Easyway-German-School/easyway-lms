@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from '@/components/BrandLogo';
 import NotificationCenter from '@/components/NotificationCenter';
+import PortalUpdates from '@/components/PortalUpdates';
 import SignOutButton from '@/components/SignOutButton';
 import {
   AttendanceIcon,
@@ -445,7 +446,16 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             )}
           </div>
         </div>
+
       </main>
+
+      {/*
+        Message popups, mounted once per shell so they follow the reader onto
+        every page rather than living on the community screen they are about.
+        See PortalUpdates for why the card carries the real message text.
+      */}
+      <PortalUpdates />
+
     </div>
   );
 }

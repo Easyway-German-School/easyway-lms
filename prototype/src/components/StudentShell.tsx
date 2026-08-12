@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
+import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
 import LiveClassCall from "@/components/live/LiveClassCall";
@@ -375,7 +376,15 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         most needs to reach the office, and gating the help button behind the
         thing they need help with is how a paywall turns into a dead end.
       */}
+
       <HelpLauncher />
+
+      {/*
+        Message popups, mounted once per shell so they follow the reader onto
+        every page rather than living on the community screen they are about.
+        See PortalUpdates for why the card carries the real message text.
+      */}
+      <PortalUpdates />
 
       {/* Whatever the queue held back. Bottom left, because the community
           launcher and the theme switch already own the other corner. */}
