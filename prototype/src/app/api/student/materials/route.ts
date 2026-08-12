@@ -46,11 +46,28 @@ export async function GET() {
       );
     }
 
+    /**
+     * MATCH ON THE MATERIAL'S OWN LEVEL AS WELL AS ITS COURSE'S.
+     *
+     * This used to be `course: { level: student.level }` alone, and that is a
+     * relation filter on a NULLABLE relation — so it silently excluded every
+     * material with no course at all. `Material.courseId` became optional when
+     * class recordings arrived (a recording belongs to a level and a date, not
+     * to a course), and the lecturer upload route deliberately allows a null
+     * course for anything that is not a document.
+     *
+     * The result: a tutor uploaded a class video, the row was written with
+     * `level = "A1"` and no course, and it appeared for nobody. On this
+     * database that was four of the eight A1 materials — half of everything at
+     * the level, invisible, with no error anywhere to explain it.
+     *
+     * `/api/student/videos` had this right all along, which is what made the
+     * bug so confusing to look at: the same upload showed on the Watch shelf
+     * and not in Materials. The two queries now agree.
+     */
     const records = await prisma.material.findMany({
       where: {
-        course: {
-          level: student.level,
-        },
+        OR: [{ level: student.level }, { course: { level: student.level } }],
       },
       include: {
         course: {
