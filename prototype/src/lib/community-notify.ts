@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
+import { sendPushToUsers, spaceMemberIds } from "@/lib/push";
 
 /**
  * Telling the room something was said — and the one decision this file exists
@@ -19,14 +20,18 @@ import { notifyInBackground, KIND } from "@/lib/notify";
  *   These get a real Notification row: they belong in the bell, they survive a
  *   closed tab, and they are rare enough to be worth the fan-out.
  *
- *   Ordinary chat — everything else. No rows at all. The popup layer polls
- *   `/api/community/live`, which derives what is new from the read markers that
- *   already exist for the unread badge. That endpoint carries the real message
- *   text, which is what makes the popup a message rather than a notice that a
- *   message happened.
+ *   Ordinary chat — everything else. NO ROWS, BUT STILL A PUSH. The two are
+ *   separable and it took a moment to notice: `sendPushToUsers` talks to the
+ *   Web Push endpoints directly and never touches the Notification table. So a
+ *   student gets their messages on the lock screen exactly as they would from
+ *   WhatsApp, and the bell stays reserved for things worth keeping. Inside the
+ *   portal the popup layer polls `/api/portal/updates`, which derives what is
+ *   new from the read markers that already exist for the unread badge and
+ *   carries the real message text.
  *
- * The result is that a student sees every message pop up while they are in the
- * portal, and finds only the things that actually needed keeping in the bell.
+ * The result is that a student is reached wherever they are — on the page, in
+ * another tab, or with the phone in their pocket — and still finds only the
+ * things that actually needed keeping when they open the bell.
  */
 
 export type ChatAnnouncement = {
@@ -47,6 +52,45 @@ export function previewOf(body: string, hasAttachment: boolean): string {
   return hasAttachment ? "📷 Photo" : "";
 }
 
+/**
+ * How long a room waits before it may buzz a phone again.
+ *
+ * Chat DOES reach the lock screen — it has to, or it loses to WhatsApp, which
+ * is the app it is competing with for the same attention. But a class of forty
+ * mid-conversation produces a message every few seconds, and forty buzzes a
+ * minute is how a student turns notifications off for good and never turns them
+ * back on.
+ *
+ * So a room may buzz at most once in this window, carrying the newest message.
+ * Combined with a `tag` keyed on the channel — which makes the operating system
+ * REPLACE the previous notification rather than stack a new one — the phone
+ * shows one live entry per class group that keeps updating. That is exactly the
+ * behaviour of every messaging app anybody here already uses.
+ *
+ * The counter lives in one server instance's memory, so on serverless the real
+ * rate is somewhat higher than this suggests. That is acceptable: the failure
+ * mode is a second buzz, not a hundred, and the alternative is a round trip to
+ * the database on the hot path of every message sent.
+ */
+const PUSH_QUIET_MS = 45_000;
+const lastPushByChannel = new Map<string, number>();
+
+function mayPush(channelId: string): boolean {
+  const now = Date.now();
+  const last = lastPushByChannel.get(channelId) ?? 0;
+  if (now - last < PUSH_QUIET_MS) return false;
+  lastPushByChannel.set(channelId, now);
+
+  // Cheap sweep so a long-lived instance does not accumulate one entry per
+  // channel forever.
+  if (lastPushByChannel.size > 500) {
+    for (const [id, at] of lastPushByChannel) {
+      if (now - at > PUSH_QUIET_MS * 4) lastPushByChannel.delete(id);
+    }
+  }
+  return true;
+}
+
 export function announceChatMessage(input: ChatAnnouncement): void {
   void (async () => {
     try {
@@ -54,9 +98,34 @@ export function announceChatMessage(input: ChatAnnouncement): void {
         where: { id: input.channelId },
         select: { kind: true, space: { select: { branchId: true, level: true, sessionSlot: true } } },
       });
+      if (!channel) return;
 
-      // Conversation, not event. The polling endpoint handles it; nothing to do.
-      if (!channel || channel.kind !== "announcement") return;
+      /**
+       * ORDINARY CHAT: a push, and no database row.
+       *
+       * This is the split the whole file exists for. The phone still buzzes —
+       * `sendPushToUsers` talks to the Web Push endpoints directly and does not
+       * touch the Notification table — so students get their messages on the
+       * lock screen without the bell filling up with them.
+       *
+       * `spaceMemberIds` resolves the cohort by branch, level AND sitting, so
+       * the buzz reaches exactly the people who can open the room it points at.
+       */
+      if (channel.kind !== "announcement") {
+        if (!mayPush(input.channelId)) return;
+
+        const recipients = await spaceMemberIds(input.spaceId, input.authorId);
+        if (recipients.length === 0) return;
+
+        await sendPushToUsers(recipients, {
+          title: `${input.authorName} · ${input.channelName}`,
+          body: previewOf(input.body, input.hasAttachment),
+          url: `/community?channel=${input.channelId}&message=${input.messageId}`,
+          // One live entry per class group, replaced rather than stacked.
+          tag: `community:${input.channelId}`,
+        });
+        return;
+      }
 
       const space = channel.space;
 

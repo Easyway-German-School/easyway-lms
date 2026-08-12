@@ -3,12 +3,14 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePushNotifications } from "@/lib/use-push";
+import { uploadFile } from "@/lib/upload";
 import {
   ArrowLeftIcon,
   BellIcon,
   BellOffIcon,
   BranchIcon,
   CommunityIcon,
+  ImageIcon,
   SendIcon,
 } from "@/components/icons";
 
@@ -165,12 +167,18 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [draft, setDraft] = useState("");
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [attachment, setAttachment] = useState<{ url: string; type: string | null; name: string | null } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  /** Id of the message being corrected, and the text in its box. */
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showRail, setShowRail] = useState(!compact);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   /** Newest confirmed message id — the cursor the poll asks from. */
   const cursorRef = useRef<string | null>(null);
 
@@ -356,12 +364,47 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
 
   /* ----------------------------------------------------------------- send */
 
+  /**
+   * Attach a picture.
+   *
+   * The file goes to storage BEFORE the message is sent, not with it — the
+   * shared uploader presigns and puts straight to the bucket, which is what
+   * keeps a phone photo off Vercel's 4.5 MB request-body ceiling. So by the
+   * time Send is pressed there is only a URL to post, and the slow part has
+   * already happened while the student was still typing their caption.
+   */
+  const attach = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setError("Pictures only, for now.");
+      return;
+    }
+    // Generous for a phone photo, mean enough to stop somebody posting a video
+    // frame-grab that every classmate then downloads on mobile data.
+    if (file.size > 8 * 1024 * 1024) {
+      setError("That picture is too large — 8 MB is the limit.");
+      return;
+    }
+
+    setUploading(true);
+    setError(null);
+    try {
+      const uploaded = await uploadFile(file, "files");
+      setAttachment({ url: uploaded.url, type: uploaded.contentType, name: uploaded.filename });
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Could not upload that picture");
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
   const send = useCallback(async () => {
     const text = draft.trim();
-    if (!text || !activeId) return;
+    // A picture on its own is a message; the server agrees.
+    if ((!text && !attachment) || !activeId) return;
 
     const tempId = `pending-${Date.now()}`;
     const quoted = replyTo;
+    const picture = attachment;
 
     setMessages((current) => [
       ...current,
@@ -373,7 +416,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
         mine: true,
         createdAt: new Date().toISOString(),
         editedAt: null,
-        attachment: null,
+        attachment: picture,
         author: { id: "me", name: "You", role: "student" },
         replyTo: quoted
           ? { id: quoted.id, author: quoted.author.name, body: quoted.body.slice(0, 180), hidden: false }
@@ -383,12 +426,20 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
     ]);
     setDraft("");
     setReplyTo(null);
+    setAttachment(null);
 
     try {
       const res = await fetch("/api/community/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelId: activeId, body: text, replyToId: quoted?.id ?? null }),
+        body: JSON.stringify({
+          channelId: activeId,
+          body: text,
+          replyToId: quoted?.id ?? null,
+          attachmentUrl: picture?.url ?? null,
+          attachmentType: picture?.type ?? null,
+          attachmentName: picture?.name ?? null,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Message not sent");
@@ -406,7 +457,41 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
       setMessages((current) => current.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)));
       setError(sendError instanceof Error ? sendError.message : "Message not sent");
     }
-  }, [draft, activeId, replyTo]);
+  }, [draft, activeId, replyTo, attachment]);
+
+  /**
+   * Editing, and why it is optimistic in one direction only.
+   *
+   * The new text is shown immediately because that is what makes a correction
+   * feel like a correction rather than a request. But if the server refuses —
+   * the message was hidden while the box was open, most likely — the ORIGINAL
+   * comes back, not the attempt. Leaving the failed edit on screen would let
+   * somebody believe they had fixed a wrong room number when they had not.
+   */
+  const saveEdit = useCallback(async () => {
+    const target = editing;
+    const text = editDraft.trim();
+    if (!target || !text) return;
+
+    const original = messages.find((m) => m.id === target)?.body ?? "";
+    setMessages((current) =>
+      current.map((m) => (m.id === target ? { ...m, body: text, editedAt: new Date().toISOString() } : m)),
+    );
+    setEditing(null);
+    setEditDraft("");
+
+    try {
+      const res = await fetch(`/api/community/messages/${target}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: text }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not save that edit");
+    } catch (editError) {
+      setMessages((current) => current.map((m) => (m.id === target ? { ...m, body: original } : m)));
+      setError(editError instanceof Error ? editError.message : "Could not save that edit");
+    }
+  }, [editing, editDraft, messages]);
 
   const remove = useCallback(async (message: ChatMessage) => {
     if (!confirm(message.mine ? "Delete your message?" : "Remove this message for everyone?")) return;
@@ -636,6 +721,34 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
 
                         {message.hidden ? (
                           <p>{message.hiddenReason || "This message was removed"}</p>
+                        ) : editing === message.id ? (
+                          /*
+                            The correction happens in place, inside the bubble
+                            it belongs to. Moving the text down to the composer
+                            would put it a long way from the thing being fixed
+                            and leave the reader unsure which message they were
+                            editing once two look alike.
+                          */
+                          <div className="space-y-1.5">
+                            <textarea
+                              autoFocus
+                              value={editDraft}
+                              onChange={(event) => setEditDraft(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Escape") setEditing(null);
+                                if (event.key === "Enter" && !event.shiftKey) {
+                                  event.preventDefault();
+                                  void saveEdit();
+                                }
+                              }}
+                              rows={2}
+                              className="w-full resize-none rounded-lg bg-black/20 px-2 py-1.5 text-sm text-inherit outline-none ring-1 ring-white/30"
+                            />
+                            <div className="flex gap-2 text-[11px] font-semibold">
+                              <button onClick={() => void saveEdit()} className="underline">Save</button>
+                              <button onClick={() => setEditing(null)} className="opacity-70">Cancel</button>
+                            </div>
+                          </div>
                         ) : (
                           <p className="whitespace-pre-wrap break-words">{message.body}</p>
                         )}
@@ -676,6 +789,23 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                           >
                             Reply
                           </button>
+                          {/*
+                            Only the author, and never staff. A moderator who
+                            could rewrite a student's words would make every
+                            transcript here worthless at the exact moment one
+                            matters — so removal is the only power staff get.
+                          */}
+                          {message.mine ? (
+                            <button
+                              onClick={() => {
+                                setEditing(message.id);
+                                setEditDraft(message.body);
+                              }}
+                              className="text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--accent)]"
+                            >
+                              Edit
+                            </button>
+                          ) : null}
                           {message.mine || isStaff ? (
                             <button
                               onClick={() => void remove(message)}
@@ -714,7 +844,62 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
               </div>
             ) : null}
 
+            {/*
+              The picture is shown BEFORE it is sent, with a way to take it off
+              again. A student photographing homework on a phone gets the wrong
+              shot often enough that committing on selection would be cruel.
+            */}
+            {attachment ? (
+              <div className="mb-2 flex items-center gap-3 rounded-xl bg-[var(--surface-alt)] p-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={attachment.url} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
+                <p className="min-w-0 flex-1 truncate text-xs text-[var(--muted)]">
+                  {attachment.name ?? "Picture"} · ready to send
+                </p>
+                <button
+                  onClick={() => setAttachment(null)}
+                  aria-label="Remove picture"
+                  className="shrink-0 rounded-lg px-2 py-1 text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : null}
+
+            {error ? (
+              <p className="mb-2 flex items-center gap-2 text-xs text-rose-500">
+                {error}
+                <button onClick={() => setError(null)} className="underline">dismiss</button>
+              </p>
+            ) : null}
+
             <div className="flex items-end gap-2">
+              {/*
+                `capture` is deliberately absent. On a phone this offers both the
+                camera and the gallery; forcing the camera would block the very
+                common case of sending a photo taken five minutes earlier.
+              */}
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  // Reset first, so picking the same file twice still fires.
+                  event.target.value = "";
+                  if (file) void attach(file);
+                }}
+              />
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                aria-label="Attach a picture"
+                title="Attach a picture"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] disabled:opacity-40"
+              >
+                <ImageIcon className="h-5 w-5" />
+              </button>
               <textarea
                 ref={composerRef}
                 value={draft}
@@ -729,12 +914,16 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                   }
                 }}
                 rows={1}
-                placeholder={`Message #${active?.name ?? ""}`}
+                placeholder={uploading ? "Uploading your picture…" : `Message #${active?.name ?? ""}`}
                 className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
               />
               <button
                 onClick={() => void send()}
-                disabled={!draft.trim()}
+                // A picture with no caption is a perfectly good message, so the
+                // button lives off either one. It stays down while the upload
+                // is in flight, because sending then would post the caption
+                // without the photograph it was written about.
+                disabled={uploading || (!draft.trim() && !attachment)}
                 aria-label="Send"
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white transition hover:brightness-110 disabled:opacity-30"
               >

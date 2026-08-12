@@ -79,19 +79,28 @@ export async function sendPushToUsers(userIds: string[], payload: PushPayload) {
 }
 
 /**
- * Everyone who belongs to a space: the students at that branch and level.
- * Staff are not included — a lecturer teaching six levels should not get a
- * phone buzz for every message in all of them.
+ * Everyone who belongs to a space: the students in that branch, level AND
+ * sitting.
+ *
+ * The sitting was missing, and it was a real leak rather than an untidiness —
+ * a space is now one cohort, but this resolved its membership by branch and
+ * level alone, so a message in the morning A1 room buzzed the phones of the
+ * afternoon and evening A1 students too. They cannot open the room the push
+ * points at, which is the worst kind of notification: one you are not allowed
+ * to act on.
+ *
+ * Staff are still not included — a lecturer teaching six levels should not get
+ * a phone buzz for every message in all of them.
  */
 export async function spaceMemberIds(spaceId: string, exclude?: string) {
   const space = await prisma.space.findUnique({
     where: { id: spaceId },
-    select: { branchId: true, level: true },
+    select: { branchId: true, level: true, sessionSlot: true },
   });
   if (!space) return [];
 
   const students = await prisma.student.findMany({
-    where: { branchId: space.branchId, level: space.level },
+    where: { branchId: space.branchId, level: space.level, sessionSlot: space.sessionSlot },
     select: { userId: true },
   });
 
