@@ -20,20 +20,39 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const formData = await request.formData();
-    const lessonId = formData.get("lessonId")?.toString();
-    const submission = formData.get("submission")?.toString() || "";
-    const file = formData.get("file") as File | null;
+    /**
+     * JSON, not multipart — and that is the fix, not a refactor.
+     *
+     * This route used to take the file itself and then THROW THE BYTES AWAY,
+     * recording `[File uploaded: homework.pdf]` in a text column and returning
+     * "Assignment submitted successfully". A student handed in their work, was
+     * told it arrived, and there was nothing for the tutor to open. Silent data
+     * loss with a success message on top is the worst failure in the app.
+     *
+     * The browser now sends the file to the bucket first, through the same
+     * presigned path everything else uses, and posts the resulting URL here.
+     * That also gets a real homework scan off Vercel's 4.5 MB request-body
+     * ceiling, which this route would have hit anyway the moment it did try to
+     * store anything.
+     */
+    const body = await request.json().catch(() => ({} as Record<string, unknown>));
+    const lessonId = String(body.lessonId ?? "");
+    const submission = String(body.submission ?? "");
+    const fileUrl = body.fileUrl ? String(body.fileUrl) : null;
+    const fileName = body.fileName ? String(body.fileName) : null;
 
     if (!lessonId) {
       return NextResponse.json({ error: "Lesson ID required" }, { status: 400 });
     }
+    if (!submission.trim() && !fileUrl) {
+      return NextResponse.json({ error: "Write something or attach a file" }, { status: 400 });
+    }
 
     let submissionText = submission;
-    if (file) {
-      const fileName = file.name;
-      // In production, upload to S3 or similar. For now, just record the file info
-      submissionText += `\n\n[File uploaded: ${fileName}]`;
+    if (fileUrl) {
+      // A link the tutor can actually click, rather than a filename that only
+      // proves a file once existed on somebody else's laptop.
+      submissionText += `${submissionText ? "\n\n" : ""}[${fileName ?? "Attached file"}](${fileUrl})`;
     }
 
     // Record as a Grade with type "assignment"

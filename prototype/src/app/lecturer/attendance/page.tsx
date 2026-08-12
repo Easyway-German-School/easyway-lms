@@ -34,6 +34,12 @@ export default function LecturerAttendance() {
   const [studentFilter, setStudentFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  /**
+   * Replaces an `alert()`. A modal dialog for a routine confirmation is a
+   * click the tutor has to dismiss before they can mark the next class, and it
+   * is the one piece of UI that cannot be styled to look like the school's.
+   */
+  const [saved, setSaved] = useState('');
   const [marking, setMarking] = useState(false);
 
   useEffect(() => {
@@ -114,7 +120,8 @@ export default function LecturerAttendance() {
       if (!res.ok) throw new Error('Failed to save attendance');
 
       setError('');
-      alert('Attendance marked successfully!');
+      setSaved(`Attendance saved for ${students.length} student${students.length === 1 ? '' : 's'}.`);
+      window.setTimeout(() => setSaved(''), 4000);
       fetchSessions();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
@@ -155,6 +162,12 @@ export default function LecturerAttendance() {
           {error && (
             <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
               {error}
+            </div>
+          )}
+
+          {saved && (
+            <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
+              {saved}
             </div>
           )}
 

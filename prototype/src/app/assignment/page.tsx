@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import StudentShell from "@/components/StudentShell";
 import AssignmentsPanel from "@/components/AssignmentsPanel";
 import BrandLoader from "@/components/BrandLoader";
+import { uploadFile } from "@/lib/upload";
 import { ArrowLeftIcon, CheckCircleIcon } from "@/components/icons";
 
 function AssignmentContent() {
@@ -20,6 +21,8 @@ function AssignmentContent() {
   const [file, setFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  /** Replaces three `alert()` calls — a browser dialog is not a submission receipt. */
+  const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -51,34 +54,54 @@ function AssignmentContent() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setNotice(null);
+
     if (!submission.trim() && !file) {
-      alert("Please enter text or upload a file");
+      setNotice({ tone: "error", text: "Write your answer or attach a file first." });
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const formData = new FormData();
-      formData.append("lessonId", lessonId || "");
-      formData.append("submission", submission);
+      /**
+       * THE FILE GOES TO THE BUCKET FIRST.
+       *
+       * It used to be posted to /api/assignment/submit as multipart, and that
+       * route recorded the filename and discarded the bytes — the student was
+       * told their homework had arrived and the tutor had nothing to open.
+       * Uploading here, through the same presigned path the rest of the app
+       * uses, is what makes the submission real; it also keeps a scanned page
+       * off Vercel's 4.5 MB request-body limit.
+       */
+      let fileUrl: string | null = null;
+      let fileName: string | null = null;
       if (file) {
-        formData.append("file", file);
+        const uploaded = await uploadFile(file, "files");
+        fileUrl = uploaded.url;
+        fileName = uploaded.filename;
       }
 
       const res = await fetch("/api/assignment/submit", {
         method: "POST",
-        body: formData
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lessonId: lessonId || "", submission, fileUrl, fileName }),
       });
 
-      if (res.ok) {
-        setSubmitted(true);
-        setSubmission("");
-        setFile(null);
-        alert("Assignment submitted successfully!");
-      }
+      const data = await res.json().catch(() => ({}));
+      // The old version only acted on success and said nothing at all on a
+      // failure, so a rejected submission looked exactly like a slow one.
+      if (!res.ok) throw new Error(data.error || "Your work was not submitted.");
+
+      setSubmitted(true);
+      setSubmission("");
+      setFile(null);
+      setNotice({ tone: "success", text: "Handed in. Your tutor will mark it and you will be told when it is back." });
     } catch (error) {
       console.error("Submission error:", error);
-      alert("Failed to submit assignment");
+      setNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Your work was not submitted. Please try again.",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -158,23 +181,41 @@ function AssignmentContent() {
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
                     className="hidden"
                     id="file-input"
-                    accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                    /*
+                      Narrowed to what the upload path will actually accept.
+                      `.doc` and `.txt` were offered here and are not in the
+                      presign allow-list, so choosing one failed at the end of
+                      the wait — after the student believed they had handed in.
+                    */
+                    accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.heic"
                   />
                   <label htmlFor="file-input" className="cursor-pointer">
                     <p className="text-[var(--muted)] font-semibold">
                       {file ? file.name : "Click to upload file"}
                     </p>
-                    <p className="text-xs text-[var(--muted)] mt-1">PDF, DOC, DOCX, TXT, PNG, JPG</p>
+                    <p className="text-xs text-[var(--muted)] mt-1">PDF, DOCX, or a photo of your work</p>
                   </label>
                 </div>
               </div>
+
+              {notice ? (
+                <p
+                  className={`rounded-xl px-4 py-3 text-sm ${
+                    notice.tone === "success"
+                      ? "bg-emerald-500/10 text-emerald-700"
+                      : "bg-rose-500/10 text-rose-700"
+                  }`}
+                >
+                  {notice.text}
+                </p>
+              ) : null}
 
               <button
                 type="submit"
                 disabled={isSubmitting}
                 className="w-full py-3 bg-emerald-500 text-white font-semibold rounded-lg hover:bg-emerald-600 disabled:opacity-60"
               >
-                {isSubmitting ? "Submitting..." : "Submit Assignment"}
+                {isSubmitting ? "Handing in…" : "Submit Assignment"}
               </button>
             </form>
           ) : (
