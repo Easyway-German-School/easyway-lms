@@ -142,3 +142,17 @@ END $$;
 
 DROP TABLE IF EXISTS "Comment";
 DROP TABLE IF EXISTS "Thread";
+
+-- ---------------------------------------------------------------------------
+-- 4. Assignments follow the sitting too
+-- ---------------------------------------------------------------------------
+--
+-- NULL means "every sitting at this level", which is exactly how assignments
+-- behaved before sessions became a boundary — so every existing row keeps
+-- reaching the same students it always did. A tutor who wants to set homework
+-- for their own morning class can now say so.
+
+ALTER TABLE "Assignment" ADD COLUMN IF NOT EXISTS "sessionSlot" TEXT;
+
+CREATE INDEX IF NOT EXISTS "Assignment_level_sessionSlot_idx"
+  ON "Assignment" ("level", "sessionSlot");

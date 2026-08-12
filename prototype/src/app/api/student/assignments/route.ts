@@ -27,7 +27,7 @@ async function currentStudent(userId: string | undefined) {
   if (!userId) return null;
   return prisma.student.findUnique({
     where: { userId },
-    select: { id: true, level: true, branchId: true },
+    select: { id: true, level: true, branchId: true, sessionSlot: true },
   });
 }
 
@@ -41,14 +41,27 @@ async function currentStudent(userId: string | undefined) {
  * The targeting rule: an assignment with NO targets goes to the whole level,
  * which is how every assignment behaved before targeting existed. One or more
  * targets narrows it to exactly those students.
+ *
+ * The sitting works the same way as the branch: NULL means every sitting, so
+ * nothing set before sessions became a boundary changes who it reaches. It
+ * matters because one branch runs the same level three times a day under three
+ * different tutors, and homework from the morning lesson appearing on the
+ * evening class's dashboard is work they were never given.
  */
-function visibleTo(student: { id: string; level: string; branchId: string | null }) {
+function visibleTo(student: {
+  id: string;
+  level: string;
+  branchId: string | null;
+  sessionSlot: string | null;
+}) {
   return {
     published: true,
     level: student.level,
     AND: [
       // Branch-specific assignments plus school-wide ones.
       { OR: [{ branchId: student.branchId }, { branchId: null }] },
+      // This sitting's work plus anything set for the whole level.
+      { OR: [{ sessionSlot: student.sessionSlot }, { sessionSlot: null }] },
       // Untargeted (everyone) or targeted at me.
       { OR: [{ targets: { none: {} } }, { targets: { some: { studentId: student.id } } }] },
     ],

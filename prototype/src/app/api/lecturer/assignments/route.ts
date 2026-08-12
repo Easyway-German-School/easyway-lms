@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { title, description, level, branchId, type, timeLimitMinutes, questions, dueAt, studentIds } = body;
+    const { title, description, level, branchId, sessionSlot, type, timeLimitMinutes, questions, dueAt, studentIds } = body;
 
     if (!title || !level) {
       return NextResponse.json({ error: "title and level are required" }, { status: 400 });
@@ -153,6 +153,15 @@ export async function POST(req: NextRequest) {
         description: typeof description === "string" ? description.trim() || null : null,
         level: normalizedLevel,
         branchId: branchId || null,
+        /**
+         * Empty means every sitting at this level, which is how assignments
+         * behaved before sessions became a boundary. A tutor who teaches the
+         * morning A1 class can now set homework for the morning A1 class,
+         * rather than for three cohorts taught by three different people.
+         */
+        sessionSlot: ["morning", "afternoon", "evening"].includes(String(sessionSlot))
+          ? String(sessionSlot)
+          : null,
         type: kind,
         timeLimitMinutes: kind === "quiz" && timeLimitMinutes ? Number(timeLimitMinutes) : null,
         questions: kind === "quiz" ? (parsed as object[]) : undefined,

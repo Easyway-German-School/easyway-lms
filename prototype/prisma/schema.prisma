@@ -1909,6 +1909,18 @@ model Assignment {
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
+  /**
+   * Which sitting this is for. NULL means every sitting at the level, which is
+   * how assignments behaved before sessions became a real boundary — so
+   * existing rows keep reaching exactly who they always did.
+   *
+   * It matters because a branch runs the same level three times a day with
+   * three different tutors. Homework set by the morning tutor landing on the
+   * evening class's dashboard is the same mistake the community and the live
+   * classroom already had to fix: work from a lesson those students never sat.
+   */
+  sessionSlot String?
+
   lecturerId String?
   lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
 

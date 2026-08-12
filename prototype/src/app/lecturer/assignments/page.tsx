@@ -43,6 +43,8 @@ export default function LecturerAssignmentsPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [level, setLevel] = useState("A1");
+  /** "" = every sitting at this level. See the note in the create route. */
+  const [sessionSlot, setSessionSlot] = useState("");
   const [type, setType] = useState("document");
   const [timeLimit, setTimeLimit] = useState(10);
   const [questions, setQuestions] = useState<QuestionDraft[]>([emptyQuestion()]);
@@ -71,7 +73,7 @@ export default function LecturerAssignmentsPage() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title, description, level, type,
+          title, description, level, sessionSlot, type,
           timeLimitMinutes: type === "quiz" ? timeLimit : null,
           questions: type === "quiz" ? questions.map(draftToQuestion) : undefined,
           studentIds,
@@ -135,6 +137,26 @@ export default function LecturerAssignmentsPage() {
                 <span className="text-xs font-medium text-[var(--foreground-soft)]">Level</span>
                 <select value={level} onChange={(e) => setLevel(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
                   {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </label>
+              {/*
+                The sitting, because a level is not a class. One branch runs the
+                same level morning, afternoon and evening under three different
+                tutors — homework set here would otherwise land on all three
+                cohorts' dashboards, including the two this tutor never teaches.
+                "Every sitting" stays the default so nothing already set changes.
+              */}
+              <label>
+                <span className="text-xs font-medium text-[var(--foreground-soft)]">Class time</span>
+                <select
+                  value={sessionSlot}
+                  onChange={(e) => setSessionSlot(e.target.value)}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                >
+                  <option value="">Every sitting at this level</option>
+                  <option value="morning">Morning only</option>
+                  <option value="afternoon">Afternoon only</option>
+                  <option value="evening">Evening only</option>
                 </select>
               </label>
               <label>
