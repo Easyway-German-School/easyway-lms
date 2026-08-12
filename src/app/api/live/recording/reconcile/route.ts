@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { reconcileRecordings } from "@/lib/class-recorder";
+import { maybeUnscoped } from "@/lib/tenant/context";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +31,18 @@ export async function POST(request: Request) {
   const denied = await authorise(request);
   if (denied) return denied;
 
+  const secret = process.env.CRON_SECRET;
+  const provided = request.headers.get("authorization");
+  const isCron = secret && provided === `Bearer ${secret}`;
+  console.log("[RECONCILE POST] secret set?", Boolean(secret), "provided", provided, "isCron", isCron);
+
   try {
-    const result = await reconcileRecordings();
+    const result = await maybeUnscoped(
+      Boolean(isCron),
+      "recording reconcile runs across every tenant",
+      reconcileRecordings,
+    );
+    console.log("[RECONCILE POST] result", result);
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error("Recording reconcile failed", error);
