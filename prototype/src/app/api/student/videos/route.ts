@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { isPlayableVideo, toPlayableUrl, type LibraryVideo, type VideoKind } from "@/lib/video-library";
+import { reconcileRecordingsSoon } from "@/lib/class-recorder";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,18 @@ export async function GET() {
     if (!student) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
+
+    /**
+     * Opening the shelf is the cue to go and collect anything still in the post.
+     *
+     * Fire-and-forget and throttled — see `reconcileRecordingsSoon`. The class
+     * this student just left finishes encoding a few minutes after the room
+     * empties, and this is the exact moment they come looking for it. Awaiting
+     * it would make every student pay LiveKit's latency for one student's
+     * missing tape, so we do not: the worst case is that it lands on the next
+     * refresh instead of this one.
+     */
+    reconcileRecordingsSoon();
 
     const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const totalPaid = student.payments

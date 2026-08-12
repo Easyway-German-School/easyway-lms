@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRightIcon } from "@/components/icons";
 
 const LENGTH = 6;
@@ -20,9 +20,23 @@ const LENGTH = 6;
  */
 export default function JoinByCode() {
   const router = useRouter();
+  const submittedCode = useSearchParams().get("code");
   const [chars, setChars] = useState<string[]>(() => Array(LENGTH).fill(""));
   const [busy, setBusy] = useState(false);
   const refs = useRef<Array<HTMLInputElement | null>>([]);
+
+  /**
+   * This box stays mounted across its own submit.
+   *
+   * Pushing `/live?code=…` changes the query on the page this component is
+   * already sitting on, so React keeps it — nothing unmounts, and `busy` was
+   * never lowered again. A student whose code turned out to be for a class
+   * that had already finished was left staring at a permanently disabled
+   * "Opening…" button with no way to try the next one.
+   */
+  useEffect(() => {
+    setBusy(false);
+  }, [submittedCode]);
 
   const code = chars.join("");
   const complete = code.length === LENGTH;
@@ -38,6 +52,10 @@ export default function JoinByCode() {
 
   const setAt = useCallback(
     (index: number, raw: string) => {
+      // Touching the code at all means the previous attempt is over. Covers the
+      // one path the effect above cannot see: re-submitting the SAME code, where
+      // the query never changes and so nothing would otherwise lower `busy`.
+      setBusy(false);
       const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
       if (!clean) {
         setChars((current) => {

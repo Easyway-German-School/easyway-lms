@@ -9,7 +9,6 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import BrandLoader from "@/components/BrandLoader";
 import StudentShell from "@/components/StudentShell";
 import LecturerShell from "@/components/LecturerShell";
-import JitsiClassroom from "@/components/live/JitsiClassroom";
 import LiveKitClassroom, { type LeaveOutcome } from "@/components/live/LiveKitClassroom";
 import SessionEndScreen from "@/components/live/SessionEndScreen";
 import PreflightCheck from "@/components/live/PreflightCheck";
@@ -19,7 +18,7 @@ import { BroadcastIcon, CalendarIcon, FilmIcon } from "@/components/icons";
 import { qualityModesFor, qualitySpec, type QualityMode, type RoomRole } from "@/lib/live-classroom";
 
 type LiveSession = {
-  provider: "livekit" | "jitsi";
+  provider: "livekit";
   token: string | null;
   url: string | null;
   roomName: string;
@@ -254,6 +253,12 @@ function LiveClassroomPageInner() {
   const [session, setSession] = useState<LiveSession | null>(null);
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
   const [notLive, setNotLive] = useState<{ message: string; title: string | null } | null>(null);
+  const [misconfigured, setMisconfigured] = useState<{
+    message: string;
+    missing: string[] | null;
+    /** Kept so a tutor meeting this screen still gets the tutor portal around it. */
+    role: RoomRole;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [joined, setJoined] = useState(false);
@@ -272,6 +277,32 @@ function LiveClassroomPageInner() {
     let cancelled = false;
 
     async function load() {
+      /**
+       * EVERY SCREEN THIS PAGE CAN SHOW IS RESET FIRST, AND THAT IS THE WHOLE
+       * REASON JOIN CODES NEVER WORKED.
+       *
+       * `JoinByCode` is rendered in exactly one place: inside `NotLiveScreen`.
+       * So by construction, a student typing a code always has `notLive` set
+       * already. The box pushed `/live?code=…`, this effect re-ran and happily
+       * fetched a perfectly good session — and then the render below hit
+       * `if (notLive) return <NotLiveScreen/>` BEFORE it ever looked at
+       * `session`, because nothing had cleared the stale screen. The student
+       * got "No class in session" over and over while the button sat on
+       * "Opening…", and the code they had been given looked broken.
+       *
+       * A fetch that is about to replace the answer must first throw away the
+       * previous one. Every branch below sets exactly one of these, so leaving
+       * any of them standing means the page renders a stale verdict about a
+       * request that has already been superseded.
+       */
+      setNotLive(null);
+      setError(null);
+      setLockedMessage(null);
+      setMisconfigured(null);
+      setEnded(null);
+      setJoined(false);
+      setLoading(true);
+
       try {
         const query = code ? `?code=${encodeURIComponent(code)}` : "";
         const res = await fetch(`/api/live/session${query}`, { cache: "no-store" });
@@ -295,6 +326,22 @@ function LiveClassroomPageInner() {
         }
         if (res.status === 403) {
           setLockedMessage(data.message || "Pay your deposit to join live classes.");
+          return;
+        }
+        /**
+         * The deployment is missing its classroom credentials.
+         *
+         * Given its own screen rather than folded into the generic error,
+         * because it is the one failure on this page that is not the student's
+         * problem, not the network's, and not fixable by trying again — and
+         * because the staff version of it names the exact variable to set.
+         */
+        if (res.status === 503 && data.misconfigured) {
+          setMisconfigured({
+            message: data.message,
+            missing: data.missing ?? null,
+            role: data.role === "tutor" ? "tutor" : "student",
+          });
           return;
         }
         if (!res.ok) {
@@ -414,6 +461,39 @@ function LiveClassroomPageInner() {
       );
     }
 
+    if (misconfigured) {
+      return (
+        <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-8 text-sm text-rose-600">
+          <p className="text-base font-semibold">The live classroom is not configured</p>
+          <p className="mt-2 leading-6">{misconfigured.message}</p>
+          {misconfigured.missing ? (
+            <ul className="mt-4 space-y-1.5">
+              {misconfigured.missing.map((name) => (
+                <li key={name} className="font-mono text-xs font-semibold">
+                  {name} <span className="font-sans font-normal opacity-70">— not set</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="mt-5 flex flex-wrap gap-2.5">
+            <Link
+              href="/materials?tab=watch"
+              className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white"
+            >
+              <FilmIcon className="h-4 w-4" />
+              Watch the last class
+            </Link>
+            <Link
+              href="/dashboard"
+              className="rounded-full border border-current/30 px-6 py-2.5 text-sm font-semibold"
+            >
+              Back to dashboard
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
     if (lockedMessage) {
       return (
         <div className="rounded-3xl border border-amber-500/40 bg-amber-500/10 p-8 text-sm text-amber-700">
@@ -455,31 +535,40 @@ function LiveClassroomPageInner() {
       return <Lobby session={session} mode={mode} onModeChange={setMode} onJoin={() => setJoined(true)} />;
     }
 
-    if (session.provider === "livekit" && session.token && session.url) {
+    /**
+     * There is one classroom, and no second-best one behind it.
+     *
+     * The route refuses the request outright when LiveKit is not configured, so
+     * reaching this point without a token means something raced — a token that
+     * expired between the lobby and the Join button, most likely. Saying so and
+     * offering a reload beats rendering an empty shell.
+     */
+    if (!session.token || !session.url) {
       return (
-        <LiveKitClassroom
-          url={session.url}
-          token={session.token}
-          roomName={session.roomName}
-          displayName={session.displayName}
-          role={session.role}
-          initialQuality={mode}
-          onLeave={handleLeave}
-        />
+        <div className="rounded-3xl border border-amber-500/40 bg-amber-500/10 p-8 text-sm text-amber-700">
+          <p className="text-base font-semibold">Your place in the room expired</p>
+          <p className="mt-2 leading-6">
+            The key to this classroom is short-lived, and this one has run out. Reload the page and you will go straight in.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-5 rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white"
+          >
+            Reload and join
+          </button>
+        </div>
       );
     }
 
     return (
-      <JitsiClassroom
+      <LiveKitClassroom
+        url={session.url}
+        token={session.token}
         roomName={session.roomName}
         displayName={session.displayName}
-        participantName={session.participantName}
-        audioFirst={mode === "audio"}
-        // The Jitsi fallback embeds somebody else's UI and tells us nothing
-        // about why it closed, so the only honest reason is "they left". The
-        // end screen degrades to its simplest form rather than being skipped:
-        // a way out is worth more than an accurate duration.
-        onLeave={() => handleLeave({ reason: "self", durationMs: 0 })}
+        role={session.role}
+        initialQuality={mode}
+        onLeave={handleLeave}
       />
     );
   })();
@@ -497,10 +586,10 @@ function LiveClassroomPageInner() {
 
   // Tutors and students both live here, so the page picks the chrome that
   // matches whoever is signed in rather than hard-coding the student portal.
-  if (session?.role === "tutor") return <LecturerShell>{content}</LecturerShell>;
+  if (session?.role === "tutor" || misconfigured?.role === "tutor") return <LecturerShell>{content}</LecturerShell>;
   // The not-live screen is a student's screen: it belongs inside their portal,
   // with the sidebar and the bell, not on a bare page that looks like an error.
-  if (session || notLive || lockedMessage) return <StudentShell>{content}</StudentShell>;
+  if (session || notLive || lockedMessage || misconfigured) return <StudentShell>{content}</StudentShell>;
   return <div className="min-h-screen bg-[var(--background)]">{content}</div>;
 }
 

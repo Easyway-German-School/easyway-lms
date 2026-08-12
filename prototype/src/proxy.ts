@@ -160,10 +160,31 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
   // Send the origin but never the path to third parties. Paths in this app
   // contain student ids, and referrers leak to every image and script host.
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  /**
+   * Camera, microphone and screen share stay allowed for THIS ORIGIN: the live
+   * classroom and the signup photo capture both need them. Everything else is
+   * off.
+   *
+   * READ THIS BEFORE EMBEDDING ANY THIRD-PARTY VIDEO OR CAPTURE TOOL.
+   *
+   * `(self)` means this origin and nothing else. A cross-origin iframe gets no
+   * delegation from it — and crucially, the iframe's own `allow="camera;
+   * microphone"` attribute cannot grant what the parent policy never gave. The
+   * child's getUserMedia then rejects, silently, while everything in that
+   * iframe that is only data keeps working perfectly.
+   *
+   * That is not hypothetical. It is exactly how the first live demo failed: a
+   * missing LIVEKIT_URL dropped the school onto an embedded `meet.jit.si`
+   * room, this header killed its camera, microphone and screen share, and the
+   * chat and hand-raise carried on working — which made it look like a broken
+   * video product rather than a two-line configuration error.
+   *
+   * If a cross-origin embed ever genuinely needs media, name its origin here
+   * explicitly, e.g. `camera=(self "https://meet.example.com")`. Do not widen
+   * it to `*`.
+   */
   headers.set(
     "Permissions-Policy",
-    // Camera and microphone stay allowed for this origin: the live classroom
-    // and the signup photo capture both need them. Everything else is off.
     "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=(), interest-cohort=()",
   );
   headers.set("X-DNS-Prefetch-Control", "off");

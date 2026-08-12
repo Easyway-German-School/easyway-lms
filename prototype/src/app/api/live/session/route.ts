@@ -18,7 +18,7 @@ import {
 import {
   cohortRoomName,
   initialQualityFor,
-  liveKitConfigured,
+  missingLiveKitConfig,
   privateRoomName,
   roomDisplayName,
   type QualityMode,
@@ -322,11 +322,38 @@ export async function GET(request: Request) {
       heartbeatMs: LIVE_HEARTBEAT_MS,
     };
 
-    if (!liveKitConfigured()) {
-      // No credentials yet — the page renders the Jitsi fallback instead. It
-      // still gets the room name so both providers put the same cohort in the
-      // same room, which matters during a switchover.
-      return NextResponse.json({ ...context, provider: "jitsi", token: null, url: null });
+    /**
+     * A HALF-CONFIGURED DEPLOYMENT SAYS SO, LOUDLY, BEFORE ANYONE JOINS.
+     *
+     * This used to hand back `provider: "jitsi"` and let the page quietly open
+     * somebody else's video service — see the long note in `live-classroom.ts`
+     * for what that cost us. The check now fails the request, and the message
+     * is different depending on who is reading it: staff get the variable name,
+     * because they are the ones who can fix it in ninety seconds; a student
+     * gets told the truth without being handed the school's plumbing.
+     */
+    const missingConfig = missingLiveKitConfig();
+    if (missingConfig.length > 0) {
+      console.error(
+        `Live classroom is not configured — missing ${missingConfig.join(", ")}. No class can start until these are set.`,
+      );
+      const staff = role === "tutor" || isAdmin;
+      return NextResponse.json(
+        {
+          ...context,
+          error: "Classroom not configured",
+          misconfigured: true,
+          missing: staff ? missingConfig : undefined,
+          message: staff
+            ? `The live classroom cannot start: ${missingConfig.join(", ")} ${
+                missingConfig.length === 1 ? "is" : "are"
+              } not set on this deployment. Add ${missingConfig.length === 1 ? "it" : "them"} to the environment and redeploy.`
+            : "The live classroom is temporarily unavailable. The school has been alerted — please check back shortly or watch the recording of your last class.",
+          token: null,
+          url: null,
+        },
+        { status: 503 },
+      );
     }
 
     const token = new AccessToken(process.env.LIVEKIT_API_KEY!, process.env.LIVEKIT_API_SECRET!, {

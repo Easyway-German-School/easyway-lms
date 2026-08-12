@@ -7,7 +7,7 @@
  * credentials are good while saying nothing about whether a class can start.
  */
 import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
-import { liveKitConfigured, liveProvider, cohortRoomName } from "../src/lib/live-classroom";
+import { liveKitConfigured, missingLiveKitConfig, cohortRoomName } from "../src/lib/live-classroom";
 import { mbPerHour, recordingObjectKey, recordingPublicUrl, recordingStorage, recordingVariant } from "../src/lib/recording";
 import { planRetention, RETENTION } from "../src/lib/retention";
 import { activeTransport } from "../src/lib/mailer";
@@ -22,7 +22,21 @@ async function main() {
   const url = process.env.LIVEKIT_URL || "";
   console.log("LIVEKIT_URL     :", url.replace(/^(wss:\/\/.{14}).*/, "$1…"));
   console.log("configured()    :", liveKitConfigured());
-  console.log("provider()      :", liveProvider());
+
+  /**
+   * Naming the missing variable is the entire point of this line.
+   *
+   * The first live demo failed because production had the key and the secret
+   * but not the URL, and nothing anywhere said so — the classroom just quietly
+   * became a different, broken product. Run this against a deployment's
+   * environment before a class and that is a one-line answer.
+   */
+  const missing = missingLiveKitConfig();
+  if (missing.length > 0) {
+    console.error("MISSING         :", missing.join(", ") + " — no class can start until these are set");
+    process.exitCode = 1;
+    return;
+  }
 
   const drift = Math.floor(Date.now() / 1000) - (await trueNow());
   console.log("clock drift     :", `${drift}s vs real UTC ${Math.abs(drift) < 120 ? "— OK" : "— TOO FAR, tokens will be rejected"}`);

@@ -274,6 +274,37 @@ export async function finaliseRecording(egress: {
  * actually happened to every capture we still think is running, which makes the
  * webhook an optimisation rather than a dependency.
  */
+/**
+ * The webhook is the fast path. This is what stops a lost one costing a day.
+ *
+ * `reconcileRecordings` is driven by the daily cron, which is the right cadence
+ * for tidying up and completely the wrong one for a student who has just sat
+ * through a class and wants to rewatch the bit they missed. A capture finishes
+ * encoding a few minutes after the room empties, so the moment that actually
+ * matters is somebody opening the Watch shelf — and at that moment we can
+ * simply go and ask.
+ *
+ * Throttled to one pass a minute per server instance, because the shelf is
+ * opened by every student in the cohort at roughly the same time and none of
+ * them need their own round trip to LiveKit. It only ever looks at captures
+ * still marked active, so on the overwhelmingly common path it is a single
+ * indexed query that returns nothing.
+ *
+ * Never awaited by a page, and never allowed to throw: the shelf must render
+ * whether or not LiveKit is reachable.
+ */
+const RECONCILE_THROTTLE_MS = 60_000;
+let lastReconcileAt = 0;
+
+export function reconcileRecordingsSoon(): void {
+  const now = Date.now();
+  if (now - lastReconcileAt < RECONCILE_THROTTLE_MS) return;
+  lastReconcileAt = now;
+  void reconcileRecordings().catch((error) => {
+    console.error("Opportunistic recording reconcile failed:", error);
+  });
+}
+
 export async function reconcileRecordings(): Promise<{ checked: number; finalised: number }> {
   const client = egressClient();
   if (!client || !recordingConfigured()) return { checked: 0, finalised: 0 };
