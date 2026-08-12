@@ -100,6 +100,16 @@ export const TENANT_OWNED_MODELS = [
    */
   "SupportTicket",
   "SupportTicketMessage",
+  /**
+   * The live quiz game. A game carries a PIN that admits somebody to it, a
+   * frozen copy of one school's question paper, and a leaderboard of one
+   * school's students by name. All three are the same category of leak as a
+   * live class join code — see LiveClassSession above — and the answer rows
+   * additionally record how long each named child took to answer.
+   */
+  "QuizGame",
+  "QuizGamePlayer",
+  "QuizGameAnswer",
   "MissionProgress",
   "PersonalizedPlan",
   "JourneyEvent",

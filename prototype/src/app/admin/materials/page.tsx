@@ -172,6 +172,8 @@ function ActivityTab() {
   const [data, setData] = useState<Activity | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [reconcileLoading, setReconcileLoading] = useState(false);
+  const [reconcileMessage, setReconcileMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -186,6 +188,23 @@ function ActivityTab() {
       setLoading(false);
     }
   }, [days]);
+
+  const reconcileRecordings = useCallback(async () => {
+    setReconcileLoading(true);
+    setReconcileMessage(null);
+    try {
+      const res = await fetch("/api/live/recording/reconcile", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json?.error || "Reconcile failed");
+      }
+      setReconcileMessage(`Checked ${json.checked}, finalised ${json.finalised}.`);
+    } catch (err) {
+      setReconcileMessage(`Reconcile failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setReconcileLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     load();
@@ -249,6 +268,19 @@ function ActivityTab() {
           value={t.attendedJoins}
           hint="times a student walked into a room"
         />
+      </div>
+
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={reconcileRecordings}
+          disabled={reconcileLoading}
+          className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+        >
+          <RefreshIcon className="h-4 w-4" />
+          {reconcileLoading ? "Reconciling…" : "Repair recording library"}
+        </button>
+        {reconcileMessage ? <p className="text-sm text-slate-500">{reconcileMessage}</p> : null}
       </div>
 
       <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">

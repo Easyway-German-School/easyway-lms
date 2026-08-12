@@ -57,6 +57,7 @@ export default function AdminStaffPage() {
   const [admins, setAdmins] = useState<Admin[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [allCapabilities, setAllCapabilities] = useState<CapabilityOption[]>([]);
+  const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
   const [signInPath, setSignInPath] = useState("/auth/admin");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -100,8 +101,20 @@ export default function AdminStaffPage() {
     }
   }, []);
 
+  async function loadBranches() {
+    try {
+      const res = await fetch('/api/admin/branches');
+      if (!res.ok) return;
+      const data = await res.json();
+      setBranches(data.branches || []);
+    } catch (err) {
+      // ignore branch load errors — branch access is optional
+    }
+  }
+
   useEffect(() => {
     load();
+    void loadBranches();
   }, [load]);
 
   async function save(
@@ -213,6 +226,12 @@ export default function AdminStaffPage() {
       ? admin.capabilities.filter((c) => c !== capability)
       : [...admin.capabilities, capability];
     void save(admin.id, { capabilities: next });
+  }
+
+  function toggleBranchAccess(admin: Admin, branchId: string) {
+    const current = Array.isArray((admin as any).branchAccess) ? (admin as any).branchAccess as string[] : [];
+    const next = current.includes(branchId) ? current.filter((b) => b !== branchId) : [...current, branchId];
+    void save(admin.id, { branchAccess: next });
   }
 
   function startEditing(admin: Admin) {
@@ -677,6 +696,21 @@ export default function AdminStaffPage() {
                             </label>
                           );
                         })}
+                      </div>
+
+                      <div className="mt-4">
+                        <p className="mb-3 text-xs text-slate-500">Branch access — limit which branches this admin can reach (leave empty for all).</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {branches.map((b) => {
+                            const has = Array.isArray((admin as any).branchAccess) && (admin as any).branchAccess.includes(b.id);
+                            return (
+                              <label key={b.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm ${has ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                                <input type="checkbox" checked={has} disabled={savingId === admin.id} onChange={() => toggleBranchAccess(admin, b.id)} className="h-4 w-4 accent-[var(--accent)]" />
+                                <span className="min-w-0">{b.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
                       </div>
 
                       {adjusted > 0 && (

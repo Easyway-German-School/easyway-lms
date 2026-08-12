@@ -107,6 +107,7 @@ export async function GET() {
     signInPath: "/auth/admin",
     admins: admins.map((a) => {
       const adminRole = normalizeAdminRole(a.adminRole);
+      const rawMeta = a.adminCapabilities && typeof a.adminCapabilities === "object" ? a.adminCapabilities as Record<string, unknown> : {};
       return {
         id: a.id,
         name: a.name,
@@ -122,6 +123,7 @@ export async function GET() {
         presetCapabilities: capabilitiesFor(adminRole),
         capabilities: capabilitiesForUser(adminRole, a.adminCapabilities),
         overrides: parseOverrides(a.adminCapabilities),
+        branchAccess: branchAccessFromMetadata(rawMeta),
       };
     }),
     roles: ADMIN_ROLES.map((r) => ({
@@ -169,6 +171,11 @@ export async function POST(req: NextRequest) {
     const adminRole = normalizeAdminRole(
       typeof body.adminRole === "string" ? body.adminRole : "secretary",
     );
+    const branchAccess = Array.isArray(body.branchAccess)
+      ? body.branchAccess.filter((value): value is string => typeof value === "string" && value.trim() !== "").map((value) => value.trim())
+      : typeof body.branchAccess === "string" && body.branchAccess.trim()
+        ? [body.branchAccess.trim()]
+        : [];
 
     if (!name || !email || !password) {
       return NextResponse.json({ error: "Name, email and password are all required" }, { status: 400 });
@@ -204,6 +211,7 @@ export async function POST(req: NextRequest) {
         password: await bcryptjs.hash(password, 10),
         role: "ADMIN",
         adminRole,
+        adminCapabilities: branchAccess.length > 0 ? { branchAccess } : Prisma.DbNull,
       },
       select: { id: true, name: true, email: true, createdAt: true },
     });
@@ -295,11 +303,18 @@ export async function PATCH(req: NextRequest) {
     const name = typeof body.name === "string" ? body.name.trim() : null;
     const email = body.email === undefined ? null : normaliseEmail(body.email);
     const password = typeof body.password === "string" ? body.password : null;
+    const branchAccess = body.branchAccess === undefined
+      ? null
+      : Array.isArray(body.branchAccess)
+        ? body.branchAccess.filter((value): value is string => typeof value === "string" && value.trim() !== "").map((value) => value.trim())
+        : typeof body.branchAccess === "string" && body.branchAccess.trim()
+          ? [body.branchAccess.trim()]
+          : [];
 
     if (!userId) {
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
-    if (!adminRole && !capabilities && name === null && email === null && password === null) {
+    if (!adminRole && !capabilities && name === null && email === null && password === null && branchAccess === null) {
       return NextResponse.json({ error: "Nothing to change" }, { status: 400 });
     }
     if (adminRole && !(ADMIN_ROLES as readonly string[]).includes(adminRole)) {
@@ -356,6 +371,10 @@ export async function PATCH(req: NextRequest) {
         }
       : parseOverrides(target.adminCapabilities);
 
+    const branchMeta = branchAccess === null
+      ? branchAccessFromMetadata(target.adminCapabilities)
+      : branchAccess;
+
     const effective = capabilitiesForUser(nextRole, overrides);
 
     // Refuse to remove the last person who can manage staff. There would be
@@ -368,6 +387,11 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
+    const meta = {
+      ...overrides,
+      ...(branchMeta.length > 0 ? { branchAccess: branchMeta } : {}),
+    };
+
     const updated = await prisma.user.update({
       where: { id: userId },
       data: {
@@ -375,7 +399,7 @@ export async function PATCH(req: NextRequest) {
         adminRole: nextRole as AdminRole,
         // An empty diff is stored as null, which reads as "just the preset".
         adminCapabilities:
-          overrides.grant.length === 0 && overrides.revoke.length === 0 ? Prisma.DbNull : overrides,
+          Object.keys(meta).length === 0 ? Prisma.DbNull : meta,
       },
       select: { id: true, name: true, email: true, totpEnabledAt: true },
     });
@@ -391,6 +415,7 @@ export async function PATCH(req: NextRequest) {
         presetCapabilities: preset,
         capabilities: effective,
         overrides,
+        branchAccess: branchMeta,
       },
       // Told back so the page can say "they must sign in again with this",
       // rather than the super admin having to remember what they typed.

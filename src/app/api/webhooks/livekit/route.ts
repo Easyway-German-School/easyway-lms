@@ -29,6 +29,7 @@ export async function POST(request: Request) {
     // Must be the raw body — any reparsing changes the bytes the signature
     // was computed over.
     const body = await request.text();
+    console.debug && console.debug('LiveKit webhook body length', body.length);
     const authorization = request.headers.get("authorization");
     if (!authorization) {
       return NextResponse.json({ error: "Unsigned" }, { status: 401 });
@@ -38,13 +39,41 @@ export async function POST(request: Request) {
     const event = await receiver.receive(body, authorization);
 
     if (event.event === "egress_ended" && event.egressInfo) {
+      console.info('LiveKit egress_ended received', { egressId: event.egressInfo.egressId });
       const info = event.egressInfo;
-      const outcome = await finaliseRecording({
-        egressId: info.egressId,
-        status: info.status,
-        error: info.error,
-        fileResults: info.fileResults,
-      });
+      
+      // The webhook has no request context, so we must find the tenant from the recording.
+      // Use unguardedPrisma to find the classRecording without tenant scope.
+      const { unguardedPrisma } = await import("@/lib/prisma");
+      const { runWithTenant } = await import("@/lib/tenant/context");
+      
+      const recording =
+        (await unguardedPrisma.classRecording.findUnique({ 
+          where: { egressId: info.egressId },
+          select: { id: true, tenantId: true, objectKey: true }
+        })) ??
+        (info.fileResults?.[0]?.filename
+          ? await unguardedPrisma.classRecording.findFirst({
+              where: { objectKey: info.fileResults[0]!.filename },
+              select: { id: true, tenantId: true, objectKey: true }
+            })
+          : null);
+
+      if (!recording?.tenantId) {
+        console.error("Could not find tenant for recording", { egressId: info.egressId });
+        return NextResponse.json({ ok: true, outcome: "unknown" });
+      }
+
+      // Now run finaliseRecording within the tenant context
+      const outcome = await runWithTenant(recording.tenantId, async () =>
+        finaliseRecording({
+          egressId: info.egressId,
+          status: info.status,
+          error: info.error,
+          fileResults: info.fileResults,
+        })
+      );
+      console.info('finaliseRecording outcome', { egressId: info.egressId, outcome });
       return NextResponse.json({ ok: true, outcome });
     }
 

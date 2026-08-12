@@ -49,7 +49,11 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("Community threads error:", error);
-    return NextResponse.json({ error: "Unable to load threads" }, { status: 500 });
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({
+      error: "Unable to load threads",
+      details: process.env.NODE_ENV === "development" ? errorMsg : undefined
+    }, { status: 500 });
   }
 }
 
@@ -124,6 +128,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ thread }, { status: 201 });
   } catch (error) {
     console.error("Create thread error:", error);
-    return NextResponse.json({ error: "Unable to create thread" }, { status: 500 });
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({
+      error: "Unable to create thread",
+      details: process.env.NODE_ENV === "development" ? errorMsg : undefined
+    }, { status: 500 });
   }
 }

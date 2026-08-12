@@ -75,6 +75,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ comment }, { status: 201 });
   } catch (error) {
     console.error("Create comment error:", error);
-    return NextResponse.json({ error: "Unable to post reply" }, { status: 500 });
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({
+      error: "Unable to post reply",
+      details: process.env.NODE_ENV === "development" ? errorMsg : undefined
+    }, { status: 500 });
   }
 }

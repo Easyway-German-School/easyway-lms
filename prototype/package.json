@@ -22,10 +22,14 @@
     "check:guard": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/check-guard.ts",
     "backup": "node scripts/snapshot-db.mjs",
     "backup:verify": "node scripts/verify-snapshot.mjs",
-    "prove": "node scripts/prove-tenant-isolation.mjs && node scripts/prove-api-key.mjs && node scripts/prove-v1-api.mjs && tsx scripts/prove-billing.ts && tsx scripts/prove-admin-scope.ts"
+    "prove": "node scripts/prove-tenant-isolation.mjs && node scripts/prove-api-key.mjs && node scripts/prove-v1-api.mjs && tsx scripts/prove-billing.ts && tsx scripts/prove-admin-scope.ts",
+    "seed:spaces": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/seed-community-spaces.ts",
+    "verify:community": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/verify-community.ts",
+    "test:community": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/test-community-e2e.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
+    "@babel/runtime": "^8.0.0",
     "@prisma/client": "^6.19.3",
     "@tanstack/react-query": "^5.101.4",
     "@tldraw/tldraw": "^5.1.1",
@@ -51,7 +55,7 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/next-auth": "^3.13.0",
     "@types/node": "^20",
     "@types/nodemailer": "^8.0.1",

@@ -26,6 +26,7 @@ import {
   MailIcon,
   MenuIcon,
   PrivateClassIcon,
+  QuizIcon,
   SettingsIcon,
   TimetableIcon,
   UsersIcon,
@@ -53,6 +54,10 @@ const navItems: NavItem[] = [
   { label: 'Timetable', href: '/lecturer/timetable', icon: <TimetableIcon /> },
   { label: 'Private classes', href: '/lecturer/private-classes', icon: <PrivateClassIcon /> },
   { label: 'Assignments', href: '/lecturer/assignments', icon: <AssignmentIcon /> },
+  // Sits with Assignments because that is where its questions come from: a
+  // game is a quiz the tutor already wrote, put on the projector instead of
+  // set as homework.
+  { label: 'Quiz game', href: '/lecturer/live-quiz', icon: <QuizIcon /> },
   { label: 'Materials', href: '/lecturer/materials', icon: <BookOpenIcon /> },
   // Tutors had no way to watch back a class they taught. The students have had
   // the shelf-style library since it was built; this is the same library,

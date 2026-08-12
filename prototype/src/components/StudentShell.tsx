@@ -34,6 +34,7 @@ import {
   MenuIcon,
   PaymentIcon,
   ProfileIcon,
+  QuizIcon,
   ResultsIcon,
 } from "@/components/icons";
 
@@ -54,6 +55,10 @@ const navItems: NavItem[] = [
   { label: "Classes", href: "/calendar", icon: <CalendarIcon /> },
   { label: "Live class", href: "/live", icon: <BroadcastIcon /> },
   { label: "Assignment", href: "/assignment", icon: <AssignmentIcon /> },
+  // NOT under the live-class gate. This is played in a branch classroom on
+  // the phone in the student's hand, so a campus student is the intended
+  // player rather than the exception.
+  { label: "Quiz game", href: "/play", icon: <QuizIcon /> },
   { label: "Materials", href: "/materials", icon: <BookOpenIcon /> },
   { label: "Community", href: "/community", icon: <CommunityIcon /> },
   { label: "Results", href: "/results", icon: <ResultsIcon /> },

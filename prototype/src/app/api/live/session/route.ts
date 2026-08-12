@@ -399,8 +399,11 @@ export async function GET(request: Request) {
      * switch on by default.
      */
     if (role === "tutor" && !privateClassId) {
+      const { currentTenantId } = await import("@/lib/tenant/context");
+      const tenantId = currentTenantId();
       void ensureRecordingStarted({
         roomName,
+        tenantId,
         branchId: branch?.id ?? null,
         branchName: branch?.name ?? null,
         level,

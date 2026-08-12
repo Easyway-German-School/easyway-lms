@@ -359,14 +359,6 @@ export default function AdminPaymentsPage() {
                             Complete
                           </button>
                         )}
-                        {payment.status !== "failed" && (
-                          <button
-                            className="rounded-lg border border-red-500 text-red-600 px-2 py-1 text-xs"
-                            onClick={() => handleStatusUpdate(payment.id, "failed")}
-                          >
-                            Fail
-                          </button>
-                        )}
                       </td>
                     </tr>
                   ))

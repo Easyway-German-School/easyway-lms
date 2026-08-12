@@ -27,6 +27,7 @@ export async function GET(request: Request) {
   const status = url.searchParams.get("status");
   const paymentStatus = url.searchParams.get("paymentStatus");
   const tutorId = url.searchParams.get("tutorId");
+  const classTypeFilter = url.searchParams.get("classType") || undefined;
   const search = url.searchParams.get("search") || undefined;
   const page = parseInt(url.searchParams.get("page") || "1", 10) || 1;
   const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get("pageSize") || "20", 10)));
@@ -36,6 +37,7 @@ export async function GET(request: Request) {
   if (level) whereClause.level = level;
   if (batch) whereClause.admission = { path: ["batch"], equals: batch };
   if (status) whereClause.status = status;
+  if (classTypeFilter) whereClause.classType = classTypeFilter;
 
   if (search) {
     whereClause.AND = whereClause.AND || [];

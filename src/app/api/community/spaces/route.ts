@@ -38,6 +38,10 @@ export async function GET() {
     });
   } catch (error) {
     console.error("Community spaces error:", error);
-    return NextResponse.json({ error: "Unable to load community spaces" }, { status: 500 });
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({
+      error: "Unable to load community spaces",
+      details: process.env.NODE_ENV === "development" ? errorMsg : undefined
+    }, { status: 500 });
   }
 }

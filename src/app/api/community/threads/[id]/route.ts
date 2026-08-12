@@ -43,6 +43,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ thread, comments: nestComments(rows), commentCount: rows.length });
   } catch (error) {
     console.error("Thread detail error:", error);
-    return NextResponse.json({ error: "Unable to load thread" }, { status: 500 });
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({
+      error: "Unable to load thread",
+      details: process.env.NODE_ENV === "development" ? errorMsg : undefined
+    }, { status: 500 });
   }
 }

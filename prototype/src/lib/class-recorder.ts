@@ -39,6 +39,7 @@ import {
 
 export type StartRecordingInput = {
   roomName: string;
+  tenantId?: string | null;
   branchId?: string | null;
   branchName?: string | null;
   level?: string | null;
@@ -119,6 +120,7 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
       data: {
         egressId: info.egressId,
         roomName: input.roomName,
+        tenantId: input.tenantId ?? null,
         branchId: input.branchId ?? null,
         level: input.level ?? null,
         sessionSlot: input.sessionSlot ?? null,
@@ -189,7 +191,11 @@ export async function finaliseRecording(egress: {
   fileResults?: Array<{ filename?: string; duration?: bigint | number; size?: bigint | number; location?: string }>;
 }): Promise<"created" | "already" | "failed" | "unknown"> {
   try {
-    const row = await prisma.classRecording.findUnique({ where: { egressId: egress.egressId } });
+    const row =
+      (await prisma.classRecording.findUnique({ where: { egressId: egress.egressId } })) ??
+      (egress.fileResults?.[0]?.filename
+        ? await prisma.classRecording.findFirst({ where: { objectKey: egress.fileResults[0]!.filename } })
+        : null);
     if (!row) return "unknown";
     if (row.materialId) return "already";
 
@@ -310,27 +316,37 @@ export async function reconcileRecordings(): Promise<{ checked: number; finalise
   if (!client || !recordingConfigured()) return { checked: 0, finalised: 0 };
 
   const open = await prisma.classRecording.findMany({
-    where: { status: "active" },
-    select: { egressId: true },
+    where: { materialId: null, objectKey: { not: null }, status: { not: "purged" } },
+    select: { egressId: true, objectKey: true, status: true },
   });
   if (open.length === 0) return { checked: 0, finalised: 0 };
 
   let finalised = 0;
-  for (const { egressId } of open) {
+  for (const { egressId, objectKey, status } of open) {
     try {
-      const [info] = await client.listEgress({ egressId });
-      if (!info) continue;
-      const done =
-        info.status === EgressStatus.EGRESS_COMPLETE ||
-        info.status === EgressStatus.EGRESS_FAILED ||
-        info.status === EgressStatus.EGRESS_ABORTED;
-      if (!done) continue;
+      if (status === "active") {
+        const [info] = await client.listEgress({ egressId });
+        if (!info) continue;
+        const done =
+          info.status === EgressStatus.EGRESS_COMPLETE ||
+          info.status === EgressStatus.EGRESS_FAILED ||
+          info.status === EgressStatus.EGRESS_ABORTED;
+        if (!done) continue;
+
+        const outcome = await finaliseRecording({
+          egressId: info.egressId,
+          status: info.status,
+          error: info.error,
+          fileResults: info.fileResults,
+        });
+        if (outcome === "created" || outcome === "failed") finalised += 1;
+        continue;
+      }
 
       const outcome = await finaliseRecording({
-        egressId: info.egressId,
-        status: info.status,
-        error: info.error,
-        fileResults: info.fileResults,
+        egressId,
+        status: EgressStatus.EGRESS_COMPLETE,
+        fileResults: [{ filename: objectKey ?? undefined }],
       });
       if (outcome === "created" || outcome === "failed") finalised += 1;
     } catch (error) {

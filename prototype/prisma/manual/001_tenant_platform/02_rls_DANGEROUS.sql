@@ -27,8 +27,18 @@ DECLARE
     'EmailSuppression','PushSubscription','Space','Channel','ChannelRead',
     'Thread','Comment','ClassRecording','VideoProgress','MissionProgress',
     'PersonalizedPlan','JourneyEvent','IntegrationConnector','AdminAction',
-    'AuditLog','BackupRun','User'
+    'AuditLog','BackupRun','User',
+    -- The live quiz game. A game row holds a PIN that admits somebody to it and
+    -- a frozen copy of one school's question paper; the other two hold one
+    -- school's children by name, their scores, and how long each of them took
+    -- to answer. Same category as a live class join code.
+    'QuizGame','QuizGamePlayer','QuizGameAnswer'
   ];
+  -- NOTE: this list is hand-maintained and has fallen behind the schema —
+  -- LiveClassSession, LiveClassInvite, SupportTicket, SupportTicketMessage,
+  -- Message, ClassRecording and the billing tables are all tenant-owned per
+  -- src/lib/tenant/registry.ts and are all missing above. Reconcile against
+  -- TENANT_OWNED_MODELS before this is ever run.
 BEGIN
   FOREACH t IN ARRAY tables LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);

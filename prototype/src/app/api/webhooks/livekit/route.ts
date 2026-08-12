@@ -86,12 +86,38 @@ export async function POST(request: Request) {
 
     if (event.event === "egress_ended" && event.egressInfo) {
       const info = event.egressInfo;
-      const outcome = await finaliseRecording({
-        egressId: info.egressId,
-        status: info.status,
-        error: info.error,
-        fileResults: info.fileResults,
-      });
+      
+      // The webhook has no request context, so we must find the tenant from the recording.
+      // Use unguardedPrisma to find the classRecording without tenant scope.
+      const { unguardedPrisma } = await import("@/lib/prisma");
+      const { runWithTenant } = await import("@/lib/tenant/context");
+      
+      const recording =
+        (await unguardedPrisma.classRecording.findUnique({ 
+          where: { egressId: info.egressId },
+          select: { id: true, tenantId: true, objectKey: true }
+        })) ??
+        (info.fileResults?.[0]?.filename
+          ? await unguardedPrisma.classRecording.findFirst({
+              where: { objectKey: info.fileResults[0]!.filename },
+              select: { id: true, tenantId: true, objectKey: true }
+            })
+          : null);
+
+      if (!recording?.tenantId) {
+        console.error("Could not find tenant for recording", { egressId: info.egressId });
+        return NextResponse.json({ ok: true, outcome: "unknown" });
+      }
+
+      // Now run finaliseRecording within the tenant context
+      const outcome = await runWithTenant(recording.tenantId, async () =>
+        finaliseRecording({
+          egressId: info.egressId,
+          status: info.status,
+          error: info.error,
+          fileResults: info.fileResults,
+        })
+      );
       return NextResponse.json({ ok: true, outcome });
     }
 

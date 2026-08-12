@@ -33,21 +33,40 @@ async function main() {
 
   await clean();
   const password = await bcryptjs.hash(PASSWORD, 10);
-  const branch = await prisma.branch.findFirst({ select: { id: true, name: true } });
+  const branch = await prisma.branch.findFirst({ select: { id: true, name: true, tenantId: true } });
+
+  /**
+   * THE TENANT, and why an account without one is useless.
+   *
+   * These fixtures used to be created with no `tenantId`. The tenant extension
+   * reads the scope from the signed-in user, so a user with none puts every
+   * query in the request into strict mode with nothing to match — the portal
+   * then throws `TenantIsolationError` on the notification bell, the community
+   * poll and every page's own data, which reads as the app being broken rather
+   * than the fixture being wrong. An account that cannot load a page cannot
+   * walk anything through.
+   *
+   * Taken from the branch these accounts are being put in, so the fixture lands
+   * in the same tenant as the students it will sit beside.
+   */
+  const tenantId =
+    branch?.tenantId ??
+    (await prisma.tenant.findFirst({ select: { id: true } }))?.id ??
+    null;
 
   const admin = await prisma.user.create({
-    data: { email: `admin${SUFFIX}`, name: "Walkthrough Admin", password, role: "ADMIN", adminRole: "super" },
+    data: { email: `admin${SUFFIX}`, name: "Walkthrough Admin", password, role: "ADMIN", adminRole: "super", tenantId },
   });
 
   const lecturerUser = await prisma.user.create({
-    data: { email: `tutor${SUFFIX}`, name: "Walkthrough Tutor", password, role: "LECTURER" },
+    data: { email: `tutor${SUFFIX}`, name: "Walkthrough Tutor", password, role: "LECTURER", tenantId },
   });
   await prisma.lecturer.create({
-    data: { userId: lecturerUser.id, branchId: branch?.id ?? null, level: "A1", sessionSlot: "morning" },
+    data: { userId: lecturerUser.id, branchId: branch?.id ?? null, level: "A1", sessionSlot: "morning", tenantId },
   });
 
   const studentUser = await prisma.user.create({
-    data: { email: `student${SUFFIX}`, name: "Walkthrough Student", password, role: "STUDENT" },
+    data: { email: `student${SUFFIX}`, name: "Walkthrough Student", password, role: "STUDENT", tenantId },
   });
   await prisma.student.create({
     data: {
@@ -56,10 +75,12 @@ async function main() {
       level: "A1",
       sessionSlot: "morning",
       status: "active",
+      tenantId,
     },
   });
 
   console.log("branch used :", branch?.name ?? "(none in database)");
+  console.log("tenant      :", tenantId ?? "(none — the portal will not load)");
   console.log("admin       :", admin.email);
   console.log("tutor       :", lecturerUser.email);
   console.log("student     :", studentUser.email);

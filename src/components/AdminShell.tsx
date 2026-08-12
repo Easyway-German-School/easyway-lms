@@ -85,6 +85,7 @@ const navItems: NavItem[] = [
   { label: 'Compose email', href: '/admin/emails/compose', capability: 'emails' as const, icon: <SendIcon />, group: 'Settings' },
   { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <BellIcon />, group: 'Settings' },
   { label: 'Notification rules', href: '/admin/notification-settings', capability: 'emails' as const, icon: <SlidersIcon />, group: 'Settings' },
+  { label: 'Class sessions', href: '/admin/class-sessions', capability: 'classes' as const, icon: <SlidersIcon />, group: 'Settings' },
   { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <ShieldIcon />, group: 'Settings' },
   { label: 'Security & recovery', href: '/admin/security', capability: 'security' as const, icon: <KeyIcon />, group: 'Settings' },
   { label: 'Integrations', href: '/admin/integrations', capability: 'integrations' as const, icon: <IntegrationIcon />, group: 'Settings' },

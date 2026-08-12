@@ -61,6 +61,7 @@ export default function AdminStudentsPage() {
   const [filterLevel, setFilterLevel] = useState<string>("");
   const [filterBatch, setFilterBatch] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
+  const [filterClassType, setFilterClassType] = useState<string>("");
   const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>("");
   const [search, setSearch] = useState<string>("");
   const [page, setPage] = useState<number>(1);
@@ -109,6 +110,7 @@ export default function AdminStudentsPage() {
     if (filterLevel) url.searchParams.set("level", filterLevel);
     if (filterBatch) url.searchParams.set("batch", filterBatch);
     if (filterStatus) url.searchParams.set("status", filterStatus);
+    if (filterClassType) url.searchParams.set("classType", filterClassType);
     if (filterPaymentStatus) url.searchParams.set("paymentStatus", filterPaymentStatus);
     if (search) url.searchParams.set("search", search);
     if (page) url.searchParams.set("page", String(page));
@@ -128,11 +130,11 @@ export default function AdminStudentsPage() {
 
   useEffect(() => {
     loadStudents();
-  }, [filterBranchId, filterTutorId, filterLevel, filterBatch, filterStatus, filterPaymentStatus, search, page, pageSize]);
+  }, [filterBranchId, filterTutorId, filterLevel, filterBatch, filterStatus, filterClassType, filterPaymentStatus, search, page, pageSize]);
 
   useEffect(() => {
     setPage(1);
-  }, [filterBranchId, filterTutorId, filterLevel, filterStatus, filterPaymentStatus, search, pageSize]);
+  }, [filterBranchId, filterTutorId, filterLevel, filterStatus, filterClassType, filterPaymentStatus, search, pageSize]);
 
   async function handleSaveStudent() {
     setStudentError("");
@@ -503,6 +505,19 @@ export default function AdminStudentsPage() {
                   <option value="active">Active</option>
                   <option value="paused">Paused</option>
                   <option value="graduated">Graduated</option>
+                </select>
+              </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                <label htmlFor="classTypeFilter" className="block text-sm font-semibold text-[var(--muted)]">Student type</label>
+                <select
+                  id="classTypeFilter"
+                  value={filterClassType}
+                  onChange={(event) => setFilterClassType(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">All types</option>
+                  <option value="group">Group class</option>
+                  <option value="private">Private class</option>
                 </select>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
