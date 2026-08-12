@@ -41,6 +41,10 @@ export type SchedulePayload = {
   currentLevel?: string;
   nextLevel?: string | null;
   viewingNextLevel?: boolean;
+  /** When this student joined — see `buildNodes`. */
+  joinedAt?: string | null;
+  /** What the register actually says, keyed by YYYY-MM-DD. */
+  attendance?: Array<{ date: string; present: boolean }>;
 };
 
 /**
@@ -52,7 +56,29 @@ export type SchedulePayload = {
  * one means "turn up on a different day", the other means "do not turn up" —
  * and a single red box made them indistinguishable.
  */
-export type NodeState = "done" | "today" | "locked" | "postponed" | "cancelled";
+/**
+ * `before` and `missed` are the two states this map used to be missing, and
+ * their absence is what made it dishonest.
+ *
+ *   before   the class ran before this student joined the school. Not theirs to
+ *            have attended, and not counted against them.
+ *   done     they were marked present.
+ *   missed   they were marked absent.
+ *   held     it happened, after they joined, and nobody marked the register.
+ *
+ * The old type had only `done`, and every past date got it — so a student who
+ * registered yesterday opened the calendar to a run of completed classes and a
+ * progress bar celebrating work they had never done.
+ */
+export type NodeState =
+  | "before"
+  | "done"
+  | "missed"
+  | "held"
+  | "today"
+  | "locked"
+  | "postponed"
+  | "cancelled";
 
 export type ClassNode = Session & {
   index: number;
@@ -123,14 +149,48 @@ export function isUnlocked(node: { state: NodeState }) {
 
 export type BuiltSchedule = {
   nodes: ClassNode[];
+  /** Classes marked present. Never inferred from the date alone. */
   done: number;
+  /**
+   * Classes this student could have attended — excludes anything that ran
+   * before they joined, which is what the progress bar must be a fraction of.
+   */
   total: number;
+  /** Held after they joined but never marked, so honestly unknown. */
+  unmarked: number;
   nextNode: ClassNode | null;
 };
 
-/** Flatten months into one ordered list and work out each class's state. */
-export function buildNodes(months: Month[] | undefined, now = new Date()): BuiltSchedule {
+export type ScheduleFacts = {
+  /** When this student joined. Classes before it were never theirs. */
+  joinedAt?: string | null;
+  /** Register entries, keyed by YYYY-MM-DD. */
+  attendance?: Array<{ date: string; present: boolean }>;
+};
+
+/** Local YYYY-MM-DD, matching how the server keys attendance. */
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Flatten months into one ordered list and work out each class's state.
+ *
+ * `facts` is optional so the tutor's timetable — which renders the same shape
+ * for a cohort rather than a person — can keep calling this without inventing
+ * an attendance record. Without it, past classes read as `held`: happened,
+ * unknown outcome. That is the honest default, and importantly it is NOT
+ * `done`, which used to be applied to every past date on no evidence at all.
+ */
+export function buildNodes(
+  months: Month[] | undefined,
+  now = new Date(),
+  facts: ScheduleFacts = {},
+): BuiltSchedule {
   const flat: Session[] = (months ?? []).flatMap((m) => m.sessions);
+
+  const joined = facts.joinedAt ? startOfDay(new Date(facts.joinedAt)) : null;
+  const register = new Map((facts.attendance ?? []).map((a) => [a.date, a.present]));
 
   let firstFuture = -1;
   const nodes: ClassNode[] = flat.map((s, index) => {
@@ -141,24 +201,40 @@ export function buildNodes(months: Month[] | undefined, now = new Date()): Built
 
     if (!off && !isPast && !isToday && firstFuture === -1) firstFuture = index;
 
-    const state: NodeState = off
-      ? s.status === "cancelled"
-        ? "cancelled"
-        : "postponed"
-      : isPast
-        ? "done"
-        : isToday
-          ? "today"
-          : "locked";
+    let state: NodeState;
+    if (off) {
+      state = s.status === "cancelled" ? "cancelled" : "postponed";
+    } else if (isPast) {
+      /**
+       * The batch rotation is generated from the batch month, which is
+       * routinely earlier than the day somebody signed up. Those classes are
+       * real — they happened — but they happened to other people, and showing
+       * them as this student's completed work is how a calendar starts lying
+       * on day one.
+       */
+      if (joined && startOfDay(date) < joined) {
+        state = "before";
+      } else {
+        const marked = register.get(dayKey(date));
+        state = marked === true ? "done" : marked === false ? "missed" : "held";
+      }
+    } else {
+      state = isToday ? "today" : "locked";
+    }
+
     return { ...s, index, state, isNext: false };
   });
 
   if (firstFuture >= 0) nodes[firstFuture].isNext = true;
 
+  // A class that ran before they arrived is not part of anybody's denominator.
+  const theirs = nodes.filter((n) => n.state !== "before");
+
   return {
     nodes,
     done: nodes.filter((n) => n.state === "done").length,
-    total: nodes.length,
+    total: theirs.length,
+    unmarked: nodes.filter((n) => n.state === "held").length,
     nextNode: firstFuture >= 0 ? nodes[firstFuture] : null,
   };
 }

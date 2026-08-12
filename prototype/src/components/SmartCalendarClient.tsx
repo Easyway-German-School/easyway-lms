@@ -87,7 +87,17 @@ export default function SmartCalendarClient() {
 
   useEffect(() => { load(previewLevel); }, [load, previewLevel]);
 
-  const { nodes, done, total, nextNode } = useMemo(() => buildNodes(data?.months), [data]);
+  /**
+   * The map is built from what the student DID, not from what the calendar
+   * says. `joinedAt` and `attendance` come from the server because only the
+   * server knows them — without both, every past date was drawn as a completed
+   * class, so a student who registered yesterday met a progress bar celebrating
+   * work they had never done.
+   */
+  const { nodes, done, total, unmarked, nextNode } = useMemo(
+    () => buildNodes(data?.months, new Date(), { joinedAt: data?.joinedAt, attendance: data?.attendance }),
+    [data],
+  );
 
   function tapNode(node: ClassNode) {
     if (node.state === "locked") {
@@ -130,6 +140,19 @@ export default function SmartCalendarClient() {
             </p>
             <p className="mt-1 text-2xl font-extrabold sm:text-3xl">
               {done} <span className="text-lg font-bold text-white/70 sm:text-xl">/ {total} classes</span>
+            </p>
+            {/*
+              Says why the number is what it is. A brand-new student sees 0 of
+              their own classes rather than a bar full of somebody else's, and
+              a student whose tutor has not marked the register is told that
+              instead of being quietly counted as absent.
+            */}
+            <p className="mt-1 text-xs font-medium text-white/75">
+              {total === 0
+                ? "Your first class is still ahead — nothing counted yet."
+                : unmarked > 0
+                  ? `${unmarked} held ${unmarked === 1 ? "class is" : "classes are"} waiting on your tutor's register.`
+                  : "Counted from the register your tutor marks."}
             </p>
           </div>
 

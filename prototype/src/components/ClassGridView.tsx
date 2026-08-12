@@ -29,8 +29,26 @@ import {
  * a student scanning a month of small boxes has only the colour to go on.
  * Neither is struck through — a postponed class still happens.
  */
+/**
+ * Green means "you were there", and nothing else.
+ *
+ * It used to mean "this date has passed", which is how a student who joined
+ * yesterday opened their calendar to a wall of green. The three states below it
+ * are the ones that were missing:
+ *
+ *   before  the class ran before they enrolled. Faded to almost nothing — it is
+ *           context for the month, not something they failed to attend.
+ *   held    it happened and nobody marked the register. Neutral on purpose:
+ *           colouring it green flatters, colouring it red accuses, and the
+ *           truth is that the school does not know.
+ *   missed  they were marked absent. This is the only state that should ever
+ *           look like bad news, and now it is earned rather than assumed.
+ */
 const STATE_STYLE: Record<string, string> = {
   done: "bg-emerald-500 text-white border-emerald-600",
+  missed: "bg-rose-100 text-rose-700 border-rose-300",
+  held: "bg-[var(--surface-alt)] text-[var(--foreground)] border-[var(--border-strong)]",
+  before: "bg-transparent text-[var(--muted)]/50 border-transparent",
   today: "bg-amber-400 text-white border-amber-500 ring-4 ring-amber-200",
   locked: "bg-[var(--border)] text-[var(--muted)] border-[var(--border-strong)]",
   postponed: "bg-pink-200 text-pink-800 border-pink-400",

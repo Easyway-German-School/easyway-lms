@@ -97,6 +97,31 @@ export async function GET(req: NextRequest) {
       console.warn("Failed to persist personalized plan:", err);
     }
 
+    /**
+     * WHAT THE STUDENT ACTUALLY DID, so the calendar stops guessing.
+     *
+     * The map used to colour a class "done" purely because its date had passed.
+     * For a brand-new student that is a lie with a progress bar attached: the
+     * batch rotation starts at the batch month, which is routinely before they
+     * signed up, so somebody who registered yesterday opened the calendar and
+     * found a run of completed classes and "6 / 24 classes" of progress they
+     * had never attended.
+     *
+     * Two facts fix it, and both have to come from the server because only the
+     * server knows them:
+     *
+     *   joinedAt    — anything before this is not their class to have missed.
+     *   attendance  — a date-keyed record of what was actually marked.
+     *
+     * Sent as plain date strings rather than joined into the sessions, because
+     * the schedule itself is generated (there is no row per class to hang a
+     * status on) and the merge is a client-side lookup by date.
+     */
+    const attendance = await prisma.attendance.findMany({
+      where: { studentId: student.id },
+      select: { date: true, present: true, status: true },
+    });
+
     return NextResponse.json({
       ...schedule,
       currentLevel: student.level,
@@ -104,6 +129,11 @@ export async function GET(req: NextRequest) {
       viewingNextLevel: viewingNext,
       classType: "group",
       provider: "batch-level-engine",
+      joinedAt: student.createdAt.toISOString(),
+      attendance: attendance.map((record) => ({
+        date: record.date.toISOString().slice(0, 10),
+        present: record.present || record.status === "present" || record.status === "late",
+      })),
     });
   } catch (error) {
     console.error("Error generating schedule:", error);
