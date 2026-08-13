@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       // The webhook has no request context, so we must find the tenant from the recording.
       // Use unguardedPrisma to find the classRecording without tenant scope.
       const { unguardedPrisma } = await import("@/lib/prisma");
-      const { runWithTenant } = await import("@/lib/tenant/context");
+      const { runWithTenant, maybeUnscoped } = await import("@/lib/tenant/context");
       
       const recording =
         (await unguardedPrisma.classRecording.findUnique({ 
@@ -59,20 +59,39 @@ export async function POST(request: Request) {
             })
           : null);
 
-      if (!recording?.tenantId) {
-        console.error("Could not find tenant for recording", { egressId: info.egressId });
+      if (!recording) {
+        console.error("Could not find classRecording for egress", { egressId: info.egressId, filename: info.fileResults?.[0]?.filename });
         return NextResponse.json({ ok: true, outcome: "unknown" });
       }
 
-      // Now run finaliseRecording within the tenant context
-      const outcome = await runWithTenant(recording.tenantId, async () =>
-        finaliseRecording({
-          egressId: info.egressId,
-          status: info.status,
-          error: info.error,
-          fileResults: info.fileResults,
-        })
-      );
+      // Run finaliseRecording within the tenant context if we have one, otherwise unscoped
+      // This ensures finalization happens even if tenantId was not captured (e.g., in single-tenant setups)
+      let outcome: "created" | "already" | "failed" | "unknown";
+      
+      if (recording.tenantId) {
+        console.debug('Running finalization with tenantId', { tenantId: recording.tenantId, egressId: info.egressId });
+        outcome = await runWithTenant(recording.tenantId, async () =>
+          finaliseRecording({
+            egressId: info.egressId,
+            status: info.status,
+            error: info.error,
+            fileResults: info.fileResults,
+          })
+        );
+      } else {
+        console.debug('Running finalization without tenant context (single-tenant or context missing)', { egressId: info.egressId });
+        outcome = await maybeUnscoped(
+          false,
+          "recording webhook has no tenant context, attempting finalization anyway",
+          async () =>
+            finaliseRecording({
+              egressId: info.egressId,
+              status: info.status,
+              error: info.error,
+              fileResults: info.fileResults,
+            })
+        );
+      }
       console.info('finaliseRecording outcome', { egressId: info.egressId, outcome });
       return NextResponse.json({ ok: true, outcome });
     }

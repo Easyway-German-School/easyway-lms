@@ -79,13 +79,14 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
         create: {
           egressId: adopted.egressId,
           roomName: input.roomName,
+          tenantId: input.tenantId ?? null,
           branchId: input.branchId ?? null,
           level: input.level ?? null,
           sessionSlot: input.sessionSlot ?? null,
           startedByUserId: input.startedByUserId ?? null,
           status: "active",
         },
-        update: {},
+        update: { tenantId: input.tenantId ?? null },
       });
       return adopted.egressId;
     }
