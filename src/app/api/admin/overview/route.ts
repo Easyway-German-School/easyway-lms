@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveAdmin } from "@/lib/admin-roles";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
-import { requireTenantSession, tenantScopeForStudent, tenantScopeForBranch, tenantScopeForLecturer } from "@/lib/tenant-access";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -24,17 +25,15 @@ function monthKey(date: Date) {
  */
 export async function GET() {
   try {
-    const auth = await requireTenantSession();
-    if (!auth.ok) return auth.response!;
+    const session = (await getServerSession(authOptions as any)) as any;
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    const admin = await resolveAdmin(auth.session.user.id as string);
+    const admin = await resolveAdmin(session.user.id as string);
     if (!admin) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
-
-    const studentWhere = tenantScopeForStudent(auth.tenantId);
-    const branchWhere = tenantScopeForBranch(auth.tenantId);
-    const lecturerWhere = tenantScopeForLecturer(auth.tenantId);
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -59,61 +58,72 @@ export async function GET() {
       recentStudents,
       recentSubmissions,
     ] = await Promise.all([
-    prisma.student.findMany({
-      where: studentWhere,
-      select: {
-        id: true,
-        level: true,
-        status: true,
-        classType: true,
-        createdAt: true,
-        branch: { select: { id: true, name: true } },
-        user: { select: { name: true, email: true } },
-        payments: { where: { status: "completed" }, select: { amount: true } },
-      },
-      take: 5000, // Reasonable limit to prevent timeout
-    }),
-    prisma.branch.count({ where: auth.tenantId ? { tenantId: auth.tenantId } : {} }),
-    prisma.lecturer.count({ where: lecturerWhere }),
-    prisma.lead.groupBy({ 
-      by: ["status"], 
-      _count: { id: true },
-    }),
-    prisma.material.count(),
-    prisma.thread.count(),
-    prisma.comment.count(),
-    prisma.examRegistration.count(),
-    prisma.examRegistration.count({ where: { status: "pending" } }),
-    prisma.assignmentSubmission.count({ where: { score: null } }),
-    prisma.attendance.findMany({
-      where: { date: { gte: thirtyDaysAgo } },
-      select: { present: true, status: true },
-    }),
-    prisma.integrationConnector.findMany({
-      select: { id: true, name: true, enabled: true, status: true, lastSyncAt: true, lastError: true, itemsSynced: true },
-    }),
-    prisma.payment.findMany({
-      where: {
-        status: "completed",
-        createdAt: { gte: sixMonthsAgo },
-      },
-      select: { amount: true, createdAt: true, method: true, student: { select: { user: { select: { name: true } } } } },
-      orderBy: { createdAt: "desc" },
-      take: 500, // Limit results to prevent timeout
-    }),
-    prisma.student.findMany({
-      where: studentWhere,
-      take: 5,
-      orderBy: { createdAt: "desc" },
-      select: { createdAt: true, level: true, user: { select: { name: true } }, branch: { select: { name: true } } },
-    }),
-    prisma.assignmentSubmission.findMany({
-      take: 5,
-      orderBy: { createdAt: "desc" },
-      select: { createdAt: true, student: { select: { user: { select: { name: true } } } }, assignment: { select: { title: true } } },
-      where: auth.tenantId ? { student: { user: { tenantId: auth.tenantId } } } : undefined,
-    }),
-  ]);
+      prisma.student.findMany({
+        select: {
+          id: true,
+          level: true,
+          status: true,
+          classType: true,
+          createdAt: true,
+          branch: { select: { id: true, name: true } },
+          user: { select: { name: true, email: true } },
+          payments: { where: { status: "completed" }, select: { amount: true } },
+        },
+        take: 5000,
+      }),
+      prisma.branch.count(),
+      prisma.lecturer.count(),
+      prisma.lead.groupBy({
+        by: ["status"],
+        _count: { id: true },
+      }).catch(() => []),
+      prisma.material.count().catch(() => 0),
+      prisma.thread.count().catch(() => 0),
+      prisma.comment.count().catch(() => 0),
+      prisma.examRegistration.count().catch(() => 0),
+      prisma.examRegistration.count({ where: { status: "pending" } }).catch(() => 0),
+      prisma.assignmentSubmission.count({ where: { score: null } }).catch(() => 0),
+      prisma.attendance.findMany({
+        where: { date: { gte: thirtyDaysAgo } },
+        select: { present: true, status: true },
+      }).catch(() => []),
+      prisma.integrationConnector.findMany({
+        select: { id: true, name: true, enabled: true, status: true, lastSyncAt: true, lastError: true, itemsSynced: true },
+      }).catch(() => []),
+      prisma.payment.findMany({
+        where: {
+          status: "completed",
+          createdAt: { gte: sixMonthsAgo },
+        },
+        select: {
+          amount: true,
+          createdAt: true,
+          method: true,
+          student: { select: { user: { select: { name: true } } } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 500,
+      }).catch(() => []),
+      prisma.student.findMany({
+        take: 5,
+        orderBy: { createdAt: "desc" },
+        select: {
+          createdAt: true,
+          level: true,
+          user: { select: { name: true } },
+          branch: { select: { name: true } },
+        },
+      }).catch(() => []),
+      prisma.assignmentSubmission.findMany({
+        take: 5,
+        orderBy: { createdAt: "desc" },
+        select: {
+          createdAt: true,
+          student: { select: { user: { select: { name: true } } } },
+          assignment: { select: { title: true } },
+        },
+      }).catch(() => []),
+    ]);
 
   // ---- Payment cohorts -------------------------------------------------
   // Which side of the tuition paywall every student sits on. "Registered only"
