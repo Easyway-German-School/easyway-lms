@@ -23,41 +23,42 @@ function monthKey(date: Date) {
  * the whole page 403ing — a secretary still needs the student numbers.
  */
 export async function GET() {
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
+  try {
+    const auth = await requireTenantSession();
+    if (!auth.ok) return auth.response!;
 
-  const admin = await resolveAdmin(auth.session.user.id as string);
-  if (!admin) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+    const admin = await resolveAdmin(auth.session.user.id as string);
+    if (!admin) {
+      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+    }
 
-  const studentWhere = tenantScopeForStudent(auth.tenantId);
-  const branchWhere = tenantScopeForBranch(auth.tenantId);
-  const lecturerWhere = tenantScopeForLecturer(auth.tenantId);
+    const studentWhere = tenantScopeForStudent(auth.tenantId);
+    const branchWhere = tenantScopeForBranch(auth.tenantId);
+    const lecturerWhere = tenantScopeForLecturer(auth.tenantId);
 
-  const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * DAY);
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * DAY);
 
-  const [
-    students,
-    branches,
-    lecturers,
-    leads,
-    materials,
-    threads,
-    comments,
-    examRegistrations,
-    pendingExamRegistrations,
-    ungradedSubmissions,
-    recentAttendance,
-    connectors,
-    recentPayments,
-    recentStudents,
-    recentSubmissions,
-  ] = await Promise.all([
+    const [
+      students,
+      branches,
+      lecturers,
+      leads,
+      materials,
+      threads,
+      comments,
+      examRegistrations,
+      pendingExamRegistrations,
+      ungradedSubmissions,
+      recentAttendance,
+      connectors,
+      recentPayments,
+      recentStudents,
+      recentSubmissions,
+    ] = await Promise.all([
     prisma.student.findMany({
       where: studentWhere,
       select: {
@@ -70,10 +71,14 @@ export async function GET() {
         user: { select: { name: true, email: true } },
         payments: { where: { status: "completed" }, select: { amount: true } },
       },
+      take: 5000, // Reasonable limit to prevent timeout
     }),
     prisma.branch.count({ where: auth.tenantId ? { tenantId: auth.tenantId } : {} }),
     prisma.lecturer.count({ where: lecturerWhere }),
-    prisma.lead.groupBy({ by: ["status"], _count: { id: true } }),
+    prisma.lead.groupBy({ 
+      by: ["status"], 
+      _count: { id: true },
+    }),
     prisma.material.count(),
     prisma.thread.count(),
     prisma.comment.count(),
@@ -91,10 +96,10 @@ export async function GET() {
       where: {
         status: "completed",
         createdAt: { gte: sixMonthsAgo },
-        student: tenantScopeForStudent(auth.tenantId).user ?? undefined,
       },
       select: { amount: true, createdAt: true, method: true, student: { select: { user: { select: { name: true } } } } },
       orderBy: { createdAt: "desc" },
+      take: 500, // Limit results to prevent timeout
     }),
     prisma.student.findMany({
       where: studentWhere,
@@ -106,6 +111,7 @@ export async function GET() {
       take: 5,
       orderBy: { createdAt: "desc" },
       select: { createdAt: true, student: { select: { user: { select: { name: true } } } }, assignment: { select: { title: true } } },
+      where: auth.tenantId ? { student: { user: { tenantId: auth.tenantId } } } : undefined,
     }),
   ]);
 
@@ -238,6 +244,9 @@ export async function GET() {
   const newStudentsThisMonth = students.filter((student) => student.createdAt >= startOfMonth).length;
 
   const canSeeMoney = admin.can("payments");
+  const nodeProcess = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+  const mailersendKey = nodeProcess?.env?.MAILERSEND_API_KEY?.trim() ?? "";
+  const smtpHost = nodeProcess?.env?.SMTP_HOST?.trim() ?? "";
 
   return NextResponse.json({
     adminRole: admin.adminRole,
@@ -340,9 +349,9 @@ export async function GET() {
     health: {
       // Nothing has ever actually been delivered without this key — worth
       // saying so on the front page rather than in a log file.
-      emailProvider: process.env.MAILERSEND_API_KEY?.trim()
+      emailProvider: mailersendKey
         ? { name: "MailerSend", configured: true }
-        : process.env.SMTP_HOST?.trim()
+        : smtpHost
         ? { name: "SMTP", configured: true }
         : { name: "None", configured: false },
       integrations: connectors.map((connector) => ({
@@ -358,4 +367,11 @@ export async function GET() {
 
     activity,
   });
+  } catch (error) {
+    console.error("[admin/overview] Error:", error);
+    return NextResponse.json(
+      { error: "Failed to load admin overview", details: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
+  }
 }

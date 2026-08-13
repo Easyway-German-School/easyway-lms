@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack --hostname 0.0.0.0",
-    "build": "prisma generate && next build --webpack",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 prisma generate && next build --webpack",
     "start": "next start --hostname 0.0.0.0",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -55,6 +55,7 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/next-auth": "^3.13.0",
     "@types/node": "^20",

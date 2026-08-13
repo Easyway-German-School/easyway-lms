@@ -5,8 +5,9 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
 import BrandLoader from "@/components/BrandLoader";
-import { BookOpenIcon, CalendarIcon, DocumentIcon, EmptyIcon, LecturerIcon, PackageIcon, VideoIcon } from '@/components/icons';
+import { BookOpenIcon, CalendarIcon, DocumentIcon, EmptyIcon, LecturerIcon, PackageIcon, VideoIcon, LinkIcon } from '@/components/icons';
 import { uploadFile } from '@/lib/upload';
+import { parseEmbedUrl } from '@/lib/embed-utils';
 
 interface Course {
   id: string;
@@ -54,6 +55,9 @@ export default function LecturerMaterials() {
     episodeNumber: '',
     recordedAt: '',
     durationSeconds: '',
+    // Embedded URL fields
+    embedUrl: '',
+    isEmbedded: false,
   });
 
   const isVideoFile = Boolean(formData.file?.type?.startsWith('video/'));
@@ -130,10 +134,86 @@ export default function LecturerMaterials() {
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     const courseId = formData.courseId || selectedCourseId;
-    if (!formData.file || !formData.title) {
-      setError('Please add a title and choose a file');
+    
+    if (!formData.title) {
+      setError('Please add a title');
       return;
     }
+
+    // Check if it's embedded or file upload
+    if (formData.isEmbedded) {
+      if (!formData.embedUrl) {
+        setError('Please enter a video URL (YouTube, TikTok, Vimeo, etc.)');
+        return;
+      }
+      
+      const embedData = parseEmbedUrl(formData.embedUrl);
+      if (!embedData) {
+        setError('Invalid URL. Please use YouTube, TikTok, Vimeo, Instagram, or a valid web link');
+        return;
+      }
+
+      if (!courseId && !formData.level) {
+        setError(formData.level ? 'Please choose the level' : 'Please choose a course');
+        return;
+      }
+
+      setIsUploading(true);
+      try {
+        const res = await fetch('/api/lecturer/materials', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: formData.title,
+            description: formData.description,
+            courseId: courseId,
+            embedUrl: formData.embedUrl,
+            embedProvider: embedData.provider,
+            isEmbedded: 'true',
+            level: formData.level,
+            series: formData.series,
+            episodeNumber: formData.episodeNumber,
+            recordedAt: formData.recordedAt,
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Failed to add material');
+        }
+
+        const newMaterial = await res.json();
+        setMaterials([newMaterial, ...materials]);
+        setFormData({
+          title: '',
+          description: '',
+          courseId: '',
+          file: null,
+          isRecording: false,
+          level: '',
+          series: '',
+          episodeNumber: '',
+          recordedAt: '',
+          durationSeconds: '',
+          embedUrl: '',
+          isEmbedded: false,
+        });
+        setShowForm(false);
+        setError('');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to add material');
+      } finally {
+        setIsUploading(false);
+      }
+      return;
+    }
+
+    // Original file upload logic
+    if (!formData.file) {
+      setError('Please choose a file');
+      return;
+    }
+    
     // A recording is filed by level rather than course, so the two have
     // different required fields.
     if (formData.isRecording ? !formData.level : !courseId) {
@@ -189,6 +269,8 @@ export default function LecturerMaterials() {
         episodeNumber: '',
         recordedAt: '',
         durationSeconds: '',
+        embedUrl: '',
+        isEmbedded: false,
       });
       setShowForm(false);
       setError('');
@@ -243,6 +325,34 @@ export default function LecturerMaterials() {
                 newly added on their dashboard. To tie it to one class day instead, attach it from
                 the Timetable page.
               </p>
+              
+              {/* Toggle between Upload and Embed */}
+              <div className="mb-4 flex gap-2 border-b border-[var(--border)]">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, isEmbedded: false })}
+                  className={`px-4 py-2 font-semibold transition ${
+                    !formData.isEmbedded
+                      ? 'text-[var(--accent)] border-b-2 border-[var(--accent)]'
+                      : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  Upload File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, isEmbedded: true })}
+                  className={`px-4 py-2 font-semibold transition ${
+                    formData.isEmbedded
+                      ? 'text-[var(--accent)] border-b-2 border-[var(--accent)]'
+                      : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  <LinkIcon className="inline mr-1 h-4 w-4" />
+                  Embed URL
+                </button>
+              </div>
+              
               <form onSubmit={handleUpload} className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
@@ -269,7 +379,23 @@ export default function LecturerMaterials() {
                     className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder-[var(--muted)] min-h-[100px]"
                   />
                 </div>
-
+                {formData.isEmbedded && (
+                  <div>
+                    <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
+                      Video URL
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="Paste YouTube, TikTok, Vimeo, Instagram link, or any web link"
+                      value={formData.embedUrl}
+                      onChange={(e) => setFormData({ ...formData, embedUrl: e.target.value })}
+                      className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder-[var(--muted)]"
+                    />
+                    <p className="text-xs text-[var(--muted)] mt-1">
+                      Supported: YouTube, TikTok, Vimeo, Instagram, or any web link
+                    </p>
+                  </div>
+                )}
                 {!formData.isRecording && (
                   <div>
                     <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">

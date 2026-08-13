@@ -7,7 +7,8 @@ import { useEffect, useState } from "react";
 import StudentShell from "@/components/StudentShell";
 import VideoLibrary from "@/components/video/VideoLibrary";
 import { isPlayableVideo, type LibraryVideo } from "@/lib/video-library";
-import { AudioIcon, DocumentIcon, FilmIcon, ImageIcon, PackageIcon, PencilIcon } from "@/components/icons";
+import { parseEmbedUrl } from "@/lib/embed-utils";
+import { AudioIcon, DocumentIcon, FilmIcon, ImageIcon, PackageIcon, PencilIcon, LinkIcon } from "@/components/icons";
 
 type Material = {
   id: string;
@@ -18,6 +19,8 @@ type Material = {
   fileSize: number;
   uploadedBy: string;
   createdAt: string;
+  isEmbedded?: boolean;
+  embedProvider?: string;
   course?: { title: string; level?: string };
 };
 
@@ -90,7 +93,8 @@ export default function MaterialsPage() {
   }, []);
 
   // Videos have their own tab, so they are not repeated in the document list.
-  const documents = materials.filter((material) => !isPlayableVideo(material.fileType));
+  // Also exclude embedded URLs from documents - they should only appear in watch tab
+  const documents = materials.filter((material) => !isPlayableVideo(material.fileType) && !material.isEmbedded);
   const filteredDocuments =
     filterType === "all" ? documents : documents.filter((material) => material.fileType?.includes(filterType));
 

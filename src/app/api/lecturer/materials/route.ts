@@ -96,6 +96,12 @@ export async function POST(req: NextRequest) {
     const description = String(body.description ?? '').trim();
     const courseId = String(body.courseId ?? '').trim();
 
+    // Handle embedded URLs
+    const isEmbedded = String(body.isEmbedded ?? '') === 'true';
+    const embedUrl = String(body.embedUrl ?? '').trim();
+    const embedProvider = String(body.embedProvider ?? '').trim().toLowerCase();
+
+    // Handle file uploads
     const fileUrl = String(body.fileUrl ?? '').trim();
     const fileName = String(body.fileName ?? '').trim();
     const fileType = String(body.fileType ?? '').trim() || 'application/octet-stream';
@@ -110,18 +116,31 @@ export async function POST(req: NextRequest) {
     const durationRaw = String(body.durationSeconds ?? '').trim();
     const isRecording = String(body.isRecording ?? '') === 'true';
 
-    if (!title || !fileUrl || !fileName) {
-      return NextResponse.json({ error: 'A title and a file are required' }, { status: 400 });
+    if (!title) {
+      return NextResponse.json({ error: 'A title is required' }, { status: 400 });
+    }
+
+    // Validate embedded URL submission
+    if (isEmbedded) {
+      if (!embedUrl) {
+        return NextResponse.json({ error: 'Please provide a video URL' }, { status: 400 });
+      }
+      if (!embedProvider) {
+        return NextResponse.json({ error: 'Invalid URL format' }, { status: 400 });
+      }
+    } else {
+      // Validate file upload submission
+      if (!fileUrl || !fileName) {
+        return NextResponse.json({ error: 'A title and a file are required' }, { status: 400 });
+      }
     }
 
     // A recording belongs to a level, not a course. Everything else still
     // needs a course so it lands somewhere students can find it.
-    const kind = isRecording ? 'recording' : deriveMaterialKind(fileType);
-    if (kind !== 'recording' && !courseId) {
+    const kind = isEmbedded ? 'video' : isRecording ? 'recording' : deriveMaterialKind(fileType);
+    
+    if (!isRecording && !courseId) {
       return NextResponse.json({ error: 'Please choose a course for this material' }, { status: 400 });
-    }
-    if (kind === 'recording' && !level) {
-      return NextResponse.json({ error: 'Please choose the level this recording is for' }, { status: 400 });
     }
 
     if (courseId) {
@@ -137,16 +156,18 @@ export async function POST(req: NextRequest) {
         description: description || null,
         courseId: courseId || null,
         lecturerId,
-        fileName,
-        filePath: fileUrl,
-        fileType,
-        fileSize,
+        fileName: isEmbedded ? embedProvider : fileName,
+        filePath: isEmbedded ? embedUrl : fileUrl,
+        fileType: isEmbedded ? 'video/embedded' : fileType,
+        fileSize: isEmbedded ? 0 : fileSize,
         kind,
         level: level || null,
         series: series || null,
         episodeNumber: episodeRaw ? Number(episodeRaw) || null : null,
         durationSeconds: durationRaw ? Number(durationRaw) || null : null,
         recordedAt: recordedAtRaw ? new Date(recordedAtRaw) : kind === 'recording' ? new Date() : null,
+        isEmbedded,
+        embedProvider: isEmbedded ? embedProvider : null,
       },
       include: { course: { select: { title: true } } },
     });

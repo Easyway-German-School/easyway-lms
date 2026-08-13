@@ -680,6 +680,18 @@ model Material {
    */
   recordedAt    DateTime?
 
+  /**
+   * Indicates if this material is an embedded resource (YouTube, TikTok, etc.)
+   * rather than an uploaded file.
+   */
+  isEmbedded Boolean @default(false)
+
+  /**
+   * For embedded resources, the provider name (youtube, tiktok, vimeo, etc.).
+   * Null for uploaded files.
+   */
+  embedProvider String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
