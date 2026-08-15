@@ -121,6 +121,7 @@ const navItems: NavItem[] = [
 
   { label: 'Assistant', href: '/admin/assistant', icon: <RobotIcon />, group: 'Intelligence' },
 
+  { label: 'General settings', href: '/admin/settings', icon: <SlidersIcon />, group: 'Settings' },
   { label: 'Email centre', href: '/admin/emails', icon: <MailIcon />, group: 'Settings' },
   { label: 'Compose email', href: '/admin/emails/compose', icon: <SendIcon />, group: 'Settings' },
   { label: 'Notifications', href: '/admin/notifications', icon: <BellIcon />, group: 'Settings' },
