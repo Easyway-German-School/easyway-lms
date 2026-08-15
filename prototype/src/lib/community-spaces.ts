@@ -134,6 +134,12 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
     (await prisma.branch.findUnique({ where: { id: cohort.branchId }, select: { name: true } }))?.name ??
     "EasyWay";
 
+  // Fetch the branch to get tenantId
+  const branch = await prisma.branch.findUnique({
+    where: { id: cohort.branchId },
+    select: { tenantId: true },
+  });
+
   const space = await prisma.space.upsert({
     where: {
       branchId_level_sessionSlot: { branchId: cohort.branchId, level, sessionSlot },
@@ -145,6 +151,7 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
       sessionSlot,
       name: `${branchName} · ${level} · ${slotLabel(sessionSlot)}`,
       description: `${slotLabel(sessionSlot)} ${level} class at ${branchName}.`,
+      tenantId: branch?.tenantId ?? null,
     },
   });
 
@@ -154,7 +161,7 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
     await prisma.channel.upsert({
       where: { spaceId_slug: { spaceId: space.id, slug: channel.slug } },
       update: {},
-      create: { spaceId: space.id, ...channel },
+      create: { spaceId: space.id, ...channel, tenantId: space.tenantId },
     });
   }
 

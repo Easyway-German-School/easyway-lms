@@ -37,7 +37,14 @@ export async function GET() {
       scope: { branchId: scope.branchId, level: scope.level },
     });
   } catch (error) {
-    console.error("Community spaces error:", error);
-    return NextResponse.json({ error: "Unable to load community spaces" }, { status: 500 });
+    console.error("Community spaces error:", error instanceof Error ? error.message : String(error));
+    console.error("Full error:", error);
+    return NextResponse.json(
+      {
+        error: "Unable to load community spaces",
+        detail: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 }
+    );
   }
 }
