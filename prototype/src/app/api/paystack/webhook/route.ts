@@ -121,6 +121,83 @@ async function handlePOST(request: Request) {
       return NextResponse.json({ received: true, examFee: result });
     }
 
+    /**
+     * A student upgrading to one-to-one tuition. Recorded as its own payment,
+     * separate from the tuition/deposit ledger above, and — unlike every other
+     * branch here — it changes the student's own row: classType flips to
+     * "private" so the tutor-assignment queue on the admin side picks them up.
+     * Idempotent on the Paystack reference, same as the tuition path, so a
+     * retried webhook cannot double-charge or double-flip the flag.
+     */
+    if (metadata.kind === "private_class_upgrade" && metadata.studentId) {
+      const upgradeStudentId = String(metadata.studentId);
+      const upgradeReference = String(data.reference || "");
+      const upgradeAmount = Math.round(Number(data.amount || 0) / 100);
+
+      const alreadyRecorded = upgradeReference
+        ? await prisma.payment.findFirst({ where: { stripeSessionId: upgradeReference } })
+        : null;
+      if (alreadyRecorded) {
+        return NextResponse.json({ received: true });
+      }
+
+      const upgradeStudent = await prisma.student.findUnique({
+        where: { id: upgradeStudentId },
+        include: { user: true },
+      });
+      if (!upgradeStudent) {
+        console.error("Paystack webhook could not resolve student for private class upgrade", { upgradeStudentId });
+        return NextResponse.json({ received: true });
+      }
+
+      await prisma.payment.create({
+        data: {
+          studentId: upgradeStudent.id,
+          amount: upgradeAmount,
+          currency: "NGN",
+          status: "completed",
+          method: "paystack",
+          description: "Private (one-to-one) class upgrade",
+          stripeSessionId: upgradeReference,
+          paymentIntentId: upgradeReference,
+        },
+      });
+
+      await prisma.student.update({
+        where: { id: upgradeStudent.id },
+        data: { classType: "private" },
+      });
+
+      notifyInBackground({
+        to: { studentIds: [upgradeStudent.id] },
+        kind: KIND.paymentReceived,
+        severity: "success",
+        title: "Private classes unlocked",
+        message: "Your one-to-one upgrade payment was received. The office will assign your tutor shortly.",
+        link: "/dashboard",
+      });
+
+      notifyInBackground({
+        to: { audience: "admin", capability: "students" },
+        kind: KIND.paymentReceived,
+        severity: "success",
+        title: "Private class upgrade purchased",
+        message: `${upgradeStudent.user?.name || "A student"} paid ₦${upgradeAmount.toLocaleString()} to switch to private classes. Assign a tutor.`,
+        link: "/admin/lecturer-invite",
+        push: true,
+      });
+
+      if (upgradeStudent.user?.email) {
+        await sendEmail({
+          to: upgradeStudent.user.email,
+          subject: "Your private class upgrade was received",
+          html: `<p>Hello ${upgradeStudent.user.name || "there"},</p><p>We received your payment for one-to-one private tuition. Our office will assign a dedicated tutor and confirm your schedule shortly.</p><p>Thank you,<br/>Easyway LMS</p>`,
+        });
+      }
+
+      return NextResponse.json({ received: true });
+    }
+
     const rawStudentId = String(metadata.studentId || metadata.userId || "");
     const pathwayId = String(metadata.pathwayId || "");
     const pathwayName = metadata.pathwayName || "program";

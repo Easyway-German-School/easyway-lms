@@ -31,6 +31,8 @@ type Student = {
   level?: string;
   /** Needed for the fee: Abuja is priced above Lagos and Port Harcourt. */
   branchName?: string | null;
+  /** group | private — drives whether the private-class upsell shows. */
+  classType?: string;
   pathway?: string;
   examReadiness?: number;
   /** Used to make the notification ask concrete: "your next class is …". */
@@ -73,6 +75,7 @@ import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
 import JourneyMapPoster from "@/components/JourneyMapPoster";
 import GermanyJourney from "@/components/journey/GermanyJourney";
+import PremiumPrivateClasses from "@/components/PremiumPrivateClasses";
 
 export default function DashboardPage() {
   return (
@@ -654,6 +657,22 @@ function DashboardContent() {
               </div>
             </div>
           </section>
+
+          {/* Premium upsell: one-to-one classes. Deliberately not on signup —
+              a student meets this after enrolling, once they know the school
+              and the offer means something. Renders nothing for students
+              already on private tuition. */}
+          {resolvedStudent && (
+            <div className="mt-8">
+              <PremiumPrivateClasses
+                student={{
+                  classType: resolvedStudent.classType ?? "group",
+                  level: resolvedStudent.level,
+                  branchName: resolvedStudent.branchName ?? undefined,
+                }}
+              />
+            </div>
+          )}
 
           <section className="mt-8 grid gap-6 lg:grid-cols-4">
             {quickStats.map((stat, index) => (

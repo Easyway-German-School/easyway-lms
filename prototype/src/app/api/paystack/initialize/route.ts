@@ -6,6 +6,7 @@ import { safeJson } from "@/lib/safe-json";
 import {
   DEPOSIT_RATE,
   isLevelSellable,
+  PRIVATE_CLASS_UPGRADE_PRICE,
   REGISTRATION_FEE,
   requiredDepositFor,
   tuitionFeeFor,
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { pathwayId, pathwayName } = body ?? {};
     const requestedStage = String(body?.paymentStage ?? body?.stage ?? "full").toLowerCase();
+    const requestType = String(body?.type ?? "").toLowerCase();
 
     const studentRecord = await prisma.student.findUnique({
       where: { userId: session.user.id as string },
@@ -45,6 +47,69 @@ export async function POST(request: Request) {
 
     if (!studentRecord) {
       return NextResponse.json({ error: "No student record to bill" }, { status: 404 });
+    }
+
+    /**
+     * PRIVATE CLASS UPGRADE — a separate, simpler checkout from the tuition
+     * flow below. One flat price, no stages, no deposit — a student either
+     * pays for one-to-one tuition or does not. Branched here, before the
+     * tuition-specific lookups, because none of that logic (sellable levels,
+     * deposit stages, pathway enrolment) applies to this purchase.
+     */
+    if (requestType === "private_class_upgrade") {
+      if (studentRecord.classType === "private") {
+        return NextResponse.json({ error: "You are already on private tuition." }, { status: 409 });
+      }
+
+      const userEmail = String(session.user.email || "").trim().toLowerCase();
+      const validEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!validEmailPattern.test(userEmail)) {
+        return NextResponse.json(
+          { error: "A valid email address is required to process Paystack payments. Please update your account email before proceeding." },
+          { status: 400 },
+        );
+      }
+
+      const secretKey = process.env.PAYSTACK_SECRET_KEY;
+      if (!secretKey) {
+        return NextResponse.json({ error: "Paystack is not configured" }, { status: 500 });
+      }
+
+      const callbackUrlBase = process.env.PAYSTACK_CALLBACK_URL || `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/enrollment/success`;
+      const callbackUrl = `${callbackUrlBase}${callbackUrlBase.includes("?") ? "&" : "?"}source=paystack`;
+
+      const paystackResponse = await fetch("https://api.paystack.co/transaction/initialize", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${secretKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: userEmail,
+          amount: PRIVATE_CLASS_UPGRADE_PRICE * 100,
+          currency: "NGN",
+          reference: `easyway-private-${Date.now()}-${session.user.id}`,
+          callback_url: callbackUrl,
+          metadata: {
+            kind: "private_class_upgrade",
+            userId: session.user.id,
+            studentId: studentRecord.id,
+            level: studentRecord.level,
+          },
+        }),
+      });
+
+      const paystackData = await safeJson(paystackResponse);
+      if (!paystackResponse.ok || !paystackData || !paystackData.status) {
+        throw new Error(paystackData?.message || "Paystack initialization failed");
+      }
+
+      return NextResponse.json({
+        authorizationUrl: paystackData.data.authorization_url,
+        authorization_url: paystackData.data.authorization_url,
+        reference: paystackData.data.reference,
+        amount: PRIVATE_CLASS_UPGRADE_PRICE,
+      });
     }
 
     const feeLookup = { level: studentRecord.level, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType };

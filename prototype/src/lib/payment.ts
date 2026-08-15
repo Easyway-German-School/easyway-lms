@@ -89,6 +89,17 @@ export const PRIVATE_CLASS_MULTIPLIER = 2;
 export const PRIVATE_PRICES_ARE_PLACEHOLDER = true;
 
 /**
+ * PRIVATE CLASS UPGRADE — flat one-time price, PLACEHOLDER.
+ *
+ * The upsell on the student dashboard (see PremiumPrivateClasses.tsx) charges
+ * this flat figure rather than the level/branch-derived PRIVATE_CLASS_MULTIPLIER
+ * above — a simpler number for a simpler decision ("upgrade to one-to-one"),
+ * quoted once at ₦300,000 by the school pending a real pricing table. Change
+ * this constant and the upsell card, the checkout and the webhook all follow.
+ */
+export const PRIVATE_CLASS_UPGRADE_PRICE = 300000;
+
+/**
  * Levels a student may buy through the portal. C1 and C2 are quoted by the
  * branch office for now, so they are priced in FEE_TABLE (the paywall still
  * needs a number for a C1 student who was enrolled by hand) but kept out of
