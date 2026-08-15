@@ -123,6 +123,7 @@ function StudentsRoster() {
   const [filterTutorId, setFilterTutorId] = useState<string>(params.get("tutorId") ?? "");
   const [filterLevel, setFilterLevel] = useState<string>(params.get("level") ?? "");
   const [filterBatch, setFilterBatch] = useState<string>(params.get("batch") ?? "");
+  const [filterClassType, setFilterClassType] = useState<string>(params.get("classType") ?? "");
   const [filterStatus, setFilterStatus] = useState<string>(params.get("status") ?? "");
   const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>(params.get("paymentStatus") ?? "");
   const [search, setSearch] = useState<string>(params.get("search") ?? "");
@@ -181,6 +182,7 @@ function StudentsRoster() {
     if (filterTutorId) url.searchParams.set("tutorId", filterTutorId);
     if (filterLevel) url.searchParams.set("level", filterLevel);
     if (filterBatch) url.searchParams.set("batch", filterBatch);
+    if (filterClassType) url.searchParams.set("classType", filterClassType);
     if (filterStatus) url.searchParams.set("status", filterStatus);
     if (filterPaymentStatus) url.searchParams.set("paymentStatus", filterPaymentStatus);
     if (search) url.searchParams.set("search", search);
@@ -220,11 +222,11 @@ function StudentsRoster() {
 
   useEffect(() => {
     loadStudents();
-  }, [filterBranchId, filterTutorId, filterLevel, filterBatch, filterStatus, filterPaymentStatus, search, focus, agingBucket, focusIds, page, pageSize]);
+  }, [filterBranchId, filterTutorId, filterLevel, filterBatch, filterClassType, filterStatus, filterPaymentStatus, search, focus, agingBucket, focusIds, page, pageSize]);
 
   useEffect(() => {
     setPage(1);
-  }, [filterBranchId, filterTutorId, filterLevel, filterStatus, filterPaymentStatus, search, focus, agingBucket, pageSize]);
+  }, [filterBranchId, filterTutorId, filterLevel, filterClassType, filterStatus, filterPaymentStatus, search, focus, agingBucket, pageSize]);
 
   async function handleSaveStudent() {
     setStudentError("");
@@ -642,6 +644,19 @@ function StudentsRoster() {
                   {['January','February','March','April','May','June','July','August','September','October','November','December'].map((month) => (
                     <option key={month} value={month}>{month}</option>
                   ))}
+                </select>
+              </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                <label htmlFor="classTypeFilter" className="block text-sm font-semibold text-[var(--muted)]">Student Type</label>
+                <select
+                  id="classTypeFilter"
+                  value={filterClassType}
+                  onChange={(event) => setFilterClassType(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">All types</option>
+                  <option value="group">Group Class</option>
+                  <option value="private">Private Class</option>
                 </select>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">

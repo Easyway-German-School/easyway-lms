@@ -339,12 +339,6 @@ export default function NotificationCenter({
                 <span className="truncate">{notification.senderName}</span>
               </>
             )}
-            {notification.link && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="font-semibold text-[var(--accent)]">Open</span>
-              </>
-            )}
           </div>
         </div>
 

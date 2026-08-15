@@ -236,6 +236,11 @@ export default function CertificateDocument({
               </span>
             </div>
           )}
+
+          {/* ---- Disclaimer ---- */}
+          <p className="ewcert__disclaimer">
+            This is electronically generated and it's valid anywhere.
+          </p>
         </div>
 
         {cert.revoked && <RevokedStamp />}
@@ -567,6 +572,12 @@ const CERT_CSS = `
 }
 .ewcert__verify strong { font-weight: 700; color: #111; }
 .ewcert__verify-sep { color: #aaa; }
+
+/* ---- Disclaimer ---- */
+.ewcert__disclaimer {
+  margin-top: 0.5cqw; font-size: 0.9cqw; color: #666;
+  font-weight: 500; letter-spacing: 0.02em;
+}
 
 /* ---- Stamps ---- */
 .ewcert__stamp {

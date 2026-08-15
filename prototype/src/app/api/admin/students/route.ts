@@ -19,6 +19,7 @@ export async function GET(request: Request) {
   const branchId = url.searchParams.get("branchId");
   const level = url.searchParams.get("level");
   const batch = url.searchParams.get("batch");
+  const classType = url.searchParams.get("classType");
   const status = url.searchParams.get("status");
   const paymentStatus = url.searchParams.get("paymentStatus");
   const tutorId = url.searchParams.get("tutorId");
@@ -52,6 +53,7 @@ export async function GET(request: Request) {
   if (branchId) whereClause.branchId = branchId;
   if (level) whereClause.level = level;
   if (batch) whereClause.admission = { path: ["batch"], equals: batch };
+  if (classType) whereClause.classType = classType;
   if (status) whereClause.status = status;
 
   if (gate.session.user.tenantId) {
