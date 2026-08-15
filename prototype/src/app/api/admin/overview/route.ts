@@ -65,29 +65,26 @@ export async function GET() {
         user: { select: { name: true, email: true } },
         payments: { where: { status: "completed" }, select: { amount: true } },
       },
-    }),
-    prisma.branch.count(),
-    prisma.lecturer.count(),
-    prisma.lead.groupBy({ by: ["status"], _count: { id: true } }),
-    prisma.material.count(),
-    prisma.message.count(),
-    prisma.message.count({ where: { hiddenAt: { not: null } } }),
-    prisma.examRegistration.count(),
-    prisma.examRegistration.count({ where: { status: "pending" } }),
-    prisma.assignmentSubmission.count({ where: { score: null } }),
+      take: 5000,
+    }).catch(() => []),
+    prisma.branch.count().catch(() => 0),
+    prisma.lecturer.count().catch(() => 0),
+    prisma.lead.groupBy({ by: ["status"], _count: { id: true } }).catch(() => []),
+    prisma.material.count().catch(() => 0),
+    prisma.message.count().catch(() => 0),
+    prisma.message.count({ where: { hiddenAt: { not: null } } }).catch(() => 0),
+    prisma.examRegistration.count().catch(() => 0),
+    prisma.examRegistration.count({ where: { status: "pending" } }).catch(() => 0),
+    prisma.assignmentSubmission.count({ where: { score: null } }).catch(() => 0),
     prisma.attendance.findMany({
       where: { date: { gte: thirtyDaysAgo } },
       select: { present: true, status: true },
-    }),
+    }).catch(() => []),
     prisma.integrationConnector.findMany({
       select: { id: true, name: true, enabled: true, status: true, lastSyncAt: true, lastError: true, itemsSynced: true },
-    }),
+    }).catch(() => []),
     prisma.payment.findMany({
       where: { status: "completed", createdAt: { gte: sixMonthsAgo } },
-      // `student.id` rides along so the feed entry can open the person it is
-      // about. Without it the front page could name someone and then offer no
-      // way to reach them — the reader had to memorise a name, open the
-      // roster and search for it.
       select: {
         amount: true,
         createdAt: true,
@@ -95,12 +92,13 @@ export async function GET() {
         student: { select: { id: true, user: { select: { name: true } } } },
       },
       orderBy: { createdAt: "desc" },
-    }),
+      take: 500,
+    }).catch(() => []),
     prisma.student.findMany({
       take: 5,
       orderBy: { createdAt: "desc" },
       select: { id: true, createdAt: true, level: true, user: { select: { name: true } }, branch: { select: { name: true } } },
-    }),
+    }).catch(() => []),
     prisma.assignmentSubmission.findMany({
       take: 5,
       orderBy: { createdAt: "desc" },
@@ -109,7 +107,7 @@ export async function GET() {
         student: { select: { id: true, user: { select: { name: true } } } },
         assignment: { select: { title: true } },
       },
-    }),
+    }).catch(() => []),
   ]);
 
   // ---- Payment cohorts -------------------------------------------------
