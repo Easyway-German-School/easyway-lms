@@ -75,7 +75,6 @@ import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
 import JourneyMapPoster from "@/components/JourneyMapPoster";
 import GermanyJourney from "@/components/journey/GermanyJourney";
-import PremiumPrivateClasses from "@/components/PremiumPrivateClasses";
 
 export default function DashboardPage() {
   return (
@@ -97,6 +96,7 @@ function DashboardContent() {
   const [plannerStrategy, setPlannerStrategy] = useState<string>('hybrid');
   const [pathway, setPathway] = useState("Language training");
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [aiTab, setAiTab] = useState<'pronunciation' | 'plan'>('pronunciation');
   const [phrase, setPhrase] = useState("Ich möchte ein Visum beantragen.");
   const [feedback, setFeedback] = useState<string[]>(["Type a phrase and press Analyze."]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -658,22 +658,6 @@ function DashboardContent() {
             </div>
           </section>
 
-          {/* Premium upsell: one-to-one classes. Deliberately not on signup —
-              a student meets this after enrolling, once they know the school
-              and the offer means something. Renders nothing for students
-              already on private tuition. */}
-          {resolvedStudent && (
-            <div className="mt-8">
-              <PremiumPrivateClasses
-                student={{
-                  classType: resolvedStudent.classType ?? "group",
-                  level: resolvedStudent.level,
-                  branchName: resolvedStudent.branchName ?? undefined,
-                }}
-              />
-            </div>
-          )}
-
           <section className="mt-8 grid gap-6 lg:grid-cols-4">
             {quickStats.map((stat, index) => (
               <motion.div
@@ -784,71 +768,91 @@ function DashboardContent() {
                 </div>
               </motion.div>
 
+              {/* Was two full cards (Pronunciation practice, AI learning path) —
+                  each always expanded, together the single biggest chunk of
+                  the dashboard. One card, one tab switch, same two tools. */}
               <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">AI coach</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">Pronunciation practice</h2>
+                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">AI study tools</p>
+                    <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">
+                      {aiTab === 'pronunciation' ? 'Pronunciation practice' : 'Personalized learning path'}
+                    </h2>
                   </div>
                 </div>
-                <p className="mt-4 text-sm text-[var(--muted)]">Type your German phrase and get instant AI feedback.</p>
-                <textarea
-                  value={phrase}
-                  onChange={(e) => setPhrase(e.target.value)}
-                  rows={4}
-                  className="mt-4 w-full rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-sm text-[var(--foreground)] focus:outline-none"
-                  placeholder="Ich möchte ein Visum beantragen."
-                />
-                <button
-                  onClick={handleAnalyze}
-                  disabled={isAnalyzing}
-                  className="mt-4 inline-flex w-full items-center justify-center rounded-3xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-                >
-                  {isAnalyzing ? 'Analyzing...' : 'Analyze pronunciation'}
-                </button>
-                <div className="mt-4 space-y-2 text-sm text-[var(--muted)]">
-                  {feedback.map((item, index) => (
-                    <p key={`${item}-${index}`}>• {item}</p>
-                  ))}
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAiTab('pronunciation')}
+                    className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] ${aiTab === 'pronunciation' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface-alt)] text-[var(--muted)]'}`}
+                  >
+                    Pronunciation
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAiTab('plan')}
+                    className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] ${aiTab === 'plan' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface-alt)] text-[var(--muted)]'}`}
+                  >
+                    Study plan
+                  </button>
                 </div>
-              </motion.div>
-            </div>
-          </section>
 
-          <section className="mt-8 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Personalized plan</p>
-                  <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">AI learning path</h2>
-                </div>
-                <select value={plannerStrategy} onChange={(e) => setPlannerStrategy(e.target.value)} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-sm text-[var(--foreground)]">
-                  <option value="deterministic">Deterministic</option>
-                  <option value="fewshot">Few-shot</option>
-                  <option value="hybrid">Hybrid</option>
-                  <option value="compare">A/B compare</option>
-                </select>
-              </div>
-              <div className="mt-6 space-y-4">
-                {personalizedPlan ? (
+                {aiTab === 'pronunciation' ? (
                   <>
-                    {personalizedPlan.rationale ? <p className="text-sm text-[var(--muted)]">{personalizedPlan.rationale}</p> : null}
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                      {(personalizedPlan.lessons || []).slice(0, 4).map((lesson: any, idx: number) => (
-                        <div key={lesson.id || idx} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
-                          <p className="font-semibold text-[var(--foreground)]">{lesson.title}</p>
-                          <p className="mt-2 text-sm text-[var(--muted)]">{lesson.goal}</p>
-                        </div>
+                    <p className="mt-4 text-sm text-[var(--muted)]">Type your German phrase and get instant AI feedback.</p>
+                    <textarea
+                      value={phrase}
+                      onChange={(e) => setPhrase(e.target.value)}
+                      rows={4}
+                      className="mt-4 w-full rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-sm text-[var(--foreground)] focus:outline-none"
+                      placeholder="Ich möchte ein Visum beantragen."
+                    />
+                    <button
+                      onClick={handleAnalyze}
+                      disabled={isAnalyzing}
+                      className="mt-4 inline-flex w-full items-center justify-center rounded-3xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      {isAnalyzing ? 'Analyzing...' : 'Analyze pronunciation'}
+                    </button>
+                    <div className="mt-4 space-y-2 text-sm text-[var(--muted)]">
+                      {feedback.map((item, index) => (
+                        <p key={`${item}-${index}`}>• {item}</p>
                       ))}
                     </div>
                   </>
                 ) : (
-                  <p className="text-sm text-[var(--muted)]">Your personalized plan will appear here once the AI recommendation service loads.</p>
+                  <>
+                    <select value={plannerStrategy} onChange={(e) => setPlannerStrategy(e.target.value)} className="mt-4 w-full rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-sm text-[var(--foreground)]">
+                      <option value="deterministic">Deterministic</option>
+                      <option value="fewshot">Few-shot</option>
+                      <option value="hybrid">Hybrid</option>
+                      <option value="compare">A/B compare</option>
+                    </select>
+                    <div className="mt-4 space-y-4">
+                      {personalizedPlan ? (
+                        <>
+                          {personalizedPlan.rationale ? <p className="text-sm text-[var(--muted)]">{personalizedPlan.rationale}</p> : null}
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                            {(personalizedPlan.lessons || []).slice(0, 4).map((lesson: any, idx: number) => (
+                              <div key={lesson.id || idx} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
+                                <p className="font-semibold text-[var(--foreground)]">{lesson.title}</p>
+                                <p className="mt-2 text-sm text-[var(--muted)]">{lesson.goal}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-[var(--muted)]">Your personalized plan will appear here once the AI recommendation service loads.</p>
+                      )}
+                    </div>
+                  </>
                 )}
-              </div>
-            </motion.div>
+              </motion.div>
+            </div>
+          </section>
 
+          <section className="mt-8">
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
               <div className="flex items-center justify-between gap-4">
                 <div>
@@ -856,7 +860,7 @@ function DashboardContent() {
                   <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">What’s new</h2>
                 </div>
               </div>
-              <div className="mt-6 space-y-4">
+              <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 {displayAnnouncements.map((item) => (
                   <div key={item.title} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
                     <p className="font-semibold text-[var(--foreground)]">{item.title}</p>

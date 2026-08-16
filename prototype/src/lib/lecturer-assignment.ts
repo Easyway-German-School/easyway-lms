@@ -176,6 +176,29 @@ export function studentWhereForAssignment(assignment: LecturerAssignment): Recor
 }
 
 /**
+ * Turn an assignment into the Prisma `where` that finds the community rooms it
+ * covers. A `Space` only carries branch + level + session, so this is a
+ * narrower cousin of `studentWhereForAssignment` — no classType/batch clauses,
+ * because a room is not one of those things. Same "empty list = no
+ * restriction, empty branch/level = unassigned" rule, for the same reason: a
+ * tutor left with no sitting chosen still only teaches Lagos A1, all sittings.
+ */
+export function spaceWhereForAssignment(assignment: LecturerAssignment): Record<string, unknown> | null {
+  if (!isAssigned(assignment)) return null;
+
+  const where: Record<string, unknown> = {
+    branchId: { in: assignment.branchIds },
+    level: { in: assignment.levels },
+  };
+
+  if (assignment.sessionSlots.length) {
+    where.sessionSlot = { in: assignment.sessionSlots };
+  }
+
+  return where;
+}
+
+/**
  * The whole roster: the class an admin described, PLUS anybody the office put
  * on this tutor by name.
  *

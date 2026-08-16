@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { resolveSpaceScope, isStaffRole } from "@/lib/community-spaces";
+import { resolveSpaceScope } from "@/lib/community-spaces";
 import { createMatch, turnsAwaiting } from "@/lib/satzkette-server";
 import { parseConstraint, type Constraint } from "@/lib/satzkette";
 
@@ -25,7 +25,7 @@ export async function GET() {
 
   const scope = await resolveSpaceScope({ userId, role });
   if (scope.spaceIds.length === 0) {
-    return NextResponse.json({ waiting: [], matches: [], canStart: isStaffRole(role) });
+    return NextResponse.json({ waiting: [], matches: [], canStart: false, spaceIds: [] });
   }
 
   const [waiting, matches] = await Promise.all([
@@ -61,17 +61,26 @@ export async function GET() {
       completedAt: match.completedAt,
       updatedAt: match.updatedAt,
     })),
-    canStart: isStaffRole(role),
+    // Every visible room is one this viewer belongs to (resolveSpaceScope
+    // already enforced that), so if there's a room there's somewhere to start
+    // a story. The per-room cap is checked for real at POST time.
+    canStart: scope.spaceIds.length > 0,
+    // A student has exactly one; staff may have several, and pick when starting.
+    spaceIds: scope.spaceIds,
   });
 }
 
+/** Nobody's chain monopolises a room. See the cap check below. */
+const MAX_ACTIVE_STORIES_PER_ROOM = 2;
+
 /**
- * Start a story. Staff only.
+ * Start a story. Any paid student in the room, or staff.
  *
- * A student cannot open one, and that is deliberate rather than an oversight: a
- * cohort where anybody can start a chain ends up with nine half-finished ones
- * and no turns owed on any of them, which breaks the only mechanic that makes
- * the feature work.
+ * Used to be staff-only, on the theory that a cohort where anybody can start a
+ * chain ends up with nine half-finished ones and no turns owed on any of them.
+ * That risk is real but the fix is a cap, not a lock: `MAX_ACTIVE_STORIES_PER_ROOM`
+ * below keeps a room from filling up with half-finished chains while still
+ * letting a student who wants to write kick one off without waiting on a tutor.
  */
 export async function POST(request: NextRequest) {
   const session = await requireAuthSession();
@@ -80,9 +89,6 @@ export async function POST(request: NextRequest) {
   }
 
   const role = (session.user as { role?: string }).role ?? "STUDENT";
-  if (!isStaffRole(role)) {
-    return NextResponse.json({ error: "Only a tutor can start a story" }, { status: 403 });
-  }
 
   const body = await request.json().catch(() => ({}));
   const spaceId = String(body?.spaceId ?? "");
@@ -91,11 +97,21 @@ export async function POST(request: NextRequest) {
   if (!spaceId) return NextResponse.json({ error: "Pick a class" }, { status: 400 });
   if (!title) return NextResponse.json({ error: "Give the story a title" }, { status: 400 });
 
-  // A tutor teaches several cohorts; this checks they teach THIS one, so a
-  // hand-edited spaceId cannot start a story in somebody else's class.
+  // Anyone in the room may start one — a tutor teaching several cohorts, or a
+  // paid student in their own single cohort. Either way, this checks the
+  // viewer actually belongs to THIS room, so a hand-edited spaceId cannot
+  // start a story in somebody else's class.
   const scope = await resolveSpaceScope({ userId: session.user.id as string, role });
   if (!scope.spaceIds.includes(spaceId)) {
     return NextResponse.json({ error: "That is not one of your classes" }, { status: 403 });
+  }
+
+  const activeCount = await prisma.gameMatch.count({ where: { spaceId, status: "active" } });
+  if (activeCount >= MAX_ACTIVE_STORIES_PER_ROOM) {
+    return NextResponse.json(
+      { error: `This room already has ${MAX_ACTIVE_STORIES_PER_ROOM} stories going — finish one first.` },
+      { status: 400 },
+    );
   }
 
   const constraints: Constraint[] = Array.isArray(body?.constraints)

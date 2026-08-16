@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { OFFERED_LEVELS } from "@/lib/levels";
+import { readAssignment, spaceWhereForAssignment } from "@/lib/lecturer-assignment";
 
 /**
  * Who may read and write in which cohort's chat.
@@ -16,10 +17,14 @@ import { OFFERED_LEVELS } from "@/lib/levels";
  * other sittings, filtered in the UI" — resolved here, once, and every
  * community route asks this module rather than trusting an id from the client.
  *
- * Staff are the deliberate exception. An admin has to be able to monitor every
- * room in the school, and a tutor covering a colleague's sitting has to be able
- * to answer in it. Restricting staff would break the moderation the school is
- * promising its students, which is the opposite of the point.
+ * Admins are the deliberate exception: the office has to be able to monitor
+ * every room in the school. A tutor is not — a tutor sees exactly the rooms
+ * their own admin-set assignment covers (see lib/lecturer-assignment.ts), the
+ * same branches/levels/sittings that already govern their roster and
+ * gradebook. Giving every tutor every room used to be the default and it was
+ * a real hole: a tutor assigned to one cohort could read and moderate the
+ * whole school, and a student's message could be lost among 50-odd rooms
+ * their own tutor was never meant to see.
  */
 
 export type Viewer = {
@@ -42,6 +47,11 @@ function normalizeRole(role: unknown) {
 export function isStaffRole(role: unknown) {
   const r = normalizeRole(role);
   return r === "admin" || r === "lecturer";
+}
+
+/** Admins, specifically — the one role that still sees every room. */
+function isAdminRole(role: unknown) {
+  return normalizeRole(role) === "admin";
 }
 
 /** The three sittings, in the order a timetable reads. */
@@ -189,8 +199,8 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
 
 /** Resolve exactly which spaces this viewer may read or post in. */
 export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
-  if (isStaffRole(viewer.role)) {
-    // Staff see every room in the school, minus the ones for levels it no
+  if (isAdminRole(viewer.role)) {
+    // Admins see every room in the school, minus the ones for levels it no
     // longer runs — moderation covers what is live, and a retired C2 room
     // would otherwise sit in the admin's list forever.
     const all = await prisma.space.findMany({
@@ -198,6 +208,32 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
       select: { id: true },
     });
     return { spaceIds: all.map((s) => s.id), isStaff: true, branchId: null, level: null, sessionSlot: null };
+  }
+
+  if (isStaffRole(viewer.role)) {
+    // A tutor sees exactly the rooms their assignment covers — same source of
+    // truth as the roster (readAssignment / spaceWhereForAssignment). No
+    // fallback to "everything": an unassigned tutor sees no rooms, mirroring
+    // isAssigned()'s refusal everywhere else a tutor's class is resolved.
+    const lecturer = await prisma.lecturer.findUnique({
+      where: { userId: viewer.userId },
+      select: {
+        branchId: true,
+        level: true,
+        sessionSlot: true,
+        branchIds: true,
+        levels: true,
+        sessionSlots: true,
+      },
+    });
+
+    const where = spaceWhereForAssignment(readAssignment(lecturer));
+    if (!where) {
+      return { spaceIds: [], isStaff: true, branchId: null, level: null, sessionSlot: null };
+    }
+
+    const rooms = await prisma.space.findMany({ where, select: { id: true } });
+    return { spaceIds: rooms.map((s) => s.id), isStaff: true, branchId: null, level: null, sessionSlot: null };
   }
 
   const student = await prisma.student.findUnique({

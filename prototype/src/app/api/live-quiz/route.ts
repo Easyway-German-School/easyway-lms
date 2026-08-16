@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { parseQuestions } from "@/lib/assignments";
 import { resolveHost } from "@/lib/live-quiz-views";
+import { liveWhere } from "@/lib/live-presence";
 import {
   DEFAULT_SECONDS_PER_QUESTION,
   MAX_SECONDS_PER_QUESTION,
@@ -52,6 +53,15 @@ export async function GET() {
     select: { id: true, pin: true, title: true, phase: true, createdAt: true },
   });
 
+  // So the setup screen can say the rule rather than only enforcing it on the
+  // click. See the online-cohort guard in POST.
+  const hostLecturer = host.lecturerId
+    ? await prisma.lecturer.findUnique({
+        where: { id: host.lecturerId },
+        select: { branch: { select: { mode: true } } },
+      })
+    : null;
+
   return NextResponse.json({
     quizzes: quizzes
       .map((quiz) => {
@@ -71,6 +81,7 @@ export async function GET() {
       // Listing it and failing on the click would be a worse way to say so.
       .filter((quiz) => quiz.questionCount > 0),
     openGame: open,
+    requiresLiveClass: hostLecturer?.branch?.mode === "online",
   });
 }
 
@@ -134,9 +145,69 @@ export async function POST(request: NextRequest) {
   const lecturer = host.lecturerId
     ? await prisma.lecturer.findUnique({
         where: { id: host.lecturerId },
-        select: { id: true, branchId: true, level: true, sessionSlot: true },
+        select: {
+          id: true,
+          branchId: true,
+          level: true,
+          sessionSlot: true,
+          branch: { select: { mode: true } },
+        },
       })
     : null;
+
+  /**
+   * Launched from inside a live class, rather than the projector/PIN flow this
+   * route was originally built for (see the file header — a physical classroom
+   * needs no video session at all, and that path stays exactly as it was).
+   *
+   * When a `liveSessionId` IS supplied, it must name a session this tutor is
+   * actually running right now — not closed, not somebody else's. Trusting an
+   * id from the client without this check would let a stale tab tag a brand
+   * new game with a class that ended an hour ago.
+   */
+  let liveSessionId: string | null = null;
+  const requestedSessionId = String(body?.liveSessionId ?? "").trim();
+  if (requestedSessionId) {
+    const session = await prisma.liveClassSession.findFirst({
+      where: {
+        id: requestedSessionId,
+        ...liveWhere(),
+        OR: [
+          { startedByUserId: host.userId },
+          ...(lecturer?.id ? [{ lecturerId: lecturer.id }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    if (!session) {
+      return NextResponse.json(
+        { error: "That live class isn't open anymore — start a new one and launch the quiz from there." },
+        { status: 400 },
+      );
+    }
+    liveSessionId = session.id;
+  }
+
+  /**
+   * AN ONLINE COHORT ONLY PLAYS INSIDE A LESSON.
+   *
+   * The PIN-and-projector flow assumes a room: thirty students sitting
+   * together, one screen, a tutor who can see who is playing. An online
+   * cohort has none of that — a PIN broadcast to a class nobody is currently
+   * attending is a quiz sitting open on the internet with no supervision and
+   * no shared moment, which is the opposite of what makes this format work.
+   * So for an online branch, the live lesson IS the room, and there is no
+   * game without one. Physical and hybrid branches are untouched.
+   */
+  if (!liveSessionId && lecturer?.branch?.mode === "online") {
+    return NextResponse.json(
+      {
+        error:
+          "Online classes play this inside the live lesson. Start your live class first, then launch the quiz from there.",
+      },
+      { status: 400 },
+    );
+  }
 
   const game = await prisma.quizGame.create({
     data: {
@@ -148,6 +219,7 @@ export async function POST(request: NextRequest) {
       branchId: lecturer?.branchId ?? quiz.branchId ?? null,
       level: lecturer?.level ?? quiz.level ?? null,
       sessionSlot: lecturer?.sessionSlot ?? quiz.sessionSlot ?? null,
+      liveSessionId,
       title: quiz.title,
       secondsPerQuestion: seconds,
       speedBonus,

@@ -8,8 +8,8 @@
  * belongs to the projector, which takes over the display entirely.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import LecturerShell from "@/components/LecturerShell";
 import HostGame from "@/components/live-quiz/HostGame";
@@ -28,12 +28,22 @@ type OpenGame = { id: string; pin: string; title: string; phase: string };
 
 const SECOND_CHOICES = [10, 20, 30, 45, 60];
 
-export default function LiveQuizPage() {
+// useSearchParams needs a Suspense boundary above it or the whole route opts
+// out of static rendering and Next fails the build — see the default export.
+function LiveQuizContent() {
   const { status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Set when this page was opened from the "Quiz" button inside a live class
+  // (see LiveKitClassroom.tsx) rather than the standalone nav entry — links
+  // the game back to that session so a physical classroom's PIN-and-projector
+  // flow, which needs none of this, is untouched.
+  const liveSessionId = searchParams.get("liveSessionId");
 
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [openGame, setOpenGame] = useState<OpenGame | null>(null);
+  /** True for an online cohort, where a game only exists inside a live lesson. */
+  const [requiresLiveClass, setRequiresLiveClass] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -53,6 +63,7 @@ export default function LiveQuizPage() {
       const data = await res.json();
       setQuizzes(data.quizzes ?? []);
       setOpenGame(data.openGame ?? null);
+      setRequiresLiveClass(Boolean(data.requiresLiveClass));
       setSelected((current) => current || data.quizzes?.[0]?.id || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -74,7 +85,13 @@ export default function LiveQuizPage() {
       const res = await fetch("/api/live-quiz", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assignmentId: selected, secondsPerQuestion: seconds, speedBonus, shuffle }),
+        body: JSON.stringify({
+          assignmentId: selected,
+          secondsPerQuestion: seconds,
+          speedBonus,
+          shuffle,
+          liveSessionId,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Could not start the game");
@@ -87,9 +104,12 @@ export default function LiveQuizPage() {
   }
 
   const chosen = quizzes.find((quiz) => quiz.id === selected);
+  // An online tutor who arrived here directly, rather than from inside a
+  // lesson, has nothing to start — the server refuses it too.
+  const blockedForOnline = requiresLiveClass && !liveSessionId;
 
   return (
-    <LecturerShell>
+    <>
       {runningId ? (
         <HostGame
           gameId={runningId}
@@ -108,10 +128,34 @@ export default function LiveQuizPage() {
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
             Put a question on the board, and the class answers on their phones against a
-            countdown. Faster right answers score more. Works in the classroom — nobody
-            needs to be in a video call.
+            countdown. Faster right answers score more.
+            {requiresLiveClass
+              ? " Your class is online, so a game runs inside the live lesson."
+              : " Works in the classroom — nobody needs to be in a video call."}
           </p>
         </header>
+
+        {/* The rule said up front, not only on the click. An online cohort has
+            no shared room other than the lesson itself — see the guard in
+            /api/live-quiz. */}
+        {blockedForOnline ? (
+          <div className="mb-6 rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-alt)] px-4 py-4">
+            <p className="text-sm font-semibold text-[var(--foreground)]">
+              Start your live class first
+            </p>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Your students are online, so the quiz plays inside the lesson — open the live
+              classroom and press <strong>Quiz</strong> there. That way only the students
+              actually in class can join, and their scores land against that session.
+            </p>
+            <a
+              href="/live"
+              className="mt-3 inline-block rounded-lg bg-[var(--accent-strong)] px-4 py-2 text-sm font-semibold text-white"
+            >
+              Open the live classroom
+            </a>
+          </div>
+        ) : null}
 
         {error ? (
           <p className="mb-4 flex items-center gap-2 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
@@ -290,7 +334,7 @@ export default function LiveQuizPage() {
             <button
               type="button"
               onClick={() => void start()}
-              disabled={!selected || starting}
+              disabled={!selected || starting || blockedForOnline}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] px-6 py-4 text-lg font-bold text-white disabled:opacity-50"
             >
               <PlayIcon className="h-5 w-5" />
@@ -310,6 +354,16 @@ export default function LiveQuizPage() {
           </div>
         )}
       </div>
+    </>
+  );
+}
+
+export default function LiveQuizPage() {
+  return (
+    <LecturerShell>
+      <Suspense fallback={<p className="p-8 text-sm text-[var(--muted)]">Loading…</p>}>
+        <LiveQuizContent />
+      </Suspense>
     </LecturerShell>
   );
 }

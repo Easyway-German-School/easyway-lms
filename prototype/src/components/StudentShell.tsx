@@ -9,6 +9,7 @@ import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
 import LiveClassCall from "@/components/live/LiveClassCall";
 import MomentDock from "@/components/MomentDock";
+import GameTurnToast from "@/components/GameTurnToast";
 import NotificationCenter from "@/components/NotificationCenter";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
 import SignOutButton from "@/components/SignOutButton";
@@ -396,6 +397,10 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       {/* Whatever the queue held back. Bottom left, because the community
           launcher and the theme switch already own the other corner. */}
       <MomentDock />
+
+      {/* The old dashboard "waiting on you" games card, now a queued nudge
+          instead of a permanent section — see lib/moment-queue.tsx. */}
+      <GameTurnToast />
 
       {/* Outranks all of the above, and knows it. A class that has started is
           the only thing in this portal that expires while you look at it. */}

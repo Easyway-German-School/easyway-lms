@@ -106,7 +106,8 @@ export type MomentId =
   | "level-advance"
   | "notifications"
   | "journey"
-  | "poster";
+  | "poster"
+  | "game-turn";
 
 type Kind = "toast" | "modal";
 
@@ -177,6 +178,20 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Your level map",
     dockBlurb: "The printed journey map for your level.",
+  },
+  /**
+   * "Someone needs a sentence from you." Below the journey moment because it
+   * is peer-driven rather than about the student's own progress, and above
+   * the poster because a person is actually waiting, not just a picture.
+   * `modal` rather than `toast`: unlike a payment confirmation this asks for
+   * a decision (play now or later), so it counts against the visit's cap and
+   * survives being deferred to the dock instead of vanishing on a timer.
+   */
+  "game-turn": {
+    priority: 40,
+    kind: "modal",
+    dockLabel: "Your turn is waiting",
+    dockBlurb: "Your class is writing a story and it's your turn to add a line.",
   },
 };
 

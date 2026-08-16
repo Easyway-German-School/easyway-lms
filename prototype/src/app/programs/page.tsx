@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 
 import TuitionCheckout from "@/components/TuitionCheckout";
+import PremiumPrivateClasses from "@/components/PremiumPrivateClasses";
 
 /**
  * The tuition checkout.
@@ -53,16 +54,40 @@ const programs = [
   },
 ];
 
+type StudentInfo = { classType: string; level?: string; branchName?: string };
+
 export default function ProgramsPage() {
   const { status } = useSession();
   const router = useRouter();
   const [selected, setSelected] = useState(programs[0].pathwayName);
+  const [student, setStudent] = useState<StudentInfo | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/auth/signin");
     }
   }, [status, router]);
+
+  // Just enough of the student record to decide whether the private-classes
+  // upsell below applies — moved here from the dashboard, which is not the
+  // place for an upsell (see PremiumPrivateClasses).
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    (async () => {
+      try {
+        const res = await fetch("/api/student", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        setStudent({
+          classType: data.classType ?? "group",
+          level: data.level ?? undefined,
+          branchName: data.branchName ?? undefined,
+        });
+      } catch {
+        // The pathway picker and checkout above still work without this.
+      }
+    })();
+  }, [status]);
 
   return (
     <div className="min-h-screen bg-[var(--surface-alt)] py-10 text-slate-950">
@@ -149,6 +174,12 @@ export default function ProgramsPage() {
             Practise a roleplay first
           </Link>
         </section>
+
+        {/* Was on the dashboard, which a student opens every day for things
+            that are still true an hour later — an upsell isn't one of them.
+            It belongs with the other "study more, differently" choices, here
+            and on the payment lock screen for students who haven't paid yet. */}
+        {student ? <PremiumPrivateClasses student={student} /> : null}
       </div>
     </div>
   );

@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import StudentShell from "@/components/StudentShell";
-import { AlertIcon, ChainIcon, ClockIcon } from "@/components/icons";
+import { AlertIcon, ChainIcon, ClockIcon, PlusIcon } from "@/components/icons";
 
 type Waiting = {
   turnId: string;
@@ -43,8 +43,16 @@ export default function GamesPage() {
 
   const [waiting, setWaiting] = useState<Waiting[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
+  const [canStart, setCanStart] = useState(false);
+  const [spaceId, setSpaceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [showStartForm, setShowStartForm] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newPrompt, setNewPrompt] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -53,6 +61,8 @@ export default function GamesPage() {
       const data = await res.json();
       setWaiting(data.waiting ?? []);
       setMatches(data.matches ?? []);
+      setCanStart(Boolean(data.canStart));
+      setSpaceId(data.spaceIds?.[0] ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -64,6 +74,29 @@ export default function GamesPage() {
     if (status === "unauthenticated") router.push("/auth/signin");
     if (status === "authenticated") void load();
   }, [status, router, load]);
+
+  const startStory = useCallback(async () => {
+    if (!spaceId || !newTitle.trim() || starting) return;
+    setStarting(true);
+    setStartError("");
+    try {
+      const res = await fetch("/api/games", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spaceId, title: newTitle.trim(), prompt: newPrompt.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Could not start that story");
+      setShowStartForm(false);
+      setNewTitle("");
+      setNewPrompt("");
+      router.push(`/games/${data.match.id}`);
+    } catch (err) {
+      setStartError(err instanceof Error ? err.message : "Could not start that story");
+    } finally {
+      setStarting(false);
+    }
+  }, [spaceId, newTitle, newPrompt, starting, router]);
 
   const active = matches.filter((match) => match.status === "active");
   const finished = matches.filter((match) => match.status === "completed");
@@ -130,17 +163,80 @@ export default function GamesPage() {
             ) : null}
 
             <section>
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
-                Your class is writing
-              </h2>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  Your class is writing
+                </h2>
+                {canStart && !showStartForm ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowStartForm(true)}
+                    className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)] hover:border-[var(--border-strong)]"
+                  >
+                    <PlusIcon className="h-3.5 w-3.5" /> Start a story
+                  </button>
+                ) : null}
+              </div>
+
+              {showStartForm ? (
+                <div className="mb-3 rounded-2xl border border-[var(--accent)] bg-[var(--accent-soft)] p-4">
+                  <label className="block text-xs font-semibold text-[var(--foreground)]">
+                    Title
+                    <input
+                      type="text"
+                      value={newTitle}
+                      onChange={(event) => setNewTitle(event.target.value)}
+                      placeholder="Ein Tag am Meer"
+                      maxLength={80}
+                      className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)]"
+                    />
+                  </label>
+                  <label className="mt-3 block text-xs font-semibold text-[var(--foreground)]">
+                    First line to build from (optional)
+                    <input
+                      type="text"
+                      value={newPrompt}
+                      onChange={(event) => setNewPrompt(event.target.value)}
+                      placeholder="Es war einmal…"
+                      maxLength={200}
+                      className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)]"
+                    />
+                  </label>
+                  {startError ? (
+                    <p className="mt-2 text-xs text-[var(--danger)]">{startError}</p>
+                  ) : null}
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void startStory()}
+                      disabled={!newTitle.trim() || starting}
+                      className="rounded-lg bg-[var(--accent-strong)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      {starting ? "Starting…" : "Start"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowStartForm(false);
+                        setStartError("");
+                      }}
+                      className="text-sm text-[var(--muted)]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               {active.length === 0 ? (
                 <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
                   <p className="text-sm text-[var(--foreground)]">
                     Nothing on the go right now.
                   </p>
                   <p className="mt-2 text-sm text-[var(--muted)]">
-                    Your tutor starts these. When one opens you will get a turn and a
-                    notification — you do not have to keep checking.
+                    {canStart
+                      ? "Start one yourself, or wait for a tutor or classmate to."
+                      : "Your tutor starts these. When one opens you will get a turn and a notification — you do not have to keep checking."}
                   </p>
                 </div>
               ) : (
