@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { authorizeChannel, canPostInChannel, isStaffRole } from "@/lib/community-spaces";
+import { activeMuteFor, muteMessage } from "@/lib/community-moderation";
 import { markChannelRead } from "@/lib/community-unread";
 import { announceChatMessage } from "@/lib/community-notify";
 
@@ -44,6 +45,7 @@ function serialise(
       author: { name: string | null };
     } | null;
     reactions?: Array<{ emoji: string; userId: string }>;
+    pinnedAt?: Date | null;
   },
   viewer: Viewer,
 ) {
@@ -88,6 +90,7 @@ function serialise(
      * whole cohort for no gain — the bubble only ever shows the count.
      */
     reactions: foldReactions(message.reactions ?? [], viewer.userId),
+    pinned: Boolean(message.pinnedAt),
   };
 }
 
@@ -178,10 +181,33 @@ export async function GET(request: Request) {
     const hasMore = rows.length > PAGE_SIZE;
     const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
 
+    /**
+     * Pinned messages come back SEPARATELY from the page.
+     *
+     * A pin is worth nothing if it scrolls away with everything else — the
+     * point of pinning "the exam is on the 14th" is that it is still on screen
+     * on the 13th, by which time it is four hundred messages back and not in
+     * any page the client has loaded.
+     */
+    const pinned = await prisma.message.findMany({
+      where: { channelId: channel.id, pinnedAt: { not: null }, hiddenAt: null },
+      include: INCLUDE,
+      orderBy: { pinnedAt: "desc" },
+      take: 3,
+    });
+
+    const mute = await activeMuteFor(viewer.userId);
+
     return NextResponse.json({
       messages: page.reverse().map((row) => serialise(row, viewer)),
+      pinned: pinned.map((row) => serialise(row, viewer)),
       hasMore,
-      canPost: canPostInChannel(channel.kind, viewer.role),
+      // Muted students get the composer disabled AND the reason, so a silence
+      // is never unexplained. The send path re-checks; this is presentation.
+      canPost: canPostInChannel(channel.kind, viewer.role) && !mute,
+      mutedUntil: mute?.mutedUntil ?? null,
+      muteReason: mute ? muteMessage(mute) : null,
+      canModerate: isStaffRole(viewer.role),
       mode: before ? "before" : "initial",
     });
   } catch (error) {
@@ -224,6 +250,20 @@ export async function POST(request: Request) {
         { error: "Only your tutor and the office can post in Announcements." },
         { status: 403 },
       );
+    }
+
+    /**
+     * A muted student, checked on the send itself.
+     *
+     * Disabling the composer is a courtesy to the honest reader; this is what
+     * actually holds. A mute that only hid the text box would be lifted by
+     * anybody willing to POST to the endpoint — which, in a room full of
+     * teenagers who have just watched a classmate get muted, is not a
+     * hypothetical.
+     */
+    const mute = await activeMuteFor(viewer.userId);
+    if (mute) {
+      return NextResponse.json({ error: muteMessage(mute), mutedUntil: mute.mutedUntil }, { status: 403 });
     }
 
     // A quote must point at a message in THIS channel — otherwise a crafted id

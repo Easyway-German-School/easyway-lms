@@ -105,7 +105,10 @@ model User {
   missionProgress   MissionProgress[]
   messages          Message[]
   moderatedMessages Message[]                @relation("MessageModerator")
+  pinnedMessages    Message[]                @relation("MessagePinner")
   messageReactions  MessageReaction[]
+  communityMute     CommunityMute?           @relation("MutedMember")
+  mutesIssued       CommunityMute[]          @relation("MuteAuthor")
   channelReads      ChannelRead[]
   pushSubs          PushSubscription[]
   examRegistrations ExamRegistration[]
@@ -235,6 +238,7 @@ model Tenant {
   backupRuns              BackupRun[]
   schoolSettings          SchoolSetting[]
   messageReactions        MessageReaction[]
+  communityMutes          CommunityMute[]
 }
 
 /// School-wide configuration the office edits instead of asking for a deploy.
@@ -1834,10 +1838,23 @@ model Message {
   reactions MessageReaction[]
 
   /**
+   * Staff pinning something to the top of the room. Null for the vast majority.
+   *
+   * A pin is not moderation — it is the opposite. Removal takes a message away;
+   * a pin is how "the exam is on the 14th" stops being buried under two hundred
+   * lines of chat by Tuesday.
+   */
+  pinnedAt   DateTime?
+  pinnedById String?
+  pinnedBy   User?     @relation("MessagePinner", fields: [pinnedById], references: [id], onDelete: SetNull)
+
+  /**
    * The read cursor and the poll both order by this, and both need the newest
    * page of one channel cheaply. It is the only access pattern that matters.
    */
   @@index([channelId, createdAt])
+  /// Finding the handful of pinned messages in a room without scanning it.
+  @@index([channelId, pinnedAt])
   @@index([authorId])
   @@index([tenantId])
 }
@@ -1853,6 +1870,42 @@ model Message {
 /// The unique constraint is what makes the toggle safe to double-tap: a second
 /// identical reaction cannot be stored, so an impatient tap on a slow phone
 /// cannot inflate the count.
+/// A student the office has stopped from posting, until a moment in time.
+///
+/// A mute, not a ban, and that distinction is the whole design. The student
+/// keeps reading — they stay in their class group, they still get the
+/// announcements and the homework — they simply cannot post until it lapses.
+/// Removing them from the room would cut them off from their class over a
+/// behaviour problem, which is a punishment the school did not intend.
+///
+/// It EXPIRES rather than being switched off by hand. A mute nobody remembers
+/// to lift is a silent, permanent exclusion, and the person who set it is
+/// usually not the person on duty when it should end.
+model CommunityMute {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation("MutedMember", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// When posting comes back. Always set; there is no indefinite mute.
+  mutedUntil DateTime
+
+  /// Shown to the muted student, so a silence is never unexplained.
+  reason String?
+
+  mutedById String?
+  mutedBy   User?   @relation("MuteAuthor", fields: [mutedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([mutedUntil])
+}
+
 model MessageReaction {
   id        String  @id @default(cuid())
   messageId String

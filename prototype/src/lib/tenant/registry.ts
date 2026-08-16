@@ -152,6 +152,9 @@ export const TENANT_OWNED_MODELS = [
 
   /** Who reacted to which chat message, and with what. */
   "MessageReaction",
+
+  /** Students the office has stopped from posting, until a moment in time. */
+  "CommunityMute",
 ] as const;
 
 /**
