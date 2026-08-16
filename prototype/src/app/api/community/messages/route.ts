@@ -43,6 +43,7 @@ function serialise(
       hiddenAt: Date | null;
       author: { name: string | null };
     } | null;
+    reactions?: Array<{ emoji: string; userId: string }>;
   },
   viewer: Viewer,
 ) {
@@ -78,12 +79,34 @@ function serialise(
           hidden: Boolean(message.replyTo.hiddenAt),
         }
       : null,
+    /**
+     * Folded to one entry per emoji, carrying whether THIS reader is in it.
+     *
+     * `mine` is what lets the pill be a toggle rather than a counter: the
+     * client needs to know, without another request, whether tapping will add
+     * or remove. Sending the raw rows would leak who reacted to what across a
+     * whole cohort for no gain — the bubble only ever shows the count.
+     */
+    reactions: foldReactions(message.reactions ?? [], viewer.userId),
   };
+}
+
+function foldReactions(rows: Array<{ emoji: string; userId: string }>, viewerId: string) {
+  const byEmoji = new Map<string, { emoji: string; count: number; mine: boolean }>();
+  for (const row of rows) {
+    const entry = byEmoji.get(row.emoji) ?? { emoji: row.emoji, count: 0, mine: false };
+    entry.count += 1;
+    if (row.userId === viewerId) entry.mine = true;
+    byEmoji.set(row.emoji, entry);
+  }
+  // Most-reacted first, so the bubble reads like every other chat app.
+  return [...byEmoji.values()].sort((a, b) => b.count - a.count || a.emoji.localeCompare(b.emoji));
 }
 
 const INCLUDE = {
   author: { select: { id: true, name: true, role: true } },
   replyTo: { select: { id: true, body: true, hiddenAt: true, author: { select: { name: true } } } },
+  reactions: { select: { emoji: true, userId: true } },
 } as const;
 
 /**

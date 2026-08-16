@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useSearchParams } from "next/navigation";
 import { usePushNotifications } from "@/lib/use-push";
 import { uploadFile } from "@/lib/upload";
+import { ALLOWED_REACTIONS, type ReactionSummary } from "@/lib/community-reactions";
 import {
   ArrowLeftIcon,
   BellIcon,
@@ -73,6 +74,8 @@ type ChatMessage = {
   attachment: { url: string; type: string | null; name: string | null } | null;
   author: { id: string; name: string; role: string };
   replyTo: { id: string; author: string; body: string; hidden: boolean } | null;
+  /** Folded one-per-emoji, with whether this reader is in the count. */
+  reactions?: ReactionSummary[];
   /** Set on a bubble we have drawn but the server has not confirmed. */
   pending?: boolean;
   failed?: boolean;
@@ -171,6 +174,8 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const [uploading, setUploading] = useState(false);
   /** Id of the message being corrected, and the text in its box. */
   const [editing, setEditing] = useState<string | null>(null);
+  /** Which message currently has the emoji row open. One at a time. */
+  const [reactingTo, setReactingTo] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showRail, setShowRail] = useState(!compact);
@@ -507,6 +512,57 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
     }
   }, [isStaff]);
 
+  /**
+   * Reacting, drawn before the server is asked.
+   *
+   * A reaction has to feel like the tap caused it, which means the pill moves
+   * on the same frame — anything else reads as lag on a phone. The server is
+   * the authority on the final count, so its answer replaces the guess when it
+   * lands; a failure puts the guess back rather than leaving a pill that says
+   * something the database does not.
+   */
+  const toggleReaction = useCallback(async (messageId: string, emoji: string) => {
+    setReactingTo(null);
+
+    const guess = (list: ReactionSummary[] = []): ReactionSummary[] => {
+      const existing = list.find((r) => r.emoji === emoji);
+      if (!existing) return [...list, { emoji, count: 1, mine: true }];
+      if (existing.mine) {
+        // Taking mine back: drop the pill entirely if I was the only one.
+        return existing.count <= 1
+          ? list.filter((r) => r.emoji !== emoji)
+          : list.map((r) => (r.emoji === emoji ? { ...r, count: r.count - 1, mine: false } : r));
+      }
+      return list.map((r) => (r.emoji === emoji ? { ...r, count: r.count + 1, mine: true } : r));
+    };
+
+    let before: ReactionSummary[] = [];
+    setMessages((current) =>
+      current.map((m) => {
+        if (m.id !== messageId) return m;
+        before = m.reactions ?? [];
+        return { ...m, reactions: guess(m.reactions) };
+      }),
+    );
+
+    try {
+      const res = await fetch("/api/community/reactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, emoji }),
+      });
+      if (!res.ok) throw new Error("rejected");
+      const data = await res.json();
+      setMessages((current) =>
+        current.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions ?? [] } : m)),
+      );
+    } catch {
+      setMessages((current) =>
+        current.map((m) => (m.id === messageId ? { ...m, reactions: before } : m)),
+      );
+    }
+  }, []);
+
   /* ----------------------------------------------------------------- view */
 
   if (error && !spaces.length) {
@@ -774,12 +830,73 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                         </p>
                       </div>
 
+                      {/*
+                        REACTIONS, under the bubble they belong to.
+
+                        Always rendered when there are any — a reaction that
+                        only appears on hover is invisible to the half of this
+                        school reading on a phone, which is the half that
+                        reacts. A pill the reader is part of is filled rather
+                        than outlined, so "did I already react" is answerable
+                        without counting.
+                      */}
+                      {message.reactions && message.reactions.length > 0 ? (
+                        <div className={`mt-1 flex flex-wrap gap-1 ${message.mine ? "justify-end" : ""}`}>
+                          {message.reactions.map((reaction) => (
+                            <button
+                              key={reaction.emoji}
+                              onClick={() => void toggleReaction(message.id, reaction.emoji)}
+                              aria-pressed={reaction.mine}
+                              aria-label={`${reaction.emoji} ${reaction.count}${reaction.mine ? ", including you" : ""}`}
+                              className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition active:scale-95 ${
+                                reaction.mine
+                                  ? "border-[var(--accent)] bg-[var(--accent)]/15 font-semibold text-[var(--accent)]"
+                                  : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)] hover:border-[var(--accent)]"
+                              }`}
+                            >
+                              <span className="text-sm leading-none">{reaction.emoji}</span>
+                              <span className="tabular-nums">{reaction.count}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {/* The picker, open for one message at a time. */}
+                      {reactingTo === message.id ? (
+                        <div className={`mt-1 flex flex-wrap gap-1 ${message.mine ? "justify-end" : ""}`}>
+                          {ALLOWED_REACTIONS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              onClick={() => void toggleReaction(message.id, emoji)}
+                              aria-label={`React with ${emoji}`}
+                              className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-base leading-none shadow-sm transition hover:scale-110 active:scale-95"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+
                       {!message.hidden && !message.pending ? (
+                        /*
+                          VISIBLE ON TOUCH, revealed on hover only where hover
+                          exists. `opacity-0 group-hover:opacity-100` alone
+                          meant Reply, Edit and Delete could not be reached at
+                          all on a phone — there is no hover to trigger them —
+                          so the actions were desktop-only by accident.
+                        */
                         <div
-                          className={`mt-0.5 flex gap-2 opacity-0 transition group-hover:opacity-100 ${
-                            message.mine ? "justify-end" : ""
-                          }`}
+                          className={`mt-0.5 flex gap-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100 ${
+                            reactingTo === message.id ? "sm:opacity-100" : ""
+                          } ${message.mine ? "justify-end" : ""}`}
                         >
+                          <button
+                            onClick={() => setReactingTo((current) => (current === message.id ? null : message.id))}
+                            aria-expanded={reactingTo === message.id}
+                            className="text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--accent)]"
+                          >
+                            React
+                          </button>
                           <button
                             onClick={() => {
                               setReplyTo(message);

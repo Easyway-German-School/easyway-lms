@@ -105,6 +105,7 @@ model User {
   missionProgress   MissionProgress[]
   messages          Message[]
   moderatedMessages Message[]                @relation("MessageModerator")
+  messageReactions  MessageReaction[]
   channelReads      ChannelRead[]
   pushSubs          PushSubscription[]
   examRegistrations ExamRegistration[]
@@ -233,6 +234,7 @@ model Tenant {
   auditLogs               AuditLog[]
   backupRuns              BackupRun[]
   schoolSettings          SchoolSetting[]
+  messageReactions        MessageReaction[]
 }
 
 /// School-wide configuration the office edits instead of asking for a deploy.
@@ -1829,12 +1831,47 @@ model Message {
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  reactions MessageReaction[]
+
   /**
    * The read cursor and the poll both order by this, and both need the newest
    * page of one channel cheaply. It is the only access pattern that matters.
    */
   @@index([channelId, createdAt])
   @@index([authorId])
+  @@index([tenantId])
+}
+
+/// One person's one reaction to one message.
+///
+/// A row per person per emoji rather than a counter on the message, because
+/// the question the UI actually asks is "did *I* react, and with what" — that
+/// is what decides whether tapping the pill adds or removes, and a bare count
+/// cannot answer it. It also makes "who reacted" a query rather than a
+/// redesign.
+///
+/// The unique constraint is what makes the toggle safe to double-tap: a second
+/// identical reaction cannot be stored, so an impatient tap on a slow phone
+/// cannot inflate the count.
+model MessageReaction {
+  id        String  @id @default(cuid())
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The emoji itself, stored as the character. Small, portable, and it needs
+  /// no lookup table to render.
+  emoji String
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
   @@index([tenantId])
 }
 

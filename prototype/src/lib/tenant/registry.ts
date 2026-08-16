@@ -149,6 +149,9 @@ export const TENANT_OWNED_MODELS = [
 
   /** How one school runs: which sittings it offers at which level. */
   "SchoolSetting",
+
+  /** Who reacted to which chat message, and with what. */
+  "MessageReaction",
 ] as const;
 
 /**
