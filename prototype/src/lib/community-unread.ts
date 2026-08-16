@@ -33,31 +33,62 @@ export async function unreadByChannel(
   const readAt = new Map(markers.map((m) => [m.channelId, m.lastReadAt]));
 
   /**
-   * Grouped in the database rather than pulled into memory.
+   * Grouped in the database rather than pulled into memory, and BUCKETED BY
+   * CUTOFF rather than one query per channel.
    *
    * The forum version fetched every thread in every visible channel and counted
-   * them in JS, which was survivable at forum volume and is not at chat volume —
-   * a term of forty students talking is tens of thousands of rows, fetched on
-   * every sidebar render. `groupBy` returns one row per channel instead.
+   * them in JS, which was survivable at forum volume and is not at chat volume.
+   * The version after it fixed that but issued `count()` once per channel
+   * inside a single `Promise.all`, on the stated assumption that a member sees
+   * three channels.
    *
-   * The per-channel cutoff cannot be expressed in a single grouped query, so
-   * channels are bucketed by their marker: in practice a member has one marker
-   * per channel and there are three channels, so this is three cheap indexed
-   * counts against `[channelId, createdAt]`.
+   * That assumption is true for a student and false for everybody else. Staff
+   * see every room in the school — eighteen spaces of three channels here — so
+   * the sidebar fired fifty-four concurrent counts at a nine-connection pool,
+   * exhausted it, and the whole request died on
+   * "Timed out fetching a new connection from the connection pool". What the
+   * office actually saw was "Unable to load community spaces" on every portal,
+   * which reads as the community being broken rather than as a pool limit.
+   *
+   * Channels that share a cutoff can be counted together, so they are: one
+   * grouped query per DISTINCT marker instead of one per channel. Staff who
+   * have opened nothing collapse to a single query. A student keeps the three
+   * they had. The bucket count is bounded by distinct timestamps rather than by
+   * channels, and the loop is capped anyway so a pathological spread still
+   * cannot outrun the pool.
    */
-  await Promise.all(
-    channelIds.map(async (channelId) => {
-      const since = readAt.get(channelId);
-      counts[channelId] = await prisma.message.count({
-        where: {
-          channelId,
-          hiddenAt: null,
-          authorId: { not: userId },
-          ...(since ? { createdAt: { gt: since } } : {}),
-        },
-      });
-    }),
-  );
+  const buckets = new Map<string, { since: Date | null; ids: string[] }>();
+  for (const channelId of channelIds) {
+    const since = readAt.get(channelId) ?? null;
+    const key = since ? since.toISOString() : "never";
+    const bucket = buckets.get(key);
+    if (bucket) bucket.ids.push(channelId);
+    else buckets.set(key, { since, ids: [channelId] });
+  }
+
+  /** Well under the pool so the bell and the page can still get a connection. */
+  const MAX_CONCURRENT_BUCKETS = 4;
+  const bucketList = [...buckets.values()];
+
+  for (let index = 0; index < bucketList.length; index += MAX_CONCURRENT_BUCKETS) {
+    await Promise.all(
+      bucketList.slice(index, index + MAX_CONCURRENT_BUCKETS).map(async ({ since, ids }) => {
+        const rows = await prisma.message.groupBy({
+          by: ["channelId"],
+          where: {
+            channelId: { in: ids },
+            hiddenAt: null,
+            authorId: { not: userId },
+            ...(since ? { createdAt: { gt: since } } : {}),
+          },
+          _count: { _all: true },
+        });
+        // groupBy omits channels with no matching rows; those keep the 0
+        // seeded above, which is the answer for them anyway.
+        for (const row of rows) counts[row.channelId] = row._count._all;
+      }),
+    );
+  }
 
   return counts;
 }
