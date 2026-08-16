@@ -122,6 +122,11 @@ model User {
   supportTickets    SupportTicket[]          @relation("SupportTicketAuthor")
   assignedTickets   SupportTicket[]          @relation("SupportTicketAssignee")
   supportReplies    SupportTicketMessage[]
+  gameMatches       GameMatch[]
+  gameTurnsAssigned GameTurn[]               @relation("GameTurnAssignee")
+  gameTurnsWritten  GameTurn[]               @relation("GameTurnAuthor")
+  constraintDecks   ConstraintDeck[]
+
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -229,6 +234,9 @@ model Tenant {
   quizGames               QuizGame[]
   quizGamePlayers         QuizGamePlayer[]
   quizGameAnswers         QuizGameAnswer[]
+  gameMatches             GameMatch[]
+  gameTurns               GameTurn[]
+  constraintDecks         ConstraintDeck[]
   leads                   Lead[]
   supportTickets          SupportTicket[]
   supportTicketMessages   SupportTicketMessage[]
@@ -1693,6 +1701,7 @@ model Space {
   updatedAt   DateTime @updatedAt
 
   channels Channel[]
+  gameMatches GameMatch[]
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
@@ -3521,5 +3530,167 @@ model QuizGameAnswer {
 
   @@unique([playerId, questionIndex])
   @@index([gameId, questionIndex])
+  @@index([tenantId])
+}
+
+/**
+ * One story written by a cohort, turn by turn.
+ *
+ * A match belongs to a Space (branch + level + session), so it scopes to the
+ * cohort naturally. Private students get cross-branch pool matching handled
+ * separately; this model stays the same.
+ *
+ * The story itself is built from GameTurn submissions in order — the channel
+ * renders it, the GameMatch row just keeps state.
+ */
+model GameMatch {
+  id        String   @id @default(cuid())
+  spaceId   String?
+  space     Space?   @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  title     String
+  prompt    String?
+  /** Tutor or system auto-start. Null for school-wide defaults. */
+  createdById String?
+  createdBy User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  /** active | completed | archived. Completed = all turns done, no more moves. */
+  status    String   @default("active")
+
+  /**
+   * How many sentences before the story is finished.
+   *
+   * A story that could run forever never gets read back, and the moment it is
+   * finished — the class scrolls the whole thing and sees what they made — is
+   * the payoff the turns were for. Without an end there is no such moment, only
+   * an endlessly growing thread that quietly stops.
+   */
+  targetTurns Int @default(12)
+
+  /**
+   * The deck this story draws its per-turn rules from, as a JSON array.
+   *
+   * COPIED off the ConstraintDeck at creation rather than referenced, for the
+   * same reason the quiz game freezes its questions: a tutor editing a deck
+   * mid-story must not retroactively change what turn three was asked to do.
+   * Null means the story runs without rules, which is the right setting for a
+   * beginner cohort who need the writing to be the whole difficulty.
+   */
+  constraints Json?
+
+  /** The turns in order. */
+  turns     GameTurn[]
+
+  startedAt DateTime @default(now())
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([spaceId, status, createdAt])
+  @@index([tenantId])
+}
+
+/**
+ * One turn in a story — one sentence.
+ *
+ * THE ASSIGNED/CLAIMED SPLIT IS THE WHOLE DESIGN, and it is what keeps a chain
+ * alive. A turn is *offered* to one named student, because "it is your turn"
+ * aimed at a person is the entire retention mechanic — a turn owed to nobody is
+ * a turn nobody feels. But a turn that can ONLY be played by that student stalls
+ * the story the first time somebody is ill, drops the course, or simply does not
+ * open the app, and a chain that dies at student three teaches nobody anything.
+ *
+ * So the deadline does not skip the turn. It OPENS it: past `deadline` the turn
+ * stays in place and anyone in the cohort may take it. The named student keeps
+ * their claim until they lose it to somebody faster, which is both fairer than a
+ * silent skip and quietly motivating.
+ *
+ * `playerId` is therefore who actually wrote the sentence, which is usually but
+ * not always `assignedToId`. Scoring, streaks and the tutor's review all read
+ * `playerId`; only the notification reads `assignedToId`.
+ */
+model GameTurn {
+  id        String   @id @default(cuid())
+  matchId   String
+  match     GameMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  /** Who the turn was offered to. Set at creation, never changes. */
+  assignedToId String
+  assignedTo   User   @relation("GameTurnAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+
+  /** Who actually wrote it. Null until somebody does. */
+  playerId  String?
+  player    User?    @relation("GameTurnAuthor", fields: [playerId], references: [id], onDelete: SetNull)
+
+  /** 1, 2, 3... the order in the game. */
+  position  Int
+
+  /**
+   * pending  — waiting on the assignee, before the deadline
+   * open     — deadline passed, anyone in the cohort may take it
+   * submitted — written
+   *
+   * Stored rather than derived from `deadline` because "open" is a thing the
+   * cohort gets *notified* about, and a state nobody can observe cannot be
+   * announced.
+   */
+  status    String   @default("pending")
+
+  /** JSON: {rule: "dative"} | {rule: "vocab", words: ["Bauer", "Schloss"]} etc. */
+  constraint Json?
+
+  /** The sentence written for this turn. Null until submitted. */
+  sentence  String?
+
+  submittedAt DateTime?
+  /** When this turn stops being exclusive to the assignee. ~24h out. */
+  deadline  DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, position])
+  /// "What am I being waited on for" — the query behind the Games tab badge.
+  @@index([assignedToId, status])
+  @@index([playerId])
+  /// Finding turns whose deadline has passed, for the opener job.
+  @@index([status, deadline])
+  @@index([tenantId])
+}
+
+/**
+ * Reusable constraint decks — sets of rules a tutor can pick from when
+ * starting a game, or the school defaults to. Constraints are JSON so new
+ * types can be added without schema migration.
+ *
+ * Examples:
+ * {rule: "dative"}
+ * {rule: "vocab", words: ["Bauer", "Schloss", "Ausbildung"]}
+ * {rule: "grammar", pattern: "weil", label: "must contain weil"}
+ * {rule: "tense", tense: "future"}
+ */
+model ConstraintDeck {
+  id        String   @id @default(cuid())
+  name      String
+  description String?
+  /** JSON array of constraint objects. */
+  constraints Json
+  createdById String?
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
   @@index([tenantId])
 }

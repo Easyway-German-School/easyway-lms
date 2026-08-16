@@ -177,6 +177,21 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * Open the story turns whose day has run out, and close the dead stories.
+   *
+   * This is the job that keeps Satzkette chains alive: a turn nobody took stops
+   * being exclusive and goes to the whole class. Cheap, and it must not be
+   * skipped — without it a single student who stops opening the app silently
+   * ends every story they were offered a turn in.
+   */
+  results.push(
+    await run("satzkette-turns", async () => {
+      const { openLapsedTurns, archiveStaleMatches } = await import("@/lib/satzkette-server");
+      return { opened: await openLapsedTurns(), archived: await archiveStaleMatches() };
+    }),
+  );
+
+  /**
    * Summarise newly uploaded materials and turn them into quests.
    *
    * Last, and capped at three per tick, because it is the only job here that

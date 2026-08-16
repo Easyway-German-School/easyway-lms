@@ -14,6 +14,7 @@ import {
   BookOpenIcon,
   BroadcastIcon,
   BroadcastMessageIcon,
+  ChainIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CommunityIcon,
@@ -58,6 +59,9 @@ const navItems: NavItem[] = [
   // game is a quiz the tutor already wrote, put on the projector instead of
   // set as homework.
   { label: 'Quiz game', href: '/lecturer/live-quiz', icon: <QuizIcon /> },
+  // Next to the quiz game because both are "a game my class plays", but it is
+  // the opposite format: nobody has to be anywhere, and it runs for a week.
+  { label: 'Story chain', href: '/lecturer/stories', icon: <ChainIcon /> },
   { label: 'Materials', href: '/lecturer/materials', icon: <BookOpenIcon /> },
   // Tutors had no way to watch back a class they taught. The students have had
   // the shelf-style library since it was built; this is the same library,

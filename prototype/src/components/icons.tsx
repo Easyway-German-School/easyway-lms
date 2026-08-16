@@ -321,6 +321,17 @@ export const QuizIcon = icon("QuizIcon", (
   </>
 ));
 
+/**
+ * Two interlocking links — a Satzkette is a chain of sentences, and the sidebar
+ * needs it to read as a different thing from the Quiz game's question mark.
+ */
+export const ChainIcon = icon("ChainIcon", (
+  <>
+    <path d="M9.5 14.5a3.5 3.5 0 0 1 0-5l2-2a3.5 3.5 0 0 1 5 5l-1 1" />
+    <path d="M14.5 9.5a3.5 3.5 0 0 1 0 5l-2 2a3.5 3.5 0 0 1-5-5l1-1" />
+  </>
+));
+
 export const EssayIcon = icon("EssayIcon", (
   <>
     <path d="M20.5 3.5C11.7 4.6 6.6 9.4 5 15l3.9 3.9C14.5 17.3 19.4 12.3 20.5 3.5" />

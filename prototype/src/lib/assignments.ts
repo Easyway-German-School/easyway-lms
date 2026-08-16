@@ -243,7 +243,7 @@ export function toPublicQuestions(questions: Question[]): PublicQuestion[] {
  * without umlauts — ue, oe, ae, ss. A student typing `schoen` has spelled it
  * correctly. A student typing `schon` has not.
  */
-function germanNormalise(value: string, caseSensitive: boolean): string {
+export function germanNormalise(value: string, caseSensitive: boolean): string {
   const collapsed = value.trim().replace(/\s+/g, " ");
   const cased = caseSensitive ? collapsed : collapsed.toLowerCase();
   return cased

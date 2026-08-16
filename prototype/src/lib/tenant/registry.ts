@@ -110,6 +110,15 @@ export const TENANT_OWNED_MODELS = [
   "QuizGame",
   "QuizGamePlayer",
   "QuizGameAnswer",
+  /**
+   * Satzkette. A story is written by one school's named students and reads as a
+   * transcript of who wrote what and when — the same category of leak as the
+   * group chat it lives beside. The decks additionally carry a school's own
+   * vocabulary lists, which is teaching material rather than shared reference.
+   */
+  "GameMatch",
+  "GameTurn",
+  "ConstraintDeck",
   "MissionProgress",
   "PersonalizedPlan",
   "JourneyEvent",
