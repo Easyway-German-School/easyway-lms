@@ -37,6 +37,7 @@ import {
   CalendarIcon,
   CheckCircleIcon,
   ClockIcon,
+  CrossCircleIcon,
   DashboardIcon,
   FilmIcon,
   PendingIcon,
@@ -121,26 +122,34 @@ export default function SessionEndScreen({
    * preferred over the client's own reason wherever the two could disagree.
    */
   const classOver = outcome.reason === "ended" || recap?.stillLive === false;
-  const dropped = outcome.reason === "dropped" && !classOver;
+  const removed = outcome.reason === "removed" && !classOver;
+  const dropped = outcome.reason === "dropped" && !classOver && !removed;
 
-  const headline = dropped
-    ? "You lost connection to the class"
-    : isTutor
-      ? "Your live class just ended"
-      : classOver
-        ? "Your class has ended"
-        : "You have left the class";
+  const headline = removed
+    ? "You were removed from the class"
+    : dropped
+      ? "You lost connection to the class"
+      : isTutor
+        ? "Your live class just ended"
+        : classOver
+          ? "Your class has ended"
+          : "You have left the class";
 
-  const subline = dropped
-    ? "Your internet dropped out rather than the lesson finishing. If the class is still running you can go straight back in."
-    : isTutor
-      ? "Everyone has been returned to their dashboard. The recording is being filed into the video library now."
-      : classOver
-        ? "Thanks for coming. The recording lands in your video library shortly, so anything you missed is not lost."
-        : "The class is carrying on without you — you can rejoin any time while it is still running.";
+  const subline = removed
+    ? "Your tutor removed you from this session. If you think that was a mistake, reach out to them directly."
+    : dropped
+      ? "Your internet dropped out rather than the lesson finishing. If the class is still running you can go straight back in."
+      : isTutor
+        ? "Everyone has been returned to their dashboard. The recording is being filed into the video library now."
+        : classOver
+          ? "Thanks for coming. The recording lands in your video library shortly, so anything you missed is not lost."
+          : "The class is carrying on without you — you can rejoin any time while it is still running.";
 
   const recording = recap?.recording ?? null;
-  const canRejoin = dropped || (!classOver && recap?.stillLive !== false);
+  // Removed is deliberately not offered a straight way back in — a tutor who
+  // just asked somebody to leave is not expecting them to reappear a second
+  // later, and the button that undid every other exit here would undo this one.
+  const canRejoin = !removed && (dropped || (!classOver && recap?.stillLive !== false));
 
   return (
     <motion.div
@@ -149,9 +158,19 @@ export default function SessionEndScreen({
       transition={{ duration: 0.4, ease: "easeOut" }}
       className="space-y-5"
     >
-      <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] p-6 text-white shadow-xl sm:p-10">
+      <div
+        className={`overflow-hidden rounded-3xl bg-gradient-to-br p-6 text-white shadow-xl sm:p-10 ${
+          removed ? "from-rose-600 via-rose-600 to-orange-500" : "from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600]"
+        }`}
+      >
         <span className="grid h-14 w-14 place-items-center rounded-2xl bg-white/15">
-          {dropped ? <SignalIcon className="h-7 w-7" /> : <CheckCircleIcon className="h-7 w-7" />}
+          {removed ? (
+            <CrossCircleIcon className="h-7 w-7" />
+          ) : dropped ? (
+            <SignalIcon className="h-7 w-7" />
+          ) : (
+            <CheckCircleIcon className="h-7 w-7" />
+          )}
         </span>
         <h1 className="mt-5 text-2xl font-semibold sm:text-3xl">{headline}</h1>
         <p className="mt-2 text-sm font-medium uppercase tracking-[0.2em] text-white/70">

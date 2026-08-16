@@ -169,7 +169,7 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
       )}
 
       <aside
-        className={`fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-white/60 bg-white/95 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:bg-white/80 lg:transition-all ${
+        className={`fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-white/60 bg-white/95 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:bg-white/80 lg:transition-all ${
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         } w-[17rem] ${collapsed ? 'lg:w-20' : 'lg:w-72'}`}
       >

@@ -62,8 +62,11 @@ export function SpeakingWave({
               height: `${height * 100}%`,
               // Matches the store's tick, so the bars glide between readings
               // instead of stepping. Height rather than transform: these are
-              // three pixels wide and a scaled 3px bar blurs.
-              transition: "height 90ms linear",
+              // three pixels wide and a scaled 3px bar blurs. Opacity gets its
+              // own, slower transition — without it, a level hovering right at
+              // the 0.02 cutoff snapped between the two opacities every tick,
+              // which read as a flicker even though the height was smooth.
+              transition: "height 90ms linear, opacity 200ms ease-out",
               opacity: level > 0.02 ? 1 : 0.35,
             }}
           />

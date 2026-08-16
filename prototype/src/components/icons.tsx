@@ -951,3 +951,12 @@ export const DatabaseIcon = icon("DatabaseIcon", (
     <path d="M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3" />
   </>
 ));
+
+/** Three dots, stacked. Opens a menu of things you can do to somebody else. */
+export const DotsVerticalIcon = icon("DotsVerticalIcon", (
+  <>
+    <circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none" />
+  </>
+));

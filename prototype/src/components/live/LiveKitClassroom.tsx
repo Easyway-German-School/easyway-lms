@@ -3,6 +3,8 @@
 import {
   CameraIcon,
   CommunityIcon,
+  DotsVerticalIcon,
+  ExitIcon,
   ExpandIcon,
   HandIcon,
   MicIcon,
@@ -30,6 +32,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ConnectionQuality,
+  DisconnectReason,
   LocalParticipant,
   Participant,
   RemoteParticipant,
@@ -44,7 +47,7 @@ import { qualityModesFor, qualitySpec, type QualityMode, type RoomRole } from "@
 
 /**
  * HOW THIS PERSON'S LESSON ENDED, which is not the same question as whether it
- * ended. The end screen says three different things and offers three different
+ * ended. The end screen says four different things and offers four different
  * ways forward depending on this one field:
  *
  *   self    — they pressed Leave. The class may well still be running, so the
@@ -54,9 +57,13 @@ import { qualityModesFor, qualitySpec, type QualityMode, type RoomRole } from "@
  *   dropped — the connection went and did not recover. The worst case to get
  *             wrong: telling somebody the class ended when their WiFi died is
  *             how a student stops trusting the portal.
+ *   removed — the tutor removed them specifically. LiveKit hands back this
+ *             exact fact as `DisconnectReason.PARTICIPANT_REMOVED`, which is
+ *             what keeps it from being misreported as "dropped" — a student
+ *             who was asked to leave should not be told their WiFi failed.
  */
 export type LeaveOutcome = {
-  reason: "self" | "ended" | "dropped";
+  reason: "self" | "ended" | "dropped" | "removed";
   /** How long this person was actually in the room, not how long the class ran. */
   durationMs: number;
 };
@@ -113,6 +120,10 @@ function ParticipantTile({
   levels,
   handPosition,
   light,
+  viewerRole,
+  moderationBusy,
+  onMute,
+  onRemove,
 }: {
   participant: Participant;
   mode: QualityMode;
@@ -128,10 +139,37 @@ function ParticipantTile({
   handPosition: number | null;
   /** Set on the ONE tile that currently owns the travelling green light. */
   light: { label: string; tone: "floor" | "speaking" } | null;
+  /** Who is looking at this tile — the moderation menu only exists for a tutor. */
+  viewerRole: RoomRole;
+  /** Identities with a moderation action in flight, so a second tap cannot queue behind the first. */
+  moderationBusy: Set<string>;
+  onMute: (identity: string) => void;
+  onRemove: (identity: string) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [hasVideo, setHasVideo] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // A menu left open when the finger lands somewhere else is a menu that
+  // stays open forever on a phone, where there is no hover-away to close it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onOutside(event: MouseEvent | TouchEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+        setConfirmRemove(false);
+      }
+    }
+    document.addEventListener("mousedown", onOutside);
+    document.addEventListener("touchstart", onOutside);
+    return () => {
+      document.removeEventListener("mousedown", onOutside);
+      document.removeEventListener("touchstart", onOutside);
+    };
+  }, [menuOpen]);
 
   const showVideo = qualitySpec(mode).maxHeight > 0;
 
@@ -208,6 +246,18 @@ function ParticipantTile({
   const initials = (participant.name || participant.identity || "?").slice(0, 1).toUpperCase();
 
   /**
+   * Who a tutor is allowed to point this menu at.
+   *
+   * Not your own tile — Leave already does that job, and a mute/remove button
+   * aimed at yourself is a trap, not a feature. Not another tutor's tile
+   * either: the server enforces this too (`/api/live/moderate` rejects a
+   * tutor-on-tutor target), but hiding the menu is what stops a co-teacher
+   * from seeing a button that only ever errors.
+   */
+  const canModerate = viewerRole === "tutor" && !(participant instanceof LocalParticipant) && !tutor;
+  const busy = moderationBusy.has(participant.identity);
+
+  /**
    * The cubicle's own border says which of four things is true about the person
    * in it, in the order that matters when two are true at once: they have been
    * given the floor, they are waiting for it, they are talking, or none of the
@@ -280,11 +330,57 @@ function ParticipantTile({
         ) : (
           <SpeakingWave store={levels} identity={participant.identity} size={large ? "lg" : "sm"} />
         )}
-        <span className="truncate text-[11px] font-medium text-white">
+        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-white">
           {participant instanceof LocalParticipant ? "You" : participant.name || participant.identity}
         </span>
         {tutor ? (
-          <span className="rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">Tutor</span>
+          <span className="shrink-0 rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">Tutor</span>
+        ) : null}
+
+        {canModerate ? (
+          <div ref={menuRef} className="relative shrink-0">
+            <button
+              onClick={() => setMenuOpen((open) => !open)}
+              aria-label={`Moderate ${participant.name || participant.identity}`}
+              disabled={busy}
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-white/80 transition hover:bg-white/15 hover:text-white disabled:opacity-40"
+            >
+              <DotsVerticalIcon className="h-4 w-4" />
+            </button>
+            {menuOpen ? (
+              <div className="absolute bottom-full right-0 z-20 mb-1.5 w-44 overflow-hidden rounded-xl border border-white/10 bg-slate-900 py-1 text-left shadow-2xl">
+                <button
+                  onClick={() => {
+                    onMute(participant.identity);
+                    setMenuOpen(false);
+                  }}
+                  disabled={micMuted || busy}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:text-slate-500 disabled:hover:bg-transparent"
+                >
+                  <SpeakerOffIcon className="h-3.5 w-3.5" />
+                  {micMuted ? "Already muted" : "Mute microphone"}
+                </button>
+                <button
+                  onClick={() => {
+                    if (!confirmRemove) {
+                      setConfirmRemove(true);
+                      return;
+                    }
+                    onRemove(participant.identity);
+                    setMenuOpen(false);
+                    setConfirmRemove(false);
+                  }}
+                  disabled={busy}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-xs font-semibold transition hover:bg-rose-500/15 ${
+                    confirmRemove ? "text-rose-300" : "text-rose-400"
+                  }`}
+                >
+                  <ExitIcon className="h-3.5 w-3.5" />
+                  {confirmRemove ? "Tap again to confirm" : "Remove from class"}
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>
@@ -340,6 +436,19 @@ const STAGE_DWELL_MS = 1500;
 const LIGHT_DWELL_MS = 600;
 /** But it lingers before going dark, so a breath does not switch it off. */
 const LIGHT_RELEASE_MS = 1400;
+/**
+ * How long a tile's speaking ring holds after the SFU stops reporting them.
+ *
+ * `room.activeSpeakers` is recomputed a few times a second and a normal
+ * sentence has gaps in it — a comma, a breath, the word "um". Ringed straight
+ * off `activeSpeakers` with no hold, every tile in a room flickered its border
+ * on and off several times a second, which is the exact "too much blinking"
+ * a video call should never produce. The ring turns on the instant the SFU
+ * says somebody is speaking — that half has no delay, because a slow-to-light
+ * ring is its own kind of wrong — and turns off only after this hold expires
+ * with no further sign of them.
+ */
+const RING_RELEASE_MS = 550;
 
 export default function LiveKitClassroom({
   url,
@@ -376,6 +485,16 @@ export default function LiveKitClassroom({
   // take it as a prop so their attach effect re-runs — see ParticipantTile.
   const [revision, forceRender] = useState(0);
   const bump = useCallback(() => forceRender((n) => n + 1), []);
+
+  /** Set while our own click is inside `setMicrophoneEnabled`, so the forced-mute listener below can tell a self-toggle from a tutor's mute. */
+  const selfMicToggleRef = useRef(false);
+  /** Tells the student their mic was muted by the tutor, or tells the tutor a moderation action failed. Same banner, different audience. */
+  const [moderationNotice, setModerationNotice] = useState<string | null>(null);
+  /** Identities (or "__all__") with a moderation request in flight. */
+  const [moderationBusy, setModerationBusy] = useState<Set<string>>(() => new Set());
+  /** Sticky, debounced "is this tile ringed as speaking" — see RING_RELEASE_MS. */
+  const [ringIds, setRingIds] = useState<Set<string>>(() => new Set());
+  const ringTimersRef = useRef<Map<string, number>>(new Map());
 
   /** When this person actually got in. Set on Connected, read by the end screen. */
   const joinedAtRef = useRef<number>(Date.now());
@@ -466,7 +585,7 @@ export default function LiveKitClassroom({
       })
       .on(RoomEvent.Reconnecting, () => setStatus("reconnecting"))
       .on(RoomEvent.Reconnected, () => setStatus("connected"))
-      .on(RoomEvent.Disconnected, () => {
+      .on(RoomEvent.Disconnected, (reason) => {
         setStatus("disconnected");
         /**
          * `cancelled` is set by the cleanup below BEFORE it disconnects, so an
@@ -474,16 +593,33 @@ export default function LiveKitClassroom({
          * call, so pressing Leave (which disconnects deliberately) does not
          * report the same departure twice.
          *
-         * Anything left is a real drop: livekit-client only emits this after
-         * its own reconnection attempts have failed, so it is not a wobble.
+         * Anything left is either a real drop or a tutor's removal, and the
+         * reason LiveKit hands back is how those two are told apart —
+         * `PARTICIPANT_REMOVED` is the one case where "your connection dropped"
+         * would be an outright lie.
          */
-        if (!cancelled) finishRef.current("dropped");
+        if (!cancelled) {
+          finishRef.current(reason === DisconnectReason.PARTICIPANT_REMOVED ? "removed" : "dropped");
+        }
       })
       .on(RoomEvent.ParticipantConnected, bump)
       .on(RoomEvent.ParticipantDisconnected, bump)
       .on(RoomEvent.TrackSubscribed, bump)
       .on(RoomEvent.TrackUnsubscribed, bump)
       .on(RoomEvent.TrackMuted, bump)
+      .on(RoomEvent.TrackMuted, (publication, trackParticipant) => {
+        // A server-forced mute (the tutor's Mute button) and a self-toggle both
+        // fire this same event — `selfMicToggleRef` is the only way to tell
+        // them apart, since LiveKit does not say who asked.
+        if (
+          trackParticipant.identity === room.localParticipant.identity &&
+          publication.source === Track.Source.Microphone &&
+          !selfMicToggleRef.current
+        ) {
+          setMicOn(false);
+          setModerationNotice("Your microphone was muted by the tutor.");
+        }
+      })
       .on(RoomEvent.TrackUnmuted, bump)
       .on(RoomEvent.ActiveSpeakersChanged, bump)
       .on(RoomEvent.LocalTrackPublished, bump)
@@ -641,14 +777,62 @@ export default function LiveKitClassroom({
     const room = roomRef.current;
     if (!room) return;
     const next = !micOn;
+    selfMicToggleRef.current = true;
     try {
       await room.localParticipant.setMicrophoneEnabled(next);
       setMicOn(next);
       setDeviceNotice(null);
     } catch (micError) {
       setDeviceNotice(mediaErrorMessage(micError, "microphone"));
+    } finally {
+      selfMicToggleRef.current = false;
     }
   }, [micOn]);
+
+  /**
+   * The tutor's kebab-menu actions and the toolbar's Mute all, in one place.
+   *
+   * `identity` is omitted for `muteAll` — there is nobody to target, the
+   * action is the room itself — which is also why its busy key is the literal
+   * string `"__all__"` rather than an identity nothing owns.
+   */
+  const moderate = useCallback(
+    async (action: "mute" | "muteAll" | "remove", identity?: string) => {
+      const key = identity ?? "__all__";
+      setModerationBusy((current) => new Set(current).add(key));
+      try {
+        const res = await fetch("/api/live/moderate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomName, action, identity }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}) as { message?: string; error?: string });
+          setModerationNotice(data.message || data.error || "That action did not go through.");
+        }
+      } catch {
+        setModerationNotice("Could not reach the server. Check your connection and try again.");
+      } finally {
+        setModerationBusy((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        });
+      }
+    },
+    [roomName],
+  );
+
+  const muteParticipant = useCallback((identity: string) => moderate("mute", identity), [moderate]);
+  const removeParticipant = useCallback((identity: string) => moderate("remove", identity), [moderate]);
+  const muteAll = useCallback(() => moderate("muteAll"), [moderate]);
+
+  // The banner is an explanation, not a dialog — same lifecycle as autoNotice.
+  useEffect(() => {
+    if (!moderationNotice) return;
+    const timer = setTimeout(() => setModerationNotice(null), 7_000);
+    return () => clearTimeout(timer);
+  }, [moderationNotice]);
 
   const toggleCamera = useCallback(async () => {
     const room = roomRef.current;
@@ -779,6 +963,65 @@ export default function LiveKitClassroom({
     const timer = window.setTimeout(() => setStageIdentity(identity), STAGE_DWELL_MS);
     return () => window.clearTimeout(timer);
   }, [liveStage?.identity, stageIdentity]);
+
+  /**
+   * The per-tile speaking ring, held for `RING_RELEASE_MS` past the last time
+   * the SFU actually said this person was speaking.
+   *
+   * A sorted, joined string of the raw identities is the effect's dependency
+   * rather than `speakingIds` itself, because `speakingIds` is a brand new Set
+   * every render — an object dependency that never equals its previous value
+   * would run this effect (and restart every hold timer) on every unrelated
+   * re-render in the room, which defeats the entire point of holding.
+   */
+  const activeSpeakerKey = Array.from(speakingIds).sort().join(",");
+  useEffect(() => {
+    const raw = new Set(activeSpeakerKey ? activeSpeakerKey.split(",") : []);
+    const timers = ringTimersRef.current;
+
+    setRingIds((current) => {
+      let changed = false;
+      const next = new Set(current);
+
+      raw.forEach((identity) => {
+        if (!next.has(identity)) {
+          next.add(identity);
+          changed = true;
+        }
+        const pending = timers.get(identity);
+        if (pending) {
+          window.clearTimeout(pending);
+          timers.delete(identity);
+        }
+      });
+
+      next.forEach((identity) => {
+        if (raw.has(identity) || timers.has(identity)) return;
+        const timer = window.setTimeout(() => {
+          setRingIds((cur) => {
+            if (!cur.has(identity)) return cur;
+            const trimmed = new Set(cur);
+            trimmed.delete(identity);
+            return trimmed;
+          });
+          timers.delete(identity);
+        }, RING_RELEASE_MS);
+        timers.set(identity, timer);
+      });
+
+      return changed ? next : current;
+    });
+  }, [activeSpeakerKey]);
+
+  // Unmounting mid-lesson (a tab close, a route change) must not leave the
+  // room's held-open timers firing setState against a gone component.
+  useEffect(
+    () => () => {
+      ringTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      ringTimersRef.current.clear();
+    },
+    [],
+  );
 
   const stageParticipant =
     participants.find((participant) => participant.identity === stageIdentity) ?? liveStage;
@@ -928,6 +1171,18 @@ export default function LiveKitClassroom({
         </div>
       ) : null}
 
+      {moderationNotice ? (
+        <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-5 py-3 text-sm text-rose-200">
+          <p className="min-w-0 flex-1 leading-6">{moderationNotice}</p>
+          <button
+            onClick={() => setModerationNotice(null)}
+            className="shrink-0 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/20"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
       {status === "failed" ? (
         <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-6 text-sm text-rose-200">
           <p className="font-semibold">Could not join the classroom</p>
@@ -969,11 +1224,15 @@ export default function LiveKitClassroom({
                       participant={stageParticipant}
                       mode={mode}
                       large
-                      isSpeaking={speakingIds.has(stageParticipant.identity)}
+                      isSpeaking={ringIds.has(stageParticipant.identity)}
                       revision={revision}
                       levels={levels}
                       handPosition={handPositions.get(stageParticipant.identity) ?? null}
                       light={lightFor(stageParticipant)}
+                      viewerRole={role}
+                      moderationBusy={moderationBusy}
+                      onMute={muteParticipant}
+                      onRemove={removeParticipant}
                     />
                   </motion.div>
                 </AnimatePresence>
@@ -990,11 +1249,15 @@ export default function LiveKitClassroom({
                     <ParticipantTile
                       participant={participant}
                       mode={mode}
-                      isSpeaking={speakingIds.has(participant.identity)}
+                      isSpeaking={ringIds.has(participant.identity)}
                       revision={revision}
                       levels={levels}
                       handPosition={handPositions.get(participant.identity) ?? null}
                       light={lightFor(participant)}
+                      viewerRole={role}
+                      moderationBusy={moderationBusy}
+                      onMute={muteParticipant}
+                      onRemove={removeParticipant}
                     />
                   </div>
                 ))}
@@ -1110,6 +1373,18 @@ export default function LiveKitClassroom({
             </span>
           ) : null}
         </button>
+
+        {role === "tutor" && others.length > 0 ? (
+          <button
+            onClick={muteAll}
+            disabled={moderationBusy.has("__all__")}
+            title="Mute every student's microphone. Nobody is locked out — anyone can unmute themselves again."
+            className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:opacity-50"
+          >
+            <MicOffIcon className="h-4 w-4" />
+            {moderationBusy.has("__all__") ? "Muting…" : "Mute all"}
+          </button>
+        ) : null}
 
         <div className="ml-auto flex items-center gap-2">
           {availableModes.length > 1 ? (
