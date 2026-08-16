@@ -146,6 +146,9 @@ export const TENANT_OWNED_MODELS = [
   /** A partner's own endpoints and the deliveries made to them. */
   "WebhookEndpoint",
   "WebhookDelivery",
+
+  /** How one school runs: which sittings it offers at which level. */
+  "SchoolSetting",
 ] as const;
 
 /**

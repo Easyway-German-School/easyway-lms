@@ -3,23 +3,16 @@
 import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import { SlidersIcon } from "@/components/icons";
-
-type SessionConfig = {
-  level: string;
-  morning: boolean;
-  afternoon: boolean;
-  evening: boolean;
-};
-
-type Settings = {
-  sessions: SessionConfig[];
-};
-
-const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
-const SESSIONS = ["morning", "afternoon", "evening"] as const;
+import {
+  LEVELS,
+  SESSION_SLOTS as SESSIONS,
+  defaultSessionSettings,
+  type SessionSettings as Settings,
+  type SessionSlot,
+} from "@/lib/school-settings";
 
 export default function SettingsPage() {
-  const [settings, setSettings] = useState<Settings>({ sessions: [] });
+  const [settings, setSettings] = useState<Settings>(() => defaultSessionSettings());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -67,15 +60,21 @@ export default function SettingsPage() {
     }
   }
 
-  function toggleSession(levelIndex: number, session: typeof SESSIONS[number]) {
-    setSettings((prev) => {
-      const newSettings = { ...prev };
-      const sessionConfig = newSettings.sessions[levelIndex];
-      if (sessionConfig) {
-        sessionConfig[session] = !sessionConfig[session];
-      }
-      return newSettings;
-    });
+  /**
+   * Keyed by level, not by array index, and immutable.
+   *
+   * The index version broke twice over: it mutated the row in place inside a
+   * setState updater, so React saw the same object reference and could skip
+   * the re-render, and it assumed the stored order matched the order this page
+   * renders — which stops being true the moment a level is missing from the
+   * saved value.
+   */
+  function toggleSession(level: string, session: SessionSlot) {
+    setSettings((prev) => ({
+      sessions: prev.sessions.map((row) =>
+        row.level === level ? { ...row, [session]: !row[session] } : row,
+      ),
+    }));
   }
 
   if (loading) {
@@ -121,7 +120,7 @@ export default function SettingsPage() {
           </p>
 
           <div className="space-y-6">
-            {LEVELS.map((level, levelIndex) => {
+            {LEVELS.map((level) => {
               const config = settings.sessions.find((s) => s.level === level);
               if (!config) return null;
 
@@ -139,8 +138,8 @@ export default function SettingsPage() {
                       >
                         <input
                           type="checkbox"
-                          checked={config[session as keyof typeof config]}
-                          onChange={() => toggleSession(levelIndex, session)}
+                          checked={config[session]}
+                          onChange={() => toggleSession(level, session)}
                           className="h-5 w-5 rounded border-[var(--border)] accent-[var(--accent)]"
                         />
                         <span className="font-medium text-[var(--foreground)] capitalize">{session}</span>

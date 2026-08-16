@@ -59,6 +59,11 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
 
   { prefix: "/admin/staff", capability: "staff" },
   { prefix: "/admin/lecturer-invite", capability: "staff" },
+  // School-wide configuration: which sittings run at which level. Same
+  // capability as the other "who and how this school is set up" screens, and
+  // it must match the capability its API asks for — a nav entry visible to
+  // somebody the route will refuse renders as a broken page, not a locked one.
+  { prefix: "/admin/settings", capability: "staff" },
 
   { prefix: "/admin/security", capability: "security" },
   { prefix: "/admin/integrations", capability: "integrations" },

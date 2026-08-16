@@ -232,6 +232,39 @@ model Tenant {
   adminActions            AdminAction[]
   auditLogs               AuditLog[]
   backupRuns              BackupRun[]
+  schoolSettings          SchoolSetting[]
+}
+
+/// School-wide configuration the office edits instead of asking for a deploy.
+///
+/// A key/value table rather than a column per setting, on purpose: the whole
+/// point of the screen it backs is that the school can change how it runs
+/// without a schema change, and a table that needs a migration per toggle
+/// would defeat that within a week.
+///
+/// `tenantId` is NOT NULL here, unlike most tables that carry it. Two reasons.
+/// A settings row with no owner is meaningless — there is no such thing as a
+/// sitting timetable that belongs to no school. And a compound unique over a
+/// NULLABLE column does not constrain the rows where it is null, because
+/// Postgres treats every NULL as distinct: one school would quietly accumulate
+/// a new row per save and read back whichever the planner happened to find.
+model SchoolSetting {
+  id String @id @default(cuid())
+
+  /// Dotted name of the setting, e.g. "class.sessions".
+  key String
+
+  /// The setting itself. JSON so a shape can grow without a migration.
+  value Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenantId  String
+  tenantRef Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
 }
 
 /// A partner's credential for the public API.

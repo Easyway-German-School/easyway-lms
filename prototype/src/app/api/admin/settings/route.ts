@@ -1,51 +1,73 @@
-import { requireCapability } from "@/lib/admin-roles";
 import { NextResponse } from "next/server";
 
+import { requireCapability } from "@/lib/admin-roles";
+import { prisma } from "@/lib/prisma";
+import {
+  CLASS_SESSIONS_KEY,
+  parseSessionSettings,
+  type SessionSettings,
+} from "@/lib/school-settings";
+
 /**
- * In-memory settings store for now. This will be migrated to a database table later.
- * Key: tenantId, Value: settings JSON
+ * The school's own configuration, read and written by /admin/settings.
+ *
+ * Persisted in SchoolSetting rather than held in module state. That is not a
+ * refinement — a Map on the module lives inside one serverless instance, so on
+ * Vercel a save would appear to work, then vanish the moment the next request
+ * landed on a different lambda. A settings screen that silently forgets is
+ * worse than no settings screen, because the office stops trusting every other
+ * number on the site too.
  */
-const settingsStore = new Map<string, Record<string, any>>();
 
-const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
-const DEFAULT_SETTINGS = {
-  sessions: LEVELS.map((level) => ({
-    level,
-    morning: true,
-    afternoon: true,
-    evening: true,
-  })),
-};
+export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
+export async function GET() {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
 
-  const tenantId = gate.session.user.tenantId || "root";
-  const settings = settingsStore.get(tenantId) || DEFAULT_SETTINGS;
+  try {
+    const row = await prisma.schoolSetting.findFirst({
+      where: { key: CLASS_SESSIONS_KEY },
+    });
 
-  return NextResponse.json(settings);
+    return NextResponse.json(parseSessionSettings(row?.value));
+  } catch (error) {
+    console.error("Failed to load school settings:", error);
+    return NextResponse.json({ error: "Unable to load settings" }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
 
+  const tenantId = gate.session.user.tenantId;
+  if (!tenantId) {
+    return NextResponse.json({ error: "No school in context" }, { status: 400 });
+  }
+
   try {
     const body = await request.json();
-    const tenantId = gate.session.user.tenantId || "root";
 
-    // Validate the settings structure
-    if (!body.sessions || !Array.isArray(body.sessions)) {
+    /**
+     * Validated into the known shape rather than stored as sent. This column
+     * is JSON, so without this a malformed POST becomes a malformed row, and
+     * the thing that breaks is the sign-up form reading it back weeks later.
+     */
+    const settings: SessionSettings | null = parseSessionSettings(body, { strict: true });
+    if (!settings) {
       return NextResponse.json({ error: "Invalid settings format" }, { status: 400 });
     }
 
-    // Store the settings
-    settingsStore.set(tenantId, body);
+    await prisma.schoolSetting.upsert({
+      where: { tenantId_key: { tenantId, key: CLASS_SESSIONS_KEY } },
+      update: { value: settings },
+      create: { tenantId, key: CLASS_SESSIONS_KEY, value: settings },
+    });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, ...settings });
   } catch (error) {
-    console.error("Failed to save settings:", error);
-    return NextResponse.json({ error: "Failed to save settings" }, { status: 500 });
+    console.error("Failed to save school settings:", error);
+    return NextResponse.json({ error: "Unable to save settings" }, { status: 500 });
   }
 }
