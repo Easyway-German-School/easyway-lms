@@ -623,7 +623,11 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                     key={channel.id}
                     onClick={() => {
                       setActiveId(channel.id);
-                      if (compact) setShowRail(false);
+                      // Picking a room takes you INTO it on a narrow screen.
+                      // This used to fire only in the compact embed, so on the
+                      // full page a phone tapped a channel and stayed staring
+                      // at the list.
+                      setShowRail(false);
                     }}
                     className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition ${
                       selected
@@ -655,8 +659,17 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
         </button>
       </aside>
 
-      {/* ------------------------------------------------------------- room */}
-      <section className={`${showRail && compact ? "hidden" : "flex"} min-w-0 flex-1 flex-col sm:flex`}>
+      {/* -------------------------------------------------------------- room
+          ONE PANE AT A TIME BELOW `sm`, both from `sm` up.
+
+          This condition used to be `showRail && compact`, which meant the
+          swap only happened in the compact embed. On the full page at phone
+          width the rail rendered `flex w-full` AND the room rendered `flex`
+          beside it, so the list ate the entire viewport and the conversation
+          was pushed off the right-hand edge — the chat was unreachable on a
+          phone, which is where most of this school reads it.
+      */}
+      <section className={`${showRail ? "hidden" : "flex"} min-w-0 flex-1 flex-col sm:flex`}>
         <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
           <button
             onClick={() => setShowRail(true)}
