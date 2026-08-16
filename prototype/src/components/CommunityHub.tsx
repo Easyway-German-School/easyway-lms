@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { usePushNotifications } from "@/lib/use-push";
 import { uploadFile } from "@/lib/upload";
 import { ALLOWED_REACTIONS, type ReactionSummary } from "@/lib/community-reactions";
+import { STICKERS, StickerArt, stickerById } from "@/lib/community-stickers";
 import {
   ArrowLeftIcon,
   BellIcon,
@@ -76,6 +77,10 @@ type ChatMessage = {
   replyTo: { id: string; author: string; body: string; hidden: boolean } | null;
   /** Folded one-per-emoji, with whether this reader is in the count. */
   reactions?: ReactionSummary[];
+  /** A sticker from the school's set, sent instead of text. */
+  stickerId?: string | null;
+  /** Staff have held this at the top of the room. */
+  pinned?: boolean;
   /** Set on a bubble we have drawn but the server has not confirmed. */
   pending?: boolean;
   failed?: boolean;
@@ -85,6 +90,23 @@ type ChatMessage = {
 const POLL_ACTIVE_MS = 4_000;
 /** And how often when the tab is in the background. */
 const POLL_HIDDEN_MS = 30_000;
+
+/** The sticker-tray button: a peeling sticker corner. */
+function StickerGlyph({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path
+        d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5V14l-6 6H5.5A1.5 1.5 0 0 1 4 18.5z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M20 14h-4.5a1.5 1.5 0 0 0-1.5 1.5V20" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <circle cx="9" cy="10" r="1.2" fill="currentColor" />
+      <circle cx="14" cy="10" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
 
 function initials(name: string | null) {
   if (!name) return "?";
@@ -176,6 +198,8 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const [editing, setEditing] = useState<string | null>(null);
   /** Which message currently has the emoji row open. One at a time. */
   const [reactingTo, setReactingTo] = useState<string | null>(null);
+  /** The sticker tray above the composer. */
+  const [stickerTrayOpen, setStickerTrayOpen] = useState(false);
   const [editDraft, setEditDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showRail, setShowRail] = useState(!compact);
@@ -402,10 +426,14 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
     }
   }, []);
 
-  const send = useCallback(async () => {
+  /**
+   * `sticker` is passed in rather than held in state, because sending one is a
+   * single tap with nothing to compose first — the tray calls this directly.
+   */
+  const send = useCallback(async (sticker?: string) => {
     const text = draft.trim();
-    // A picture on its own is a message; the server agrees.
-    if ((!text && !attachment) || !activeId) return;
+    // A picture or a sticker on its own is a message; the server agrees.
+    if ((!text && !attachment && !sticker) || !activeId) return;
 
     const tempId = `pending-${Date.now()}`;
     const quoted = replyTo;
@@ -422,6 +450,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
         createdAt: new Date().toISOString(),
         editedAt: null,
         attachment: picture,
+        stickerId: sticker ?? null,
         author: { id: "me", name: "You", role: "student" },
         replyTo: quoted
           ? { id: quoted.id, author: quoted.author.name, body: quoted.body.slice(0, 180), hidden: false }
@@ -432,6 +461,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
     setDraft("");
     setReplyTo(null);
     setAttachment(null);
+    setStickerTrayOpen(false);
 
     try {
       const res = await fetch("/api/community/messages", {
@@ -444,6 +474,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           attachmentUrl: picture?.url ?? null,
           attachmentType: picture?.type ?? null,
           attachmentName: picture?.name ?? null,
+          stickerId: sticker ?? null,
         }),
       });
       const data = await res.json();
@@ -511,6 +542,52 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
       );
     }
   }, [isStaff]);
+
+  /** Hold a message at the top of the room, or let it go again. */
+  const togglePin = useCallback(async (message: ChatMessage) => {
+    const next = !message.pinned;
+    setMessages((current) => current.map((m) => (m.id === message.id ? { ...m, pinned: next } : m)));
+    const res = await fetch("/api/community/moderate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: next ? "pin" : "unpin", messageId: message.id }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      setMessages((current) => current.map((m) => (m.id === message.id ? { ...m, pinned: !next } : m)));
+      setError("Could not change the pin.");
+    }
+  }, []);
+
+  /**
+   * Stop somebody posting for a while.
+   *
+   * Confirmed, and the duration is asked for rather than assumed — a mute is
+   * the one action here that a student feels as a punishment, so it should
+   * take a moment of deliberation rather than a stray tap on a phone.
+   */
+  const muteAuthor = useCallback(async (message: ChatMessage) => {
+    const choice = prompt(
+      `Mute ${message.author.name}? Type 1h, 24h or 7d.\n\nThey can still read the room and get announcements — they just cannot post.`,
+      "24h",
+    );
+    if (!choice) return;
+    const duration = choice.trim().toLowerCase();
+
+    const reason = prompt("Reason (shown to them, optional):", "") ?? "";
+
+    const res = await fetch("/api/community/moderate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "mute", userId: message.author.id, duration, reason }),
+    }).catch(() => null);
+
+    const data = await res?.json().catch(() => ({}));
+    if (!res?.ok) {
+      setError(data?.error || "Could not mute that member.");
+      return;
+    }
+    setError(`${message.author.name} is muted until ${new Date(data.mutedUntil).toLocaleString("en-GB")}.`);
+  }, []);
 
   /**
    * Reacting, drawn before the server is asked.
@@ -764,13 +841,27 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                         </p>
                       ) : null}
 
+                      {(() => {
+                        /*
+                          A sticker floats; it does not sit on a coloured
+                          bubble. Painting the accent behind it would put a
+                          pale illustration on an orange slab and lose the
+                          edges of the artwork — every messaging app draws
+                          stickers bare for the same reason.
+                        */
+                        const isSticker = Boolean(message.stickerId && stickerById(message.stickerId));
+                        return (
                       <div
-                        className={`rounded-2xl px-3 py-2 text-sm leading-6 ${
-                          message.hidden
-                            ? "border border-dashed border-[var(--border)] bg-transparent italic text-[var(--muted)]"
-                            : message.mine
-                              ? "bg-[var(--accent)] text-white"
-                              : "bg-[var(--surface-alt)] text-[var(--foreground)]"
+                        className={`text-sm leading-6 ${
+                          isSticker && !message.hidden
+                            ? "bg-transparent p-0"
+                            : `rounded-2xl px-3 py-2 ${
+                                message.hidden
+                                  ? "border border-dashed border-[var(--border)] bg-transparent italic text-[var(--muted)]"
+                                  : message.mine
+                                    ? "bg-[var(--accent)] text-white"
+                                    : "bg-[var(--surface-alt)] text-[var(--foreground)]"
+                              }`
                         } ${message.failed ? "ring-1 ring-rose-400" : ""} ${message.pending ? "opacity-60" : ""}`}
                       >
                         {message.replyTo ? (
@@ -818,6 +909,14 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                               <button onClick={() => setEditing(null)} className="opacity-70">Cancel</button>
                             </div>
                           </div>
+                        ) : message.stickerId && stickerById(message.stickerId) ? (
+                          /*
+                            A sticker fills the bubble instead of sitting in it.
+                            An unknown id — one retired from the set — falls
+                            through to the text branch and renders whatever body
+                            there was, rather than leaving a torn tile behind.
+                          */
+                          <StickerArt sticker={stickerById(message.stickerId)!} size={116} />
                         ) : (
                           <p className="whitespace-pre-wrap break-words">{message.body}</p>
                         )}
@@ -842,6 +941,8 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                           {message.failed ? " · not sent" : ""}
                         </p>
                       </div>
+                        );
+                      })()}
 
                       {/*
                         REACTIONS, under the bubble they belong to.
@@ -944,6 +1045,26 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                               {message.mine ? "Delete" : "Remove"}
                             </button>
                           ) : null}
+                          {/*
+                            Staff only, and separate from removal on purpose:
+                            one takes a message away, the other holds it up.
+                          */}
+                          {isStaff ? (
+                            <button
+                              onClick={() => void togglePin(message)}
+                              className="text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--accent)]"
+                            >
+                              {message.pinned ? "Unpin" : "Pin"}
+                            </button>
+                          ) : null}
+                          {isStaff && !message.mine ? (
+                            <button
+                              onClick={() => void muteAuthor(message)}
+                              className="text-[11px] font-semibold text-[var(--muted)] hover:text-amber-600"
+                            >
+                              Mute
+                            </button>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
@@ -1003,6 +1124,32 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
               </p>
             ) : null}
 
+            {/*
+              THE STICKER TRAY.
+
+              Sits above the composer rather than in a popover, because on a
+              phone a popover anchored to a button next to the keyboard is
+              either under the thumb or off the screen. A horizontal scroller
+              is the shape every messaging app already uses here, and it needs
+              no positioning logic to survive a keyboard opening.
+            */}
+            {stickerTrayOpen ? (
+              <div className="mb-2 rounded-2xl bg-[var(--surface-alt)] p-2">
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {STICKERS.map((sticker) => (
+                    <button
+                      key={sticker.id}
+                      onClick={() => void send(sticker.id)}
+                      title={sticker.meaning}
+                      className="shrink-0 rounded-2xl transition hover:scale-105 active:scale-95"
+                    >
+                      <StickerArt sticker={sticker} size={72} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="flex items-end gap-2">
               {/*
                 `capture` is deliberately absent. On a phone this offers both the
@@ -1029,6 +1176,17 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] disabled:opacity-40"
               >
                 <ImageIcon className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => setStickerTrayOpen((open) => !open)}
+                aria-label="Send a sticker"
+                aria-expanded={stickerTrayOpen}
+                title="Send a sticker"
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-lg transition hover:bg-[var(--surface-alt)] ${
+                  stickerTrayOpen ? "bg-[var(--surface-alt)] text-[var(--accent)]" : "text-[var(--muted)]"
+                }`}
+              >
+                <StickerGlyph className="h-5 w-5" />
               </button>
               <textarea
                 ref={composerRef}

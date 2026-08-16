@@ -3,6 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { authorizeChannel, canPostInChannel, isStaffRole } from "@/lib/community-spaces";
 import { activeMuteFor, muteMessage } from "@/lib/community-moderation";
+import { isStickerId, stickerById } from "@/lib/community-stickers";
 import { markChannelRead } from "@/lib/community-unread";
 import { announceChatMessage } from "@/lib/community-notify";
 
@@ -46,6 +47,7 @@ function serialise(
     } | null;
     reactions?: Array<{ emoji: string; userId: string }>;
     pinnedAt?: Date | null;
+    stickerId?: string | null;
   },
   viewer: Viewer,
 ) {
@@ -91,6 +93,9 @@ function serialise(
      */
     reactions: foldReactions(message.reactions ?? [], viewer.userId),
     pinned: Boolean(message.pinnedAt),
+    // Withheld from students on a hidden message for the same reason the body
+    // is: a removed sticker should not still be showing.
+    stickerId: hidden && !staff ? null : message.stickerId ?? null,
   };
 }
 
@@ -226,10 +231,16 @@ export async function POST(request: Request) {
     const channelId = String(body.channelId ?? "");
     const text = String(body.body ?? "").trim().slice(0, MAX_BODY);
     const attachmentUrl = body.attachmentUrl ? String(body.attachmentUrl) : null;
+    /**
+     * Validated against the set, not trusted. This id is rendered to a whole
+     * cohort, and an unrecognised one would put an empty tile in everybody's
+     * transcript permanently.
+     */
+    const stickerId = isStickerId(body.stickerId) ? String(body.stickerId) : null;
 
     if (!channelId) return NextResponse.json({ error: "channelId is required" }, { status: 400 });
-    // A message with neither words nor a picture is not a message.
-    if (!text && !attachmentUrl) {
+    // A message with neither words nor a picture nor a sticker is not a message.
+    if (!text && !attachmentUrl && !stickerId) {
       return NextResponse.json({ error: "Type something first" }, { status: 400 });
     }
 
@@ -286,6 +297,7 @@ export async function POST(request: Request) {
         attachmentUrl,
         attachmentType: body.attachmentType ? String(body.attachmentType) : null,
         attachmentName: body.attachmentName ? String(body.attachmentName) : null,
+        stickerId,
       },
       include: INCLUDE,
     });
@@ -305,7 +317,9 @@ export async function POST(request: Request) {
       messageId: created.id,
       authorId: viewer.userId,
       authorName: created.author.name ?? "Someone",
-      body: text,
+      // A sticker carries no text, so the lock-screen preview would otherwise
+      // be a blank line under somebody's name. The caption IS the message.
+      body: text || (stickerId ? stickerById(stickerId)?.caption ?? "" : ""),
       hasAttachment: Boolean(attachmentUrl),
     });
 

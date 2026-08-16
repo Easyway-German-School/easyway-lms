@@ -1838,6 +1838,16 @@ model Message {
   reactions MessageReaction[]
 
   /**
+   * A sticker from the school's own set, sent instead of text.
+   *
+   * An ID, never an image URL. The artwork is drawn in code (see
+   * src/lib/community-stickers.tsx), so a sticker sent today still renders
+   * after the set is redrawn, costs no storage, and cannot 404 the way an
+   * uploaded file eventually does.
+   */
+  stickerId String?
+
+  /**
    * Staff pinning something to the top of the room. Null for the vast majority.
    *
    * A pin is not moderation — it is the opposite. Removal takes a message away;
