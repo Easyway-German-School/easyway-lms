@@ -15,7 +15,14 @@
 
 export const CLASS_SESSIONS_KEY = "class.sessions";
 
-export const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
+/**
+ * The levels this screen configures — what the school SELLS, not every level
+ * that can exist on a record. C2 is not taught, so it gets no sittings row, no
+ * sign-up option and no community room.
+ */
+export { OFFERED_LEVELS as LEVELS } from "@/lib/levels";
+import { OFFERED_LEVELS as LEVELS } from "@/lib/levels";
+
 export const SESSION_SLOTS = ["morning", "afternoon", "evening"] as const;
 
 export type Level = (typeof LEVELS)[number];

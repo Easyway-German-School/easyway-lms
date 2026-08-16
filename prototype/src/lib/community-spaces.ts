@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { OFFERED_LEVELS } from "@/lib/levels";
 
 /**
  * Who may read and write in which cohort's chat.
@@ -55,6 +56,18 @@ export function normalizeSlot(value: unknown): SessionSlot {
 export function slotLabel(slot: string): string {
   const normalized = normalizeSlot(slot);
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+/**
+ * Does the school actually run this level?
+ *
+ * A room for a class nobody teaches is worse than no room: it sits at the top
+ * of the hub, permanently silent, and students ask the office why their C2
+ * group is dead. C2 is priced and recorded — old certificates point at it —
+ * but it is not taught, so it gets no chat room.
+ */
+export function isOfferedLevel(level: unknown): boolean {
+  return (OFFERED_LEVELS as readonly string[]).includes(String(level ?? "").trim().toUpperCase());
 }
 
 /**
@@ -129,6 +142,12 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
   const sessionSlot = normalizeSlot(cohort.sessionSlot);
   const level = cohort.level;
 
+  // Never conjure a room for a level the school does not teach. Returning null
+  // rather than throwing because the callers all treat "no room" as an empty
+  // state they already render, and a student on a retired level should see
+  // that rather than a stack trace.
+  if (!isOfferedLevel(level)) return null;
+
   const branchName =
     cohort.branchName ??
     (await prisma.branch.findUnique({ where: { id: cohort.branchId }, select: { name: true } }))?.name ??
@@ -171,7 +190,13 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
 /** Resolve exactly which spaces this viewer may read or post in. */
 export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
   if (isStaffRole(viewer.role)) {
-    const all = await prisma.space.findMany({ select: { id: true } });
+    // Staff see every room in the school, minus the ones for levels it no
+    // longer runs — moderation covers what is live, and a retired C2 room
+    // would otherwise sit in the admin's list forever.
+    const all = await prisma.space.findMany({
+      where: { level: { in: OFFERED_LEVELS as unknown as string[] } },
+      select: { id: true },
+    });
     return { spaceIds: all.map((s) => s.id), isStaff: true, branchId: null, level: null, sessionSlot: null };
   }
 
@@ -192,7 +217,8 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
 
   const sessionSlot = normalizeSlot(student.sessionSlot);
 
-  // Creates the room if this is the first student of the sitting to arrive.
+  // Creates the room if this is the first student of the sitting to arrive,
+  // and returns null for a level the school no longer runs.
   const space = await ensureSpaceForCohort({
     branchId: student.branchId,
     branchName: student.branch?.name,
@@ -201,7 +227,11 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
   });
 
   return {
-    spaceIds: [space.id],
+    // EXACTLY ONE ROOM, and this is where the sitting boundary is enforced.
+    // A1 Morning resolves to the A1 Morning space and nothing else, so an A1
+    // Afternoon channel id posted by hand fails the membership check in
+    // authorizeChannel rather than being filtered out in the UI.
+    spaceIds: space ? [space.id] : [],
     isStaff: false,
     branchId: student.branchId,
     level: student.level,

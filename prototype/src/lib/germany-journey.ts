@@ -35,7 +35,14 @@
  * does the database half.
  */
 
-import { LEVELS, SESSION_MONTHS, nextLevelAfter } from "@/lib/levels";
+import {
+  JOURNEY_LEVELS,
+  JOURNEY_TOP_LEVEL,
+  LEVELS,
+  SESSION_MONTHS,
+  journeyLevelFor,
+  nextLevelAfter,
+} from "@/lib/levels";
 import { CUSTOM_GOAL, goalFor, levelForGoal, type GermanyGoal } from "@/lib/germany-goals";
 
 /* -------------------------------------------------------------------------- */
@@ -256,10 +263,14 @@ export function targetLevelFor(input: {
 
   // The goal they chose can only ever LENGTHEN the road, never shorten it —
   // see levelForGoal. Someone who tells us they are joining a spouse (A1) does
-  // not get their B2 course quietly cut in half; someone heading to university
-  // gets told about the C1 before they finish B2 and find out the hard way.
-  if (!input.goalId) return fromFile;
-  return levelForGoal(goalFor(input.goalId), fromFile);
+  // not get their B2 course quietly cut in half.
+  //
+  // Clamped to the drawn range at the end. A university goal still REQUIRES
+  // C1 and its own copy still says so; what changed is that the road stops
+  // being drawn at B2, so the target handed to the map has to stop there too
+  // or the ladder asks for a node that no longer exists.
+  const target = input.goalId ? levelForGoal(goalFor(input.goalId), fromFile) : fromFile;
+  return journeyLevelFor(target);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -422,9 +433,11 @@ export function estimateArrival(input: {
   now?: Date;
 }): ArrivalEstimate {
   const { paperworkMonths = 4, now = new Date() } = input;
-  const levels = LEVELS as readonly string[];
-  const from = levels.indexOf(String(input.currentLevel ?? "A1").toUpperCase());
-  const to = levels.indexOf(String(input.targetLevel ?? "B2").toUpperCase());
+  // Same clamped ladder the road is drawn from, so the arrival date counts the
+  // levels the student can actually see ahead of them.
+  const levels = JOURNEY_LEVELS as readonly string[];
+  const from = levels.indexOf(journeyLevelFor(input.currentLevel));
+  const to = levels.indexOf(journeyLevelFor(input.targetLevel ?? JOURNEY_TOP_LEVEL));
 
   if (from < 0 || to < 0 || to < from) {
     return {
@@ -539,9 +552,13 @@ export function buildJourney(input: JourneyInput): Journey {
   const now = input.now ?? new Date();
   const goal = input.goalId ? goalFor(input.goalId) : CUSTOM_GOAL;
   const goalUnset = !input.goalId;
-  const currentLevel = String(input.currentLevel ?? "A1").toUpperCase();
-  const targetLevel = String(input.targetLevel ?? "B2").toUpperCase();
-  const levels = LEVELS as readonly string[];
+  /**
+   * Clamped to the drawn range. A student sitting C1 is placed on the last
+   * node rather than dropped off the road — see journeyLevelFor.
+   */
+  const currentLevel = journeyLevelFor(input.currentLevel);
+  const targetLevel = journeyLevelFor(input.targetLevel ?? JOURNEY_TOP_LEVEL);
+  const levels = JOURNEY_LEVELS as readonly string[];
 
   const completed = new Set(input.levelsCompleted.map((l) => String(l).toUpperCase()));
   const startedIso = toIso(input.classesStartedAt);

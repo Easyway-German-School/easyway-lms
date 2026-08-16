@@ -1,180 +1,115 @@
 import { prisma } from "@/lib/prisma";
+import { runUnscoped } from "@/lib/tenant/context";
+import { ensureSpaceForCohort, isOfferedLevel, normalizeSlot } from "@/lib/community-spaces";
 
 /**
- * Seed community spaces and channels for each branch + level combination.
- * 
- * This ensures every student can access their community from day one.
- * Run this after branches and students exist: npm run seed:spaces
+ * Opens the chat room for every cohort that actually has students.
+ *
+ *   npm run seed:spaces
+ *
+ * Rooms are created lazily when the first student of a sitting opens the hub,
+ * so this script is not required for correctness. What it buys is that the
+ * room is already there — with its channels — before anybody looks, which
+ * matters for a launch where the first person into a room should not be the
+ * one who creates it.
+ *
+ * ---------------------------------------------------------------------------
+ * REWRITTEN. The previous version built its own rooms and channels by hand and
+ * disagreed with the app on all three counts that matter:
+ *
+ *   - It invented a five-channel set (general, grammar-help, vocabulary,
+ *     announcements, assignments) where the app creates three. Running it
+ *     therefore ADDED channels the app never makes and would never clean up.
+ *   - It named rooms "Lagos - Level A1 (morning)" where the app names them
+ *     "Lagos · A1 · Morning", so seeded and lazily-created rooms did not look
+ *     like each other.
+ *   - It set no tenantId, and it built the full branch × level × sitting
+ *     cartesian product — rooms for cohorts that do not exist, including
+ *     levels the school does not teach.
+ *
+ * It now calls the same `ensureSpaceForCohort` the app calls, for the cohorts
+ * the register actually shows. One definition of a room, in one place.
+ * ---------------------------------------------------------------------------
  */
 
 async function main() {
-  console.log("🌱 Seeding community spaces and channels...\n");
+  console.log("Opening community rooms for every live cohort\n");
 
-  // Get all branches that have students
-  const branches = await prisma.branch.findMany({
-    select: { id: true, name: true }
-  });
+  /**
+   * Spans every tenant on purpose: this is an operator script run from a
+   * terminal, where there is no signed-in user to take a tenant from.
+   */
+  await runUnscoped("seeding community rooms across every school", async () => {
+    /**
+     * The cohorts that actually exist, taken from the register rather than
+     * from a cartesian product. A room for a combination nobody is enrolled in
+     * is an empty room, and empty rooms are what kill a young community.
+     */
+    const cohorts = await prisma.student.groupBy({
+      by: ["branchId", "level", "sessionSlot"],
+      // `level` is a required column, so only the nullable branch needs a
+      // guard — a student with no branch has no cohort to open a room for.
+      where: { status: "active", branchId: { not: null } },
+      _count: { _all: true },
+    });
 
-  if (branches.length === 0) {
-    console.log("⚠️  No branches found. Create branches first.");
-    return;
-  }
-
-  // Get all unique levels from existing students
-  const studentLevels = await prisma.student.findMany({
-    where: { level: { not: null } },
-    distinct: ["level"],
-    select: { level: true }
-  });
-
-  const levels = studentLevels
-    .map(s => s.level)
-    .filter(Boolean) as string[];
-
-  if (levels.length === 0) {
-    console.log("⚠️  No student levels found. Enroll students first.");
-    return;
-  }
-
-  // Get all unique session slots from existing students
-  const studentSessions = await prisma.student.findMany({
-    where: { sessionSlot: { not: null } },
-    distinct: ["sessionSlot"],
-    select: { sessionSlot: true }
-  });
-
-  const sessionSlots = studentSessions
-    .map(s => s.sessionSlot)
-    .filter(Boolean) as string[];
-
-  if (sessionSlots.length === 0) {
-    console.log("⚠️  No student session slots found. Enroll students first.");
-    return;
-  }
-
-  console.log(`📍 Found ${branches.length} branches, ${levels.length} levels, and ${sessionSlots.length} sessions:\n`);
-  for (const branch of branches) {
-    console.log(`  📌 ${branch.name}`);
-  }
-  console.log(`\n  📚 Levels: ${levels.join(", ")}`);
-  console.log(`  🕐 Sessions: ${sessionSlots.join(", ")}\n`);
-
-  let spacesCreated = 0;
-  let channelsCreated = 0;
-  let skipped = 0;
-
-  // Create or update spaces for each branch × level × session combination
-  for (const branch of branches) {
-    for (const level of levels) {
-      for (const sessionSlot of sessionSlots) {
-        try {
-          const space = await prisma.space.upsert({
-            where: { branchId_level_sessionSlot: { branchId: branch.id, level, sessionSlot } },
-            update: {}, // If exists, leave it alone
-            create: {
-              branchId: branch.id,
-              level,
-              sessionSlot,
-              name: `${branch.name} - Level ${level} (${sessionSlot})`,
-              description: `Community space for ${branch.name} learners at level ${level}, ${sessionSlot} session. Discuss lessons, ask questions, and collaborate with peers.`
-            }
-          });
-
-        // Create default channels for this space
-        const defaultChannels = [
-          {
-            slug: "general",
-            name: "General",
-            description: "General discussion and announcements",
-            kind: "topic" as const,
-            position: 0
-          },
-          {
-            slug: "grammar-help",
-            name: "Grammar Help",
-            description: "Ask and answer grammar questions",
-            kind: "topic" as const,
-            position: 1
-          },
-          {
-            slug: "vocabulary",
-            name: "Vocabulary",
-            description: "Share and discuss new words and phrases",
-            kind: "topic" as const,
-            position: 2
-          },
-          {
-            slug: "announcements",
-            name: "Announcements",
-            description: "Important updates from tutors and staff",
-            kind: "topic" as const,
-            position: 3
-          },
-          {
-            slug: "assignments",
-            name: "Assignment Support",
-            description: "Help with assignments and homework",
-            kind: "topic" as const,
-            position: 4
-          }
-        ];
-
-        for (const channelData of defaultChannels) {
-          try {
-            await prisma.channel.upsert({
-              where: { spaceId_slug: { spaceId: space.id, slug: channelData.slug } },
-              update: {}, // If exists, leave it alone
-              create: {
-                spaceId: space.id,
-                ...channelData
-              }
-            });
-            channelsCreated++;
-          } catch (e) {
-            // Channel already exists
-            if ((e as any).code === "P2002") {
-              skipped++;
-            } else {
-              throw e;
-            }
-          }
-        }
-
-        spacesCreated++;
-        console.log(`✅ ${branch.name} - Level ${level} (${sessionSlot})`);
-      } catch (e) {
-        // Space already exists
-        if ((e as any).code === "P2002") {
-          skipped++;
-          console.log(`⏭️  ${branch.name} - Level ${level} (${sessionSlot}) (already exists)`);
-        } else {
-          console.error(`❌ Error creating space for ${branch.name} - Level ${level}:`, e);
-        }
-      }
+    if (cohorts.length === 0) {
+      console.log("No active students with a branch and level. Nothing to open.");
+      return;
     }
-  }
 
-  console.log(`\n✨ Complete!`);
-  console.log(`  ✅ Spaces: ${spacesCreated} created/updated`);
-  console.log(`  ✅ Channels: ${channelsCreated} created`);
-  if (skipped > 0) {
-    console.log(`  ⏭️  ${skipped} already existed (skipped)`);
-  }
+    const branches = await prisma.branch.findMany({ select: { id: true, name: true, mode: true } });
+    const branchById = new Map(branches.map((b) => [b.id, b]));
 
-  // Verify
-  const totalSpaces = await prisma.space.count();
-  const totalChannels = await prisma.channel.count();
-  console.log(`\n📊 Database now has:`);
-  console.log(`  📦 ${totalSpaces} spaces total`);
-  console.log(`  📢 ${totalChannels} channels total`);
+    let opened = 0;
+    let skipped = 0;
+
+    // Sorted so the output reads like a timetable rather than a query plan.
+    const sorted = [...cohorts].sort((a, b) => {
+      const branchA = branchById.get(a.branchId!)?.name ?? "";
+      const branchB = branchById.get(b.branchId!)?.name ?? "";
+      return (
+        branchA.localeCompare(branchB) ||
+        String(a.level).localeCompare(String(b.level)) ||
+        String(a.sessionSlot).localeCompare(String(b.sessionSlot))
+      );
+    });
+
+    for (const cohort of sorted) {
+      const branch = branchById.get(cohort.branchId!);
+      const label = `${branch?.name ?? "?"} · ${cohort.level} · ${normalizeSlot(cohort.sessionSlot)}`;
+
+      if (!isOfferedLevel(cohort.level)) {
+        console.log(`  skip  ${label.padEnd(36)} level not taught`);
+        skipped += 1;
+        continue;
+      }
+
+      const space = await ensureSpaceForCohort({
+        branchId: cohort.branchId!,
+        branchName: branch?.name,
+        level: cohort.level!,
+        sessionSlot: cohort.sessionSlot,
+      });
+
+      if (!space) {
+        console.log(`  skip  ${label.padEnd(36)} no room`);
+        skipped += 1;
+        continue;
+      }
+
+      const mode = branch?.mode === "online" ? " [online]" : "";
+      console.log(`  open  ${label.padEnd(36)} ${cohort._count._all} student(s)${mode}`);
+      opened += 1;
+    }
+
+    console.log(`\n${opened} room(s) open, ${skipped} skipped.`);
+  });
 }
 
 main()
-  .then(() => {
-    console.log("\n✨ Seeding complete! Students can now access the community.\n");
-    process.exit(0);
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
   })
-  .catch(e => {
-    console.error("\n❌ Seeding failed:", e);
-    process.exit(1);
-  });
+  .finally(() => prisma.$disconnect());
