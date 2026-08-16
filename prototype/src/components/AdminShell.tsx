@@ -19,7 +19,6 @@ import {
   CommunityIcon,
   CrossIcon,
   DashboardIcon,
-  ExamCentreIcon,
   ExamIcon,
   InboxIcon,
   IntegrationIcon,
@@ -36,7 +35,6 @@ import {
   PencilIcon,
   PulseIcon,
   RobotIcon,
-  RosterIcon,
   SendIcon,
   ShieldIcon,
   TicketIcon,
@@ -95,8 +93,6 @@ const navItems: NavItem[] = [
   { label: 'Certificates', href: '/admin/certificates', icon: <CertificateIcon />, group: 'Academics' },
 
   { label: 'Exams', href: '/admin/exams', icon: <ExamIcon />, group: 'Exams' },
-  { label: 'Exam centre', href: '/admin/exam-centre', icon: <ExamCentreIcon />, group: 'Exams' },
-  { label: 'Exam Registrations', href: '/admin/exam-registrations', icon: <RosterIcon />, group: 'Exams' },
   // The dashboard has counted unmarked work since it was built and had nowhere
   // to send anybody. This is that somewhere.
   { label: 'Marking queue', href: '/admin/marking', icon: <PencilIcon />, group: 'Exams' },
@@ -220,11 +216,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   }, [router, session?.user?.role, status]);
 
   if (status === 'loading') {
-    return <div className="flex min-h-screen items-center justify-center bg-[#fffbf8] text-slate-700">Loading admin portal...</div>;
+    return <div className="app-canvas flex min-h-screen items-center justify-center text-[var(--foreground-soft)]">Loading admin portal...</div>;
   }
 
   if (status === 'unauthenticated' || session?.user?.role?.toLowerCase() !== 'admin') {
-    return <div className="flex min-h-screen items-center justify-center bg-[#fffbf8] text-slate-700">Redirecting to admin sign-in...</div>;
+    return <div className="app-canvas flex min-h-screen items-center justify-center text-[var(--foreground-soft)]">Redirecting to admin sign-in...</div>;
   }
 
   /**
@@ -265,7 +261,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   );
 
   return (
-    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.08),_transparent_40%),linear-gradient(135deg,_#f9f7f5_0%,_#fffbf8_100%)] text-[var(--foreground)]">
+    <div className="app-canvas flex min-h-screen text-[var(--foreground)]">
       {drawerOpen && (
         <button
           aria-label="Close menu"
@@ -276,12 +272,12 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
       {/* Sidebar */}
       <aside
-        className={`fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-white/60 bg-white/95 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:bg-white/85 lg:transition-all ${
+        className={`fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-[var(--border)] bg-[var(--surface-soft)] shadow-[var(--shadow)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:transition-all ${
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         } w-[17rem] ${collapsed ? 'lg:w-20' : 'lg:w-72'}`}
       >
         {/* Header */}
-        <div className="border-b border-slate-200/70 p-4">
+        <div className="border-b border-[var(--border)] p-4">
           <div className="flex items-center justify-between gap-3">
             {/* The real logo, not an "AW" placeholder — the school has artwork
                 and every other portal was already using it. */}
@@ -299,14 +295,14 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             <button
               onClick={() => setCollapsed(!collapsed)}
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              className="hidden rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:block"
+              className="hidden rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:block"
             >
               {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
             </button>
             <button
               onClick={() => setDrawerOpen(false)}
               aria-label="Close menu"
-              className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:hidden"
+              className="rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:hidden"
             >
               <CrossIcon className="h-5 w-5" />
             </button>
@@ -328,7 +324,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             return (
               <div key={group} className="mb-6">
                 {!collapsed && (
-                  <p className="mb-3 px-3 text-xs font-bold uppercase tracking-[0.3em] text-slate-500">{group}</p>
+                  <p className="mb-3 px-3 text-xs font-bold uppercase tracking-[0.3em] text-[var(--muted)]">{group}</p>
                 )}
                 <div className="space-y-1">
                   {groupItems.map((item) => {
@@ -344,12 +340,12 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                         className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition-all duration-200 ${
                           active
                             ? 'bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_8px_24px_rgba(255,102,0,0.12)]'
-                            : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+                            : 'text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]'
                         }`}
                       >
                         <span
-                          className={`relative flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-base shadow-sm transition ${
-                            active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-slate-300'
+                          className={`relative flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${
+                            active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'
                           }`}
                         >
                           {item.icon}
@@ -357,7 +353,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                               it — so the icon itself carries a dot, which is
                               the only thing that still fits. */}
                           {badge > 0 && collapsed ? (
-                            <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-white lg:block" />
+                            <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--surface-alt)] lg:block" />
                           ) : null}
                         </span>
                         {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
@@ -376,12 +372,12 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         </nav>
 
         {/* Footer */}
-        <div className="border-t border-slate-200/70 p-3">
+        <div className="border-t border-[var(--border)] p-3">
           {/* Of the three portals this is the one that most needs a way out —
               an admin left signed in on an office machine exposes every
               student record, payment and staff account in the school. */}
           <SignOutButton callbackUrl="/auth/admin" collapsed={collapsed} tone="slate" portalLabel="the admin portal" />
-          <p className={`mt-2 px-3 text-xs text-slate-500 ${collapsed ? 'lg:text-center' : ''}`}>
+          <p className={`mt-2 px-3 text-xs text-[var(--muted)] ${collapsed ? 'lg:text-center' : ''}`}>
             {collapsed ? 'v1' : 'Professional admin panel'}
           </p>
         </div>
@@ -394,11 +390,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           letting the page scroll to it. The admin area is the worst case for
           this — it is nothing but wide tables of emails and amounts. */}
       <main className={`min-w-0 flex-1 overflow-x-clip transition-all duration-300 ${collapsed ? 'lg:ml-20' : 'lg:ml-72'}`}>
-        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-white/60 bg-white/80 px-3 py-2 backdrop-blur-xl sm:px-6">
+        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2 backdrop-blur-xl sm:px-6">
           <button
             onClick={() => setDrawerOpen(true)}
             aria-label="Open menu"
-            className="grid h-10 w-10 place-items-center rounded-xl text-slate-600 transition hover:bg-slate-100 lg:hidden"
+            className="grid h-10 w-10 place-items-center rounded-xl text-[var(--muted)] transition hover:bg-[var(--surface-alt)] lg:hidden"
           >
             <MenuIcon className="h-5 w-5" />
           </button>
@@ -407,31 +403,31 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             <BrandLogo variant="wordmark" className="h-7" />
           </div>
 
-          <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-slate-700 lg:block">
+          <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-[var(--foreground-soft)] lg:block">
             {navItems.find((item) => pathname === item.href)?.label ?? 'Admin'}
           </p>
 
           <NotificationCenter />
         </header>
 
-        <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.08),_transparent_40%),linear-gradient(135deg,_#f9f7f5_0%,_#fffbf8_100%)] p-4 sm:p-6 lg:p-8">
+        <div className="app-canvas min-h-screen p-4 sm:p-6 lg:p-8">
           <div className="mx-auto max-w-7xl">
             {blocked ? (
-              <div className="mx-auto mt-10 max-w-lg rounded-[28px] border border-slate-200 bg-white p-8 text-center shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
+              <div className="mx-auto mt-10 max-w-lg rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-8 text-center shadow-[var(--shadow)]">
                 <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
                   <ShieldIcon className="h-7 w-7" />
                 </span>
-                <h1 className="mt-4 text-xl font-bold text-slate-900">Not your area</h1>
+                <h1 className="mt-4 text-xl font-bold text-[var(--foreground)]">Not your area</h1>
                 {/* Not `${label}s do not cover` — that renders "Secretarys",
                     and a permissions screen that cannot spell the role is not
                     one anybody trusts. The label goes in parentheses instead,
                     which works for every role name including future ones. */}
-                <p className="mt-2 text-sm leading-6 text-slate-600">
+                <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
                   Your admin role{adminRoleLabel ? ` (${adminRoleLabel})` : ''} does not cover{' '}
-                  <strong className="font-semibold text-slate-800">{currentArea?.label}</strong>. Nothing is broken —
+                  <strong className="font-semibold text-[var(--foreground)]">{currentArea?.label}</strong>. Nothing is broken —
                   this is simply not part of your role.
                 </p>
-                <p className="mt-3 text-xs leading-5 text-slate-500">
+                <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
                   A super admin can hand you this one from Admin roles, without changing anybody else&rsquo;s access.
                 </p>
                 <button

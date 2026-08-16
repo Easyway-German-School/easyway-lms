@@ -7,12 +7,20 @@ import { uploadFile } from "@/lib/upload";
 import { ALLOWED_REACTIONS, type ReactionSummary } from "@/lib/community-reactions";
 import { STICKERS, StickerArt, stickerById } from "@/lib/community-stickers";
 import {
+  CHAT_THEMES,
+  CHAT_THEME_STORAGE_KEY,
+  chatThemeById,
+  type ChatTheme,
+} from "@/lib/chat-theme";
+import {
   ArrowLeftIcon,
   BellIcon,
   BellOffIcon,
   BranchIcon,
+  CheckIcon,
   CommunityIcon,
   ImageIcon,
+  PaletteIcon,
   SendIcon,
 } from "@/components/icons";
 
@@ -203,6 +211,9 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const [editDraft, setEditDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showRail, setShowRail] = useState(!compact);
+  /** This device's chat wallpaper/bubble colour. Defaults to the brand look until read from storage. */
+  const [chatTheme, setChatTheme] = useState<ChatTheme>(chatThemeById(null));
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -212,6 +223,27 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const cursorRef = useRef<string | null>(null);
 
   const push = usePushNotifications();
+
+  // Read the saved chat theme once the component is mounted — never during
+  // render, so server and first client paint agree and there is nothing to
+  // hydrate-mismatch on.
+  useEffect(() => {
+    try {
+      setChatTheme(chatThemeById(window.localStorage.getItem(CHAT_THEME_STORAGE_KEY)));
+    } catch {
+      // Private browsing. The brand default stays in effect for this visit.
+    }
+  }, []);
+
+  const pickChatTheme = useCallback((theme: ChatTheme) => {
+    setChatTheme(theme);
+    setThemePickerOpen(false);
+    try {
+      window.localStorage.setItem(CHAT_THEME_STORAGE_KEY, theme.id);
+    } catch {
+      // Private browsing. The pick still applies for the rest of this visit.
+    }
+  }, []);
 
   const channels = useMemo(() => spaces.flatMap((space) => space.channels), [spaces]);
   const active = useMemo(() => channels.find((c) => c.id === activeId) ?? null, [channels, activeId]);
@@ -747,7 +779,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           phone, which is where most of this school reads it.
       */}
       <section className={`${showRail ? "hidden" : "flex"} min-w-0 flex-1 flex-col sm:flex`}>
-        <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
+        <header className="relative flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
           <button
             onClick={() => setShowRail(true)}
             aria-label="All channels"
@@ -767,9 +799,70 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                 : active?.description}
             </p>
           </div>
+
+          {/*
+            THIS DEVICE'S CHAT THEME, not the school's.
+
+            Sits beside the room name rather than in a settings page, because
+            the whole point is that a student can find it while they are
+            looking at the chat it changes. Position is per-device only —
+            nothing here writes to the room, so nobody else's screen changes.
+          */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setThemePickerOpen((open) => !open)}
+              aria-label="Chat theme"
+              aria-expanded={themePickerOpen}
+              title="Chat theme"
+              className="rounded-lg p-1.5 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)]"
+            >
+              <PaletteIcon className="h-4 w-4" />
+            </button>
+
+            {themePickerOpen ? (
+              <div
+                role="group"
+                aria-label="Choose a chat theme"
+                className="absolute right-0 top-full z-20 mt-2 w-56 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shadow-2xl"
+              >
+                <p className="px-2 pb-1.5 pt-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">
+                  Chat theme · this device
+                </p>
+                <div className="grid grid-cols-1 gap-0.5">
+                  {CHAT_THEMES.map((theme) => {
+                    const selected = theme.id === chatTheme.id;
+                    return (
+                      <button
+                        key={theme.id}
+                        onClick={() => pickChatTheme(theme)}
+                        aria-pressed={selected}
+                        className={`flex items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-sm transition ${
+                          selected ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--surface-alt)]"
+                        }`}
+                      >
+                        <span
+                          aria-hidden
+                          className="h-6 w-6 shrink-0 rounded-full border border-[var(--border-strong)] shadow-inner"
+                          style={{ background: theme.swatch }}
+                        />
+                        <span className="min-w-0 flex-1 truncate font-medium text-[var(--foreground)]">
+                          {theme.label}
+                        </span>
+                        {selected ? <CheckIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" strokeWidth={3} /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </header>
 
-        <div ref={scrollRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4"
+          style={{ background: chatTheme.wallpaper }}
+        >
           {hasMore ? (
             <div className="pb-2 text-center">
               <button
@@ -859,10 +952,14 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                                 message.hidden
                                   ? "border border-dashed border-[var(--border)] bg-transparent italic text-[var(--muted)]"
                                   : message.mine
-                                    ? "bg-[var(--accent)] text-white"
+                                    ? "text-white"
                                     : "bg-[var(--surface-alt)] text-[var(--foreground)]"
                               }`
                         } ${message.failed ? "ring-1 ring-rose-400" : ""} ${message.pending ? "opacity-60" : ""}`}
+                        // This device's chosen bubble colour/gradient — see
+                        // lib/chat-theme.ts. Only "mine", not hidden, not a
+                        // sticker (which floats bare on purpose, see below).
+                        style={message.mine && !message.hidden && !isSticker ? { background: chatTheme.bubble } : undefined}
                       >
                         {message.replyTo ? (
                           <div

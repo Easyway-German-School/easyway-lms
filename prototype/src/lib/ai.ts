@@ -57,6 +57,93 @@ export function claudeFailureHint(): string | null {
   return lastClaudeFailure;
 }
 
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+
+/**
+ * Groq's free tier, spoken with the same OpenAI-shaped chat-completions body
+ * every hosted provider but Anthropic uses.
+ *
+ * This exists because the school will not pay a monthly bill and this
+ * machine cannot run Ollama reliably (see [[project-ai-actually-works]]) —
+ * so production had NO reachable model at all, hosted or local. Groq's free
+ * tier is fast enough for a student watching a spinner and costs the
+ * platform nothing, which is also why its calls are NOT run through
+ * `recordUsage`: `ai.tokens` bills a school the real per-token cost this
+ * platform pays a provider, and Groq's real cost here is zero. Metering it
+ * at Claude's rate would invent a charge for a call nobody paid for.
+ */
+async function callGroq(prompt: string, maxTokens: number): Promise<string | null> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        max_tokens: maxTokens,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      console.error("Groq API error:", response.status, detail);
+      return null;
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The one function every hosted-text call site should use.
+ *
+ * Tries whichever hosted key is actually configured, in the order
+ * `hostedProvider()` picks: Claude first when funded (best quality), Groq
+ * next (free, fast, no local RAM needed), DeepSeek last. Callers that used to
+ * branch on `provider === "claude"` only would silently mock the moment
+ * someone set GROQ_API_KEY instead of ANTHROPIC_API_KEY — this is what closes
+ * that gap everywhere at once instead of at each call site separately.
+ */
+async function callHostedText(prompt: string, maxTokens: number): Promise<string | null> {
+  if (hasKey(process.env.ANTHROPIC_API_KEY)) return callClaude(prompt, maxTokens);
+  if (hasKey(process.env.GROQ_API_KEY)) return callGroq(prompt, maxTokens);
+  if (hasKey(process.env.DEEPSEEK_API_KEY)) return callDeepSeekText(prompt, maxTokens);
+  return null;
+}
+
+async function callDeepSeekText(prompt: string, maxTokens: number): Promise<string | null> {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const response = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+        max_tokens: maxTokens,
+      }),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as any;
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 async function callClaude(prompt: string, maxTokens: number): Promise<string | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -158,7 +245,7 @@ export async function gradeEssay(essay: string): Promise<{
 }> {
   const provider = getAIProvider();
 
-  if (provider === "claude") {
+  if (provider === "claude" || provider === "groq" || provider === "deepseek") {
     return gradeEssayWithClaude(essay);
   } else if (provider === "ollama") {
     return gradeEssayWithOllama(essay);
@@ -175,7 +262,7 @@ export async function analyzePronunciation(phrase: string): Promise<{
 }> {
   const provider = getAIProvider();
 
-  if (provider === "claude") {
+  if (provider === "claude" || provider === "groq" || provider === "deepseek") {
     return analyzePronunciationWithClaude(phrase);
   } else if (provider === "ollama") {
     return analyzePronunciationWithOllama(phrase);
@@ -186,7 +273,7 @@ export async function analyzePronunciation(phrase: string): Promise<{
 
 export async function generateEssayNextSteps(score: number, feedback: Array<{ category: string; comment: string; score: number }>, essay: string): Promise<string> {
   const provider = getAIProvider();
-  if (provider === "claude") {
+  if (provider === "claude" || provider === "groq") {
     return generateNextStepsWithClaude(score, feedback, essay);
   } else if (provider === "deepseek") {
     return generateNextStepsWithDeepSeek(score, feedback, essay);
@@ -233,8 +320,8 @@ export async function generateDailyMissions(
   const provider = getAIProvider();
 
   const raw =
-    provider === "claude"
-      ? await callClaude(prompt, 700)
+    provider === "claude" || provider === "groq" || provider === "deepseek"
+      ? await callHostedText(prompt, 700)
       : provider === "ollama" || provider === "anythingllm"
         ? await callLocalModel(getOllamaModel(), prompt, 0.6)
         : null;
@@ -267,7 +354,7 @@ export async function generateMissionPracticeFeedback(input: {
 }): Promise<{ prompt: string; feedback: string; score: number; suggestion?: string }> {
   const provider = getAIProvider();
 
-  if (provider === "claude") {
+  if (provider === "claude" || provider === "groq" || provider === "deepseek") {
     return generateMissionPracticeFeedbackWithClaude(input);
   }
 
@@ -283,7 +370,7 @@ async function generateMissionPracticeFeedbackWithClaude(input: {
   description: string;
   response: string;
 }) {
-  const raw = await callClaude(
+  const raw = await callHostedText(
     `You are an expert German tutor. A student submitted the following mission response.\n\nMission: ${input.title}\nDescription: ${input.description}\nResponse: ${input.response}\n\nGive output as JSON with fields: prompt, feedback, score, suggestion.${JSON_ONLY}`,
     512,
   );
@@ -1152,14 +1239,20 @@ export type AiWorkload =
   /** Nobody is waiting. Privacy and cost win. */
   | "backoffice";
 
-type Provider = "claude" | "ollama" | "deepseek" | "anythingllm" | "mock";
+type Provider = "claude" | "groq" | "ollama" | "deepseek" | "anythingllm" | "mock";
 
 function hasKey(value: string | undefined): boolean {
   return Boolean(value && !value.startsWith("sk-placeholder"));
 }
 
+/**
+ * Claude first when funded (best quality), then Groq — free, fast, no local
+ * RAM needed, which is what actually unblocks production on a school laptop
+ * with no server budget — then DeepSeek.
+ */
 function hostedProvider(): Provider | null {
   if (hasKey(process.env.ANTHROPIC_API_KEY)) return "claude";
+  if (hasKey(process.env.GROQ_API_KEY)) return "groq";
   if (hasKey(process.env.DEEPSEEK_API_KEY)) return "deepseek";
   return null;
 }
@@ -1239,6 +1332,7 @@ function getAIProvider(workload: AiWorkload = "interactive"): Provider {
 export function activeModelName(): string {
   const provider = getAIProvider();
   if (provider === "claude") return CLAUDE_MODEL;
+  if (provider === "groq") return GROQ_MODEL;
   if (provider === "ollama" || provider === "anythingllm") return getOllamaModel();
   return provider;
 }
@@ -1257,7 +1351,9 @@ export function activeModelName(): string {
 export async function callModel(prompt: string, maxTokens = 800): Promise<string | null> {
   const provider = getAIProvider();
 
-  if (provider === "claude") return callClaude(prompt, maxTokens);
+  if (provider === "claude" || provider === "groq" || provider === "deepseek") {
+    return callHostedText(prompt, maxTokens);
+  }
   if (provider === "ollama" || provider === "anythingllm") {
     return callLocalModel(getOllamaModel(), prompt, 0.4);
   }
@@ -1412,7 +1508,7 @@ function getOllamaModel() {
 }
 
 async function generateNextStepsWithClaude(score: number, feedback: Array<{ category: string; comment: string; score: number }>, essay: string): Promise<string> {
-  const text = await callClaude(
+  const text = await callHostedText(
     `Based on a German essay scored at ${score}/100 with these feedback categories: ${feedback.map((f) => `${f.category}: ${f.score}/100`).join(", ")}, provide ONE specific, actionable next step to improve from ${score} to ${score + 10} points. Keep it to one concise sentence. Reply with the sentence and nothing else.`,
     256,
   );
@@ -1506,9 +1602,9 @@ function generateNextStepsMock(score: number, feedback: Array<{ category: string
   return suggestions_for_category[Math.floor(Math.random() * suggestions_for_category.length)];
 }
 
-// Claude Implementation
+// Hosted implementation — Claude, Groq or DeepSeek, whichever `callHostedText` finds configured.
 async function gradeEssayWithClaude(essay: string) {
-  const raw = await callClaude(
+  const raw = await callHostedText(
     `Grade this German essay at B2 exam standard. Return JSON with:
 {
   "score": (0-100),
@@ -1541,7 +1637,7 @@ ${essay}${JSON_ONLY}`,
 }
 
 async function analyzePronunciationWithClaude(phrase: string) {
-  const raw = await callClaude(
+  const raw = await callHostedText(
     `Analyze this German phrase for pronunciation coaching. Return JSON:
 {
   "transcription": "correct spelling/transcription",

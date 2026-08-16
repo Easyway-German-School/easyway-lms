@@ -157,7 +157,7 @@ function Kpi({
   );
 
   const className =
-    "group block rounded-3xl border border-[var(--border)] bg-white/80 p-5 text-left shadow-sm transition";
+    "group block rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-5 text-left shadow-sm transition";
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }}>
@@ -188,7 +188,7 @@ function SectionCard({
   className?: string;
 }) {
   return (
-    <div className={`rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm ${className}`}>
+    <div className={`rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm ${className}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--foreground)]">{title}</h2>
         <div className="flex items-baseline gap-3">
@@ -296,14 +296,14 @@ export default function AdminHomePage() {
               type="button"
               onClick={() => void load()}
               disabled={loading}
-              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-white disabled:opacity-50"
+              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-[var(--surface-alt)] disabled:opacity-50"
             >
               {loading ? "Refreshing…" : "Refresh"}
             </button>
             <button
               type="button"
               onClick={() => router.push("/dashboard")}
-              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-white"
+              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-[var(--surface-alt)]"
             >
               View student portal
             </button>
@@ -529,7 +529,7 @@ export default function AdminHomePage() {
                 label: "Exam registrations pending",
                 value: data?.actionQueue.pendingExamRegistrations ?? 0,
                 hint: "Awaiting confirmation",
-                href: to("/admin/exam-registrations?status=pending"),
+                href: to("/admin/exams"),
               },
               {
                 label: "Submissions ungraded",
@@ -909,7 +909,7 @@ export default function AdminHomePage() {
               { label: "Finance", hint: "Receivables and cash", href: "/admin/finance" },
               { label: "Marking queue", hint: "Work waiting on a tutor", href: "/admin/marking" },
               { label: "Attendance", hint: "Registers by class", href: "/admin/attendance" },
-              { label: "Exam centre", hint: "Sittings and results", href: "/admin/exam-centre" },
+              { label: "Exams", hint: "Sittings and results", href: "/admin/exams" },
               { label: "Promotions", hint: "End-of-session moves", href: "/admin/promotions" },
               { label: "Reports", hint: "Enrolment and progress", href: "/admin/reports" },
               { label: "Admin roles", hint: "Who can see what", href: "/admin/staff" },
@@ -919,7 +919,7 @@ export default function AdminHomePage() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="rounded-3xl border border-[var(--border)] bg-white/70 p-5 text-left transition hover:border-[var(--accent)]/40 hover:bg-[var(--accent)]/5"
+                  className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-5 text-left transition hover:border-[var(--accent)]/40 hover:bg-[var(--accent)]/5"
                 >
                   <p className="text-base font-bold text-[var(--foreground)]">{item.label}</p>
                   <p className="mt-1 text-xs text-[var(--muted)]">{item.hint}</p>
