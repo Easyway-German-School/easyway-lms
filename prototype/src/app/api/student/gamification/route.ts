@@ -44,6 +44,17 @@ export async function GET() {
     where: { userId, done: true },
   });
 
+  /**
+   * Live quiz games this student played to the end.
+   *
+   * Only finished games count. A game still in progress would tick XP up mid-
+   * lesson and then need taking back if the tutor abandoned it, and a game the
+   * laptop was closed on is not something the student did wrong.
+   */
+  const quizGamesPlayed = await prisma.quizGamePlayer.count({
+    where: { studentId: student.id, game: { phase: "ended" }, answered: { gt: 0 } },
+  });
+
   const presentDays = student.attendances.filter(
     (record) => record.present || record.status === "present" || record.status === "late",
   );
@@ -63,6 +74,7 @@ export async function GET() {
     submissions: student.assignmentSubmissions.length,
     sessionsAttended,
     missionsCompleted,
+    quizGamesPlayed,
   });
 
   const badges = deriveBadges({
@@ -92,6 +104,7 @@ export async function GET() {
       averageGrade,
       examsRegistered: student.examRegistrations.length,
       missionsCompleted,
+      quizGamesPlayed,
       examReadiness: student.examReadiness ?? 0,
       memberSince: student.createdAt.toISOString(),
     },

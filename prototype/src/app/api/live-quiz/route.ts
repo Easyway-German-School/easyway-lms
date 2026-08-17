@@ -53,6 +53,29 @@ export async function GET() {
     select: { id: true, pin: true, title: true, phase: true, createdAt: true },
   });
 
+  /**
+   * Games already played, so the results are reachable.
+   *
+   * Without this the scores were written and there was no door to them, which
+   * is the same as not keeping them — and keeping them was the whole reason to
+   * build this here instead of linking to Kahoot.
+   */
+  const past = await prisma.quizGame.findMany({
+    where: {
+      phase: "ended",
+      ...(host.isAdmin ? {} : { hostUserId: host.userId }),
+    },
+    orderBy: { endedAt: "desc" },
+    take: 25,
+    select: {
+      id: true,
+      title: true,
+      endedAt: true,
+      createdAt: true,
+      _count: { select: { players: true } },
+    },
+  });
+
   // So the setup screen can say the rule rather than only enforcing it on the
   // click. See the online-cohort guard in POST.
   const hostLecturer = host.lecturerId
@@ -82,6 +105,12 @@ export async function GET() {
       .filter((quiz) => quiz.questionCount > 0),
     openGame: open,
     requiresLiveClass: hostLecturer?.branch?.mode === "online",
+    pastGames: past.map((game) => ({
+      id: game.id,
+      title: game.title,
+      endedAt: (game.endedAt ?? game.createdAt).toISOString(),
+      playerCount: game._count.players,
+    })),
   });
 }
 

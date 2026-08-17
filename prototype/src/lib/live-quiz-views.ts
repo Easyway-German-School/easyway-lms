@@ -562,3 +562,192 @@ export async function playerView(gameId: string, studentId: string): Promise<Pla
     myStanding: showStandings ? myRow : null,
   };
 }
+
+/* -------------------------------------------------------------------------- */
+/* The report                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a tutor reads after the room has emptied.
+ *
+ * The whole argument for building this game inside the platform rather than
+ * linking to a third-party one was that the scores would still be here in
+ * March. Until this existed they were: the rows were written and nothing could
+ * open them, which is the same as not having them.
+ *
+ * It leads with the QUESTIONS, not the leaderboard. Who won is already known —
+ * the room watched it happen on the podium. What nobody can see from a
+ * leaderboard is which question the class fell over, and that is the one fact
+ * here that changes what a tutor does on Monday. So questions are returned
+ * worst-first.
+ *
+ * It deliberately does NOT mark attendance. A quiz can be played from a
+ * bedroom, and a register that quietly counts "was in the game" as "was in the
+ * lesson" is a record the school cannot defend. Who played is reported, and a
+ * human decides what that means.
+ */
+export type QuizReport = {
+  game: {
+    id: string;
+    title: string;
+    pin: string;
+    phase: GamePhase;
+    questionCount: number;
+    playerCount: number;
+    startedAt: string | null;
+    endedAt: string | null;
+    speedBonus: boolean;
+    secondsPerQuestion: number;
+    /** Set when it was played inside a video lesson. */
+    liveSessionId: string | null;
+  };
+  /** Worst-answered first — the point of the screen. */
+  questions: Array<{
+    index: number;
+    prompt: string;
+    type: string;
+    points: number;
+    correctText: string | null;
+    answered: number;
+    correct: number;
+    /** 0-100 of those who answered. Null when nobody did. */
+    accuracy: number | null;
+    /** Seconds, mean over correct answers only. Null when there were none. */
+    averageSeconds: number | null;
+  }>;
+  /** Highest score first, the order the podium used. */
+  players: Array<{
+    studentId: string;
+    name: string;
+    score: number;
+    correct: number;
+    answered: number;
+    bestStreak: number;
+    place: number;
+    /** 0-100 of the questions in the game, not of the ones they answered. */
+    accuracy: number;
+  }>;
+  classAccuracy: number | null;
+};
+
+export async function quizReport(gameId: string): Promise<QuizReport | null> {
+  const game = await prisma.quizGame.findUnique({
+    where: { id: gameId },
+    select: {
+      id: true,
+      title: true,
+      pin: true,
+      phase: true,
+      questions: true,
+      startedAt: true,
+      endedAt: true,
+      speedBonus: true,
+      secondsPerQuestion: true,
+      liveSessionId: true,
+    },
+  });
+  if (!game) return null;
+
+  const questions = parseQuestions(game.questions);
+
+  const [players, answers] = await Promise.all([
+    prisma.quizGamePlayer.findMany({
+      where: { gameId },
+      select: {
+        studentId: true,
+        score: true,
+        correct: true,
+        answered: true,
+        bestStreak: true,
+        student: { select: { user: { select: { name: true } } } },
+      },
+    }),
+    // Grouped rather than per-question queried: a 20-question game would
+    // otherwise be 20 round trips against a 9-connection pool, which is the
+    // exact shape of the bug that took the community hub down.
+    prisma.quizGameAnswer.findMany({
+      where: { gameId },
+      select: { questionIndex: true, correct: true, msTaken: true },
+    }),
+  ]);
+
+  const byIndex = new Map<number, { answered: number; correct: number; totalMs: number; correctMs: number }>();
+  for (const answer of answers) {
+    const bucket = byIndex.get(answer.questionIndex) ?? { answered: 0, correct: 0, totalMs: 0, correctMs: 0 };
+    bucket.answered += 1;
+    if (answer.correct) {
+      bucket.correct += 1;
+      bucket.correctMs += answer.msTaken;
+    }
+    bucket.totalMs += answer.msTaken;
+    byIndex.set(answer.questionIndex, bucket);
+  }
+
+  const questionRows = questions.map((question, index) => {
+    const bucket = byIndex.get(index);
+    const answered = bucket?.answered ?? 0;
+    const correct = bucket?.correct ?? 0;
+    return {
+      index,
+      prompt: question.prompt,
+      type: question.type,
+      points: question.points,
+      correctText: correctAnswerFor(question).text,
+      answered,
+      correct,
+      accuracy: answered > 0 ? Math.round((correct / answered) * 100) : null,
+      averageSeconds: correct > 0 ? Math.round(((bucket?.correctMs ?? 0) / correct) / 100) / 10 : null,
+    };
+  });
+
+  const table = standingsOf(
+    players.map((player) => ({
+      // Keyed by studentId here rather than the QuizGamePlayer row id: the
+      // report is read months later against students, not against rows that
+      // only existed for one game.
+      id: player.studentId,
+      studentId: player.studentId,
+      name: player.student.user.name ?? "Student",
+      score: player.score,
+      correct: player.correct,
+      answered: player.answered,
+      streak: player.bestStreak,
+    })),
+  );
+  const placeOf = new Map(table.map((row) => [row.playerId, row.place]));
+
+  const totalAnswered = answers.length;
+  const totalCorrect = answers.filter((answer) => answer.correct).length;
+
+  return {
+    game: {
+      id: game.id,
+      title: game.title,
+      pin: game.pin,
+      phase: game.phase as GamePhase,
+      questionCount: questions.length,
+      playerCount: players.length,
+      startedAt: game.startedAt?.toISOString() ?? null,
+      endedAt: game.endedAt?.toISOString() ?? null,
+      speedBonus: game.speedBonus,
+      secondsPerQuestion: game.secondsPerQuestion,
+      liveSessionId: game.liveSessionId,
+    },
+    // Unanswered questions sort last rather than first: "0 of 0" is not the
+    // hardest question in the paper, it is one the game never reached.
+    questions: [...questionRows].sort((a, b) => (a.accuracy ?? 999) - (b.accuracy ?? 999)),
+    players: players
+      .map((player) => ({
+        studentId: player.studentId,
+        name: player.student.user.name ?? "Student",
+        score: player.score,
+        correct: player.correct,
+        answered: player.answered,
+        bestStreak: player.bestStreak,
+        place: placeOf.get(player.studentId) ?? 0,
+        accuracy: questions.length > 0 ? Math.round((player.correct / questions.length) * 100) : 0,
+      }))
+      .sort((a, b) => a.place - b.place),
+    classAccuracy: totalAnswered > 0 ? Math.round((totalCorrect / totalAnswered) * 100) : null,
+  };
+}

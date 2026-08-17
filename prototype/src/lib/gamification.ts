@@ -25,6 +25,15 @@ export type XpInputs = {
   sessionsAttended?: number;
   /** Daily missions ticked off. */
   missionsCompleted?: number;
+  /**
+   * Finished live quiz games this student actually played in.
+   *
+   * Counted rather than scored on purpose. The game already ranks the room on
+   * speed, and paying XP by score would rank it twice — the student who is
+   * slowest in German gains least from the format and would then earn least
+   * from it as well. Turning up and playing is the behaviour worth rewarding.
+   */
+  quizGamesPlayed?: number;
 };
 
 export type GamificationSummary = {
@@ -73,6 +82,9 @@ export function calculateXp(inputs: XpInputs): number {
     (inputs.submissions ?? 0) * 30 +
     (inputs.sessionsAttended ?? 0) * 15 +
     (inputs.missionsCompleted ?? 0) * 20 +
+    // Between a mission and a submission: more than ticking a box, less than
+    // handing in written work, which is what a revision game is worth.
+    (inputs.quizGamesPlayed ?? 0) * 25 +
     gradeBonus;
 
   return Math.max(XP_FLOOR, raw);

@@ -13,6 +13,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import LecturerShell from "@/components/LecturerShell";
 import HostGame from "@/components/live-quiz/HostGame";
+import GameReport from "@/components/live-quiz/GameReport";
 import { AlertIcon, ClockIcon, FlameIcon, PlayIcon, QuizIcon, RefreshIcon } from "@/components/icons";
 
 type Quiz = {
@@ -25,6 +26,8 @@ type Quiz = {
 };
 
 type OpenGame = { id: string; pin: string; title: string; phase: string };
+
+type PastGame = { id: string; title: string; endedAt: string; playerCount: number };
 
 const SECOND_CHOICES = [10, 20, 30, 45, 60];
 
@@ -55,6 +58,9 @@ function LiveQuizContent() {
 
   /** Non-null while the projector view owns the screen. */
   const [runningId, setRunningId] = useState<string | null>(null);
+  /** Non-null while reading the results of a game already played. */
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [pastGames, setPastGames] = useState<PastGame[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -64,6 +70,7 @@ function LiveQuizContent() {
       setQuizzes(data.quizzes ?? []);
       setOpenGame(data.openGame ?? null);
       setRequiresLiveClass(Boolean(data.requiresLiveClass));
+      setPastGames(data.pastGames ?? []);
       setSelected((current) => current || data.quizzes?.[0]?.id || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -120,6 +127,14 @@ function LiveQuizContent() {
         />
       ) : null}
 
+      {/* Reading a past game replaces the setup screen rather than sitting
+          below it: they are two different jobs, and a tutor doing one is not
+          doing the other. */}
+      {reportId ? (
+        <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
+          <GameReport gameId={reportId} onClose={() => setReportId(null)} />
+        </div>
+      ) : (
       <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
         <header className="mb-6">
           <h1 className="flex items-center gap-3 text-2xl font-bold text-[var(--foreground)] sm:text-3xl">
@@ -353,7 +368,42 @@ function LiveQuizContent() {
             </p>
           </div>
         )}
+
+        {/* The results of games already played. This is the half that was
+            missing: the scores were being written and there was no door to
+            them, which is the same as not keeping them. */}
+        {pastGames.length > 0 ? (
+          <section className="mt-8">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+              Games you have played
+            </h2>
+            <div className="space-y-2">
+              {pastGames.map((game) => (
+                <button
+                  key={game.id}
+                  type="button"
+                  onClick={() => setReportId(game.id)}
+                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left transition hover:border-[var(--border-strong)]"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-[var(--foreground)]">
+                      {game.title}
+                    </span>
+                    <span className="block text-xs text-[var(--muted)]">
+                      {new Date(game.endedAt).toLocaleDateString()} · {game.playerCount}{" "}
+                      {game.playerCount === 1 ? "player" : "players"}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-xs font-semibold text-[var(--accent)]">
+                    See results
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
+      )}
     </>
   );
 }
