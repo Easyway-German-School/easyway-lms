@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolvePlayer } from "@/lib/live-quiz-views";
-import { gameByPin, joinableGameForStudent, normalisePin } from "@/lib/live-quiz";
+import { assignTeam, gameByPin, joinableGameForStudent, normalisePin } from "@/lib/live-quiz";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     : gameId
       ? await prisma.quizGame.findFirst({
           where: { id: gameId, endedAt: null },
-          select: { id: true, title: true, phase: true, pin: true },
+          select: { id: true, title: true, phase: true, pin: true, teamMode: true },
         })
       : null;
 
@@ -91,12 +91,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "That game has finished." }, { status: 410 });
   }
 
+  /**
+   * A team, in a team game, decided HERE and not by the student.
+   *
+   * Counted at join time rather than balanced afterwards, so a class arriving
+   * one phone at a time still ends up even — see `assignTeam`. Only computed
+   * for a team game: a solo game leaves the column null, which is what null
+   * means on that row.
+   */
+  let team: string | null = null;
+  if (game.teamMode) {
+    const grouped = await prisma.quizGamePlayer.groupBy({
+      by: ["team"],
+      where: { gameId: game.id },
+      _count: { _all: true },
+    });
+    const counts: Record<string, number> = {};
+    for (const row of grouped) {
+      if (row.team) counts[row.team] = row._count._all;
+    }
+    team = assignTeam(counts);
+  }
+
   await prisma.quizGamePlayer.upsert({
     where: { gameId_studentId: { gameId: game.id, studentId: player.studentId } },
     // Rejoining is not a reset. A phone that lost wifi and came back must find
-    // its score where it left it, or every dropped connection is a punishment.
+    // its score where it left it, or every dropped connection is a punishment —
+    // and it must keep the TEAM it was on, or a reconnect quietly moves somebody
+    // between sides mid-game.
     update: { lastSeenAt: new Date() },
-    create: { gameId: game.id, studentId: player.studentId },
+    create: { gameId: game.id, studentId: player.studentId, team },
   });
 
   return NextResponse.json({ game: { id: game.id, title: game.title, phase: game.phase } });

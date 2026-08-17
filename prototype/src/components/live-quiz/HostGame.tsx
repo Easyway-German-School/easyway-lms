@@ -70,6 +70,15 @@ type Standing = {
   movement: number | null;
 };
 
+type Team = { id: string; name: string; color: string };
+
+type TeamStanding = Team & {
+  score: number;
+  members: number;
+  correct: number;
+  place: number;
+};
+
 type HostView = {
   pollMs: number;
   serverNow: number;
@@ -82,12 +91,13 @@ type HostView = {
     questionCount: number;
     secondsPerQuestion: number;
     speedBonus: boolean;
+    teamMode: boolean;
   };
   endsAt: number | null;
   question: ViewQuestion | null;
   playerCount: number;
   answeredCount: number;
-  lobby: Array<{ id: string; name: string }>;
+  lobby: Array<{ id: string; name: string; team: Team | null }>;
   reveal: {
     correctIndexes: number[];
     correctText: string | null;
@@ -97,6 +107,7 @@ type HostView = {
     noAnswerCount: number;
   } | null;
   standings: Standing[] | null;
+  teamStandings: TeamStanding[] | null;
 };
 
 type Action = "start" | "lock" | "reveal" | "standings" | "next" | "end";
@@ -483,13 +494,36 @@ function Lobby({ view }: { view: HostView }) {
             ? "Waiting for the first player"
             : `${view.playerCount} in the room`}
         </p>
-        <div className="lq-names">
-          {view.lobby.map((player) => (
-            <span key={player.id} className="lq-name">
-              {player.name}
-            </span>
-          ))}
-        </div>
+        {/* In teams, the room needs to SEE the teams forming before the first
+            question — four filling columns say "you are on a side" in a way a
+            flat list of thirty names never does. */}
+        {view.game.teamMode ? (
+          <div className="lq-lobby-teams">
+            {groupByTeam(view.lobby).map((group) => (
+              <div key={group.team.id} className="lq-lobby-team">
+                <p className="lq-lobby-team-head" style={{ background: group.team.color }}>
+                  {group.team.name}
+                  <span>{group.players.length}</span>
+                </p>
+                <div className="lq-names lq-names-tight">
+                  {group.players.map((player) => (
+                    <span key={player.id} className="lq-name">
+                      {player.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="lq-names">
+            {view.lobby.map((player) => (
+              <span key={player.id} className="lq-name">
+                {player.name}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -636,12 +670,67 @@ function RevealStage({ view, totalVotes }: { view: HostView; totalVotes: number 
   );
 }
 
+/** Lobby names bucketed by team, in the teams' own fixed order. */
+function groupByTeam(lobby: HostView["lobby"]): Array<{ team: Team; players: HostView["lobby"] }> {
+  const groups = new Map<string, { team: Team; players: HostView["lobby"] }>();
+  for (const player of lobby) {
+    if (!player.team) continue;
+    const existing = groups.get(player.team.id);
+    if (existing) existing.players.push(player);
+    else groups.set(player.team.id, { team: player.team, players: [player] });
+  }
+  return [...groups.values()];
+}
+
+/**
+ * The team table, and it goes ABOVE the individual one.
+ *
+ * The point of team mode is that a student who is weak in German still moves
+ * their team's number, so the team is the headline and the personal table is
+ * the footnote — the other way round and the room is still playing solo with
+ * colours on.
+ */
+function TeamTable({ rows }: { rows: TeamStanding[] }) {
+  const leader = Math.max(1, ...rows.map((row) => row.score));
+
+  return (
+    <div className="lq-teams">
+      {rows.map((row) => (
+        <div key={row.id} className="lq-team-row">
+          <span className="lq-place">{row.place}</span>
+          <span className="lq-team-name" style={{ color: row.color }}>
+            {row.name}
+            <em>
+              {row.members} {row.members === 1 ? "player" : "players"}
+            </em>
+          </span>
+          <div className="lq-team-bar">
+            <i style={{ width: `${(row.score / leader) * 100}%`, background: row.color }} />
+          </div>
+          <span className="lq-score">{row.score.toLocaleString()}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function StandingsStage({ view }: { view: HostView }) {
-  const rows = (view.standings ?? []).slice(0, 8);
+  // Fewer individual rows when the teams are above them, so the two tables fit
+  // one projector screen without either being scrolled past.
+  const teams = view.teamStandings;
+  const rows = (view.standings ?? []).slice(0, teams ? 5 : 8);
 
   return (
     <div className="lq-standings">
-      <p className="lq-kicker">Standings</p>
+      {teams && teams.length > 0 ? (
+        <>
+          <p className="lq-kicker">Teams</p>
+          <TeamTable rows={teams} />
+          <p className="lq-kicker lq-kicker-spaced">Top players</p>
+        </>
+      ) : (
+        <p className="lq-kicker">Standings</p>
+      )}
       <ol>
         {rows.map((row) => (
           <li key={row.playerId}>
@@ -680,6 +769,20 @@ function FinalStage({ view }: { view: HostView }) {
       <p className="lq-kicker">
         <TrophyIcon className="h-7 w-7" /> Final
       </p>
+
+      {/* In a team game the WINNING TEAM is the result, announced before the
+          three individuals. Leading with the personal podium would hand the
+          moment to the same strongest-speaker-in-the-room that team mode
+          exists to spread out. */}
+      {view.teamStandings && view.teamStandings.length > 0 ? (
+        <div className="lq-team-winner" style={{ borderColor: view.teamStandings[0].color }}>
+          <span className="lq-team-winner-label">Winning team</span>
+          <strong style={{ color: view.teamStandings[0].color }}>{view.teamStandings[0].name}</strong>
+          <span className="lq-team-winner-score">
+            {view.teamStandings[0].score.toLocaleString()} points
+          </span>
+        </div>
+      ) : null}
 
       <div className="lq-podium">
         {/* Second, first, third — the order a podium is actually built in, so
@@ -809,6 +912,29 @@ const STAGE_CSS = `
 .lq-typed-no{color:#fda4af}
 .lq-typed-list em{opacity:.6;font-style:normal}
 
+.lq-lobby-teams{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem;max-height:56vh;overflow:hidden}
+.lq-lobby-team{border-radius:.9rem;background:rgba(255,255,255,.06);overflow:hidden}
+.lq-lobby-team-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;
+  padding:.45rem .8rem;font-size:clamp(.85rem,1.3vw,1.15rem);font-weight:800;color:#fff}
+.lq-lobby-team-head span{font-variant-numeric:tabular-nums;opacity:.85}
+.lq-names-tight{padding:.5rem;gap:.35rem;justify-content:flex-start;max-height:22vh}
+.lq-names-tight .lq-name{font-size:clamp(.75rem,1.05vw,1rem);padding:.3rem .6rem}
+
+.lq-kicker-spaced{margin-top:1.4rem}
+.lq-teams{display:flex;flex-direction:column;gap:.5rem;margin-bottom:.4rem}
+.lq-team-row{display:flex;align-items:center;gap:1rem;padding:.6rem 1rem;border-radius:.8rem;
+  background:rgba(255,255,255,.07)}
+.lq-team-name{min-width:9rem;font-weight:800;font-size:clamp(1rem,1.7vw,1.5rem);line-height:1.1}
+.lq-team-name em{display:block;font-style:normal;font-size:.72rem;font-weight:600;
+  letter-spacing:.06em;text-transform:uppercase;opacity:.55;color:#f4fbfa}
+.lq-team-bar{flex:1;height:.85rem;border-radius:999px;background:rgba(255,255,255,.1);overflow:hidden}
+.lq-team-bar i{display:block;height:100%;border-radius:999px;transition:width .6s ease}
+.lq-team-winner{display:flex;flex-direction:column;align-items:center;gap:.2rem;margin-bottom:1.2rem;
+  padding:.9rem 1.4rem;border:2px solid;border-radius:1rem;background:rgba(255,255,255,.06)}
+.lq-team-winner-label{font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;opacity:.6}
+.lq-team-winner strong{font-size:clamp(1.6rem,3.2vw,2.8rem);line-height:1.05}
+.lq-team-winner-score{font-size:1rem;opacity:.75;font-variant-numeric:tabular-nums}
+
 .lq-standings,.lq-final{width:100%;max-width:1100px}
 .lq-standings ol,.lq-rest{list-style:none;display:flex;flex-direction:column;gap:.5rem;margin:0;padding:0}
 .lq-standings li,.lq-rest li{display:flex;align-items:center;gap:1rem;padding:.7rem 1.1rem;
@@ -834,6 +960,8 @@ const STAGE_CSS = `
 
 @media (max-width:900px){
   .lq-lobby{grid-template-columns:1fr;gap:1.5rem}
+  .lq-lobby-teams{grid-template-columns:1fr}
+  .lq-team-name{min-width:6rem}
   .lq-options,.lq-options-3,.lq-options-5,.lq-options-6{grid-template-columns:1fr}
   .lq-meta{gap:1.2rem}
 }

@@ -60,6 +60,15 @@ model User {
    */
   adminCapabilities Json?
   /**
+   * Restricts an admin to specific branches, as JSON: ["branchId1", "branchId2"].
+   * Null (or an empty array) means unrestricted — every branch, exactly the
+   * behaviour every admin had before this column existed — so nobody's access
+   * narrows until a super admin deliberately picks branches for them. Only
+   * meaningful alongside the `branches` capability; it does not grant that
+   * capability by itself, it only narrows it once granted.
+   */
+  adminBranchIds    Json?
+  /**
    * False on an account created by an exam booking, which starts with a
    * password nobody knows. The claim link works only while this is false, so
    * a forwarded confirmation email cannot be used to take the account later.
@@ -1179,9 +1188,19 @@ model Grade {
 
   type     String // "essay", "quiz", "speaking", "pronunciation", "exam"
   content  String? // the essay text, quiz answers, etc
-  score    Int // 0-100
+  score    Int // 0-100 — for type "exam" this is min(the four skills below)
   grade    String? // A, B, C, D, F
   feedback String? // grading feedback
+
+  /**
+   * Per-skill breakdown for an internal exam sitting (type "exam" only) —
+   * Lesen, Hören, Schreiben, Sprechen, matching the real ÖSD/Goethe
+   * structure. Null until results are entered.
+   */
+  readingScore   Int?
+  listeningScore Int?
+  writingScore   Int?
+  speakingScore  Int?
 
   /**
    * platform | physical — whether the work was sat on the LMS or on paper in
@@ -1646,6 +1665,14 @@ model Exam {
    * Only published sittings are bookable by candidates.
    */
   published Boolean @default(false)
+
+  /**
+   * Per-skill minimum (0-100) to pass this sitting. A candidate passes only
+   * if every one of the four skill scores clears this bar — matching real
+   * ÖSD/Goethe grading, where one weak skill fails the sitting regardless of
+   * how strong the others are.
+   */
+  passThreshold Int @default(60)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3433,6 +3460,21 @@ model QuizGame {
    */
   shuffled Boolean @default(false)
 
+  /**
+   * Play in teams rather than as individuals.
+   *
+   * The reason this is worth having in a LANGUAGE school specifically: a solo
+   * leaderboard is won by whoever already speaks the most German, so the
+   * students who most need to practise learn within two rounds that they cannot
+   * place and stop trying. In a team the weakest speaker's correct answer still
+   * moves their team, and the room starts helping each other out loud — which
+   * is the actual lesson.
+   *
+   * Individual scores are still recorded underneath, because the gradebook and
+   * the XP count are about a person, not a table of four.
+   */
+  teamMode Boolean @default(false)
+
   startedAt DateTime?
   endedAt   DateTime?
   createdAt DateTime  @default(now())
@@ -3477,6 +3519,17 @@ model QuizGamePlayer {
   correct    Int @default(0)
   answered   Int @default(0)
 
+  /**
+   * Which team, when the game is played in teams. Null in a solo game.
+   *
+   * A name rather than a foreign key to a Team table: a team exists for forty
+   * minutes and has no life outside this one game, so a row for it would be a
+   * row nothing ever reads again. The set of names is fixed in code
+   * (`QUIZ_TEAMS` in src/lib/live-quiz.ts) and validated on join, so this can
+   * never hold a name the projector has no colour for.
+   */
+  team String?
+
   joinedAt   DateTime @default(now())
   lastSeenAt DateTime @default(now())
 
@@ -3488,6 +3541,7 @@ model QuizGamePlayer {
 
   @@unique([gameId, studentId])
   @@index([gameId, score])
+  @@index([gameId, team])
   @@index([tenantId])
 }
 

@@ -54,6 +54,7 @@ function LiveQuizContent() {
   const [seconds, setSeconds] = useState(20);
   const [speedBonus, setSpeedBonus] = useState(true);
   const [shuffle, setShuffle] = useState(true);
+  const [teamMode, setTeamMode] = useState(false);
   const [starting, setStarting] = useState(false);
 
   /** Non-null while the projector view owns the screen. */
@@ -97,6 +98,7 @@ function LiveQuizContent() {
           secondsPerQuestion: seconds,
           speedBonus,
           shuffle,
+          teamMode,
           liveSessionId,
         }),
       });
@@ -322,6 +324,29 @@ function LiveQuizContent() {
                       On, the quickest correct answer is worth twice the slowest. Turn it off
                       for a group who are still translating in their heads — otherwise the
                       same three students win every time.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={teamMode}
+                    onChange={(event) => setTeamMode(event.target.checked)}
+                    className="mt-1 accent-[var(--accent)]"
+                  />
+                  <span>
+                    <span className="text-sm font-medium text-[var(--foreground)]">
+                      Play in teams
+                    </span>
+                    {/* The argument for teams, said plainly, because a tutor who
+                        does not know this will never turn it on — and the
+                        students it helps are the ones who need it most. */}
+                    <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                      Four teams, filled evenly as students join. A solo leaderboard is won by
+                      whoever already speaks the most German, so the rest learn in two rounds
+                      that they cannot place and stop trying. In a team every right answer
+                      still counts, and the room starts helping each other out loud.
                     </span>
                   </span>
                 </label>

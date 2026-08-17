@@ -530,6 +530,7 @@ export const gameSelect = {
   secondsPerQuestion: true,
   speedBonus: true,
   shuffled: true,
+  teamMode: true,
   assignmentId: true,
   lecturerId: true,
   hostUserId: true,
@@ -541,3 +542,128 @@ export const gameSelect = {
   endedAt: true,
   createdAt: true,
 } as const;
+
+/* -------------------------------------------------------------------------- */
+/* Teams                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The teams, and why there are exactly four with these names.
+ *
+ * German colour words, because a beginner cohort can read them and the room
+ * ends up saying "Team Rot" out loud, which is a free vocabulary drill nobody
+ * has to be told to do. Four, because a class of thirty splits into teams of
+ * seven or eight — small enough that everybody's answer visibly matters, large
+ * enough that the table on the projector stays readable from the back.
+ *
+ * A fixed list rather than tutor-typed names: the projector needs a colour per
+ * team, and a free-text box in a room of teenagers is a moderation problem
+ * waiting for a parent to see the screen. Same reasoning as the deliberate
+ * absence of nicknames on QuizGamePlayer.
+ */
+export const QUIZ_TEAMS = [
+  { id: "rot", name: "Rot", color: "#e11d48" },
+  { id: "blau", name: "Blau", color: "#2563eb" },
+  { id: "gruen", name: "Grün", color: "#16a34a" },
+  { id: "gelb", name: "Gelb", color: "#f59e0b" },
+] as const;
+
+export type QuizTeamId = (typeof QUIZ_TEAMS)[number]["id"];
+
+export function isQuizTeam(value: unknown): value is QuizTeamId {
+  return QUIZ_TEAMS.some((team) => team.id === value);
+}
+
+export function quizTeam(id: string | null | undefined) {
+  return QUIZ_TEAMS.find((team) => team.id === id) ?? null;
+}
+
+export type TeamStanding = {
+  id: string;
+  name: string;
+  color: string;
+  /** Sum of its members' scores. */
+  score: number;
+  members: number;
+  correct: number;
+  place: number;
+};
+
+/**
+ * Rank the teams.
+ *
+ * SUM, not average, and this is the one decision in team mode worth arguing
+ * about. An average lets a team of two beat a team of eight without answering
+ * more questions, and — worse in a classroom — makes a weak player a liability
+ * their own team can see in the numbers. A sum means every correct answer only
+ * ever helps, which is the behaviour the format is being used to produce.
+ *
+ * Uneven teams are handled at assignment time by filling the smallest first,
+ * not here by arithmetic.
+ */
+export function teamStandingsOf(
+  players: Array<{ team: string | null; score: number; correct: number }>,
+): TeamStanding[] {
+  const totals = new Map<string, { score: number; members: number; correct: number }>();
+
+  for (const player of players) {
+    if (!player.team) continue;
+    const entry = totals.get(player.team) ?? { score: 0, members: 0, correct: 0 };
+    entry.score += player.score;
+    entry.members += 1;
+    entry.correct += player.correct;
+    totals.set(player.team, entry);
+  }
+
+  const rows = QUIZ_TEAMS.filter((team) => totals.has(team.id)).map((team) => {
+    const entry = totals.get(team.id)!;
+    return {
+      id: team.id,
+      name: team.name,
+      color: team.color,
+      score: entry.score,
+      members: entry.members,
+      correct: entry.correct,
+      place: 0,
+    };
+  });
+
+  rows.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+
+  // Ties share a place, for the same reason they do in the individual table.
+  let place = 0;
+  let previousScore: number | null = null;
+  rows.forEach((row, index) => {
+    if (previousScore === null || row.score !== previousScore) {
+      place = index + 1;
+      previousScore = row.score;
+    }
+    row.place = place;
+  });
+
+  return rows;
+}
+
+/**
+ * Which team a joining student goes on.
+ *
+ * Smallest team first, ties broken by the fixed order, so a class arriving one
+ * phone at a time ends up even without anybody organising it. NOT the student's
+ * choice: letting a room pick teams reliably produces one team of friends and
+ * one team of whoever was left, and being picked last in front of your class is
+ * a worse experience than any quiz is worth.
+ */
+export function assignTeam(counts: Record<string, number>): QuizTeamId {
+  let best: QuizTeamId = QUIZ_TEAMS[0].id;
+  let bestCount = Number.POSITIVE_INFINITY;
+
+  for (const team of QUIZ_TEAMS) {
+    const count = counts[team.id] ?? 0;
+    if (count < bestCount) {
+      best = team.id;
+      bestCount = count;
+    }
+  }
+
+  return best;
+}

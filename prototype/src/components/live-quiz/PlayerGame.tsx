@@ -50,6 +50,15 @@ type Standing = {
   movement: number | null;
 };
 
+type Team = { id: string; name: string; color: string };
+
+type TeamStanding = Team & {
+  score: number;
+  members: number;
+  correct: number;
+  place: number;
+};
+
 type PlayerView = {
   pollMs: number;
   serverNow: number;
@@ -62,6 +71,7 @@ type PlayerView = {
     questionCount: number;
     secondsPerQuestion: number;
     speedBonus: boolean;
+    teamMode: boolean;
   };
   endsAt: number | null;
   question: ViewQuestion | null;
@@ -72,6 +82,7 @@ type PlayerView = {
     playerCount: number;
     streak: number;
     correct: number;
+    team: Team | null;
   };
   myAnswer: { submitted: boolean; value: unknown } | null;
   outcome: {
@@ -84,6 +95,7 @@ type PlayerView = {
   } | null;
   standings: Standing[] | null;
   myStanding: Standing | null;
+  teamStandings: TeamStanding[] | null;
 };
 
 export default function PlayerGame({ gameId, onLeave }: { gameId: string; onLeave: () => void }) {
@@ -254,6 +266,15 @@ export default function PlayerGame({ gameId, onLeave }: { gameId: string; onLeav
         </div>
       </header>
 
+      {/* Which side they are on, kept on screen for the whole game. A student
+          who has to remember their team colour from the lobby will not, and
+          "we're winning" only means something if you know who "we" is. */}
+      {view.me.team ? (
+        <p className="pq-team" style={{ background: view.me.team.color }}>
+          {view.me.team.name}
+        </p>
+      ) : null}
+
       {view.me.streak >= 2 && view.game.phase !== "ended" ? (
         <p className="pq-streak">
           <FlameIcon className="h-4 w-4" /> {view.me.streak} in a row
@@ -263,7 +284,14 @@ export default function PlayerGame({ gameId, onLeave }: { gameId: string; onLeav
       {view.game.phase === "lobby" ? (
         <div className="pq-centre">
           <p className="pq-big">You&rsquo;re in</p>
-          <p className="pq-note">Look up at the board. It starts in a moment.</p>
+          {view.me.team ? (
+            <p className="pq-note">
+              You&rsquo;re playing for <strong>{view.me.team.name}</strong>. Every right answer
+              adds to your team&rsquo;s score.
+            </p>
+          ) : (
+            <p className="pq-note">Look up at the board. It starts in a moment.</p>
+          )}
           <p className="pq-note pq-dim">
             {view.me.playerCount} {view.me.playerCount === 1 ? "player" : "players"} so far
           </p>
@@ -430,6 +458,31 @@ export default function PlayerGame({ gameId, onLeave }: { gameId: string; onLeav
         </div>
       ) : null}
 
+      {/* Teams first on the phone too, for the same reason as the projector:
+          in a team game this is the score that decides it. */}
+      {(view.game.phase === "standings" || view.game.phase === "ended") &&
+      view.teamStandings &&
+      view.teamStandings.length > 0 ? (
+        <div className="pq-teams">
+          <p className="pq-kicker">Teams</p>
+          <ol>
+            {view.teamStandings.map((team) => (
+              <li
+                key={team.id}
+                className={team.id === view.me.team?.id ? "pq-team-mine" : ""}
+                style={team.id === view.me.team?.id ? { borderColor: team.color } : undefined}
+              >
+                <span className="pq-place">{team.place}</span>
+                <span className="pq-sname" style={{ color: team.color }}>
+                  {team.name}
+                </span>
+                <span className="pq-pts">{team.score.toLocaleString()}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+
       {(view.game.phase === "standings" || view.game.phase === "ended") && view.standings ? (
         <div className="pq-table">
           <p className="pq-kicker">
@@ -562,6 +615,14 @@ const PLAYER_CSS = `
 .pq-wrong{background:rgba(251,113,133,.14);color:#fda4af}
 .pq-points{font-size:2rem;font-weight:800;font-variant-numeric:tabular-nums}
 .pq-verdict .pq-note{color:#f4fbfa}
+
+.pq-team{align-self:flex-start;padding:.28rem .8rem;border-radius:999px;color:#fff;
+  font-size:.78rem;font-weight:800;letter-spacing:.04em;margin-bottom:.5rem}
+.pq-teams{margin-bottom:.9rem}
+.pq-teams ol{list-style:none;margin:.4rem 0 0;padding:0;display:flex;flex-direction:column;gap:.4rem}
+.pq-teams li{display:flex;align-items:center;gap:.7rem;padding:.55rem .8rem;border-radius:.7rem;
+  background:rgba(255,255,255,.07);border:1px solid transparent}
+.pq-team-mine{background:rgba(255,255,255,.13)!important}
 
 .pq-report{text-align:center;padding:1.1rem .9rem 1.2rem;margin-bottom:.9rem;border-radius:1.1rem;
   background:linear-gradient(160deg,rgba(255,102,0,.22),rgba(255,255,255,.06));

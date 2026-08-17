@@ -6,9 +6,12 @@ import {
   displayOptions,
   publicQuestion,
   shapeFor,
+  quizTeam,
   standingsOf,
+  teamStandingsOf,
   type GamePhase,
   type StandingRow,
+  type TeamStanding,
 } from "@/lib/live-quiz";
 
 /**
@@ -162,6 +165,7 @@ type GameRow = {
   questionEndsAt: Date | null;
   secondsPerQuestion: number;
   speedBonus: boolean;
+  teamMode: boolean;
   startedAt: Date | null;
   endedAt: Date | null;
 };
@@ -216,6 +220,7 @@ export type HostView = {
     questionCount: number;
     secondsPerQuestion: number;
     speedBonus: boolean;
+    teamMode: boolean;
     startedAt: string | null;
     endedAt: string | null;
   };
@@ -223,8 +228,14 @@ export type HostView = {
   question: ViewQuestion | null;
   playerCount: number;
   answeredCount: number;
-  /** Names only, for the lobby. Thirty names arriving one at a time IS the pre-show. */
-  lobby: Array<{ id: string; name: string }>;
+  /**
+   * Names for the lobby. Thirty names arriving one at a time IS the pre-show.
+   * In a team game each carries its colour, because watching the four columns
+   * fill up is what tells a room it is about to play as teams — a flat list
+   * announces nothing until the first standings screen, by which point the
+   * students have already worked out they are on a team from their phones.
+   */
+  lobby: Array<{ id: string; name: string; team: { id: string; name: string; color: string } | null }>;
   reveal: {
     correctIndexes: number[];
     correctText: string | null;
@@ -236,6 +247,8 @@ export type HostView = {
     noAnswerCount: number;
   } | null;
   standings: StandingRow[] | null;
+  /** Null unless this is a team game. The projector leads with this when set. */
+  teamStandings: TeamStanding[] | null;
 };
 
 export async function hostView(gameId: string): Promise<HostView | null> {
@@ -254,6 +267,7 @@ export async function hostView(gameId: string): Promise<HostView | null> {
       questionEndsAt: true,
       secondsPerQuestion: true,
       speedBonus: true,
+      teamMode: true,
       startedAt: true,
       endedAt: true,
     },
@@ -272,6 +286,7 @@ export async function hostView(gameId: string): Promise<HostView | null> {
       correct: true,
       answered: true,
       streak: true,
+      team: true,
       joinedAt: true,
       student: { select: { user: { select: { name: true } } } },
     },
@@ -286,6 +301,7 @@ export async function hostView(gameId: string): Promise<HostView | null> {
     correct: player.correct,
     answered: player.answered,
     streak: player.streak,
+    team: player.team,
   }));
 
   const answers =
@@ -312,6 +328,7 @@ export async function hostView(gameId: string): Promise<HostView | null> {
       questionCount: questions.length,
       secondsPerQuestion: game.secondsPerQuestion,
       speedBonus: game.speedBonus,
+      teamMode: game.teamMode,
       startedAt: game.startedAt?.toISOString() ?? null,
       endedAt: game.endedAt?.toISOString() ?? null,
     },
@@ -319,11 +336,20 @@ export async function hostView(gameId: string): Promise<HostView | null> {
     question: current ? toViewQuestion(current, game.currentIndex, questions.length) : null,
     playerCount: players.length,
     answeredCount: answers.length,
-    lobby: named.map((player) => ({ id: player.id, name: player.name })),
+    lobby: named.map((player) => ({
+      id: player.id,
+      name: player.name,
+      team: game.teamMode ? quizTeam(player.team) : null,
+    })),
     reveal: showReveal
       ? buildReveal(current, answers, players.length)
       : null,
+    // The individual table is built either way. In a team game it becomes the
+    // second half of the standings screen rather than disappearing: a student
+    // still wants to know how THEY did, and hiding it would make the team the
+    // only thing that counted, which is a different game from the one intended.
     standings: showStandings ? standingsOf(named) : null,
+    teamStandings: showStandings && game.teamMode ? teamStandingsOf(players) : null,
   };
 }
 
@@ -406,6 +432,7 @@ export type PlayerView = {
     questionCount: number;
     secondsPerQuestion: number;
     speedBonus: boolean;
+    teamMode: boolean;
   };
   endsAt: number | null;
   /** Null while the question is closed or not yet asked. */
@@ -417,6 +444,8 @@ export type PlayerView = {
     playerCount: number;
     streak: number;
     correct: number;
+    /** Which team I am on, with its colour. Null in a solo game. */
+    team: { id: string; name: string; color: string } | null;
   };
   /** My answer to the current question — echoed back so a reload does not look like a lost answer. */
   myAnswer: { submitted: boolean; value: unknown } | null;
@@ -433,6 +462,8 @@ export type PlayerView = {
   /** Top of the table, plus my own row if I am not in it. */
   standings: StandingRow[] | null;
   myStanding: StandingRow | null;
+  /** Null unless this is a team game. */
+  teamStandings: TeamStanding[] | null;
 };
 
 function buildOutcome(
@@ -468,6 +499,7 @@ export async function playerView(gameId: string, studentId: string): Promise<Pla
       questionEndsAt: true,
       secondsPerQuestion: true,
       speedBonus: true,
+      teamMode: true,
       startedAt: true,
       endedAt: true,
     },
@@ -481,6 +513,7 @@ export async function playerView(gameId: string, studentId: string): Promise<Pla
       score: true,
       streak: true,
       correct: true,
+      team: true,
       student: { select: { user: { select: { name: true } } } },
     },
   });
@@ -499,6 +532,7 @@ export async function playerView(gameId: string, studentId: string): Promise<Pla
       correct: true,
       answered: true,
       streak: true,
+      team: true,
       student: { select: { user: { select: { name: true } } } },
     },
   });
@@ -539,6 +573,7 @@ export async function playerView(gameId: string, studentId: string): Promise<Pla
       questionCount: questions.length,
       secondsPerQuestion: game.secondsPerQuestion,
       speedBonus: game.speedBonus,
+      teamMode: game.teamMode,
     },
     endsAt: game.questionEndsAt?.getTime() ?? null,
     // The question goes out only while it is genuinely open. Once the buzzer
@@ -555,6 +590,10 @@ export async function playerView(gameId: string, studentId: string): Promise<Pla
       playerCount: players.length,
       streak: me.streak,
       correct: me.correct,
+      // Carried on every poll, not just at the standings: a student needs to
+      // know whose side they are on while they are answering, which is the
+      // whole point of being on a side.
+      team: quizTeam(me.team),
     },
     myAnswer: myAnswer ? { submitted: true, value: myAnswer.answer } : null,
     // The answer key crosses to a phone at exactly one moment: reveal. Before
@@ -563,6 +602,7 @@ export async function playerView(gameId: string, studentId: string): Promise<Pla
     outcome: game.phase === "reveal" && current ? buildOutcome(current, myAnswer) : null,
     standings: showStandings ? table.slice(0, 5) : null,
     myStanding: showStandings ? myRow : null,
+    teamStandings: showStandings && game.teamMode ? teamStandingsOf(players) : null,
   };
 }
 
