@@ -537,6 +537,24 @@ export default function LiveKitClassroom({
   const joinedAtRef = useRef<number>(Date.now());
   /** A departure is reported once. Three paths lead here and they can race. */
   const leftRef = useRef(false);
+  /**
+   * A tutor's Leave does not just leave — it broadcasts `ended` and closes the
+   * class for every student currently in the room. A single mis-tap used to be
+   * enough to do that with no way back, which is exactly what happened during a
+   * live test: a class ended on a student's phone before they had even properly
+   * joined. So a tutor's first tap only arms the button; it has to be tapped
+   * again to actually go through. A student's Leave only ever affects the
+   * student, so it fires immediately — there is nothing to guard against.
+   */
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const confirmLeaveTimerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (confirmLeaveTimerRef.current) window.clearTimeout(confirmLeaveTimerRef.current);
+    },
+    [],
+  );
 
   const finish = useCallback(
     (reason: LeaveOutcome["reason"]) => {
@@ -959,6 +977,31 @@ export default function LiveKitClassroom({
   }, [role, interactions, finish]);
 
   /**
+   * What the Leave button actually calls. See `confirmLeave` above for why a
+   * tutor needs two taps and a student needs one.
+   */
+  const handleLeaveClick = useCallback(() => {
+    if (role !== "tutor") {
+      leave();
+      return;
+    }
+    if (confirmLeaveTimerRef.current) {
+      window.clearTimeout(confirmLeaveTimerRef.current);
+      confirmLeaveTimerRef.current = null;
+    }
+    if (!confirmLeave) {
+      setConfirmLeave(true);
+      // Arming resets on its own — a tutor who taps once, thinks better of it,
+      // and walks away should not find the button still primed to end class
+      // five minutes later because they brushed it on the way past.
+      confirmLeaveTimerRef.current = window.setTimeout(() => setConfirmLeave(false), 4000);
+      return;
+    }
+    setConfirmLeave(false);
+    leave();
+  }, [role, confirmLeave, leave]);
+
+  /**
    * The tutor said it is over, so this browser stops being in a classroom.
    *
    * Deliberately not "show a banner and let them sit there": a room where the
@@ -1199,10 +1242,14 @@ export default function LiveKitClassroom({
             </button>
             <button
               onPointerDown={(event) => event.stopPropagation()}
-              onClick={leave}
-              aria-label="Leave class"
-              title="Leave class"
-              className="grid h-6 w-6 place-items-center rounded-md text-rose-300 transition hover:bg-rose-500/20"
+              onClick={handleLeaveClick}
+              aria-label={role === "tutor" && confirmLeave ? "Tap again to end class for everyone" : "Leave class"}
+              title={role === "tutor" && confirmLeave ? "Tap again to end class for everyone" : "Leave class"}
+              className={`grid h-6 w-6 shrink-0 place-items-center rounded-md transition ${
+                role === "tutor" && confirmLeave
+                  ? "bg-rose-500 text-white"
+                  : "text-rose-300 hover:bg-rose-500/20"
+              }`}
             >
               <ExitIcon className="h-3.5 w-3.5" />
             </button>
@@ -1620,7 +1667,16 @@ export default function LiveKitClassroom({
           </button>
         ) : null}
 
-        <div className="ml-auto flex items-center gap-2">
+        {/*
+          `w-full` on mobile is what stops this row overflowing the screen: on
+          a narrow viewport "Video quality" plus the (long-labelled) dropdown
+          plus Leave do not fit on one line, and without a wrap this block —
+          being a single flex item — does not shrink below its content's own
+          width. It used to just run off the right edge, taking Leave with it.
+          `flex-wrap` lets the pieces stack instead; `sm:` reverts to the
+          original inline-right layout once there is room for it.
+        */}
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:ml-auto sm:w-auto">
           {availableModes.length > 1 ? (
             <>
               <label htmlFor="quality" className="text-xs font-medium text-slate-400">
@@ -1646,8 +1702,11 @@ export default function LiveKitClassroom({
               Teaching in {qualitySpec(mode).label}
             </span>
           )}
-          <button onClick={leave} className="rounded-xl bg-rose-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">
-            Leave
+          <button
+            onClick={handleLeaveClick}
+            className="shrink-0 rounded-xl bg-rose-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
+          >
+            {role === "tutor" && confirmLeave ? "Tap again to end for everyone" : "Leave"}
           </button>
         </div>
       </div>
