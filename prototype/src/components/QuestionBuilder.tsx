@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import {
   QUESTION_TYPES,
   QUESTION_TYPE_LABELS,
   QUESTION_TYPE_HINTS,
   type QuestionType,
 } from "@/lib/assignments";
+import { uploadFile, uploadErrorMessage, validateImageFile } from "@/lib/upload";
 
 /**
  * The question editor — the form-software half of setting an online test.
@@ -36,6 +38,8 @@ export type QuestionDraft = {
   caseSensitive: boolean;
   allowTypos: boolean;
   guidance: string;
+  /** A picture the question is about. Any type may have one. */
+  imageUrl: string;
 };
 
 export function emptyQuestion(): QuestionDraft {
@@ -52,6 +56,7 @@ export function emptyQuestion(): QuestionDraft {
     caseSensitive: false,
     allowTypos: false,
     guidance: "",
+    imageUrl: "",
   };
 }
 
@@ -63,7 +68,14 @@ export function emptyQuestion(): QuestionDraft {
  * parser would have to guess which of the two answer keys was meant.
  */
 export function draftToQuestion(draft: QuestionDraft) {
-  const base = { type: draft.type, prompt: draft.prompt.trim(), points: draft.points };
+  const base = {
+    type: draft.type,
+    prompt: draft.prompt.trim(),
+    points: draft.points,
+    // In `base` rather than per-type: a picture belongs to any question, and
+    // putting it here means a new type added below cannot forget to carry it.
+    ...(draft.imageUrl.trim() ? { imageUrl: draft.imageUrl.trim() } : {}),
+  };
 
   switch (draft.type) {
     case "choice":
@@ -166,6 +178,11 @@ export default function QuestionBuilder({
             onChange={(event) => patch(index, { prompt: event.target.value })}
             placeholder="Type the question…"
             className={`${inputClass} mb-3 font-medium`}
+          />
+
+          <QuestionImage
+            url={question.imageUrl}
+            onChange={(imageUrl) => patch(index, { imageUrl })}
           />
 
           {/* ---- the answer editor, per type ---- */}
@@ -349,6 +366,76 @@ export default function QuestionBuilder({
       >
         + Add question
       </button>
+    </div>
+  );
+}
+
+/**
+ * Attach a picture to one question.
+ *
+ * The file goes to storage on selection rather than on save, through the same
+ * `uploadFile` every other picker in the app uses — so the draft only ever
+ * carries a URL, and a tutor who abandons the form has not blocked on an upload
+ * they were not waiting for. Only our own storage paths are accepted on read
+ * (see `asImageUrl` in lib/assignments.ts); this simply produces one.
+ */
+function QuestionImage({ url, onChange }: { url: string; onChange: (next: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function pick(file: File | undefined) {
+    if (!file) return;
+    const problem = validateImageFile(file, 8 * 1024 * 1024);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const uploaded = await uploadFile(file, "materials");
+      onChange(uploaded.url);
+    } catch (uploadError) {
+      setError(uploadErrorMessage(uploadError, "Could not upload that picture"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (url) {
+    return (
+      <div className="mb-3 flex items-start gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt="" className="h-20 w-20 rounded object-cover" />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-[var(--foreground)]">Picture attached</p>
+          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+            Shown on the board and on every student&rsquo;s phone.
+          </p>
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="mt-1.5 text-[11px] font-semibold text-red-600"
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3">
+      <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-[var(--accent)]">
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(event) => void pick(event.target.files?.[0])}
+        />
+        {busy ? "Uploading…" : "+ Add a picture"}
+      </label>
+      {error ? <p className="mt-1 text-[11px] text-red-600">{error}</p> : null}
     </div>
   );
 }

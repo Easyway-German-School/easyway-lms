@@ -39,6 +39,7 @@ type ViewQuestion = {
   points: number;
   options: ViewOption[];
   needsSubmit: boolean;
+  imageUrl: string | null;
 };
 
 type Standing = {
@@ -276,6 +277,14 @@ export default function PlayerGame({ gameId, onLeave }: { gameId: string; onLeav
           </div>
 
           <p className="pq-prompt">{view.question.prompt}</p>
+
+          {/* On the phone too, for the same reason the prompt is: the board is
+              at the far end of a bright room. Hidden once they have answered —
+              the buttons are gone by then and the picture would be pushing the
+              "answer in" message off a small screen. */}
+          {view.question.imageUrl && !answered ? (
+            <img src={view.question.imageUrl} alt="" className="pq-image" />
+          ) : null}
 
           {answered ? (
             <div className="pq-centre">
@@ -516,6 +525,10 @@ const PLAYER_CSS = `
 .pq-timer{height:.5rem;border-radius:999px;background:rgba(255,255,255,.12);overflow:hidden}
 .pq-timer i{display:block;height:100%;background:#2dd4bf;transition:width .12s linear}
 .pq-prompt{font-size:1.15rem;font-weight:600;line-height:1.35;text-wrap:balance}
+/* Height-capped, not width-capped: the answer buttons must stay reachable
+   without scrolling, and a tall photo would push them under the fold. */
+.pq-image{width:100%;max-height:22vh;object-fit:contain;border-radius:.7rem;
+  background:rgba(255,255,255,.06)}
 .pq-centre{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:.5rem;text-align:center}
 .pq-big{font-size:1.6rem;font-weight:800}

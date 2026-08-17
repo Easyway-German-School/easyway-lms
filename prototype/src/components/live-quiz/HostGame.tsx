@@ -56,6 +56,7 @@ type ViewQuestion = {
   points: number;
   options: ViewOption[];
   needsSubmit: boolean;
+  imageUrl: string | null;
 };
 
 type Standing = {
@@ -506,6 +507,13 @@ function QuestionStage({ view, remainingMs }: { view: HostView; remainingMs: num
     <div className="lq-question">
       <p className="lq-prompt">{question.prompt}</p>
 
+      {/* Capped by viewport height rather than width: the options below must
+          stay on screen, and a portrait photograph would otherwise push the
+          four answers off the bottom of the projector. */}
+      {question.imageUrl ? (
+        <img src={question.imageUrl} alt="" className="lq-image" />
+      ) : null}
+
       <div className="lq-meta">
         <Countdown seconds={seconds} fraction={fraction} />
         <div className="lq-answered">
@@ -567,6 +575,12 @@ function RevealStage({ view, totalVotes }: { view: HostView; totalVotes: number 
   return (
     <div className="lq-question">
       <p className="lq-prompt lq-prompt-small">{question.prompt}</p>
+
+      {/* Smaller here than during the question: the distribution bars are what
+          the room is reading now, and the picture has done its job. */}
+      {question.imageUrl ? (
+        <img src={question.imageUrl} alt="" className="lq-image lq-image-small" />
+      ) : null}
 
       {question.type === "short" ? (
         <div className="lq-typed">
@@ -756,6 +770,9 @@ const STAGE_CSS = `
 .lq-prompt{font-size:clamp(1.6rem,3.6vw,3.4rem);font-weight:700;text-align:center;line-height:1.2;
   text-wrap:balance}
 .lq-prompt-small{font-size:clamp(1.2rem,2.2vw,2rem);opacity:.8}
+.lq-image{max-height:34vh;max-width:min(100%,46rem);border-radius:.9rem;object-fit:contain;
+  background:rgba(255,255,255,.06)}
+.lq-image-small{max-height:18vh}
 .lq-meta{display:flex;align-items:center;gap:2.5rem}
 .lq-clock{position:relative;display:grid;place-items:center}
 .lq-clock svg{transform:rotate(0deg)}

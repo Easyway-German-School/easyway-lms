@@ -111,6 +111,8 @@ export type ViewQuestion = {
   options: ViewOption[];
   /** Checkboxes and typed answers need a confirm button; a single tap does not. */
   needsSubmit: boolean;
+  /** The picture the question is about, when it has one. */
+  imageUrl: string | null;
 };
 
 /**
@@ -145,6 +147,7 @@ function toViewQuestion(question: Question, index: number, count: number): ViewQ
     points: pub.points,
     options,
     needsSubmit: pub.type === "multi" || pub.type === "short",
+    imageUrl: pub.imageUrl ?? null,
   };
 }
 
