@@ -9,7 +9,7 @@ import {
   ringStudents,
   touchLiveSession,
 } from "@/lib/live-presence";
-import { stopRecordingForRoom } from "@/lib/class-recorder";
+import { ensureRecordingStarted, stopRecordingForRoom } from "@/lib/class-recorder";
 
 export const dynamic = "force-dynamic";
 
@@ -73,8 +73,9 @@ export async function POST(request: Request) {
       orderBy: { startedAt: "desc" },
       select: {
         id: true, roomName: true, joinCode: true, kind: true, title: true, branchId: true,
-        level: true, sessionSlot: true, privateClassId: true, startedAt: true,
-        lecturer: { select: { user: { select: { name: true } } } },
+        level: true, sessionSlot: true, privateClassId: true, startedAt: true, startedByUserId: true,
+        branch: { select: { name: true } },
+        lecturer: { select: { id: true, user: { select: { name: true } } } },
       },
     });
 
@@ -86,6 +87,42 @@ export async function POST(request: Request) {
 
     if (action === "heartbeat") {
       await touchLiveSession(owned.roomName);
+
+      /**
+       * THE HEARTBEAT IS ALSO THE RECORDING'S SECOND CHANCE.
+       *
+       * `/api/live/session` already tries to start the capture, fired the
+       * instant the tutor's token is minted — but that is server-to-LiveKit,
+       * racing a client that still has to finish a WebRTC handshake with
+       * LiveKit over whatever connection they actually have. On the networks
+       * this school is built around, the token often wins that race, and
+       * `startRoomCompositeEgress` fails outright against a room LiveKit does
+       * not think exists yet. That failure was silent — logged to a server
+       * console nobody was reading — and it is why a real 19-minute class
+       * produced zero rows in the recording library.
+       *
+       * By the time ANY heartbeat lands, the tutor is unquestionably
+       * connected — the heartbeat only starts once `startCall` has fired, and
+       * only a live Room keeps it going. `ensureRecordingStarted` is already
+       * idempotent (see class-recorder.ts), so calling it again here costs
+       * nothing when the first attempt already won, and quietly fixes it
+       * within one heartbeat interval when it did not. Private classes are
+       * still excluded — recording a one-to-one is a consent question, not a
+       * timing one.
+       */
+      if (owned.kind !== "private") {
+        const { currentTenantId } = await import("@/lib/tenant/context");
+        void ensureRecordingStarted({
+          roomName: owned.roomName,
+          tenantId: currentTenantId(),
+          branchId: owned.branchId,
+          branchName: owned.branch?.name ?? null,
+          level: owned.level,
+          sessionSlot: owned.sessionSlot,
+          startedByUserId: owned.startedByUserId,
+        });
+      }
+
       return NextResponse.json({ ok: true, live: true });
     }
 
