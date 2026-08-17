@@ -28,6 +28,9 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   { prefix: "/admin/promotions", capability: "students" },
 
   { prefix: "/admin/attendance", capability: "attendance" },
+  // Who is live right now, in which class — coordinating classes in real
+  // time is the same desk as coordinating them on the timetable.
+  { prefix: "/admin/live", capability: "classes" },
   { prefix: "/admin/branches", capability: "branches" },
 
   { prefix: "/admin/exams", capability: "exams" },

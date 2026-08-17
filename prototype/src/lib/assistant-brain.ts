@@ -6,8 +6,10 @@ import {
   ollamaSupportsTools,
   toolArguments,
   type ChatMessage as OllamaMessage,
+  type ToolCall as OllamaToolCall,
   type ToolSpec,
 } from "@/lib/ollama";
+import { GROQ_MODEL } from "@/lib/ai";
 
 /**
  * The assistant's brain, and which one it uses.
@@ -36,30 +38,41 @@ import {
  *
  *   ANTHROPIC_API_KEY set  →  Claude. ~2-4 seconds to a full answer, and tool
  *                             arguments that survive being checked.
- *   Not set                →  Ollama, exactly as before. Read tools only —
+ *   Else GROQ_API_KEY set  →  Groq. Also hosted, also real structured tool
+ *                             calling — same trust tier as Claude, see
+ *                             canBrainAct() — and free, which is why it sits
+ *                             ahead of the local model rather than behind it.
+ *                             This is the same Claude-then-Groq order ai.ts
+ *                             already uses for the rest of the app's hosted
+ *                             calls; this file just extends it to the one
+ *                             brain that was still Claude-or-nothing.
+ *   Neither set             →  Ollama, exactly as before. Read tools only —
  *                             see toolsForBrain() below, which is the load-
  *                             bearing half of this decision.
  *
  * The privacy story the old file told is still true and now needs saying out
  * loud rather than being implied by the architecture: with a key set, student
- * names and balances are sent to Anthropic. A school that does not want that
- * unsets the key and keeps the local assistant, complete, at reading speed.
- * That is a deployment decision, so it lives in an environment variable and
- * the admin page says which mode it is in.
+ * names and balances are sent to Anthropic or to Groq, whichever answered.
+ * A school that does not want that unsets both keys and keeps the local
+ * assistant, complete, at reading speed. That is a deployment decision, so it
+ * lives in environment variables and the admin page says which mode it is in.
  *
  * ---------------------------------------------------------------------------
- * ONE MESSAGE SHAPE, TWO WIRE FORMATS
+ * ONE MESSAGE SHAPE, THREE WIRE FORMATS
  *
  * Ollama wants tool results as `{role:"tool", tool_name}` and takes system
  * messages inline. Anthropic wants them as `tool_result` blocks inside a USER
  * message, keyed by the id of the `tool_use` that asked, and takes the system
- * prompt as a separate top-level parameter. Neither is convertible to the
- * other after the fact — the Anthropic form needs an id that the Ollama form
- * never carried.
+ * prompt as a separate top-level parameter. Groq speaks the OpenAI shape —
+ * closer to Ollama's (system messages inline, no top-level parameter) but
+ * still keyed by id like Anthropic's, via `tool_call_id`, and it fragments a
+ * streamed tool call's arguments across several chunks that have to be
+ * reassembled by index — Ollama and Anthropic each send a tool call whole.
+ * None of the three is convertible to another after the fact.
  *
  * So the route speaks BrainMessage, which carries the id, and each adapter
  * below throws away what its provider does not want. Trying to make the route
- * speak either provider's dialect directly is what makes this kind of code rot.
+ * speak any provider's dialect directly is what makes this kind of code rot.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -86,7 +99,7 @@ export type BrainTurn =
   | { ok: true; text: string; toolCalls: BrainToolCall[]; model: string; provider: Provider }
   | { ok: false; reason: string };
 
-export type Provider = "claude" | "ollama";
+export type Provider = "claude" | "groq" | "ollama";
 
 export type BrainStatus = {
   provider: Provider;
@@ -132,8 +145,14 @@ export function hasHostedBrain(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
+export function hasGroqBrain(): boolean {
+  return Boolean(process.env.GROQ_API_KEY);
+}
+
 export function brainProvider(): Provider {
-  return hasHostedBrain() ? "claude" : "ollama";
+  if (hasHostedBrain()) return "claude";
+  if (hasGroqBrain()) return "groq";
+  return "ollama";
 }
 
 /**
@@ -149,9 +168,19 @@ export function brainProvider(): Provider {
  * that is plausible and wrong. Plausible and wrong is the one failure mode the
  * confirm step cannot save you from, because it is the one a busy person
  * approves.
+ *
+ * Groq is trusted the same as Claude, not gated like Ollama. It is a real
+ * hosted model doing real structured function calling — the same mechanism
+ * Claude uses, not the heuristic tool-parsing a small local model does — so
+ * the failure mode above does not apply to it the way it applies to Ollama.
+ * The trade being made explicitly: whenever Claude has no credit and Groq
+ * takes over, student and financial data starts flowing to a second hosted
+ * destination. That is disclosed in brainStatus()'s note, the same way the
+ * Claude path already discloses Anthropic.
  */
 export function canBrainAct(): boolean {
-  if (brainProvider() === "claude") return true;
+  const provider = brainProvider();
+  if (provider === "claude" || provider === "groq") return true;
   // The school's override. Off unless deliberately set — see below.
   return process.env.ASSISTANT_LOCAL_ACTIONS === "true";
 }
@@ -182,13 +211,25 @@ export function localActionsEnabled(): boolean {
 }
 
 export async function brainStatus(): Promise<BrainStatus> {
-  if (brainProvider() === "claude") {
+  const provider = brainProvider();
+
+  if (provider === "claude") {
     return {
       provider: "claude",
       model: CLAUDE_MODEL,
       ready: true,
       canAct: true,
       note: "Answers in seconds and can carry out actions you confirm. Questions are sent to Anthropic.",
+    };
+  }
+
+  if (provider === "groq") {
+    return {
+      provider: "groq",
+      model: GROQ_MODEL,
+      ready: true,
+      canAct: true,
+      note: "Answers in seconds and can carry out actions you confirm. Free tier — questions are sent to Groq.",
     };
   }
 
@@ -410,6 +451,181 @@ function describeClaudeFailure(error: unknown): string {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Groq                                                                       */
+/* -------------------------------------------------------------------------- */
+
+type GroqWireMessage =
+  | { role: "system" | "user"; content: string }
+  | {
+      role: "assistant";
+      content: string | null;
+      tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+    }
+  | { role: "tool"; tool_call_id: string; content: string };
+
+/**
+ * Translate BrainMessages into the OpenAI-compatible shape Groq's chat
+ * completions endpoint wants.
+ *
+ * Closer to Ollama's wire format than Anthropic's — system messages sit
+ * inline in the array rather than in a separate top-level parameter — but a
+ * tool call is identified by `id` the way Anthropic's is, because that id has
+ * to survive round to round for `tool_call_id` to match it back up. Ollama
+ * never needed this: it has no id at all, one is invented in ollamaTurn()
+ * below and never read back.
+ */
+function toGroq(messages: BrainMessage[]): GroqWireMessage[] {
+  return messages.map((message) => {
+    if (message.role === "tool") {
+      return { role: "tool", tool_call_id: message.toolCallId, content: message.content };
+    }
+    if (message.role === "assistant") {
+      return {
+        role: "assistant",
+        // OpenAI's shape wants `null`, not an empty string, when a turn is
+        // pure tool calls with no accompanying text.
+        content: message.content || null,
+        ...(message.toolCalls?.length
+          ? {
+              tool_calls: message.toolCalls.map((call) => ({
+                id: call.id,
+                type: "function" as const,
+                function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+              })),
+            }
+          : {}),
+      };
+    }
+    return { role: message.role, content: message.content };
+  });
+}
+
+let groqCallCounter = 0;
+
+/**
+ * Say what actually went wrong, mirroring describeClaudeFailure() below —
+ * an admin staring at "the assistant could not be reached" when the real
+ * answer is "the Groq key is wrong" loses the same twenty minutes either way.
+ */
+function describeGroqFailure(status: number, detail: string): string {
+  if (status === 401) return "The Groq key was rejected. Check GROQ_API_KEY.";
+  if (status === 429) return "Groq is rate limited right now. Try again in a moment.";
+  if (status >= 500) return "Groq is having trouble right now. Try again in a moment.";
+  return detail
+    ? `Groq refused that request: ${detail.slice(0, 200)}`
+    : "Could not reach Groq. Check the internet connection.";
+}
+
+/**
+ * Groq's streamed tool calls arrive FRAGMENTED — unlike Ollama, which sends
+ * one whole tool call per line. Each SSE chunk carries a partial
+ * `{index, id?, function:{name?, arguments?}}` and the pieces have to be
+ * accumulated by `index` across the whole stream: the id and the function
+ * name typically land in the first fragment for that index, and `arguments`
+ * arrives as a JSON string built up a few characters at a time.
+ */
+async function groqTurn(
+  messages: BrainMessage[],
+  onDelta: (text: string) => void,
+  tools: ToolSpec[],
+): Promise<BrainTurn> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) return { ok: false, reason: "GROQ_API_KEY is not set." };
+
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: toGroq(messages),
+        ...(tools.length > 0 ? { tools } : {}),
+        stream: true,
+        temperature: 0,
+        max_tokens: MAX_TOKENS,
+      }),
+    });
+
+    if (!response.ok || !response.body) {
+      const detail = await response.text().catch(() => "");
+      return { ok: false, reason: describeGroqFailure(response.status, detail) };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    const calls = new Map<number, { id: string; name: string; arguments: string }>();
+
+    const consume = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) return;
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === "[DONE]") return;
+
+      let parsed: { choices?: Array<{ delta?: { content?: string; tool_calls?: unknown } }> };
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        // A malformed frame is not worth killing a good answer over — same
+        // rule ollamaChatStream's consume() follows.
+        return;
+      }
+
+      const delta = parsed.choices?.[0]?.delta;
+      if (!delta) return;
+
+      if (typeof delta.content === "string" && delta.content) {
+        text += delta.content;
+        onDelta(delta.content);
+      }
+
+      const fragments = delta.tool_calls;
+      if (Array.isArray(fragments)) {
+        for (const raw of fragments) {
+          const fragment = raw as { index?: number; id?: string; function?: { name?: string; arguments?: string } };
+          const index = fragment.index ?? 0;
+          const existing = calls.get(index) ?? { id: "", name: "", arguments: "" };
+          if (fragment.id) existing.id = fragment.id;
+          if (fragment.function?.name) existing.name += fragment.function.name;
+          if (fragment.function?.arguments) existing.arguments += fragment.function.arguments;
+          calls.set(index, existing);
+        }
+      }
+    };
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) consume(line);
+    }
+    consume(buffer);
+
+    const toolCalls: BrainToolCall[] = [...calls.values()]
+      .filter((call) => call.name)
+      .map((call) => {
+        // toolArguments() already knows how to turn a raw JSON string into
+        // arguments — reused rather than re-implemented, same as ollamaTurn()
+        // below reuses it for Ollama's own tool calls.
+        const shim: OllamaToolCall = { function: { name: call.name, arguments: call.arguments } };
+        return {
+          id: call.id || `groq_${(groqCallCounter += 1)}`,
+          name: call.name,
+          arguments: toolArguments(shim),
+        };
+      });
+
+    return { ok: true, text: text.trim(), toolCalls, model: GROQ_MODEL, provider: "groq" };
+  } catch (error) {
+    console.error("Groq turn failed", error);
+    return { ok: false, reason: "Could not reach Groq. Check the internet connection." };
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Ollama                                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -502,27 +718,34 @@ export async function brainTurn(
   },
 ): Promise<BrainTurn> {
   if (options?.force === "ollama") return ollamaTurn(messages, onDelta, tools);
-  if (brainProvider() === "ollama") return ollamaTurn(messages, onDelta, tools);
+  if (options?.force === "groq") return groqTurn(messages, onDelta, tools);
 
-  const hosted = await claudeTurn(messages, onDelta, tools);
-  if (hosted.ok) return hosted;
+  const provider = brainProvider();
+  if (provider === "ollama") return ollamaTurn(messages, onDelta, tools);
+
+  const primary = provider === "claude"
+    ? await claudeTurn(messages, onDelta, tools)
+    : await groqTurn(messages, onDelta, tools);
+  if (primary.ok) return primary;
 
   /**
-   * The hosted brain failed. Rather than hand the office an error, drop to the
-   * local one — which is exactly the assistant they had before this feature
-   * existed, and is more useful than nothing when the card runs out of credit
-   * on a Tuesday morning.
+   * The primary brain failed. Rather than hand the office an error, step down
+   * the same cascade brainProvider() would if the failed one were unset:
+   * Claude falls to Groq before either falls to the local model, because Groq
+   * is still hosted and still trusted with actions (see canBrainAct()) —
+   * dropping straight to Ollama would throw away tool-calling quality the
+   * school is not actually short of.
    *
-   * TWO CONDITIONS, both load bearing:
+   * TWO CONDITIONS gate EVERY step down, both load bearing:
    *
    *   Nothing may have streamed yet. If half an answer is already on screen,
    *   a second model continuing it produces one reply written by two authors
    *   in two voices, spliced at an arbitrary word.
    *
-   *   No tool calls may have happened yet. A conversation carrying Anthropic
-   *   tool_use ids means the failure came mid-loop; replaying that history to a
-   *   local model that never issued those ids is asking it to answer for work
-   *   it did not do.
+   *   No tool calls may have happened yet. A conversation carrying the failed
+   *   brain's own tool_use/tool_call ids means the failure came mid-loop;
+   *   replaying that history to a brain that never issued those ids is asking
+   *   it to answer for work it did not do.
    *
    * Neither holds after the first round, and in practice the first round is
    * where an out-of-credit or unreachable API fails anyway.
@@ -530,23 +753,32 @@ export async function brainTurn(
   const midConversation = messages.some(
     (message) => message.role === "tool" || (message.role === "assistant" && message.toolCalls?.length),
   );
-  if (midConversation) return hosted;
-
-  const local = await ollamaStatus();
-  if (!local.reachable || !local.modelReady) return hosted;
+  if (midConversation) return primary;
 
   let streamed = false;
-  const fallback = await ollamaTurn(
-    messages,
-    (text) => {
-      streamed = true;
-      onDelta(text);
-    },
-    options?.fallbackTools ?? [],
-  );
+  const capture = (text: string) => {
+    streamed = true;
+    onDelta(text);
+  };
 
-  // The local model failed too — report the ORIGINAL problem, because that is
+  if (provider === "claude" && hasGroqBrain()) {
+    // The FULL tool set, not fallbackTools — Groq is trusted the same as
+    // Claude, so a Claude→Groq step-down loses no capability, unlike the
+    // step to Ollama below.
+    const groqFallback = await groqTurn(messages, capture, tools);
+    if (groqFallback.ok) return groqFallback;
+    // Groq streamed something before failing — stop here rather than let a
+    // third brain finish what a second one started.
+    if (streamed) return groqFallback;
+  }
+
+  const local = await ollamaStatus();
+  if (!local.reachable || !local.modelReady) return primary;
+
+  const fallback = await ollamaTurn(messages, capture, options?.fallbackTools ?? []);
+
+  // Every hosted option failed — report the ORIGINAL problem, because that is
   // the one the admin can do something about.
-  if (!fallback.ok) return streamed ? fallback : hosted;
+  if (!fallback.ok) return streamed ? fallback : primary;
   return fallback;
 }

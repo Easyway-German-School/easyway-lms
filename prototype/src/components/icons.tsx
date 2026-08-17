@@ -332,6 +332,15 @@ export const ChainIcon = icon("ChainIcon", (
   </>
 ));
 
+/** The composer's "play a game" button, and the invite card's own glyph. */
+export const GameControllerIcon = icon("GameControllerIcon", (
+  <>
+    <path d="M8 9h8a3.5 3.5 0 0 1 3.5 3.5v2.5a2 2 0 0 1-3.6 1.2L14.5 14h-5l-1.4 2.2A2 2 0 0 1 4.5 15v-2.5A3.5 3.5 0 0 1 8 9Z" />
+    <path d="M8.5 11.3v2M7.5 12.3h2" />
+    <path d="M15.3 12.2h.01M17.3 13.7h.01" />
+  </>
+));
+
 export const EssayIcon = icon("EssayIcon", (
   <>
     <path d="M20.5 3.5C11.7 4.6 6.6 9.4 5 15l3.9 3.9C14.5 17.3 19.4 12.3 20.5 3.5" />

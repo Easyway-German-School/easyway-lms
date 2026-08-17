@@ -18,7 +18,9 @@ import {
   BellOffIcon,
   BranchIcon,
   CheckIcon,
+  ChainIcon,
   CommunityIcon,
+  GameControllerIcon,
   ImageIcon,
   PaletteIcon,
   SendIcon,
@@ -87,6 +89,8 @@ type ChatMessage = {
   reactions?: ReactionSummary[];
   /** A sticker from the school's set, sent instead of text. */
   stickerId?: string | null;
+  /** This message IS an invite card — somebody started a game in this room. */
+  gameMatch?: { id: string; title: string; status: string } | null;
   /** Staff have held this at the top of the room. */
   pinned?: boolean;
   /** Set on a bubble we have drawn but the server has not confirmed. */
@@ -98,6 +102,9 @@ type ChatMessage = {
 const POLL_ACTIVE_MS = 4_000;
 /** And how often when the tab is in the background. */
 const POLL_HIDDEN_MS = 30_000;
+
+/** Rotated at random so a room's stories aren't all called the same thing. */
+const GAME_INVITE_TITLES = ["Let's write something", "Story time", "Add a sentence", "Chain reaction"];
 
 /** The sticker-tray button: a peeling sticker corner. */
 function StickerGlyph({ className = "" }: { className?: string }) {
@@ -208,6 +215,9 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const [reactingTo, setReactingTo] = useState<string | null>(null);
   /** The sticker tray above the composer. */
   const [stickerTrayOpen, setStickerTrayOpen] = useState(false);
+  /** The games tray above the composer — same shape as the sticker tray. */
+  const [gamesTrayOpen, setGamesTrayOpen] = useState(false);
+  const [startingGame, setStartingGame] = useState(false);
   const [editDraft, setEditDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showRail, setShowRail] = useState(!compact);
@@ -459,13 +469,16 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   }, []);
 
   /**
-   * `sticker` is passed in rather than held in state, because sending one is a
-   * single tap with nothing to compose first — the tray calls this directly.
+   * `sticker` and `gameMatch` are passed in rather than held in state, because
+   * sending either is a single tap with nothing to compose first — the tray
+   * calls this directly. Never both at once in practice, but nothing here
+   * assumes that.
    */
-  const send = useCallback(async (sticker?: string) => {
+  const send = useCallback(async (sticker?: string, gameMatch?: { id: string; title: string; status: string }) => {
     const text = draft.trim();
-    // A picture or a sticker on its own is a message; the server agrees.
-    if ((!text && !attachment && !sticker) || !activeId) return;
+    // A picture, a sticker or a game invite on its own is a message; the
+    // server agrees.
+    if ((!text && !attachment && !sticker && !gameMatch) || !activeId) return;
 
     const tempId = `pending-${Date.now()}`;
     const quoted = replyTo;
@@ -483,6 +496,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
         editedAt: null,
         attachment: picture,
         stickerId: sticker ?? null,
+        gameMatch: gameMatch ?? null,
         author: { id: "me", name: "You", role: "student" },
         replyTo: quoted
           ? { id: quoted.id, author: quoted.author.name, body: quoted.body.slice(0, 180), hidden: false }
@@ -507,6 +521,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           attachmentType: picture?.type ?? null,
           attachmentName: picture?.name ?? null,
           stickerId: sticker ?? null,
+          gameMatchId: gameMatch?.id ?? null,
         }),
       });
       const data = await res.json();
@@ -526,6 +541,38 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
       setError(sendError instanceof Error ? sendError.message : "Message not sent");
     }
   }, [draft, activeId, replyTo, attachment]);
+
+  /**
+   * THE GAMES TRAY — the iMessage-style "invite to play", scoped to the room.
+   *
+   * There is no 1:1 chat anywhere in this app; every room here is already the
+   * cohort — "your level and session" — so starting a game FOR THIS ROOM is
+   * the invite. It reuses the ordinary POST /api/games that the Games tab
+   * itself calls (same whole-cohort matchmaking, same per-room cap on active
+   * stories), then drops one message into this thread carrying the new
+   * match's id — send() already knows how to post and render that, the same
+   * one-tap shape a sticker uses.
+   */
+  const startGame = useCallback(async () => {
+    if (!activeSpace || !activeId || startingGame) return;
+    setStartingGame(true);
+    setGamesTrayOpen(false);
+    try {
+      const title = GAME_INVITE_TITLES[Math.floor(Math.random() * GAME_INVITE_TITLES.length)];
+      const res = await fetch("/api/games", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spaceId: activeSpace.id, title }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not start a game");
+      await send(undefined, { id: data.match.id, title: data.match.title, status: data.match.status ?? "active" });
+    } catch (startError) {
+      setError(startError instanceof Error ? startError.message : "Could not start a game");
+    } finally {
+      setStartingGame(false);
+    }
+  }, [activeSpace, activeId, startingGame, send]);
 
   /**
    * Editing, and why it is optimistic in one direction only.
@@ -943,10 +990,16 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                           stickers bare for the same reason.
                         */
                         const isSticker = Boolean(message.stickerId && stickerById(message.stickerId));
+                        // A game invite is a card, not a chat bubble — it needs
+                        // its own border and background regardless of theme or
+                        // "mine", the same reasoning that keeps a sticker bare.
+                        const isGameInvite = Boolean(message.gameMatch);
                         return (
                       <div
                         className={`text-sm leading-6 ${
-                          isSticker && !message.hidden
+                          isGameInvite && !message.hidden
+                            ? "p-0"
+                            : isSticker && !message.hidden
                             ? "bg-transparent p-0"
                             : `rounded-2xl px-3 py-2 ${
                                 message.hidden
@@ -958,8 +1011,13 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                         } ${message.failed ? "ring-1 ring-rose-400" : ""} ${message.pending ? "opacity-60" : ""}`}
                         // This device's chosen bubble colour/gradient — see
                         // lib/chat-theme.ts. Only "mine", not hidden, not a
-                        // sticker (which floats bare on purpose, see below).
-                        style={message.mine && !message.hidden && !isSticker ? { background: chatTheme.bubble } : undefined}
+                        // sticker or a game invite (both float/card bare on
+                        // purpose, see below).
+                        style={
+                          message.mine && !message.hidden && !isSticker && !isGameInvite
+                            ? { background: chatTheme.bubble }
+                            : undefined
+                        }
                       >
                         {message.replyTo ? (
                           <div
@@ -1006,6 +1064,30 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                               <button onClick={() => setEditing(null)} className="opacity-70">Cancel</button>
                             </div>
                           </div>
+                        ) : message.gameMatch ? (
+                          /*
+                            THE INVITE CARD. Its own bordered tile rather than a
+                            bubble, the way an attachment or a sticker already
+                            reads as "not quite text" — a game invite is
+                            similarly a thing to tap, not a line to read.
+                          */
+                          <a
+                            href={`/games/${message.gameMatch.id}`}
+                            className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-[var(--foreground)] transition hover:border-[var(--accent)]"
+                          >
+                            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                              <ChainIcon className="h-5 w-5" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-bold uppercase tracking-wide text-[var(--accent)]">
+                                Satzkette
+                              </span>
+                              <span className="block truncate text-sm font-semibold">{message.gameMatch.title}</span>
+                              <span className="block text-xs text-[var(--muted)]">
+                                {message.gameMatch.status === "completed" ? "Finished — read the story" : "Tap to add a sentence"}
+                              </span>
+                            </span>
+                          </a>
                         ) : message.stickerId && stickerById(message.stickerId) ? (
                           /*
                             A sticker fills the bubble instead of sitting in it.
@@ -1247,6 +1329,49 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
               </div>
             ) : null}
 
+            {/*
+              THE GAMES TRAY — the iMessage-style "play together" drawer,
+              scoped to this room the same way the sticker tray is. See
+              startGame() above for why a game invite here means "start a game
+              for the whole cohort chat", not a person-to-person invite.
+            */}
+            {gamesTrayOpen ? (
+              <div className="mb-2 space-y-2 rounded-2xl bg-[var(--surface-alt)] p-3">
+                <button
+                  onClick={() => void startGame()}
+                  disabled={startingGame}
+                  className="flex w-full items-center gap-3 rounded-xl bg-[var(--surface)] p-3 text-left transition hover:brightness-95 disabled:opacity-50"
+                >
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                    <ChainIcon className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-[var(--foreground)]">
+                      {startingGame ? "Starting…" : "Satzkette — start a story"}
+                    </span>
+                    <span className="block text-xs text-[var(--muted)]">
+                      Everyone in this room takes turns adding one sentence.
+                    </span>
+                  </span>
+                </button>
+
+                {isStaff ? (
+                  <a
+                    href="/lecturer/live-quiz"
+                    className="flex w-full items-center gap-3 rounded-xl bg-[var(--surface)] p-3 text-left transition hover:brightness-95"
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                      <GameControllerIcon className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-[var(--foreground)]">Live quiz</span>
+                      <span className="block text-xs text-[var(--muted)]">Set one up for this class.</span>
+                    </span>
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="flex items-end gap-2">
               {/*
                 `capture` is deliberately absent. On a phone this offers both the
@@ -1275,7 +1400,10 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                 <ImageIcon className="h-5 w-5" />
               </button>
               <button
-                onClick={() => setStickerTrayOpen((open) => !open)}
+                onClick={() => {
+                  setStickerTrayOpen((open) => !open);
+                  setGamesTrayOpen(false);
+                }}
                 aria-label="Send a sticker"
                 aria-expanded={stickerTrayOpen}
                 title="Send a sticker"
@@ -1284,6 +1412,20 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                 }`}
               >
                 <StickerGlyph className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => {
+                  setGamesTrayOpen((open) => !open);
+                  setStickerTrayOpen(false);
+                }}
+                aria-label="Play a game"
+                aria-expanded={gamesTrayOpen}
+                title="Play a game"
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition hover:bg-[var(--surface-alt)] ${
+                  gamesTrayOpen ? "bg-[var(--surface-alt)] text-[var(--accent)]" : "text-[var(--muted)]"
+                }`}
+              >
+                <GameControllerIcon className="h-5 w-5" />
               </button>
               <textarea
                 ref={composerRef}

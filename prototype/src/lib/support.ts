@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { KIND, notifyInBackground } from "@/lib/notify";
 import { MAX_BODY, MAX_SUBJECT, type TicketTopic } from "@/lib/support-copy";
+import { isAssigned, readAssignment } from "@/lib/lecturer-assignment";
 
 /**
  * The help desk, on the server.
@@ -46,6 +47,79 @@ export {
 export type { TicketTopic, TicketStatus } from "@/lib/support-copy";
 
 /**
+ * WHICH TUTOR "my tutor" MEANS, for one student.
+ *
+ * This is the exact question `studentWhereForLecturer()` in
+ * lecturer-assignment.ts answers in the other direction — "which students does
+ * THIS tutor see" — run backwards, because nothing in that prisma-free module
+ * can query the database to ask "which tutor sees THIS student". Same two
+ * routes, same precedence: the office's explicit `Student.tutorId` pairing
+ * always wins over a class match, for the identical reason it wins there —
+ * a deliberate naming outranks a pattern.
+ *
+ * Ambiguity is possible (two tutors both assigned to Lagos A1 morning) and
+ * deliberately not solved by picking a "best" match — the office would have to
+ * name one anyway, so this returns whichever comes first by `createdAt`,
+ * which at least answers the same way twice rather than depending on however
+ * Postgres happened to order an unsorted scan.
+ */
+async function tutorForStudent(studentId: string): Promise<string | null> {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: {
+      tutorId: true,
+      branchId: true,
+      level: true,
+      sessionSlot: true,
+    },
+  });
+  if (!student) return null;
+
+  if (student.tutorId) {
+    const named = await prisma.lecturer.findUnique({
+      where: { id: student.tutorId },
+      select: { userId: true },
+    });
+    if (named) return named.userId;
+  }
+
+  if (!student.branchId) return null;
+
+  const lecturers = await prisma.lecturer.findMany({
+    where: { status: "active" },
+    orderBy: { createdAt: "asc" },
+    select: {
+      userId: true,
+      branchId: true,
+      level: true,
+      sessionSlot: true,
+      branchIds: true,
+      levels: true,
+      sessionSlots: true,
+      classTypes: true,
+      batches: true,
+    },
+  });
+
+  for (const lecturer of lecturers) {
+    const assignment = readAssignment(lecturer);
+    if (!isAssigned(assignment)) continue;
+    if (!assignment.branchIds.includes(student.branchId)) continue;
+    if (!assignment.levels.includes(student.level)) continue;
+    if (
+      assignment.sessionSlots.length &&
+      student.sessionSlot &&
+      !assignment.sessionSlots.includes(student.sessionSlot)
+    ) {
+      continue;
+    }
+    return lecturer.userId;
+  }
+
+  return null;
+}
+
+/**
  * Open a ticket and tell the office.
  *
  * The first message is written as a message rather than stored on the ticket,
@@ -65,6 +139,17 @@ export async function openTicket(input: {
   const subject = input.subject.trim().slice(0, MAX_SUBJECT);
   const body = input.body.trim().slice(0, MAX_BODY);
 
+  /**
+   * "Ask my tutor" skips the office entirely and goes straight to the one
+   * person who actually teaches this student — resolved by tutorForStudent()
+   * above, the same class-match-or-named-override rule the roster/attendance/
+   * grading views already follow, not from anything the student picked. A
+   * student with no resolvable tutor yet falls back to the ordinary office
+   * queue rather than vanishing into a routed-to nobody.
+   */
+  const tutorUserId =
+    input.topic === "tutor" && input.studentId ? await tutorForStudent(input.studentId) : null;
+
   const ticket = await prisma.supportTicket.create({
     data: {
       userId: input.userId,
@@ -73,6 +158,7 @@ export async function openTicket(input: {
       topic: input.topic,
       fromPath: input.fromPath,
       status: "open",
+      assignedToId: tutorUserId,
       unreadForAdmin: true,
       unreadForUser: false,
       lastMessageAt: new Date(),
@@ -86,6 +172,20 @@ export async function openTicket(input: {
     },
     include: { messages: true },
   });
+
+  if (tutorUserId) {
+    notifyInBackground({
+      to: { userIds: [tutorUserId] },
+      kind: KIND.supportTicket,
+      severity: "info",
+      title: "A student messaged you",
+      message: `${input.authorName ?? "A student"}: ${subject}`,
+      link: `/lecturer/messages?ticket=${ticket.id}`,
+      senderId: input.userId,
+      push: true,
+    });
+    return ticket;
+  }
 
   /**
    * Routed to `students`, which is the capability the Enquiries screen already
@@ -109,9 +209,14 @@ export async function openTicket(input: {
 /**
  * Add a reply, from either side.
  *
- * `fromAdmin` decides everything that differs: which unread flag lights, which
- * way the status moves, and who gets buzzed. Passing it explicitly rather than
- * re-deriving the author's role means a single source of truth per call.
+ * `fromStaff` decides everything that differs: which unread flag lights,
+ * which way the status moves, and who gets buzzed. Passing it explicitly
+ * rather than re-deriving the author's role means a single source of truth
+ * per call — and "staff" here means whoever is answering, not specifically an
+ * admin: the routed-to tutor on an "Ask my tutor" ticket answers through this
+ * exact path. What matters is "the asker" versus "everyone else", which is
+ * why the caller computes it as `authorId !== ticket.userId` rather than from
+ * a role check that a tutor replying to their own routed ticket would fail.
  */
 export async function replyToTicket(input: {
   ticketId: string;
@@ -119,14 +224,14 @@ export async function replyToTicket(input: {
   authorRole: string;
   authorName: string | null;
   body: string;
-  fromAdmin: boolean;
+  fromStaff: boolean;
 }) {
   const body = input.body.trim().slice(0, MAX_BODY);
   if (!body) return null;
 
   const ticket = await prisma.supportTicket.findUnique({
     where: { id: input.ticketId },
-    select: { id: true, userId: true, subject: true, status: true },
+    select: { id: true, userId: true, subject: true, status: true, assignedToId: true, topic: true },
   });
   if (!ticket) return null;
 
@@ -143,8 +248,8 @@ export async function replyToTicket(input: {
     where: { id: ticket.id },
     data: {
       lastMessageAt: new Date(),
-      unreadForAdmin: !input.fromAdmin,
-      unreadForUser: input.fromAdmin,
+      unreadForAdmin: !input.fromStaff,
+      unreadForUser: input.fromStaff,
       /**
        * An answer moves it to "waiting on the student"; a student writing back
        * moves it to "needs an answer". A resolved ticket that gets a new
@@ -152,17 +257,17 @@ export async function replyToTicket(input: {
        * closed ticket must not vanish from the queue, which is the single most
        * common way a help desk loses somebody.
        */
-      status: input.fromAdmin ? "pending" : "open",
+      status: input.fromStaff ? "pending" : "open",
       resolvedAt: null,
     },
   });
 
-  if (input.fromAdmin) {
+  if (input.fromStaff) {
     notifyInBackground({
       to: { userIds: [ticket.userId] },
-      kind: KIND.supportReply,
+      kind: ticket.topic === "tutor" ? KIND.lecturerMessage : KIND.supportReply,
       severity: "info",
-      title: "The office replied to your question",
+      title: ticket.topic === "tutor" ? "Your tutor replied" : "The office replied to your question",
       message: ticket.subject,
       /**
        * There is no /support page, on purpose. The conversation lives in the
@@ -175,6 +280,21 @@ export async function replyToTicket(input: {
       senderId: input.authorId,
       // Worth a phone buzz: the student asked and then went to do something
       // else, and an answer they do not see is the same as no answer.
+      push: true,
+    });
+  } else if (ticket.assignedToId) {
+    // Routed straight to whoever is answering — the tutor on an "Ask my
+    // tutor" thread, or the admin who already picked this one up. Broadcasting
+    // to the whole capability group again once somebody has claimed it just
+    // trains the rest of the office to ignore the bell.
+    notifyInBackground({
+      to: { userIds: [ticket.assignedToId] },
+      kind: KIND.supportTicket,
+      severity: "info",
+      title: "Reply on a help request",
+      message: `${input.authorName ?? "A student"}: ${ticket.subject}`,
+      link: ticket.topic === "tutor" ? `/lecturer/messages?ticket=${ticket.id}` : `/admin/enquiries?ticket=${ticket.id}`,
+      senderId: input.authorId,
       push: true,
     });
   } else {

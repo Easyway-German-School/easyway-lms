@@ -320,6 +320,11 @@ export default function HelpLauncher() {
                         </option>
                       ))}
                     </select>
+                    {topic === "tutor" ? (
+                      <p className="mt-1.5 text-[11px] leading-4 text-[var(--muted)]">
+                        This goes straight to your tutor, not the office.
+                      </p>
+                    ) : null}
                   </div>
 
                   <div>

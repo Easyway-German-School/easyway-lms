@@ -3,6 +3,7 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
+import { notify, KIND } from "@/lib/notify";
 
 export async function POST(request: NextRequest) {
   const session = await requireAuthSession();
@@ -12,7 +13,8 @@ export async function POST(request: NextRequest) {
   }
 
   const student = await prisma.student.findUnique({
-    where: { userId: session.user.id as string }
+    where: { userId: session.user.id as string },
+    include: { tutor: { select: { userId: true } } },
   });
 
   if (!student) {
@@ -85,6 +87,20 @@ export async function POST(request: NextRequest) {
         completedAt: new Date()
       }
     });
+
+    // Same rule as the modern assignment path: tell the tutor this student is
+    // actually assigned to, not a guess at who teaches the lesson.
+    if (student.tutor?.userId) {
+      await notify({
+        to: { userIds: [student.tutor.userId] },
+        kind: KIND.assignmentSubmitted,
+        severity: "info",
+        title: "A submission needs marking",
+        message: `${session.user?.name ?? "A student"} handed in work — it's pending review.`,
+        link: "/lecturer/assignments/mark",
+        dedupeKey: `assignment-submitted:${lessonId}:${student.id}`,
+      }).catch((error) => console.error("Legacy assignment notification failed", error));
+    }
 
     return NextResponse.json({
       message: "Assignment submitted successfully",

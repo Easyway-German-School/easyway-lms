@@ -1,6 +1,7 @@
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { notify, KIND } from "@/lib/notify";
 import {
   parseQuestions,
   finaliseScore,
@@ -164,6 +165,19 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.warn("Could not record marked quiz grade:", error);
     }
+
+    // The one grading path that used to leave the student finding out by
+    // opening the page and checking — see gradebook/route.ts and
+    // grades/roster/route.ts, which already do this on every score change.
+    await notify({
+      to: { studentIds: [submission.studentId] },
+      kind: KIND.resultPublished,
+      severity: "info",
+      title: "Your submission has been marked",
+      message: "Your tutor finished marking your work. Open your results to see it.",
+      link: "/results",
+      dedupeKey: `submission-marked:${submission.id}`,
+    }).catch((error) => console.error("Marking notification failed", error));
 
     return NextResponse.json({ score: final.score, earned: final.earned, possible: final.possible });
   } catch (error) {

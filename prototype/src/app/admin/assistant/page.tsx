@@ -59,7 +59,7 @@ type Briefing = {
 };
 
 type Status = {
-  provider: "claude" | "ollama";
+  provider: "claude" | "groq" | "ollama";
   model: string;
   ready: boolean;
   canAct: boolean;

@@ -41,7 +41,15 @@ async function resolveAccess(userId: string, role: string, ticketId: string) {
     return { ticket, isAdmin: true, allowed: capabilities.includes("students") };
   }
 
-  return { ticket, isAdmin: false, allowed: ticket.userId === userId };
+  /**
+   * A tutor gets in two ways: it is their own question (same as a student),
+   * or it is a "Ask my tutor" thread routed to them — `assignedToId` is set
+   * at creation for exactly that case (see openTicket in support.ts) and never
+   * by the tutor themselves, so there is nothing here for a tutor to forge
+   * their way into somebody else's thread with.
+   */
+  const allowed = ticket.userId === userId || ticket.assignedToId === userId;
+  return { ticket, isAdmin: false, allowed };
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -56,6 +64,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (!ticket) return NextResponse.json({ error: "No such request" }, { status: 404 });
     if (!allowed) return NextResponse.json({ error: "Not your request" }, { status: 403 });
 
+    // "Staff" here is whoever is answering, not specifically an admin — the
+    // tutor a ticket was routed to is on this side too. `allowed` already
+    // proved a non-admin viewer is either the asker or the assignee, so for a
+    // non-admin, "not the asker" is enough to mean staff.
+    const isStaff = isAdmin || ticket.assignedToId === session.user.id;
+
     /**
      * OPENING IT IS READING IT.
      *
@@ -64,10 +78,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
      * unread reply as read by the student, and the badge that told them an
      * answer had arrived disappears before they ever saw it.
      */
-    if (isAdmin ? ticket.unreadForAdmin : ticket.unreadForUser) {
+    if (isStaff ? ticket.unreadForAdmin : ticket.unreadForUser) {
       await prisma.supportTicket.update({
         where: { id: ticket.id },
-        data: isAdmin ? { unreadForAdmin: false } : { unreadForUser: false },
+        data: isStaff ? { unreadForAdmin: false } : { unreadForUser: false },
       });
     }
 
@@ -79,8 +93,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       fromPath: ticket.fromPath,
       createdAt: ticket.createdAt,
       lastMessageAt: ticket.lastMessageAt,
-      // The office needs to know who is asking; the student already knows.
-      asker: isAdmin
+      // Whoever is answering needs to know who is asking; the asker already knows.
+      asker: isStaff
         ? {
             name: ticket.user.name,
             email: ticket.user.email,
@@ -117,6 +131,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!ticket) return NextResponse.json({ error: "No such request" }, { status: 404 });
     if (!allowed) return NextResponse.json({ error: "Not your request" }, { status: 403 });
 
+    // Same rule as GET: staff is whoever is answering, admin or the tutor a
+    // "Ask my tutor" ticket was routed to — not literally `isAdmin`.
+    const isStaff = isAdmin || ticket.assignedToId === session.user.id;
+
     const body = await request.json().catch(() => ({}));
     const action = String(body.action ?? "reply");
 
@@ -136,8 +154,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           // Closing a ticket is not an answer, so it does not light anybody's
           // badge — except when the OFFICE closes it, which the student should
           // be told about because it means nobody is working on it any more.
-          unreadForUser: resolving && isAdmin,
-          unreadForAdmin: !resolving && !isAdmin,
+          unreadForUser: resolving && isStaff,
+          unreadForAdmin: !resolving && !isStaff,
         },
       });
       return NextResponse.json({ ok: true });
@@ -172,7 +190,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       authorRole: isAdmin ? "admin" : role || "student",
       authorName: session.user.name ?? null,
       body: message,
-      fromAdmin: isAdmin,
+      fromStaff: isStaff,
     });
 
     return NextResponse.json({ ok: true });

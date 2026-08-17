@@ -98,8 +98,54 @@ export async function POST(request: Request) {
     }
 
     if (action === "ring") {
-      const studentIds: string[] = Array.isArray(body.studentIds) ? body.studentIds.map(String) : [];
-      if (!studentIds.length) return NextResponse.json({ error: "studentIds is required" }, { status: 400 });
+      const requested: string[] = Array.isArray(body.studentIds) ? body.studentIds.map(String) : [];
+      if (!requested.length) return NextResponse.json({ error: "studentIds is required" }, { status: 400 });
+
+      /**
+       * `studentIds` in the request body is a claim, same as `sessionId` above —
+       * without this check a tutor's own client could ring (and thus invite,
+       * notify and buzz the phone of) any student in the school, not just the
+       * ones in this class. The eligible set is the room's own definition of
+       * who belongs here: the private booking's one student, or everyone in
+       * this session's branch+level+sessionSlot for a cohort class.
+       */
+      const eligible =
+        owned.kind === "private"
+          ? new Set(
+              owned.privateClassId
+                ? [
+                    (
+                      await prisma.privateClass.findUnique({
+                        where: { id: owned.privateClassId },
+                        select: { studentId: true },
+                      })
+                    )?.studentId ?? "",
+                  ].filter(Boolean)
+                : [],
+            )
+          : new Set(
+              (
+                await prisma.student.findMany({
+                  // `as any` on the nullable-vs-null mismatch, same as
+                  // studentWhereForLecturer's callers elsewhere in this app —
+                  // Prisma's generated filter type does not accept a bare
+                  // `null` for an exact match on a nullable column here even
+                  // though it is valid at runtime.
+                  where: {
+                    id: { in: requested },
+                    branchId: owned.branchId,
+                    level: owned.level,
+                    sessionSlot: owned.sessionSlot,
+                  } as any,
+                  select: { id: true },
+                })
+              ).map((s) => s.id),
+            );
+
+      const studentIds = requested.filter((id) => eligible.has(id));
+      if (!studentIds.length) {
+        return NextResponse.json({ error: "None of those students are in this class." }, { status: 403 });
+      }
 
       await addInvites(owned.id, studentIds);
 

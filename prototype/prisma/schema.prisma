@@ -1884,6 +1884,28 @@ model Message {
   stickerId String?
 
   /**
+   * "text" for everything ordinary; "game_invite" when this message IS the
+   * card inviting the room to a game. A discriminator rather than inferring
+   * the kind from which optional field is set, the way stickerId/attachment
+   * already are — a game invite needs the reader to render one specific
+   * bubble, not "whichever special field happens to be non-null", and a
+   * second special type sharing that inference would make the two ambiguous
+   * the moment a message somehow carried both.
+   */
+  kind String @default("text")
+
+  /**
+   * Set only on a "game_invite" message. Points at the GameMatch this card
+   * invites the room into — started through the ordinary POST /api/games the
+   * same way a game started from the Games tab is, so there is exactly one
+   * way a match ever comes into existence. onDelete: SetNull rather than
+   * Cascade: a match being archived should not delete the historical fact
+   * that it was started from this thread.
+   */
+  gameMatchId String?
+  gameMatch   GameMatch? @relation(fields: [gameMatchId], references: [id], onDelete: SetNull)
+
+  /**
    * Staff pinning something to the top of the room. Null for the vast majority.
    *
    * A pin is not moderation — it is the opposite. Removal takes a message away;
@@ -3633,6 +3655,9 @@ model GameMatch {
 
   /** The turns in order. */
   turns     GameTurn[]
+
+  /** The chat message(s) that invited people into this match — see Message.gameMatchId. */
+  messages  Message[]
 
   startedAt DateTime @default(now())
   completedAt DateTime?

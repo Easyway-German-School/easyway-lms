@@ -501,12 +501,16 @@ export async function POST(request: Request) {
         /**
          * Which brain is actually answering, once we know.
          *
-         * Set the moment a round comes back from the local model, and pinned
-         * for the rest of the loop — see the `force` option on brainTurn. One
-         * question is answered by one model; re-deciding per round produces a
-         * conversation half of which the answering model never saw.
+         * Set the moment a round comes back from a brain other than the
+         * default hosted one — Groq after a Claude fallback, or Ollama after
+         * either — and pinned for the rest of the loop — see the `force`
+         * option on brainTurn. One question is answered by one model;
+         * re-deciding per round produces a conversation half of which the
+         * answering model never saw, and would otherwise re-try Claude on the
+         * next round, fail the same way, and find the conversation mid-tool-
+         * call — refusing the very fallback that just happened.
          */
-        let pinned: "ollama" | undefined;
+        let pinned: "groq" | "ollama" | undefined;
 
         /**
          * The tool loop.
@@ -543,7 +547,7 @@ export async function POST(request: Request) {
             send({ type: "error", error: turn.reason });
             return finish();
           }
-          if (turn.provider === "ollama") pinned = "ollama";
+          if (turn.provider === "groq" || turn.provider === "ollama") pinned = turn.provider;
 
           if (turn.toolCalls.length === 0) {
             send({

@@ -34,9 +34,12 @@ export const KIND = {
   levelAdvance: "level.advance",
   materialPublished: "material.published",
   assignmentDue: "assignment.due",
+  /** A student handed in work. The tutor who set it is waiting to mark it. */
+  assignmentSubmitted: "assignment.submitted",
   resultPublished: "result.published",
   certificateIssued: "certificate.issued",
   classStarting: "class.starting",
+  attendanceMarked: "attendance.marked",
   lecturerMessage: "lecturer.message",
   leadCaptured: "lead.captured",
   /** A student asked the office for help, or wrote back on a thread. */
@@ -44,6 +47,8 @@ export const KIND = {
   /** The office answered. This is the one the student is waiting on. */
   supportReply: "support.reply",
   announcement: "announcement",
+  /** Somebody started a game in the room's chat — see /api/community/messages. */
+  gameInvite: "game.invite",
   general: "general",
 } as const;
 

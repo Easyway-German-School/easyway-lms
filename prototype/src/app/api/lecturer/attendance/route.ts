@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { dayKey } from '@/lib/class-sessions';
 import { readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
+import { KIND, notifyInBackground } from '@/lib/notify';
 
 export async function GET(req: NextRequest) {
   try {
@@ -144,6 +145,28 @@ export async function POST(req: NextRequest) {
         },
       });
       saved += 1;
+
+      /**
+       * Only the absent mark is worth a notification. A register is dozens of
+       * students at once, nearly all of them present — buzzing every one of
+       * them every single class day is the alert-fatigue mistake the gradebook
+       * route already avoids by only notifying when a score actually moved.
+       * Being marked absent is the one outcome a student would want to catch
+       * quickly, in case it is wrong. `dedupeKey` includes the mark itself, so
+       * re-saving the same register does not re-notify, but a correction that
+       * flips somebody TO absent still reaches them.
+       */
+      if (!present) {
+        notifyInBackground({
+          to: { studentIds: [entry.studentId] },
+          kind: KIND.attendanceMarked,
+          severity: "info",
+          title: "Marked absent today",
+          message: "Your tutor recorded you as absent for today's class. If that's wrong, let them know.",
+          link: "/attendance",
+          dedupeKey: `attendance-marked:${entry.studentId}:${day.toISOString()}:absent`,
+        });
+      }
     }
 
     return NextResponse.json({ count: saved });

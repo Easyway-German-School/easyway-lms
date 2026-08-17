@@ -57,7 +57,18 @@ export function claudeFailureHint(): string | null {
   return lastClaudeFailure;
 }
 
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+// Exported so assistant-brain.ts (the admin assistant's brain) can name the
+// same model rather than hardcoding a second copy of this default that would
+// silently drift from this one.
+//
+// llama-3.3-70b-versatile was the default until Groq retired it from their
+// catalog outright — not deprecated-with-warning, just gone, so every call
+// failed with a flat model_not_found and no earlier signal. Confirmed against
+// GET https://api.groq.com/openai/v1/models with the account's own key before
+// picking a replacement: openai/gpt-oss-120b is the largest general-purpose
+// model Groq currently serves with tool calling, which is the one property
+// this brain cannot do without (see assistant-brain.ts's groqTurn()).
+export const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 /**
  * Groq's free tier, spoken with the same OpenAI-shaped chat-completions body

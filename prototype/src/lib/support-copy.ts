@@ -8,19 +8,23 @@
  * no imports can be read from either side.
  */
 
-export const TICKET_TOPICS = ["classes", "payment", "account", "technical", "other"] as const;
+export const TICKET_TOPICS = ["classes", "payment", "account", "technical", "tutor", "other"] as const;
 export type TicketTopic = (typeof TICKET_TOPICS)[number];
 
 /**
  * Worded as a student would say it, not as the office would file it.
  * "Something is broken" gets used; "Technical issue" gets skipped in favour of
  * "Other", and then nobody can route the queue.
+ *
+ * "tutor" is the one topic that never reaches the office at all — see
+ * `openTicket()` in support.ts. Everything else lands in the admin queue.
  */
 export const TICKET_TOPIC_LABELS: Record<TicketTopic, string> = {
   classes: "My classes",
   payment: "Payments and fees",
   account: "My account",
   technical: "Something is broken",
+  tutor: "Ask my tutor",
   other: "Something else",
 };
 

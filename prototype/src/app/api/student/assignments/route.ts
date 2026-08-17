@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { notify, KIND } from "@/lib/notify";
 import {
   parseQuestions,
   toPublicQuestions,
@@ -149,6 +150,7 @@ export async function POST(req: NextRequest) {
      */
     const assignment = await prisma.assignment.findFirst({
       where: { id: String(assignmentId), ...visibleTo(student) },
+      include: { lecturer: { select: { userId: true } } },
     });
     if (!assignment) {
       return NextResponse.json({ error: "Assignment not found" }, { status: 404 });
@@ -257,6 +259,24 @@ export async function POST(req: NextRequest) {
         } catch (err) {
           console.warn("Could not record quiz grade:", err);
         }
+      }
+
+      /**
+       * Tell the tutor who set it — not the whole school. Only possible when
+       * this assignment has a named owner; one handed out school-wide with no
+       * lecturerId has no single tutor waiting on it, and guessing who to buzz
+       * would be worse than staying quiet.
+       */
+      if (assignment.lecturer?.userId) {
+        await notify({
+          to: { userIds: [assignment.lecturer.userId] },
+          kind: KIND.assignmentSubmitted,
+          severity: "info",
+          title: needsReview ? "A submission needs marking" : "A submission came in",
+          message: `${session.user?.name ?? "A student"} handed in "${assignment.title}".`,
+          link: "/lecturer/assignments/mark",
+          dedupeKey: `assignment-submitted:${assignmentId}:${student.id}`,
+        }).catch((error) => console.error("Assignment submission notification failed", error));
       }
 
       return NextResponse.json({

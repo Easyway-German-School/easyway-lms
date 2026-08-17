@@ -6,6 +6,7 @@ import { activeMuteFor, muteMessage } from "@/lib/community-moderation";
 import { isStickerId, stickerById } from "@/lib/community-stickers";
 import { markChannelRead } from "@/lib/community-unread";
 import { announceChatMessage } from "@/lib/community-notify";
+import { notify, KIND } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,9 @@ function serialise(
     reactions?: Array<{ emoji: string; userId: string }>;
     pinnedAt?: Date | null;
     stickerId?: string | null;
+    kind?: string;
+    gameMatchId?: string | null;
+    gameMatch?: { id: string; title: string; status: string } | null;
   },
   viewer: Viewer,
 ) {
@@ -96,6 +100,11 @@ function serialise(
     // Withheld from students on a hidden message for the same reason the body
     // is: a removed sticker should not still be showing.
     stickerId: hidden && !staff ? null : message.stickerId ?? null,
+    kind: message.kind ?? "text",
+    // Carries enough to render the invite card without a second request per
+    // message — same reasoning as `reactions` being folded here rather than
+    // fetched separately per bubble.
+    gameMatch: hidden && !staff ? null : message.gameMatch ?? null,
   };
 }
 
@@ -115,6 +124,7 @@ const INCLUDE = {
   author: { select: { id: true, name: true, role: true } },
   replyTo: { select: { id: true, body: true, hiddenAt: true, author: { select: { name: true } } } },
   reactions: { select: { emoji: true, userId: true } },
+  gameMatch: { select: { id: true, title: true, status: true } },
 } as const;
 
 /**
@@ -237,10 +247,12 @@ export async function POST(request: Request) {
      * transcript permanently.
      */
     const stickerId = isStickerId(body.stickerId) ? String(body.stickerId) : null;
+    const gameMatchId = body.gameMatchId ? String(body.gameMatchId) : null;
 
     if (!channelId) return NextResponse.json({ error: "channelId is required" }, { status: 400 });
-    // A message with neither words nor a picture nor a sticker is not a message.
-    if (!text && !attachmentUrl && !stickerId) {
+    // A message with neither words nor a picture nor a sticker nor a game
+    // invite is not a message.
+    if (!text && !attachmentUrl && !stickerId && !gameMatchId) {
       return NextResponse.json({ error: "Type something first" }, { status: 400 });
     }
 
@@ -248,6 +260,25 @@ export async function POST(request: Request) {
     const channel = await authorizeChannel(viewer, channelId);
     if (!channel) {
       return NextResponse.json({ error: "Channel not found in your community" }, { status: 403 });
+    }
+
+    /**
+     * The match has to belong to the SAME room, or a hand-crafted id would let
+     * a message in one cohort's chat point at a story only another cohort can
+     * see — the invite card would render fine and the "Join" link would 403
+     * the moment somebody tapped it. The match itself was already created
+     * through the ordinary POST /api/games, which checked the poster belonged
+     * to this space; this only confirms the two ids still agree.
+     */
+    let gameMatch: { id: string; title: string; status: string; spaceId: string | null } | null = null;
+    if (gameMatchId) {
+      gameMatch = await prisma.gameMatch.findFirst({
+        where: { id: gameMatchId, spaceId: channel.spaceId },
+        select: { id: true, title: true, status: true, spaceId: true },
+      });
+      if (!gameMatch) {
+        return NextResponse.json({ error: "That game isn't in this room." }, { status: 403 });
+      }
     }
 
     /**
@@ -298,6 +329,8 @@ export async function POST(request: Request) {
         attachmentType: body.attachmentType ? String(body.attachmentType) : null,
         attachmentName: body.attachmentName ? String(body.attachmentName) : null,
         stickerId,
+        kind: gameMatch ? "game_invite" : "text",
+        gameMatchId: gameMatch?.id ?? null,
       },
       include: INCLUDE,
     });
@@ -317,11 +350,43 @@ export async function POST(request: Request) {
       messageId: created.id,
       authorId: viewer.userId,
       authorName: created.author.name ?? "Someone",
-      // A sticker carries no text, so the lock-screen preview would otherwise
-      // be a blank line under somebody's name. The caption IS the message.
-      body: text || (stickerId ? stickerById(stickerId)?.caption ?? "" : ""),
+      // A sticker or a game invite carries no text, so the lock-screen preview
+      // would otherwise be a blank line under somebody's name. The caption IS
+      // the message.
+      body: text || (stickerId ? stickerById(stickerId)?.caption ?? "" : "") || (gameMatch ? `Started a game: ${gameMatch.title}` : ""),
       hasAttachment: Boolean(attachmentUrl),
     });
+
+    /**
+     * A game invite ALSO gets a real, persistent notification — bell and
+     * push, not just the ambient chat push everything above already sent.
+     * Closer in shape to Satzkette's own turn-ping (pingAssignee() in
+     * satzkette-server.ts) than to ordinary chat: starting a game is a rare,
+     * actionable event worth a badge that survives after the message has
+     * scrolled away, for a student who was not in the room when it happened.
+     * Deduped per match, not per message — reopening the tray and starting
+     * the same game again is not possible (POST /api/games already caps
+     * active stories per room), but this keeps the rule honest either way.
+     */
+    if (gameMatch) {
+      notify({
+        to: {
+          students: {
+            branchId: channel.space.branchId,
+            level: channel.space.level,
+            sessionSlot: channel.space.sessionSlot,
+          },
+        },
+        kind: KIND.gameInvite,
+        severity: "info",
+        title: "A game started",
+        message: `${created.author.name ?? "Someone"} started "${gameMatch.title}" — jump in.`,
+        link: `/games/${gameMatch.id}`,
+        senderId: viewer.userId,
+        push: true,
+        dedupeKey: `game-invite:${gameMatch.id}`,
+      }).catch((error) => console.error("Game invite notification failed", error));
+    }
 
     return NextResponse.json({ message: serialise(created, viewer) }, { status: 201 });
   } catch (error) {

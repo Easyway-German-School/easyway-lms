@@ -89,7 +89,18 @@ export async function GET() {
 
   const notifications = studentIds.length
     ? await prisma.notification.findMany({
-        where: { studentId: { in: studentIds }, channel: "in-app" },
+        /**
+         * `kind: "general"` is not a stylistic filter — it is the one thing
+         * that actually distinguishes an announcement the POST below wrote
+         * from every other reason one of these students might have a
+         * Notification row: a grade, an attendance mark, a support-ticket
+         * reply, a game starting in their chat. The POST writes raw rows with
+         * no `kind`, so they all land on the schema default, "general" — the
+         * same default every one of those OTHER notify() calls deliberately
+         * avoids by naming a real kind. Before this filter, every one of them
+         * showed up here as if the tutor had personally composed and sent it.
+         */
+        where: { studentId: { in: studentIds }, channel: "in-app", kind: "general" },
         orderBy: { createdAt: "desc" },
         take: 300,
         select: {
