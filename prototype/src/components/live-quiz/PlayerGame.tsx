@@ -26,6 +26,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import AnswerShape from "@/components/live-quiz/AnswerShape";
+import { buzz } from "@/lib/live-quiz-sound";
 import { CheckIcon, ClockIcon, CrossIcon, FlameIcon, SendIcon, TrophyIcon } from "@/components/icons";
 
 type ViewOption = { index: number; text: string; shape: string; color: string; label: string };
@@ -139,6 +140,26 @@ export default function PlayerGame({ gameId, onLeave }: { gameId: string; onLeav
   }, [view]);
 
   /**
+   * The verdict, in the pocket.
+   *
+   * Two short buzzes for right, one long for wrong — distinguishable without
+   * looking, which matters because at the reveal every head in the room is up
+   * at the board. Keyed on phase+index so the 1.5s poll cannot buzz a phone
+   * continuously for the whole time the answer is on screen.
+   */
+  const verdictRef = useRef("");
+  useEffect(() => {
+    if (!view || view.game.phase !== "reveal" || !view.outcome) return;
+    const key = `${view.game.currentIndex}`;
+    if (verdictRef.current === key) return;
+    verdictRef.current = key;
+    // Nothing at all for a missed question. A student who ran out of time knows,
+    // and buzzing at them about it is just a poke.
+    if (view.outcome.missed) return;
+    buzz(view.outcome.correct ? [26, 60, 26] : 150);
+  }, [view]);
+
+  /**
    * The draining bar, off the SERVER's clock.
    *
    * `offsetRef` is the difference between the server's `serverNow` and this
@@ -168,6 +189,10 @@ export default function PlayerGame({ gameId, onLeave }: { gameId: string; onLeav
     async (answer: unknown) => {
       if (!view?.question || sending) return;
       setSending(true);
+      // The tap landed. Said with a buzz rather than a noise, because thirty
+      // phones confirming out loud is not atmosphere — and because the student
+      // is looking at the board, not at their own screen.
+      buzz(18);
       try {
         await fetch(`/api/live-quiz/${gameId}/answer`, {
           method: "POST",
@@ -371,6 +396,31 @@ export default function PlayerGame({ gameId, onLeave }: { gameId: string; onLeav
         </div>
       ) : null}
 
+      {/* THEIR game, before the league table.
+          A leaderboard answers "who won", which for the twenty people who did
+          not win is not the question they are asking. This answers theirs: how
+          many did I get, and how did I place. It is also the only screen that
+          survives the walk home, so it is the one that has to be about them. */}
+      {view.game.phase === "ended" ? (
+        <div className="pq-report">
+          <p className="pq-report-score">
+            {view.me.correct}
+            <em>of {view.game.questionCount}</em>
+          </p>
+          <p className="pq-report-line">{scoreline(view.me.correct, view.game.questionCount)}</p>
+          <div className="pq-report-meta">
+            <span>
+              <strong>{view.me.score.toLocaleString()}</strong> points
+            </span>
+            {view.myStanding ? (
+              <span>
+                <strong>{ordinal(view.myStanding.place)}</strong> of {view.me.playerCount}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {(view.game.phase === "standings" || view.game.phase === "ended") && view.standings ? (
         <div className="pq-table">
           <p className="pq-kicker">
@@ -415,6 +465,26 @@ export default function PlayerGame({ gameId, onLeave }: { gameId: string; onLeav
       ) : null}
     </div>
   );
+}
+
+/**
+ * One line about how it went, and it has to be honest.
+ *
+ * A student who got 2 of 10 knows they got 2 of 10, and "Great job!" over that
+ * number is the moment they stop believing anything the app tells them. So the
+ * bottom rungs point at the next thing instead of praising the last one — but
+ * nothing here is ever unkind, because this is a German lesson and getting it
+ * wrong is the method, not a failure.
+ */
+function scoreline(correct: number, total: number): string {
+  if (total <= 0) return "That's the game.";
+  const share = correct / total;
+  if (correct === total) return "Every single one. Fehlerlos.";
+  if (share >= 0.8) return "Strong round — that level is sticking.";
+  if (share >= 0.6) return "Solid. The gaps are worth a second look.";
+  if (share >= 0.4) return "Halfway there. Worth going over these in class.";
+  if (correct > 0) return "A tricky set. These are the ones to revise.";
+  return "None this time — so these are exactly what to study next.";
 }
 
 function ordinal(place: number): string {
@@ -479,6 +549,15 @@ const PLAYER_CSS = `
 .pq-wrong{background:rgba(251,113,133,.14);color:#fda4af}
 .pq-points{font-size:2rem;font-weight:800;font-variant-numeric:tabular-nums}
 .pq-verdict .pq-note{color:#f4fbfa}
+
+.pq-report{text-align:center;padding:1.1rem .9rem 1.2rem;margin-bottom:.9rem;border-radius:1.1rem;
+  background:linear-gradient(160deg,rgba(255,102,0,.22),rgba(255,255,255,.06));
+  border:1px solid rgba(255,102,0,.35)}
+.pq-report-score{font-size:3.4rem;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.pq-report-score em{display:block;margin-top:.25rem;font-size:.95rem;font-weight:600;font-style:normal;opacity:.7}
+.pq-report-line{margin-top:.7rem;font-size:1rem;font-weight:600;text-wrap:balance}
+.pq-report-meta{display:flex;justify-content:center;gap:1.6rem;margin-top:.9rem;font-size:.85rem;opacity:.85}
+.pq-report-meta strong{font-variant-numeric:tabular-nums}
 
 .pq-table{flex:1;display:flex;flex-direction:column;gap:.6rem}
 .pq-kicker{display:flex;align-items:center;justify-content:center;gap:.5rem;

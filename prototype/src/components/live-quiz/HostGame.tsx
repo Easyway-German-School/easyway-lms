@@ -33,7 +33,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import AnswerShape from "@/components/live-quiz/AnswerShape";
-import { CheckIcon, CrossIcon, ExitIcon, ExpandIcon, TrophyIcon, UsersIcon } from "@/components/icons";
+import Confetti from "@/components/live-quiz/Confetti";
+import * as sound from "@/lib/live-quiz-sound";
+import {
+  CheckIcon,
+  CrossIcon,
+  ExitIcon,
+  ExpandIcon,
+  SpeakerIcon,
+  SpeakerOffIcon,
+  TrophyIcon,
+  UsersIcon,
+} from "@/components/icons";
 
 type ViewOption = { index: number; text: string; shape: string; color: string; label: string };
 
@@ -103,6 +114,8 @@ export default function HostGame({ gameId, onClose }: { gameId: string; onClose:
    * the following question.
    */
   const revealedRef = useRef(-1);
+  /** Which countdown pulse has already sounded. See the paint loop. */
+  const tickRef = useRef("");
 
   useEffect(() => setMounted(true), []);
 
@@ -117,6 +130,11 @@ export default function HostGame({ gameId, onClose }: { gameId: string; onClose:
   const act = useCallback(
     async (action: Action) => {
       setBusy(true);
+      // Every one of these is called from a click or a keypress, which is the
+      // only moment a browser will let us make noise. Safari also suspends the
+      // context whenever it feels like it, so this runs on each action rather
+      // than once at mount.
+      sound.unlock();
       try {
         const res = await fetch(`/api/live-quiz/${gameId}`, {
           method: "POST",
@@ -156,6 +174,80 @@ export default function HostGame({ gameId, onClose }: { gameId: string; onClose:
     // the phase, and the phase changes.
   }, [load, view?.pollMs]);
 
+  // --- sound ---------------------------------------------------------------
+
+  const [muted, setMutedState] = useState(true);
+  useEffect(() => setMutedState(sound.isMuted()), []);
+
+  const toggleSound = useCallback(() => {
+    // Unlock first: on the very first press the context does not exist yet, and
+    // un-muting a context that was never created is silent and looks broken.
+    sound.unlock();
+    const next = !sound.isMuted();
+    sound.setMuted(next);
+    setMutedState(next);
+  }, []);
+
+  /**
+   * The lobby bed cannot start on its own — no gesture has happened yet when
+   * the projector opens. So the tutor's first click ANYWHERE on the stage
+   * unlocks audio, which is usually the click that puts it full screen.
+   */
+  useEffect(() => {
+    const onFirstGesture = () => sound.unlock();
+    window.addEventListener("pointerdown", onFirstGesture, { once: true });
+    window.addEventListener("keydown", onFirstGesture, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", onFirstGesture);
+      window.removeEventListener("keydown", onFirstGesture);
+    };
+  }, []);
+
+  useEffect(() => () => sound.dispose(), []);
+
+  /**
+   * One cue per screen, keyed on phase AND question index.
+   *
+   * The poll returns the same phase every 1.5 seconds, so firing off `view`
+   * alone would replay the reveal sting for the whole time the answer is up.
+   */
+  const cueRef = useRef("");
+  useEffect(() => {
+    if (!view) return;
+    const key = `${view.game.phase}:${view.game.currentIndex}`;
+    if (cueRef.current === key) return;
+    const first = cueRef.current === "";
+    cueRef.current = key;
+
+    switch (view.game.phase) {
+      case "lobby":
+        sound.startLobby();
+        break;
+      case "question":
+        sound.stopLobby();
+        // Only the opening question gets the fanfare. On every one after it the
+        // countdown starting IS the cue, and a flourish before each question
+        // makes a ten-question game feel like ten separate games.
+        if (view.game.currentIndex === 0 && !first) sound.startCue();
+        break;
+      case "reveal":
+        // What the room hears depends on how the room did. A triumphant
+        // arpeggio over "nobody got this" is the sound of an app not paying
+        // attention.
+        if ((view.reveal?.correctCount ?? 0) > 0) sound.correctCue();
+        else sound.timeoutCue();
+        break;
+      case "standings":
+        sound.standingsCue();
+        break;
+      case "ended":
+        sound.finaleCue();
+        break;
+      default:
+        break;
+    }
+  }, [view]);
+
   // --- the countdown, redrawn locally at 10fps off the server's clock ------
   const [remainingMs, setRemainingMs] = useState(0);
   useEffect(() => {
@@ -164,7 +256,30 @@ export default function HostGame({ gameId, onClose }: { gameId: string; onClose:
       return;
     }
     const endsAt = view.endsAt;
-    const paint = () => setRemainingMs(Math.max(0, endsAt - (Date.now() + offsetRef.current)));
+    const paint = () => {
+      const left = Math.max(0, endsAt - (Date.now() + offsetRef.current));
+      setRemainingMs(left);
+
+      /**
+       * The pulse, and it ACCELERATES: once a second until the last five, then
+       * twice a second. That change of rate is what makes a room that has
+       * already answered look up at the people who have not — which is the
+       * whole social mechanic of the format.
+       *
+       * Driven off the same corrected clock as the dial rather than its own
+       * interval, so the sound and the number can never disagree. The slot key
+       * carries the rate so the regime change cannot land on a slot number it
+       * has already played.
+       */
+      if (left > 0) {
+        const slotMs = left <= 5000 ? 500 : 1000;
+        const key = `${slotMs}:${Math.ceil(left / slotMs)}`;
+        if (key !== tickRef.current) {
+          tickRef.current = key;
+          sound.tick(left <= 5000);
+        }
+      }
+    };
     paint();
     const timer = window.setInterval(paint, 100);
     return () => window.clearInterval(timer);
@@ -261,6 +376,15 @@ export default function HostGame({ gameId, onClose }: { gameId: string; onClose:
             <UsersIcon className="h-5 w-5" />
             {view?.playerCount ?? 0}
           </span>
+          <button
+            type="button"
+            className="lq-icon-btn"
+            onClick={toggleSound}
+            title={muted ? "Turn sound on" : "Turn sound off"}
+            aria-label={muted ? "Turn sound on" : "Turn sound off"}
+          >
+            {muted ? <SpeakerOffIcon className="h-5 w-5" /> : <SpeakerIcon className="h-5 w-5" />}
+          </button>
           <button type="button" className="lq-icon-btn" onClick={requestFullscreen} title="Full screen">
             <ExpandIcon className="h-5 w-5" />
           </button>
@@ -537,6 +661,8 @@ function FinalStage({ view }: { view: HostView }) {
 
   return (
     <div className="lq-final">
+      {/* Only here, and only once. See Confetti for why it stops. */}
+      <Confetti />
       <p className="lq-kicker">
         <TrophyIcon className="h-7 w-7" /> Final
       </p>
