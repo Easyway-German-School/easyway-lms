@@ -167,6 +167,43 @@ export function capabilitiesForUser(adminRole: unknown, overrides: unknown): Cap
 }
 
 /**
+ * Which branches this admin may see/manage, or `null` for unrestricted.
+ *
+ * Stored on User.adminBranchIds as a plain JSON array of branch ids — not a
+ * grant/revoke diff like capabilities, because there is no preset to diff
+ * against: "which branches" has no school-wide default beyond "all of them".
+ *
+ * Null AND an empty array both mean unrestricted. Empty is treated the same
+ * as null rather than as "access to nothing" because a superadmin unticking
+ * every box in the UI is indistinguishable from never having restricted this
+ * person at all, and the safer reading of that ambiguity is the wider one —
+ * the same reasoning `parseOverrides` above uses for a capability that is
+ * both granted and revoked, just pointed the other way: there, an
+ * unresolvable conflict picks the narrower access; here, an empty selection
+ * is not a conflict; it is nobody having deliberately drawn a boundary yet.
+ */
+export function parseBranchIds(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const ids = raw.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+  const unique = Array.from(new Set(ids));
+  return unique.length > 0 ? unique : null;
+}
+
+/**
+ * The branch filter a route should apply for this admin: `null` means every
+ * branch (today's behaviour, and every admin until restricted by hand), an
+ * array means exactly those branch ids.
+ *
+ *   const gate = await requireCapability("students");
+ *   if (!gate.ok) return gate.response;
+ *   const branchIds = scopedBranchIds(gate.admin);
+ *   if (branchIds) whereClause.branchId = { in: branchIds };
+ */
+export function scopedBranchIds(admin: Pick<AdminContext, "branchIds">): string[] | null {
+  return admin.branchIds;
+}
+
+/**
  * Convenience for route handlers that already established the user is an
  * admin and just need to check one capability by user id.
  */
@@ -305,6 +342,8 @@ export type AdminContext = {
   /** What this person can actually reach: preset plus their own overrides. */
   capabilities: Capability[];
   can: (capability: Capability) => boolean;
+  /** Null means every branch. See scopedBranchIds() above for how to use this. */
+  branchIds: string[] | null;
 };
 
 /**
@@ -316,7 +355,14 @@ export async function resolveAdmin(userId: string | undefined): Promise<AdminCon
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, role: true, adminRole: true, adminCapabilities: true },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      adminRole: true,
+      adminCapabilities: true,
+      adminBranchIds: true,
+    },
   });
 
   if (!user || String(user.role).toLowerCase() !== "admin") return null;
@@ -329,5 +375,6 @@ export async function resolveAdmin(userId: string | undefined): Promise<AdminCon
     adminRole,
     capabilities,
     can: (capability: Capability) => capabilities.includes(capability),
+    branchIds: parseBranchIds(user.adminBranchIds),
   };
 }

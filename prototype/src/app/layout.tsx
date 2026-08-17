@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
 import PageContainer from "@/components/PageContainer";
+import { LiveCallProvider } from "@/components/live/LiveCallContext";
+import LiveCallDock from "@/components/live/LiveCallDock";
 
 export const metadata: Metadata = {
   title: "Easyway German Language School",
@@ -101,7 +103,17 @@ export default function RootLayout({
           background-color and throws the gradient away. See globals.css. */}
       <body className="app-canvas min-h-full flex flex-col text-[var(--foreground)] transition-colors duration-300">
         <Providers>
-          <PageContainer>{children}</PageContainer>
+          {/*
+            Mounted here, above every route, so a live class survives client-
+            side navigation. Layouts don't remount when the page inside them
+            changes, so as long as `LiveCallDock` keeps rendering the same
+            `LiveKitClassroom` instance, the Room connection it holds never
+            tears down — see `LiveCallContext` for the full reasoning.
+          */}
+          <LiveCallProvider>
+            <PageContainer>{children}</PageContainer>
+            <LiveCallDock />
+          </LiveCallProvider>
         </Providers>
       </body>
     </html>

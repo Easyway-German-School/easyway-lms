@@ -8,6 +8,7 @@ import { type StudentWithUser } from "@/types/admin";
 import PasswordInput from "@/components/PasswordInput";
 import BulkStudentAdd from "@/components/BulkStudentAdd";
 import { goalFor } from "@/lib/germany-goals";
+import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 
 type BranchOption = {
   id: string;
@@ -124,6 +125,7 @@ function StudentsRoster() {
   const [filterLevel, setFilterLevel] = useState<string>(params.get("level") ?? "");
   const [filterBatch, setFilterBatch] = useState<string>(params.get("batch") ?? "");
   const [filterClassType, setFilterClassType] = useState<string>(params.get("classType") ?? "");
+  const [filterSessionSlot, setFilterSessionSlot] = useState<string>(params.get("sessionSlot") ?? "");
   const [filterStatus, setFilterStatus] = useState<string>(params.get("status") ?? "");
   const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>(params.get("paymentStatus") ?? "");
   const [search, setSearch] = useState<string>(params.get("search") ?? "");
@@ -183,6 +185,7 @@ function StudentsRoster() {
     if (filterLevel) url.searchParams.set("level", filterLevel);
     if (filterBatch) url.searchParams.set("batch", filterBatch);
     if (filterClassType) url.searchParams.set("classType", filterClassType);
+    if (filterSessionSlot) url.searchParams.set("sessionSlot", filterSessionSlot);
     if (filterStatus) url.searchParams.set("status", filterStatus);
     if (filterPaymentStatus) url.searchParams.set("paymentStatus", filterPaymentStatus);
     if (search) url.searchParams.set("search", search);
@@ -222,11 +225,11 @@ function StudentsRoster() {
 
   useEffect(() => {
     loadStudents();
-  }, [filterBranchId, filterTutorId, filterLevel, filterBatch, filterClassType, filterStatus, filterPaymentStatus, search, focus, agingBucket, focusIds, page, pageSize]);
+  }, [filterBranchId, filterTutorId, filterLevel, filterBatch, filterClassType, filterSessionSlot, filterStatus, filterPaymentStatus, search, focus, agingBucket, focusIds, page, pageSize]);
 
   useEffect(() => {
     setPage(1);
-  }, [filterBranchId, filterTutorId, filterLevel, filterClassType, filterStatus, filterPaymentStatus, search, focus, agingBucket, pageSize]);
+  }, [filterBranchId, filterTutorId, filterLevel, filterClassType, filterSessionSlot, filterStatus, filterPaymentStatus, search, focus, agingBucket, pageSize]);
 
   async function handleSaveStudent() {
     setStudentError("");
@@ -657,6 +660,20 @@ function StudentsRoster() {
                   <option value="">All types</option>
                   <option value="group">Group Class</option>
                   <option value="private">Private Class</option>
+                </select>
+              </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                <label htmlFor="sessionSlotFilter" className="block text-sm font-semibold text-[var(--muted)]">Session</label>
+                <select
+                  id="sessionSlotFilter"
+                  value={filterSessionSlot}
+                  onChange={(event) => setFilterSessionSlot(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">All sittings</option>
+                  {TIME_SLOTS.map((slot) => (
+                    <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
+                  ))}
                 </select>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">

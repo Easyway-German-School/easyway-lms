@@ -18,6 +18,7 @@ import {
   isOnlineBranch,
 } from "@/lib/online-branch";
 import { TIME_SLOTS, slotLabel } from "@/lib/class-times";
+import { OFFERED_LEVELS } from "@/lib/levels";
 
 type BranchOption = { id: string; name: string; location?: string | null; mode?: string | null };
 
@@ -49,14 +50,17 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [name, setName] = useState("");
   const branchRole = "student";
   const [branchId, setBranchId] = useState("");
-  const [level, setLevel] = useState("A1");
+  // Empty rather than defaulted to "A1" — a student who never opens this
+  // dropdown must be stopped by canAdvanceStep below, not silently enrolled
+  // as a beginner. Same reasoning for sessionSlot further down.
+  const [level, setLevel] = useState("");
   const [pathway, setPathway] = useState(packageOptions[0]);
   const [gender, setGender] = useState("");
   const [dob, setDob] = useState("");
   const [religion, setReligion] = useState("");
   const [profession, setProfession] = useState("");
   const [batch, setBatch] = useState("");
-  const [sessionSlot, setSessionSlot] = useState("morning");
+  const [sessionSlot, setSessionSlot] = useState("");
   /**
    * physical | hybrid — how a CAMPUS student attends. The Online branch has no
    * choice to make (it is online by definition), so this control only appears
@@ -156,7 +160,17 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
 
   const canAdvanceStep =
     step === 1
-      ? name.trim() !== "" && email.trim() !== "" && password.length >= 8 && branchId !== "" && pathway.trim() !== "" && batch !== ""
+      ? name.trim() !== "" &&
+        email.trim() !== "" &&
+        password.length >= 8 &&
+        branchId !== "" &&
+        pathway.trim() !== "" &&
+        batch !== "" &&
+        level !== "" &&
+        // A private student agrees their own times with their tutor and never
+        // sees the session dropdown (it is hidden below), so it cannot gate
+        // them forward.
+        (classType === "private" || sessionSlot !== "")
       : step === 2
       ? phone.trim() !== "" &&
         city.trim() !== "" &&
@@ -217,11 +231,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
 
     prefill("email", setEmail);
     prefill("name", setName);
-    prefill("level", (v) => setLevel(v.toUpperCase()));
+    prefill("level", (v) => {
+      const requested = v.toUpperCase();
+      if ((OFFERED_LEVELS as readonly string[]).includes(requested)) setLevel(requested);
+    });
     prefill("branchId", setBranchId);
     prefill("sessionSlot", (v) => {
       const slot = v.toLowerCase();
-      if (["morning", "afternoon", "evening"].includes(slot)) setSessionSlot(slot);
+      if ((TIME_SLOTS as readonly string[]).includes(slot)) setSessionSlot(slot);
     });
   }, []);
 
@@ -294,6 +311,18 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
 
     if (!pathway.trim()) {
       setError("Please choose a package type.");
+      return;
+    }
+
+    if (!level.trim()) {
+      setError("Please choose your level.");
+      return;
+    }
+
+    // A private student books their own times with their tutor and never
+    // sees this question — see the hidden sessionSlot field in step 1.
+    if (classType !== "private" && !sessionSlot.trim()) {
+      setError("Please choose a session.");
       return;
     }
 
@@ -524,6 +553,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <div>
                   <label htmlFor="level" className="block text-sm font-semibold text-[var(--muted)]">What class are you starting with?</label>
                   <select id="level" name="level" value={level} onChange={(e) => setLevel(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
+                    <option value="">Select your level</option>
                     <option value="A1">A1 Beginner — new learners starting from basics</option>
                     <option value="A2">A2 — upper beginners class</option>
                     <option value="B1">B1 — intermediate class</option>
@@ -624,6 +654,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <div>
                   <label htmlFor="sessionSlot" className="block text-sm font-semibold text-[var(--muted)]">Which session suits you?</label>
                   <select id="sessionSlot" name="sessionSlot" value={sessionSlot} onChange={(e) => setSessionSlot(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
+                    <option value="">Select a session</option>
                     {SESSION_SLOTS.map((slot) => (
                       <option key={slot.value} value={slot.value}>
                         {isOnline ? `${slot.label} WAT` : slot.label}

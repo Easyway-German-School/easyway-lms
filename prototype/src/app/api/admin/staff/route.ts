@@ -10,11 +10,13 @@ import {
   capabilitiesFor,
   capabilitiesForUser,
   normalizeAdminRole,
+  parseBranchIds,
   parseOverrides,
   type AdminContext,
   type AdminRole,
   type Capability,
 } from "@/lib/admin-roles";
+import { tenantWhere } from "@/lib/auth";
 
 /**
  * Admin accounts: who they are, what they can reach, and how they get in.
@@ -86,9 +88,20 @@ export async function GET() {
       email: true,
       adminRole: true,
       adminCapabilities: true,
+      adminBranchIds: true,
       createdAt: true,
       totpEnabledAt: true,
     },
+  });
+
+  // Fetched here, gated only on `staff`, rather than making the page call
+  // /api/admin/branches itself — that route requires the `branches`
+  // capability, which somebody holding `staff` (e.g. a secretary handed staff
+  // management by hand) does not necessarily also have.
+  const branches = await prisma.branch.findMany({
+    where: tenantWhere(auth.session.user.tenantId),
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
   });
 
   return NextResponse.json({
@@ -113,6 +126,9 @@ export async function GET() {
         presetCapabilities: capabilitiesFor(adminRole),
         capabilities: capabilitiesForUser(adminRole, a.adminCapabilities),
         overrides: parseOverrides(a.adminCapabilities),
+        // Null means every branch — the default, and what every admin had
+        // before branch scoping existed.
+        branchIds: parseBranchIds(a.adminBranchIds),
       };
     }),
     roles: ADMIN_ROLES.map((r) => ({
@@ -121,6 +137,7 @@ export async function GET() {
       capabilities: capabilitiesFor(r),
     })),
     allCapabilities: CAPABILITIES.map((value) => ({ value, label: CAPABILITY_LABELS[value] })),
+    branches,
   });
 }
 
@@ -208,6 +225,7 @@ export async function POST(req: NextRequest) {
           presetCapabilities: capabilitiesFor(adminRole),
           capabilities: capabilitiesFor(adminRole),
           overrides: { grant: [], revoke: [] },
+          branchIds: null,
           mfaEnabled: false,
         },
         // Echoed once so the super admin can pass it on. Never stored in the
@@ -262,7 +280,12 @@ export async function DELETE(req: NextRequest) {
 
   await prisma.user.update({
     where: { id: userId },
-    data: { role: "STUDENT", adminRole: null, adminCapabilities: Prisma.DbNull },
+    data: {
+      role: "STUDENT",
+      adminRole: null,
+      adminCapabilities: Prisma.DbNull,
+      adminBranchIds: Prisma.DbNull,
+    },
   });
 
   return NextResponse.json({ success: true, revoked: target.email });
@@ -286,11 +309,26 @@ export async function PATCH(req: NextRequest) {
     const name = typeof body.name === "string" ? body.name.trim() : null;
     const email = body.email === undefined ? null : normaliseEmail(body.email);
     const password = typeof body.password === "string" ? body.password : null;
+    // Distinguished from "not sent" (leave alone) rather than folded into a
+    // plain array check, because the way to LIFT a restriction is to send an
+    // empty array, and that has to be tellable apart from the field being
+    // absent entirely.
+    const branchIdsProvided = Object.prototype.hasOwnProperty.call(body, "branchIds");
+    const requestedBranchIds = branchIdsProvided && Array.isArray(body.branchIds)
+      ? (body.branchIds as unknown[]).filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      : [];
 
     if (!userId) {
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
-    if (!adminRole && !capabilities && name === null && email === null && password === null) {
+    if (
+      !adminRole &&
+      !capabilities &&
+      name === null &&
+      email === null &&
+      password === null &&
+      !branchIdsProvided
+    ) {
       return NextResponse.json({ error: "Nothing to change" }, { status: 400 });
     }
     if (adminRole && !(ADMIN_ROLES as readonly string[]).includes(adminRole)) {
@@ -303,6 +341,19 @@ export async function PATCH(req: NextRequest) {
     });
     if (!target || String(target.role).toLowerCase() !== "admin") {
       return NextResponse.json({ error: "That user is not an admin" }, { status: 404 });
+    }
+
+    // Only branches that actually exist, in this tenant, make the cut — a
+    // stale id (a removed branch, or a typo from a hand-built request) is
+    // dropped silently rather than stored and later dereferenced into
+    // nothing.
+    let validatedBranchIds: string[] = [];
+    if (branchIdsProvided && requestedBranchIds.length > 0) {
+      const found = await prisma.branch.findMany({
+        where: { id: { in: requestedBranchIds }, ...tenantWhere(auth.session.user.tenantId) },
+        select: { id: true },
+      });
+      validatedBranchIds = found.map((b) => b.id);
     }
 
     /* ---------------------------------------------------------- account */
@@ -367,8 +418,14 @@ export async function PATCH(req: NextRequest) {
         // An empty diff is stored as null, which reads as "just the preset".
         adminCapabilities:
           overrides.grant.length === 0 && overrides.revoke.length === 0 ? Prisma.DbNull : overrides,
+        // Only touched when the request actually sent branchIds; an empty
+        // selection clears the restriction rather than locking the person out
+        // of every branch.
+        ...(branchIdsProvided
+          ? { adminBranchIds: validatedBranchIds.length > 0 ? validatedBranchIds : Prisma.DbNull }
+          : {}),
       },
-      select: { id: true, name: true, email: true, totpEnabledAt: true },
+      select: { id: true, name: true, email: true, totpEnabledAt: true, adminBranchIds: true },
     });
 
     return NextResponse.json({
@@ -382,6 +439,7 @@ export async function PATCH(req: NextRequest) {
         presetCapabilities: preset,
         capabilities: effective,
         overrides,
+        branchIds: parseBranchIds(updated.adminBranchIds),
       },
       // Told back so the page can say "they must sign in again with this",
       // rather than the super admin having to remember what they typed.

@@ -105,7 +105,14 @@ export type MyExam = {
   seatNumber: string | null;
   branchName: string | null;
   isPast: boolean;
-  result: { score: number; grade: string | null; feedback: string | null } | null;
+  result: {
+    score: number;
+    grade: string | null;
+    feedback: string | null;
+    skills: { reading: number; listening: number; writing: number; speaking: number } | null;
+    passThreshold: number | null;
+    passed: boolean | null;
+  } | null;
 };
 
 /**
@@ -128,7 +135,7 @@ export async function myExams(userId: string, now = new Date()): Promise<MyExam[
     include: {
       exam: {
         select: {
-          id: true, examBody: true, level: true, fee: true,
+          id: true, examBody: true, level: true, fee: true, passThreshold: true,
           branch: { select: { name: true } },
         },
       },
@@ -139,13 +146,24 @@ export async function myExams(userId: string, now = new Date()): Promise<MyExam[
   const grades = student
     ? await prisma.grade.findMany({
         where: { studentId: student.id, examId: { not: null } },
-        select: { examId: true, score: true, grade: true, feedback: true },
+        select: {
+          examId: true, score: true, grade: true, feedback: true,
+          readingScore: true, listeningScore: true, writingScore: true, speakingScore: true,
+        },
       })
     : [];
   const gradeBy = new Map(grades.map((g) => [g.examId!, g]));
 
   return registrations.map((r) => {
     const grade = r.examId ? gradeBy.get(r.examId) : undefined;
+    const skills =
+      grade &&
+      grade.readingScore != null && grade.listeningScore != null &&
+      grade.writingScore != null && grade.speakingScore != null
+        ? { reading: grade.readingScore, listening: grade.listeningScore, writing: grade.writingScore, speaking: grade.speakingScore }
+        : null;
+    const passThreshold = r.exam?.passThreshold ?? null;
+
     return {
       registrationId: r.id,
       examId: r.examId,
@@ -160,7 +178,17 @@ export async function myExams(userId: string, now = new Date()): Promise<MyExam[
       branchName: r.exam?.branch?.name ?? null,
       isPast: r.examDate < now,
       result: grade
-        ? { score: grade.score, grade: grade.grade, feedback: grade.feedback }
+        ? {
+            score: grade.score,
+            grade: grade.grade,
+            feedback: grade.feedback,
+            skills,
+            passThreshold,
+            passed:
+              skills && passThreshold !== null
+                ? Object.values(skills).every((s) => s >= passThreshold)
+                : null,
+          }
         : null,
     };
   });

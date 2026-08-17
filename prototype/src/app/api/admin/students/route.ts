@@ -2,7 +2,7 @@ import bcryptjs from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
-import { requireCapability } from "@/lib/admin-roles";
+import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import {
   AGING_BUCKETS,
   computeStudentFinance,
@@ -20,6 +20,7 @@ export async function GET(request: Request) {
   const level = url.searchParams.get("level");
   const batch = url.searchParams.get("batch");
   const classType = url.searchParams.get("classType");
+  const sessionSlot = url.searchParams.get("sessionSlot");
   const status = url.searchParams.get("status");
   const paymentStatus = url.searchParams.get("paymentStatus");
   const tutorId = url.searchParams.get("tutorId");
@@ -54,10 +55,28 @@ export async function GET(request: Request) {
   if (level) whereClause.level = level;
   if (batch) whereClause.admission = { path: ["batch"], equals: batch };
   if (classType) whereClause.classType = classType;
+  if (sessionSlot) whereClause.sessionSlot = sessionSlot;
   if (status) whereClause.status = status;
 
   if (gate.session.user.tenantId) {
     whereClause.branch = { tenantId: gate.session.user.tenantId };
+  }
+
+  /**
+   * BRANCH SCOPING — an admin restricted to specific branches (see
+   * admin-roles.ts / AdminBranchAccess in the staff page) cannot see students
+   * outside them, whatever branchId they pass in the query string. A request
+   * for an out-of-scope branch is not told apart from one for a branch that
+   * does not exist — an impossible id, rather than an error — so this cannot
+   * be used to probe which branches exist.
+   */
+  const allowedBranchIds = scopedBranchIds(gate.admin);
+  if (allowedBranchIds) {
+    if (branchId) {
+      if (!allowedBranchIds.includes(branchId)) whereClause.branchId = "__no-branch-access__";
+    } else {
+      whereClause.branchId = { in: allowedBranchIds };
+    }
   }
 
   if (search) {

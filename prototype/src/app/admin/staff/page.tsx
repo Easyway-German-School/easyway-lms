@@ -42,10 +42,14 @@ type Admin = {
   presetCapabilities: string[];
   capabilities: string[];
   overrides: { grant: string[]; revoke: string[] };
+  // Null means every branch — the default, and what every admin has until a
+  // super admin deliberately narrows it below.
+  branchIds: string[] | null;
 };
 
 type RoleOption = { value: string; label: string; capabilities: string[] };
 type CapabilityOption = { value: string; label: string };
+type BranchOption = { id: string; name: string };
 
 const ROLE_SUMMARY: Record<string, string> = {
   super: "Everything, including who else is an admin.",
@@ -60,6 +64,7 @@ export default function AdminStaffPage() {
   const [admins, setAdmins] = useState<Admin[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [allCapabilities, setAllCapabilities] = useState<CapabilityOption[]>([]);
+  const [branches, setBranches] = useState<BranchOption[]>([]);
   const [signInPath, setSignInPath] = useState("/auth/admin");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -67,6 +72,11 @@ export default function AdminStaffPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  // Whether the "restrict to specific branches" box is ticked open, per admin
+  // id. Falls back to whether a restriction already exists, so opening a
+  // freshly loaded person shows the right state without an explicit entry
+  // here — this only overrides that once someone actually clicks the box.
+  const [branchRestrictOpen, setBranchRestrictOpen] = useState<Record<string, boolean>>({});
 
   // Creating
   const [showNew, setShowNew] = useState(false);
@@ -94,6 +104,7 @@ export default function AdminStaffPage() {
       setAdmins(data.admins ?? []);
       setRoles(data.roles ?? []);
       setAllCapabilities(data.allCapabilities ?? []);
+      setBranches(data.branches ?? []);
       if (data.signInPath) setSignInPath(data.signInPath);
       setError("");
     } catch (e) {
@@ -115,6 +126,9 @@ export default function AdminStaffPage() {
       name?: string;
       email?: string;
       password?: string;
+      // Sending [] clears the restriction (every branch); omit the field
+      // entirely to leave it untouched.
+      branchIds?: string[];
     },
   ) {
     setSavingId(userId);
@@ -216,6 +230,29 @@ export default function AdminStaffPage() {
       ? admin.capabilities.filter((c) => c !== capability)
       : [...admin.capabilities, capability];
     void save(admin.id, { capabilities: next });
+  }
+
+  /**
+   * Opens or closes the branch checklist for this person. Switching it off
+   * clears any restriction immediately — leaving stale picks stored but
+   * hidden would mean the access and the screen disagree about what is
+   * actually in effect.
+   */
+  function toggleBranchRestriction(admin: Admin) {
+    const isOpen = branchRestrictOpen[admin.id] ?? admin.branchIds !== null;
+    const next = !isOpen;
+    setBranchRestrictOpen((prev) => ({ ...prev, [admin.id]: next }));
+    if (!next && admin.branchIds !== null) {
+      void save(admin.id, { branchIds: [] });
+    }
+  }
+
+  function toggleBranch(admin: Admin, branchId: string) {
+    const current = admin.branchIds ?? [];
+    const next = current.includes(branchId)
+      ? current.filter((id) => id !== branchId)
+      : [...current, branchId];
+    void save(admin.id, { branchIds: next });
   }
 
   function startEditing(admin: Admin) {
@@ -680,6 +717,74 @@ export default function AdminStaffPage() {
                             </label>
                           );
                         })}
+                      </div>
+
+                      {/* ---- Branch access -------------------------------
+                          Independent of the "Branches" capability above: that
+                          box gates the /admin/branches area itself, this one
+                          narrows which branches' students, staff and other
+                          branch-scoped records this person can reach at all. */}
+                      <div className="mt-4 border-t border-slate-200 pt-4">
+                        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm hover:border-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={branchRestrictOpen[admin.id] ?? admin.branchIds !== null}
+                            disabled={busy}
+                            onChange={() => toggleBranchRestriction(admin)}
+                            className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-medium text-slate-800">
+                              Restrict to specific branches
+                            </span>
+                            <span className="mt-0.5 block text-xs text-slate-500">
+                              {admin.branchIds === null
+                                ? "Off — this person can see every branch."
+                                : `On — limited to ${admin.branchIds.length} of ${branches.length} branch${branches.length === 1 ? "" : "es"}.`}
+                            </span>
+                          </span>
+                        </label>
+
+                        {(branchRestrictOpen[admin.id] ?? admin.branchIds !== null) && (
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            {branches.length === 0 ? (
+                              <p className="text-xs text-slate-500">No branches exist yet.</p>
+                            ) : (
+                              branches.map((branch) => {
+                                const checked = (admin.branchIds ?? []).includes(branch.id);
+                                return (
+                                  <label
+                                    key={branch.id}
+                                    className={`flex cursor-pointer items-center gap-2 rounded-xl border p-2.5 text-sm transition ${
+                                      checked
+                                        ? "border-emerald-300 bg-emerald-50"
+                                        : "border-slate-200 bg-white hover:border-slate-300"
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={busy}
+                                      onChange={() => toggleBranch(admin, branch.id)}
+                                      className="h-4 w-4 shrink-0 accent-[var(--accent)]"
+                                    />
+                                    <span className="min-w-0 flex-1 truncate font-medium text-slate-800">
+                                      {branch.name}
+                                    </span>
+                                  </label>
+                                );
+                              })
+                            )}
+                          </div>
+                        )}
+                        {(branchRestrictOpen[admin.id] ?? admin.branchIds !== null) &&
+                          branches.length > 0 &&
+                          (admin.branchIds ?? []).length === 0 && (
+                            <p className="mt-2 text-xs text-slate-500">
+                              Nothing picked yet — until at least one branch is ticked, this is the
+                              same as leaving the restriction off.
+                            </p>
+                          )}
                       </div>
 
                       {adjusted > 0 && (

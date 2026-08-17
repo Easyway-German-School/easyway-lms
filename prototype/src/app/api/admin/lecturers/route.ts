@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcryptjs from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 
-import { requireCapability } from "@/lib/admin-roles";
+import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import {
   COURSE_LEVELS,
   assignmentToData,
@@ -137,36 +137,52 @@ export async function GET() {
 
   const branchNames = new Map(branches.map((branch) => [branch.id, branch.name]));
 
-  const rows = await Promise.all(
-    lecturers.map(async (lecturer) => {
-      const assignment = readAssignment(lecturer);
-      return {
-        id: lecturer.id,
-        user: lecturer.user,
-        specialization: lecturer.specialization,
-        bio: lecturer.bio,
-        phone: lecturer.phone,
-        photoUrl: lecturer.photoUrl,
-        status: readLecturerStatus(lecturer.status),
-        statusNote: lecturer.statusNote,
-        statusChangedAt: lecturer.statusChangedAt,
-        // Resolved rather than raw, so the admin form shows the same answer the
-        // tutor's own portal acts on — including the null-means-everything
-        // default, which a raw column would render as no boxes ticked.
-        features: lecturerFeatures(lecturer.features),
-        employmentType: lecturer.employmentType,
-        startedAt: lecturer.startedAt,
-        assignment,
-        assignmentLabel: describeAssignment(assignment, branchNames),
-        studentCount: await countStudents(assignment, lecturer.id),
-        classes: lecturer.classes.map((klass) => ({
-          id: klass.id,
-          name: klass.name,
-          course: { title: klass.course.title, level: klass.course.level },
-        })),
-      };
-    }),
-  );
+  /**
+   * BRANCH SCOPING — an admin restricted to specific branches sees only the
+   * tutors assigned to at least one of them. A tutor with no branch in their
+   * assignment at all (`branchIds` empty — "No class assigned") is not shown
+   * to a restricted admin either: there is nothing about them that says they
+   * belong inside the restriction, and the safer reading of "unassigned" is
+   * "not yet this admin's to see", not "visible everywhere".
+   */
+  const allowedBranchIds = scopedBranchIds(gate.admin);
+
+  const rows = (
+    await Promise.all(
+      lecturers.map(async (lecturer) => {
+        const assignment = readAssignment(lecturer);
+        if (allowedBranchIds && !assignment.branchIds.some((id) => allowedBranchIds.includes(id))) {
+          return null;
+        }
+        return {
+          id: lecturer.id,
+          user: lecturer.user,
+          specialization: lecturer.specialization,
+          bio: lecturer.bio,
+          phone: lecturer.phone,
+          photoUrl: lecturer.photoUrl,
+          status: readLecturerStatus(lecturer.status),
+          statusNote: lecturer.statusNote,
+          statusChangedAt: lecturer.statusChangedAt,
+          // Resolved rather than raw, so the admin form shows the same answer
+          // the tutor's own portal acts on — including the
+          // null-means-everything default, which a raw column would render as
+          // no boxes ticked.
+          features: lecturerFeatures(lecturer.features),
+          employmentType: lecturer.employmentType,
+          startedAt: lecturer.startedAt,
+          assignment,
+          assignmentLabel: describeAssignment(assignment, branchNames),
+          studentCount: await countStudents(assignment, lecturer.id),
+          classes: lecturer.classes.map((klass) => ({
+            id: klass.id,
+            name: klass.name,
+            course: { title: klass.course.title, level: klass.course.level },
+          })),
+        };
+      }),
+    )
+  ).filter((row): row is NonNullable<typeof row> => row !== null);
 
   return NextResponse.json({ lecturers: rows, branches });
 }

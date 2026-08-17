@@ -9,6 +9,8 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
 import { currentTenantId, setTenantScope } from "@/lib/tenant/context";
 import { resolveTenantId } from "@/lib/tenant/resolve";
+import { OFFERED_LEVELS } from "@/lib/levels";
+import { TIME_SLOTS } from "@/lib/class-times";
 
 /**
  * Whether there is a Branch table to select from.
@@ -160,15 +162,30 @@ export async function POST(request: NextRequest) {
     }
     const normalizedRole = "STUDENT" as const;
     const normalizedBranchId = typeof branchId === "string" && branchId.trim() ? branchId : null;
-    const normalizedLevel = typeof level === "string" && level.trim() ? level : "A1";
+    // Level used to fall back to "A1" whenever this was missing or garbled,
+    // which meant a student who never touched the level dropdown was silently
+    // enrolled as a beginner instead of being told the field mattered. It is
+    // validated below (against the same OFFERED_LEVELS the rest of the app
+    // draws its level lists from) and the request is rejected rather than
+    // defaulted when it is missing or not a real level.
+    const normalizedLevel = typeof level === "string" ? level.trim().toUpperCase() : "";
+    const levelValid = (OFFERED_LEVELS as readonly string[]).includes(normalizedLevel);
     const normalizedPathway = typeof pathway === "string" && pathway.trim() ? pathway : "Language training";
     const normalizedBatch = typeof batch === "string" && batch.trim() ? batch : "";
-    const normalizedSessionSlot = ["morning", "afternoon", "evening"].includes(
-      String(sessionSlot ?? "").toLowerCase(),
-    )
-      ? String(sessionSlot).toLowerCase()
-      : "morning";
     const normalizedClassType = String(classType ?? "").toLowerCase() === "private" ? "private" : "group";
+    // Same story as level: this used to fall back to "morning" for any missing
+    // or invalid value, so a student who never opened the session dropdown got
+    // enrolled into a slot they never chose. A private student genuinely has
+    // nothing to choose here — they book their own times with their tutor, the
+    // signup form hides the field for them — so validation below is skipped
+    // only for classType "private". The DB column is a non-nullable
+    // String @default("morning") that other code (the timetable, the
+    // community room a student lands in) matches against directly, so a
+    // private signup still needs *some* valid slot in storage; it lands on
+    // "morning" rather than an empty string nothing downstream expects.
+    const rawSessionSlot = typeof sessionSlot === "string" ? sessionSlot.trim().toLowerCase() : "";
+    const sessionSlotValid = (TIME_SLOTS as readonly string[]).includes(rawSessionSlot);
+    const normalizedSessionSlot = sessionSlotValid ? rawSessionSlot : "morning";
 
     /**
      * How this student attends: physical | hybrid | online.
@@ -273,6 +290,23 @@ export async function POST(request: NextRequest) {
     if (normalizedRole === "STUDENT" && !normalizedPathway) {
       return NextResponse.json(
         { error: "Please select a learning pathway" },
+        { status: 400 }
+      );
+    }
+
+    if (normalizedRole === "STUDENT" && !levelValid) {
+      return NextResponse.json(
+        { error: "Please select a valid level" },
+        { status: 400 }
+      );
+    }
+
+    // Group students pick one of the house sittings; a private student agrees
+    // their own times with their tutor and never sees this question, so it is
+    // not required for them.
+    if (normalizedRole === "STUDENT" && normalizedClassType !== "private" && !sessionSlotValid) {
+      return NextResponse.json(
+        { error: "Please select a session" },
         { status: 400 }
       );
     }

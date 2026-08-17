@@ -74,7 +74,9 @@ export async function GET() {
     prisma.message.count().catch(() => 0),
     prisma.message.count({ where: { hiddenAt: { not: null } } }).catch(() => 0),
     prisma.examRegistration.count().catch(() => 0),
-    prisma.examRegistration.count({ where: { status: "pending" } }).catch(() => 0),
+    // "registered" is the real awaiting-confirmation state — "pending" was
+    // never a value this column takes, so this count silently read 0 always.
+    prisma.examRegistration.count({ where: { status: "registered" } }).catch(() => 0),
     prisma.assignmentSubmission.count({ where: { score: null } }).catch(() => 0),
     prisma.attendance.findMany({
       where: { date: { gte: thirtyDaysAgo } },

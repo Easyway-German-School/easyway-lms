@@ -77,6 +77,19 @@ async function handleGET(request: NextRequest) {
     }),
   );
 
+  /**
+   * Exam reminders used to only exist as a manual "send now" button an admin
+   * had to remember to click — nothing scheduled it, so a student who
+   * registered got no reminder unless someone in the office thought to. This
+   * fires once, on the single calendar day three days before each sitting.
+   */
+  results.push(
+    await run("exam-reminders", async () => {
+      const { sendDueExamReminders } = await import("@/lib/exam-reminders");
+      return sendDueExamReminders();
+    }),
+  );
+
   results.push(
     await run("recording-reconcile", async () => {
       const { reconcileRecordings } = await import("@/lib/class-recorder");

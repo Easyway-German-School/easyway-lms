@@ -5,38 +5,19 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import BrandLoader from "@/components/BrandLoader";
 import StudentShell from "@/components/StudentShell";
 import LecturerShell from "@/components/LecturerShell";
-import LiveKitClassroom, { type LeaveOutcome } from "@/components/live/LiveKitClassroom";
+import type { LeaveOutcome } from "@/components/live/LiveKitClassroom";
+import { useLiveCall } from "@/components/live/LiveCallContext";
 import SessionEndScreen from "@/components/live/SessionEndScreen";
 import PreflightCheck from "@/components/live/PreflightCheck";
 import JoinByCode from "@/components/live/JoinByCode";
 import LiveClassCode from "@/components/live/LiveClassCode";
 import { BroadcastIcon, CalendarIcon, FilmIcon } from "@/components/icons";
 import { qualityModesFor, qualitySpec, type QualityMode, type RoomRole } from "@/lib/live-classroom";
-
-type LiveSession = {
-  provider: "livekit";
-  token: string | null;
-  url: string | null;
-  roomName: string;
-  displayName: string;
-  role: RoomRole;
-  level: string;
-  sessionSlot: string;
-  branchName: string | null;
-  isOnlineBranch: boolean;
-  initialQuality: QualityMode;
-  participantName: string;
-  liveSessionId: string | null;
-  joinCode: string | null;
-  startedAt: string | null;
-  tutorName: string | null;
-  isPrivate: boolean;
-  heartbeatMs: number;
-};
+import type { LiveSession } from "@/lib/live-call-session";
 
 /**
  * The pre-join screen.
@@ -261,8 +242,8 @@ function LiveClassroomPageInner() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [joined, setJoined] = useState(false);
   const [mode, setMode] = useState<QualityMode>("medium");
+  const liveCall = useLiveCall();
   /**
    * Set the moment somebody leaves, and the reason they left with it.
    *
@@ -300,7 +281,6 @@ function LiveClassroomPageInner() {
       setLockedMessage(null);
       setMisconfigured(null);
       setEnded(null);
-      setJoined(false);
       setLoading(true);
 
       try {
@@ -367,82 +347,42 @@ function LiveClassroomPageInner() {
   }, [code]);
 
   /**
-   * THE TUTOR'S HEARTBEAT.
-   *
-   * An open session is what tells forty students the class is on, so the one
-   * thing it must never do is stay open after the tutor has gone. A closed
-   * laptop, a crashed tab and a flat battery all look identical from the server
-   * — none of them send "I left" — so the server expires anything it has not
-   * heard from, and this is the sound of the tutor still being here.
-   *
-   * It starts at the LOBBY, not on join. A tutor who opens the page, reads out
-   * the code and spends two minutes on the quality screen has already had their
-   * students rung; if the heartbeat waited for the video to connect, the
-   * session would expire underneath them while they were still setting up.
+   * The tutor's heartbeat and the explicit, idempotent "end class" call both
+   * moved into `LiveCallContext` — they have to keep running while the call
+   * is minimized or the tutor is looking at a completely different page,
+   * which this component is no longer guaranteed to be mounted for.
    */
   const isTutor = session?.role === "tutor";
-  const heartbeatMs = session?.heartbeatMs ?? 45_000;
-  const beating = Boolean(isTutor && session?.liveSessionId);
-
-  useEffect(() => {
-    if (!beating) return;
-
-    const beat = () => {
-      void fetch("/api/live/presence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "heartbeat" }),
-      }).catch(() => {});
-    };
-
-    beat();
-    const timer = window.setInterval(beat, heartbeatMs);
-    return () => window.clearInterval(timer);
-  }, [beating, heartbeatMs]);
-
-  const endedRef = useRef(false);
 
   /**
-   * Ending the class is EXPLICIT and idempotent.
-   *
-   * Not fired on unmount: a tutor navigating to the roster mid-lesson, or React
-   * remounting in strict mode, would end the class for everybody. Only leaving
-   * the classroom deliberately does it — and the heartbeat expiry is the safety
-   * net for every other way a tutor can disappear.
+   * A call this page started can end while the tutor/student is elsewhere —
+   * the dock clears `activeCall` and parks the outcome for whoever asks. This
+   * claims it the moment it appears, which is what stopped the old behaviour:
+   * leaving used to just flip a local `joined` flag, and for a student whose
+   * class had just ended, the lobby's own "nothing is live" branch would then
+   * say so — a lousy way to be thanked for attending a lesson.
    */
-  const endClass = useCallback(() => {
-    if (endedRef.current) return;
-    endedRef.current = true;
-    void fetch("/api/live/presence", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "end" }),
-    }).catch(() => {});
-  }, []);
+  useEffect(() => {
+    if (!session) return;
+    const outcome = liveCall.takeOutcomeFor(session.roomName);
+    if (outcome) setEnded(outcome);
+  }, [session, liveCall.activeCall, liveCall.takeOutcomeFor]);
 
-  const handleLeave = useCallback(
-    (outcome: LeaveOutcome) => {
-      /**
-       * A TUTOR WHO DROPPED HAS NOT ENDED THE CLASS.
-       *
-       * Only a deliberate departure closes the session. A tutor whose laptop
-       * lost WiFi for thirty seconds would otherwise have their own lesson
-       * closed underneath them and forty students sent home — and the heartbeat
-       * expiry already covers the case where they really are gone for good,
-       * which is precisely why it exists.
-       */
-      if (isTutor && outcome.reason === "self") endClass();
-      setJoined(false);
-      setEnded(outcome);
-    },
-    [isTutor, endClass],
+  const joinedActive = Boolean(
+    session && liveCall.activeCall && liveCall.activeCall.session.roomName === session.roomName,
   );
+
+  const handleJoin = useCallback(() => {
+    if (!session || !session.token || !session.url) return;
+    liveCall.startCall(session, mode);
+  }, [session, mode, liveCall]);
 
   /** Going back in is a fresh join, so the end screen has to get out of the way. */
   const handleRejoin = useCallback(() => {
+    if (!session || !session.token || !session.url) return;
     setEnded(null);
-    setJoined(true);
-  }, []);
+    liveCall.startCall(session, mode);
+  }, [session, mode, liveCall]);
 
   const body = (() => {
     if (loading) {
@@ -531,8 +471,8 @@ function LiveClassroomPageInner() {
 
     if (!session) return null;
 
-    if (!joined) {
-      return <Lobby session={session} mode={mode} onModeChange={setMode} onJoin={() => setJoined(true)} />;
+    if (!joinedActive) {
+      return <Lobby session={session} mode={mode} onModeChange={setMode} onJoin={handleJoin} />;
     }
 
     /**
@@ -560,17 +500,33 @@ function LiveClassroomPageInner() {
       );
     }
 
-    return (
-      <LiveKitClassroom
-        url={session.url}
-        token={session.token}
-        roomName={session.roomName}
-        displayName={session.displayName}
-        role={session.role}
-        initialQuality={mode}
-        onLeave={handleLeave}
-      />
-    );
+    /**
+     * The actual video is not rendered here — `LiveCallDock` (mounted once,
+     * in the root layout) owns the one `LiveKitClassroom` instance so it can
+     * survive navigating away from this page. In full mode the dock is a
+     * fixed full-screen overlay above everything, so there is nothing left
+     * for this page to show. If the student has minimized WHILE looking at
+     * this exact page, though, the overlay steps aside and this page needs
+     * to offer a way back in.
+     */
+    if (liveCall.dockState === "minimized") {
+      return (
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+          <p className="text-base font-semibold text-[var(--foreground)]">Your class is minimized</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[var(--muted)]">
+            It is still running in the small window on your screen — nobody has been dropped.
+          </p>
+          <button
+            onClick={() => liveCall.setDockState("full")}
+            className="mt-5 rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white"
+          >
+            Expand
+          </button>
+        </div>
+      );
+    }
+
+    return null;
   })();
 
   const content = (

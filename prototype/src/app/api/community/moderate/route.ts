@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { authorizeMessage, isStaffRole } from "@/lib/community-spaces";
 import { canModerate, minutesForPreset } from "@/lib/community-moderation";
 import { notifyInBackground, KIND } from "@/lib/notify";
+import { previewOf } from "@/lib/community-notify";
 
 /**
  * The office acting on a room: pinning a message, or muting a student.
@@ -58,6 +59,30 @@ export async function POST(request: Request) {
           pinnedById: pinning ? viewer.userId : null,
         },
       });
+
+      /**
+       * The room is TOLD, same as a mute — but only on pin. Unpinning is
+       * cleanup, not news, and mirrors how unmute stays silent above.
+       */
+      if (pinning) {
+        const space = message.channel.space;
+        const pinnedByName = session.user.name ?? "A moderator";
+        notifyInBackground({
+          to: {
+            students: {
+              branchId: space.branchId,
+              level: space.level,
+              sessionSlot: space.sessionSlot,
+            },
+          },
+          kind: KIND.announcement,
+          severity: "info",
+          title: `${pinnedByName} pinned a message in ${message.channel.name}`,
+          message: previewOf(message.body, Boolean(message.attachmentUrl)),
+          link: `/community?channel=${message.channelId}&message=${messageId}`,
+          senderId: viewer.userId,
+        });
+      }
 
       return NextResponse.json({ messageId, pinned: pinning });
     }

@@ -6,6 +6,7 @@ import {
   DotsVerticalIcon,
   ExitIcon,
   ExpandIcon,
+  QuizIcon,
   HandIcon,
   MicIcon,
   MicOffIcon,
@@ -27,6 +28,7 @@ import {
 } from "./ClassroomInteractions";
 import { FloorLight, HandFlag, SpeakingWave } from "./SpeakingIndicators";
 import { useAudioLevels, type AudioLevelStore } from "./useAudioLevels";
+import { useRouter } from "next/navigation";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -76,6 +78,22 @@ type LiveKitClassroomProps = {
   role: RoomRole;
   initialQuality: QualityMode;
   onLeave: (outcome: LeaveOutcome) => void;
+  /** So a tutor can jump straight to hosting a quiz for THIS class. Null for a room with no LiveClassSession row (e.g. an ad-hoc catch-up). */
+  liveSessionId?: string | null;
+  /**
+   * Rendered as a small floating card instead of the full classroom when
+   * true. The Room connection is unaffected either way — this only changes
+   * which JSX branch is returned, never whether the room is open. Owned by
+   * `LiveCallDock`, not by this component: minimizing must survive
+   * navigation, which means the decision has to live above the route.
+   */
+  minimized?: boolean;
+  /** Shown in full mode's header. Absent when the component isn't hosted inside a dock that supports minimizing. */
+  onMinimize?: () => void;
+  /** Shown in minimized mode's card. Restores full view and (if needed) navigates back to /live. */
+  onExpand?: () => void;
+  /** Wired to the minimized card's drag handle; the dock owns the actual position state. */
+  onDragHandlePointerDown?: (event: React.PointerEvent) => void;
 };
 
 type Status = "connecting" | "connected" | "reconnecting" | "disconnected" | "failed";
@@ -458,7 +476,13 @@ export default function LiveKitClassroom({
   role,
   initialQuality,
   onLeave,
+  liveSessionId = null,
+  minimized = false,
+  onMinimize,
+  onExpand,
+  onDragHandlePointerDown,
 }: LiveKitClassroomProps) {
+  const router = useRouter();
   const roomRef = useRef<Room | null>(null);
   const [status, setStatus] = useState<Status>("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -479,6 +503,19 @@ export default function LiveKitClassroom({
   const [lightIdentity, setLightIdentity] = useState<string | null>(null);
   const [immersive, setImmersive] = useState(false);
   const [panel, setPanel] = useState<"hands" | "chat" | null>(null);
+  /**
+   * A quiz the tutor has unlocked for this cohort, or null.
+   *
+   * Only ever set from the poll below — nothing here creates a game. The
+   * gate that matters (a student can only ever join a game their own tutor
+   * created for their own branch/level/session) lives entirely server-side
+   * in `joinableGameForStudent`; this banner is discoverability, not the
+   * lock. See `/api/live-quiz/join` GET.
+   */
+  const [quizGame, setQuizGame] = useState<{ id: string; title: string; phase: string; joined: boolean } | null>(
+    null,
+  );
+  const [quizDismissed, setQuizDismissed] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
   // Room state lives on the Room object, not in React. Rather than mirroring it
   // (and drifting), events bump this counter and the component re-reads. Tiles
@@ -860,6 +897,48 @@ export default function LiveKitClassroom({
     setScreenSharing(next);
   }, [screenSharing]);
 
+  /**
+   * Is there a quiz my tutor unlocked for this class? Students only.
+   *
+   * Polled rather than pushed over the data channel: a game can outlive the
+   * poller anyway (it is a DB row students reach through `/play`, not a
+   * LiveKit broadcast — see `lib/live-quiz.ts`), and polling means a student
+   * who reconnects, or who was minimized when it started, finds out too.
+   */
+  useEffect(() => {
+    if (role !== "student") return;
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const res = await fetch("/api/live-quiz/join", { cache: "no-store" });
+        if (cancelled || !res.ok) return;
+        const data = await res.json().catch(() => ({}) as { game?: typeof quizGame });
+        setQuizGame(data.game ?? null);
+      } catch {
+        // A missed poll just means the banner waits for the next one.
+      }
+    }
+
+    poll();
+    const timer = window.setInterval(poll, 6_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [role]);
+
+  // A new game (a different id than the one just dismissed) deserves a fresh
+  // chance to be seen, so dismissal is keyed to the game rather than global.
+  useEffect(() => {
+    setQuizDismissed(false);
+  }, [quizGame?.id]);
+
+  const startQuizAsTutor = useCallback(() => {
+    const query = liveSessionId ? `?liveSessionId=${encodeURIComponent(liveSessionId)}` : "";
+    router.push(`/lecturer/live-quiz${query}`);
+  }, [liveSessionId, router]);
+
   const interactions = useRoomInteractions(roomRef.current, role, revision);
   const levels = useAudioLevels(roomRef.current, revision);
 
@@ -1084,6 +1163,89 @@ export default function LiveKitClassroom({
     return { label: mine ? "You are speaking" : "Speaking", tone: "speaking" as const };
   };
 
+  /**
+   * THE MINIMIZED CARD.
+   *
+   * Same Room, same connection — this is a different render branch of an
+   * unmounted-nowhere component, not a different component. Deliberately
+   * thin: a face, a mic toggle, restore, leave. Everything else (chat,
+   * hands, screen share) is what the student is choosing to step away from;
+   * cramming it into a 288×176 box would just make a worse version of the
+   * full room instead of a clear "you are still in class" reminder.
+   */
+  if (minimized) {
+    return (
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl bg-slate-900 ring-1 ring-white/15">
+        <div
+          onPointerDown={onDragHandlePointerDown}
+          className="flex shrink-0 cursor-grab touch-none items-center justify-between gap-2 bg-slate-950/90 px-2.5 py-1.5 active:cursor-grabbing"
+        >
+          <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-white">
+            <span className="relative flex h-1.5 w-1.5 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            </span>
+            <span className="truncate">{displayName}</span>
+          </span>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={onExpand}
+              aria-label="Expand classroom"
+              title="Expand"
+              className="grid h-6 w-6 place-items-center rounded-md text-white/80 transition hover:bg-white/15 hover:text-white"
+            >
+              <ExpandIcon className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={leave}
+              aria-label="Leave class"
+              title="Leave class"
+              className="grid h-6 w-6 place-items-center rounded-md text-rose-300 transition hover:bg-rose-500/20"
+            >
+              <ExitIcon className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="relative min-h-0 flex-1 bg-black" onClick={onExpand} role="button" tabIndex={-1}>
+          {stageParticipant ? (
+            <ParticipantTile
+              participant={stageParticipant}
+              mode="low"
+              large
+              isSpeaking={ringIds.has(stageParticipant.identity)}
+              revision={revision}
+              levels={levels}
+              handPosition={null}
+              light={null}
+              viewerRole={role}
+              moderationBusy={moderationBusy}
+              onMute={() => {}}
+              onRemove={() => {}}
+            />
+          ) : (
+            <div className="grid h-full place-items-center text-xs text-slate-400">Connecting…</div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-slate-950/70 px-2 py-1.5">
+          <button
+            onClick={toggleMic}
+            aria-label={micOn ? "Mute microphone" : "Unmute microphone"}
+            className={`grid h-7 w-7 place-items-center rounded-full transition ${
+              micOn ? "bg-white/10 text-white hover:bg-white/20" : "bg-rose-500 text-white"
+            }`}
+          >
+            {micOn ? <MicIcon className="h-3.5 w-3.5" /> : <MicOffIcon className="h-3.5 w-3.5" />}
+          </button>
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${pill.className}`}>{pill.label}</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={shellRef}
@@ -1122,8 +1284,48 @@ export default function LiveKitClassroom({
           >
             {immersive ? <ShrinkIcon className="h-4 w-4" /> : <ExpandIcon className="h-4 w-4" />}
           </button>
+          {onMinimize ? (
+            <button
+              onClick={onMinimize}
+              aria-label="Minimize classroom"
+              title="Minimize — keep the class running while you use the rest of the portal"
+              className="rounded-xl bg-white/10 p-2 text-white transition hover:bg-white/20"
+            >
+              <ShrinkIcon className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
       </div>
+
+      {/*
+        A tutor-unlocked quiz, surfaced right where a student's attention
+        already is. Nothing here creates access — `/api/live-quiz/join` GET
+        already refuses anyone whose branch/level/session doesn't match, so
+        this banner can only ever appear for a game the student's own tutor
+        started for their own class.
+      */}
+      {role === "student" && quizGame && quizGame.phase !== "ended" && !quizDismissed ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent)]/15 px-5 py-3 text-sm text-white">
+          <QuizIcon className="h-5 w-5 shrink-0" />
+          <p className="min-w-0 flex-1 leading-6">
+            <span className="font-semibold">Your tutor started a quiz</span> — {quizGame.title}.{" "}
+            {quizGame.joined ? "Jump back in." : "Tap to join from your phone."}
+          </p>
+          <button
+            onClick={() => router.push("/play")}
+            className="shrink-0 rounded-xl bg-white px-4 py-2 text-xs font-semibold text-[var(--accent)] transition hover:brightness-95"
+          >
+            {quizGame.joined ? "Back to quiz" : "Join quiz"}
+          </button>
+          <button
+            onClick={() => setQuizDismissed(true)}
+            aria-label="Dismiss"
+            className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+          >
+            Later
+          </button>
+        </div>
+      ) : null}
 
       {/*
         Sound first, before anything else on the page. A muted classroom is not
@@ -1316,7 +1518,20 @@ export default function LiveKitClassroom({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-slate-900/90 p-3">
+      {/*
+        Pinned to the bottom of the scroll container in full screen —
+        without this, a tall video stage plus an open side panel could push
+        total content past the viewport, and this bar (Leave included) would
+        scroll out of view with no way back to it short of scrolling blind.
+        Only applied in immersive mode: outside it the PAGE scrolls, not this
+        div, so `sticky` would pin it against the browser viewport instead
+        and could overlap footer content that has nothing to do with class.
+      */}
+      <div
+        className={`flex flex-wrap items-center gap-2 rounded-2xl bg-slate-900/90 p-3 ${
+          immersive ? "sticky bottom-0 z-20 shadow-[0_-8px_24px_rgba(0,0,0,0.35)]" : ""
+        }`}
+      >
         <button
           onClick={toggleMic}
           className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
@@ -1383,6 +1598,25 @@ export default function LiveKitClassroom({
           >
             <MicOffIcon className="h-4 w-4" />
             {moderationBusy.has("__all__") ? "Muting…" : "Mute all"}
+          </button>
+        ) : null}
+
+        {/*
+          Students never see a way into the quiz from inside the call — this
+          is the only door. Tapping it hands the tutor off to the existing
+          host screen (`/lecturer/live-quiz`), which is where a game actually
+          gets created; nothing here creates one itself. Leaving `/live`
+          auto-minimizes the call instead of ending it, so the tutor keeps
+          teaching in the corner of their screen while they set the quiz up.
+        */}
+        {role === "tutor" ? (
+          <button
+            onClick={startQuizAsTutor}
+            title="Unlock the class quiz — students only ever see it once you start one here."
+            className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20"
+          >
+            <QuizIcon className="h-4 w-4" />
+            Quiz
           </button>
         ) : null}
 
