@@ -955,7 +955,10 @@ const STAGE_CSS = `
 .lq-step-1{height:14rem;background:rgba(255,102,0,.3)}
 .lq-step-2{height:9rem;background:rgba(180,83,9,.25)}
 .lq-step-empty{background:transparent}
-.lq-step .lq-sname{font-size:clamp(1rem,1.8vw,1.6rem);text-align:center;flex:0}
+/* flex:0 here collapsed the name to zero height — the shorthand sets
+   flex-basis:0%, and in this column flex container that is the whole box, so
+   the winner's name was invisible on the one screen built to show it. */
+.lq-step .lq-sname{font-size:clamp(1rem,1.8vw,1.6rem);text-align:center;flex:0 0 auto}
 .lq-step .lq-score{font-size:clamp(1.2rem,2.4vw,2.2rem)}
 
 @media (max-width:900px){
