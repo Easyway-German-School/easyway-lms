@@ -139,6 +139,7 @@ export default function SignInForm() {
                 Don’t have an account? <Link href="/auth/signup" className="font-semibold text-[var(--accent)] hover:text-[var(--accent-strong)]">Sign up</Link>
               </p>
               <p className="mt-2">Lecturer? <Link href="/auth/lecturer/signin" className="font-semibold text-[var(--accent)] hover:text-[var(--accent-strong)]">Sign in here</Link></p>
+              <p className="mt-2">Parent or guardian? <Link href="/auth/parent/signin" className="font-semibold text-[var(--accent)] hover:text-[var(--accent-strong)]">Sign in here</Link></p>
             </div>
           </div>
         </div>

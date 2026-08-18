@@ -62,7 +62,7 @@ const navItems: NavItem[] = [
   // the phone in the student's hand, so a campus student is the intended
   // player rather than the exception.
   { label: "Quiz game", href: "/play", icon: <QuizIcon /> },
-  { label: "Games", href: "/games", icon: <ChainIcon /> },
+  { label: "AI Coach & Games", href: "/games", icon: <ChainIcon /> },
   { label: "Materials", href: "/materials", icon: <BookOpenIcon /> },
   { label: "Community", href: "/community", icon: <CommunityIcon /> },
   { label: "Results", href: "/results", icon: <ResultsIcon /> },

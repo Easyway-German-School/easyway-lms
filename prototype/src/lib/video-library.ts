@@ -29,6 +29,15 @@ export type LibraryVideo = {
   /** Where this student stopped, if they have started it. */
   positionSeconds: number;
   completed: boolean;
+  /**
+   * Set when the tutor linked the video rather than uploading it, and the
+   * player must use an iframe. Null for anything we host ourselves — including
+   * a linked bare .mp4, which is a real file and stays in a <video> so it keeps
+   * scrubbing, speed control and the resume position. See lib/media-embed.ts.
+   */
+  embedUrl: string | null;
+  /** "YouTube", "Vimeo"… — shown on the tile so the shelf is honest about it. */
+  embedLabel: string | null;
 };
 
 export type VideoShelf = {

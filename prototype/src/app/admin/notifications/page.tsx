@@ -10,6 +10,8 @@ type NotificationRecord = {
   channel: string;
   status: string;
   createdAt: string;
+  audience?: string | null;
+  recipientCount?: number;
   student?: { user: { name?: string | null; email: string } } | null;
   branch?: { name: string } | null;
 };
@@ -23,15 +25,24 @@ export default function AdminNotificationsPage() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [channel, setChannel] = useState("email");
+  /** students | lecturers | everyone. See /api/admin/notifications. */
+  const [audience, setAudience] = useState("students");
   const [studentId, setStudentId] = useState("");
   const [branchId, setBranchId] = useState("");
   const [level, setLevel] = useState("");
-  const [status, setStatus] = useState("pending");
+  const [link, setLink] = useState("");
+  const [alsoEmail, setAlsoEmail] = useState(false);
+  const [alsoPush, setAlsoPush] = useState(true);
   const [formError, setFormError] = useState("");
+  const [formNotice, setFormNotice] = useState("");
   const [formBusy, setFormBusy] = useState(false);
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
+
+  // The three student filters are meaningless for staff — a tutor has no level
+  // and no single branch — so the server rejects the combination and the form
+  // hides it rather than letting an admin build a send that cannot work.
+  const targetingStudents = audience === "students";
 
   async function loadNotifications() {
     try {
@@ -74,6 +85,7 @@ export default function AdminNotificationsPage() {
 
   async function handleCreateNotification() {
     setFormError("");
+    setFormNotice("");
 
     if (!title.trim() || !message.trim()) {
       setFormError("Title and message are required.");
@@ -85,11 +97,14 @@ export default function AdminNotificationsPage() {
     const payload = {
       title: title.trim(),
       message: message.trim(),
-      channel,
-      status,
-      studentId: studentId || null,
-      branchId: branchId || null,
-      level: level || null,
+      audience,
+      link: link.trim() || null,
+      alsoEmail,
+      alsoPush,
+      // Only meaningful for students; the server refuses them otherwise.
+      studentId: targetingStudents ? studentId || null : null,
+      branchId: targetingStudents ? branchId || null : null,
+      level: targetingStudents ? level || null : null,
     };
 
     try {
@@ -99,23 +114,29 @@ export default function AdminNotificationsPage() {
         body: JSON.stringify(payload),
       });
 
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Unable to create notification");
+        throw new Error(data.error || "Unable to send notification");
       }
 
+      // Reported back, because "it saved" and "it reached 84 people" are
+      // different claims and only the second one is what the office wanted.
+      setFormNotice(
+        `Sent to ${data.sent} ${data.sent === 1 ? "person" : "people"}` +
+          (data.pushed ? ` · ${data.pushed} phone${data.pushed === 1 ? "" : "s"} buzzed` : "") +
+          (data.emailed ? ` · ${data.emailed} email${data.emailed === 1 ? "" : "s"} queued` : ""),
+      );
       setTitle("");
       setMessage("");
-      setChannel("email");
       setStudentId("");
       setBranchId("");
       setLevel("");
-      setStatus("pending");
+      setLink("");
       setShowForm(false);
       setLoading(true);
       await loadNotifications();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Unable to create notification");
+      setFormError(error instanceof Error ? error.message : "Unable to send notification");
     } finally {
       setFormBusy(false);
     }
@@ -139,6 +160,19 @@ export default function AdminNotificationsPage() {
           </button>
         </div>
 
+        {formNotice ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-emerald-300 bg-emerald-50 px-6 py-4 text-sm font-semibold text-emerald-800">
+            <span>{formNotice}</span>
+            <button
+              type="button"
+              onClick={() => setFormNotice("")}
+              className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs"
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         {showForm ? (
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
             <div className="grid gap-4 md:grid-cols-2">
@@ -151,47 +185,51 @@ export default function AdminNotificationsPage() {
                 />
               </label>
               <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Channel</span>
+                <span className="font-semibold text-[var(--muted)]">Send to</span>
                 <select
-                  value={channel}
-                  onChange={(event) => setChannel(event.target.value)}
+                  value={audience}
+                  onChange={(event) => setAudience(event.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="email">Email</option>
-                  <option value="sms">SMS</option>
-                  <option value="in-app">In-app</option>
+                  <option value="students">Students</option>
+                  <option value="lecturers">Tutors</option>
+                  <option value="everyone">Everyone (students, tutors and staff)</option>
                 </select>
               </label>
-              <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Student</span>
-                <select
-                  value={studentId}
-                  onChange={(event) => setStudentId(event.target.value)}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                >
-                  <option value="">All students</option>
-                  {students.map((student) => (
-                    <option key={student.id} value={student.id}>
-                      {student.user.name || student.user.email}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Branch</span>
-                <select
-                  value={branchId}
-                  onChange={(event) => setBranchId(event.target.value)}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                >
-                  <option value="">All branches</option>
-                  {branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {targetingStudents ? (
+                <>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-semibold text-[var(--muted)]">Student</span>
+                    <select
+                      value={studentId}
+                      onChange={(event) => setStudentId(event.target.value)}
+                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    >
+                      <option value="">All students</option>
+                      {students.map((student) => (
+                        <option key={student.id} value={student.id}>
+                          {student.user.name || student.user.email}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-semibold text-[var(--muted)]">Branch</span>
+                    <select
+                      value={branchId}
+                      onChange={(event) => setBranchId(event.target.value)}
+                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    >
+                      <option value="">All branches</option>
+                      {branches.map((branch) => (
+                        <option key={branch.id} value={branch.id}>
+                          {branch.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ) : null}
               <label className="space-y-2 text-sm md:col-span-2">
                 <span className="font-semibold text-[var(--muted)]">Message</span>
                 <textarea
@@ -201,26 +239,55 @@ export default function AdminNotificationsPage() {
                   className="w-full rounded-3xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 text-sm"
                 />
               </label>
+              {targetingStudents ? (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Level</span>
+                  <input
+                    value={level}
+                    onChange={(event) => setLevel(event.target.value)}
+                    placeholder="All levels or e.g. B1"
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  />
+                </label>
+              ) : null}
               <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Level</span>
+                <span className="font-semibold text-[var(--muted)]">Opens (optional)</span>
                 <input
-                  value={level}
-                  onChange={(event) => setLevel(event.target.value)}
-                  placeholder="All levels or e.g. B1"
+                  value={link}
+                  onChange={(event) => setLink(event.target.value)}
+                  placeholder="/calendar"
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 />
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Where tapping it takes the reader. Leave blank and it just opens the bell.
+                </span>
               </label>
-              <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Status</span>
-                <select
-                  value={status}
-                  onChange={(event) => setStatus(event.target.value)}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                >
-                  <option value="pending">Pending</option>
-                  <option value="sent">Sent</option>
-                </select>
-              </label>
+              <div className="space-y-2 text-sm md:col-span-2">
+                <span className="font-semibold text-[var(--muted)]">Also deliver by</span>
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={alsoPush}
+                      onChange={(event) => setAlsoPush(event.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    Phone notification
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={alsoEmail}
+                      onChange={(event) => setAlsoEmail(event.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    Email
+                  </label>
+                </div>
+                <p className="text-xs text-[var(--muted)]">
+                  The in-app bell always rings. Anyone who has muted this kind in their own settings is skipped.
+                </p>
+              </div>
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
@@ -229,7 +296,7 @@ export default function AdminNotificationsPage() {
                 disabled={formBusy}
                 className="rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
               >
-                Save notification
+                {formBusy ? "Sending…" : "Send notification"}
               </button>
               <button
                 type="button"
@@ -250,7 +317,7 @@ export default function AdminNotificationsPage() {
               <thead className="bg-[var(--background)] text-left uppercase tracking-[0.16em] text-[var(--muted)]">
                 <tr>
                   <th className="px-4 py-3">Title</th>
-                  <th className="px-4 py-3">Channel</th>
+                  <th className="px-4 py-3">Reached</th>
                   <th className="px-4 py-3">User</th>
                   <th className="px-4 py-3">Branch</th>
                   <th className="px-4 py-3">Message</th>
@@ -270,7 +337,11 @@ export default function AdminNotificationsPage() {
                   notifications.map((notification) => (
                     <tr key={notification.id}>
                       <td className="px-4 py-3">{notification.title}</td>
-                      <td className="px-4 py-3">{notification.channel}</td>
+                      <td className="px-4 py-3">
+                        {notification.recipientCount && notification.recipientCount > 1
+                          ? `${notification.recipientCount} people`
+                          : "1 person"}
+                      </td>
                       <td className="px-4 py-3">{notification.student?.user.name ?? notification.student?.user.email ?? "All"}</td>
                       <td className="px-4 py-3">{notification.branch?.name ?? "All"}</td>
                       <td className="px-4 py-3">{notification.message}</td>

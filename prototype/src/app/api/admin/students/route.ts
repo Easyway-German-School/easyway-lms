@@ -10,6 +10,7 @@ import {
   type StudentFinance,
 } from "@/lib/finance/receivables";
 import { setStudentTutor } from "@/lib/tutor-pairing";
+import { isOnlineBranch } from "@/lib/online-branch";
 
 export async function GET(request: Request) {
   const gate = await requireCapability("students");
@@ -244,6 +245,11 @@ export async function POST(request: Request) {
   const branchId = typeof body.branchId === "string" ? body.branchId : null;
   const tutorId = typeof body.tutorId === "string" ? body.tutorId : null;
   const status = typeof body.status === "string" ? body.status : "active";
+  const classType = body.classType === "private" ? "private" : "group";
+  const sessionSlot = ["morning", "afternoon", "evening"].includes(String(body.sessionSlot))
+    ? String(body.sessionSlot)
+    : "morning";
+  const requestedDeliveryMode = body.deliveryMode === "hybrid" ? "hybrid" : "physical";
 
   if (!name || !email || !password) {
     return NextResponse.json({ error: "Name, email, and password are required" }, { status: 400 });
@@ -258,15 +264,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Email already registered" }, { status: 400 });
   }
 
-  if (gate.session.user.tenantId && branchId) {
-    const branch = await prisma.branch.findUnique({
+  let branchRow: { tenantId: string | null; name: string; mode: string | null } | null = null;
+  if (branchId) {
+    branchRow = await prisma.branch.findUnique({
       where: { id: branchId },
-      select: { tenantId: true },
+      select: { tenantId: true, name: true, mode: true },
     });
-    if (!branch || branch.tenantId !== gate.session.user.tenantId) {
+    if (!branchRow || (gate.session.user.tenantId && branchRow.tenantId !== gate.session.user.tenantId)) {
       return NextResponse.json({ error: "Branch not found" }, { status: 404 });
     }
   }
+
+  /**
+   * How this student attends — derived against the branch the same way signup
+   * does, not taken on trust. Leaving this unset was the bug: every admin-added
+   * student defaulted to "physical" even when placed in the Online branch, which
+   * silently hid the Live class tab from them.
+   */
+  const deliveryMode = isOnlineBranch(branchRow) ? "online" : requestedDeliveryMode;
 
   const hashedPassword = await bcryptjs.hash(password, 10);
 
@@ -285,12 +300,18 @@ export async function POST(request: Request) {
             status,
             tutorId,
             pathway: "Language training",
+            classType,
+            sessionSlot,
+            deliveryMode,
           },
         },
       },
     });
 
-    return NextResponse.json({ user: { id: user.id, email: user.email, name: user.name } }, { status: 201 });
+    return NextResponse.json(
+      { user: { id: user.id, email: user.email, name: user.name }, classType, deliveryMode },
+      { status: 201 },
+    );
   } catch (error) {
     return NextResponse.json({ error: "Unable to create student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
   }
@@ -311,6 +332,9 @@ export async function PATCH(request: Request) {
   const classType = body.classType === "private" || body.classType === "group" ? body.classType : undefined;
   const sessionSlot = ["morning", "afternoon", "evening"].includes(String(body.sessionSlot))
     ? String(body.sessionSlot)
+    : undefined;
+  const requestedDeliveryMode = body.deliveryMode === "hybrid" || body.deliveryMode === "physical"
+    ? body.deliveryMode
     : undefined;
   const newPassword = typeof body.password === "string" ? body.password : "";
 
@@ -352,12 +376,13 @@ export async function PATCH(request: Request) {
       updateUser.password = await bcryptjs.hash(newPassword, 10);
     }
 
-    if (gate.session.user.tenantId && branchId) {
-      const branch = await prisma.branch.findUnique({
+    let branchRow: { tenantId: string | null; name: string; mode: string | null } | null = null;
+    if (branchId) {
+      branchRow = await prisma.branch.findUnique({
         where: { id: branchId },
-        select: { tenantId: true },
+        select: { tenantId: true, name: true, mode: true },
       });
-      if (!branch || branch.tenantId !== gate.session.user.tenantId) {
+      if (!branchRow || (gate.session.user.tenantId && branchRow.tenantId !== gate.session.user.tenantId)) {
         return NextResponse.json({ error: "Branch not found" }, { status: 404 });
       }
     }
@@ -368,9 +393,27 @@ export async function PATCH(request: Request) {
       status?: string;
       classType?: string;
       sessionSlot?: string;
+      deliveryMode?: string;
     };
     if (level) updateStudent.level = level;
     if (body.branchId !== undefined) updateStudent.branchId = branchId;
+    /**
+     * deliveryMode follows the branch — an admin moving a student INTO the
+     * Online branch must not leave them stranded on "physical" with no Live
+     * class tab. Only recomputed when the branch or an explicit hybrid/physical
+     * choice is actually part of this request, so an unrelated edit (name,
+     * status) does not quietly reset a campus student who was set to hybrid.
+     */
+    if (body.branchId !== undefined || requestedDeliveryMode) {
+      const effectiveBranch = branchId ? branchRow : null;
+      if (isOnlineBranch(effectiveBranch)) {
+        updateStudent.deliveryMode = "online";
+      } else if (requestedDeliveryMode) {
+        updateStudent.deliveryMode = requestedDeliveryMode;
+      } else if (body.branchId !== undefined) {
+        updateStudent.deliveryMode = "physical";
+      }
+    }
     if (status) updateStudent.status = status;
     if (classType) updateStudent.classType = classType;
     if (sessionSlot) updateStudent.sessionSlot = sessionSlot;

@@ -2,6 +2,7 @@
 
 import { type FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { buildApiUrl } from "@/lib/api";
 import BrandLoader from "@/components/BrandLoader";
@@ -9,7 +10,7 @@ import { countries, nigerianStates, packageOptions, professionOptions } from "@/
 import PasswordInput from "@/components/PasswordInput";
 import PhotoCapture from "@/components/PhotoCapture";
 import SignupJourney from "@/components/SignupJourney";
-import { CheckCircleIcon, SignalIcon } from "@/components/icons";
+import { CheckCircleIcon, FamilyIcon, SignalIcon } from "@/components/icons";
 import { uploadErrorMessage, uploadImage } from "@/lib/upload";
 import {
   CONNECTION_OPTIONS,
@@ -468,6 +469,22 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
             </p>
           </div>
         </div>
+
+        {/* This form enrols the STUDENT. A parent has their own, separate
+            account and their own form — see /auth/parent/signup — so this
+            is a way out rather than a step in the enrolment itself. */}
+        <Link
+          href="/auth/parent/signup"
+          className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-white/80 px-5 py-4 text-sm text-[var(--foreground)] shadow-sm transition hover:border-[var(--accent)] hover:bg-white"
+        >
+          <span className="grid h-9 w-9 flex-none place-items-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+            <FamilyIcon className="h-5 w-5" />
+          </span>
+          <span>
+            <span className="font-semibold">Are you a parent or guardian?</span>{" "}
+            <span className="text-[var(--muted)]">Create your own account to follow your child's classes instead.</span>
+          </span>
+        </Link>
 
         {/*
           `p-8` unconditionally was costing 64px of a 375px screen, and the page

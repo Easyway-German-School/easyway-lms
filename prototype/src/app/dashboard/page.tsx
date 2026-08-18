@@ -11,7 +11,7 @@ import LiveClassBanner from "@/components/live/LiveClassBanner";
 import LevelAdvance from "@/components/LevelAdvance";
 import WelcomeTour from "@/components/WelcomeTour";
 import NotificationInvite from "@/components/NotificationInvite";
-import { BookOpenIcon, CompassIcon, FlameIcon, SparklesIcon, TargetIcon, TrendingUpIcon } from "@/components/icons";
+import { ArrowRightIcon, BookOpenIcon, CompassIcon, FlameIcon, SparklesIcon, TargetIcon, TrendingUpIcon } from "@/components/icons";
 import { summarizeGamification } from "@/lib/gamification";
 import { REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { useGamification } from "@/lib/useGamification";
@@ -91,15 +91,8 @@ function DashboardContent() {
   const [paymentSummary, setPaymentSummary] = useState<Student["paymentSummary"] | null>(null);
   const [courses, setCourses] = useState<Course[]>([]);
   const [paymentUnlock, setPaymentUnlock] = useState<{ requiredDeposit: number; totalPaid: number; tuitionFee: number } | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [personalizedPlan, setPersonalizedPlan] = useState<any>(null);
-  const [plannerStrategy, setPlannerStrategy] = useState<string>('hybrid');
   const [pathway, setPathway] = useState("Language training");
   const [dashboardError, setDashboardError] = useState<string | null>(null);
-  const [aiTab, setAiTab] = useState<'pronunciation' | 'plan'>('pronunciation');
-  const [phrase, setPhrase] = useState("Ich möchte ein Visum beantragen.");
-  const [feedback, setFeedback] = useState<string[]>(["Type a phrase and press Analyze."]);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [insights, setInsights] = useState({
     completedLessons: 0,
     totalLessons: 0,
@@ -278,34 +271,6 @@ function DashboardContent() {
     }
   }, [loadStudentData, loadCourses]);
 
-  const loadPersonalizedPlan = useCallback(async () => {
-    const savedPlan = typeof window !== 'undefined' ? localStorage.getItem('studentPersonalizedPlan') : null;
-    if (savedPlan) {
-      try {
-        setPersonalizedPlan(JSON.parse(savedPlan));
-      } catch {
-        // ignore invalid saved plan
-      }
-    }
-
-    try {
-      const compareParam = plannerStrategy === 'compare' ? '&compare=true' : '';
-      const res = await fetchWithTiming(`/api/personalize?strategy=${encodeURIComponent(plannerStrategy)}${compareParam}`, { cache: "no-store", credentials: "include" }, "personalize");
-      if (!res.ok) {
-        console.warn('Personalized plan endpoint returned an error response', res.status);
-        return;
-      }
-      const data = await res.json();
-      const nextPlan = data.plan || null;
-      setPersonalizedPlan(nextPlan);
-      if (nextPlan && typeof window !== 'undefined') {
-        localStorage.setItem('studentPersonalizedPlan', JSON.stringify(nextPlan));
-      }
-    } catch (err) {
-      console.warn('Failed to load personalized plan', err);
-    }
-  }, [plannerStrategy]);
-
   const loadDailyMissions = useCallback(async () => {
     if (!student) return;
     const readiness = student?.examReadiness ?? 0;
@@ -358,7 +323,6 @@ function DashboardContent() {
 
     const refreshOnFocus = () => {
       void syncPendingPayment();
-      void loadPersonalizedPlan();
     };
 
     const handleVisibility = () => {
@@ -373,9 +337,9 @@ function DashboardContent() {
       window.removeEventListener("focus", refreshOnFocus);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [status, loadPersonalizedPlan]);
+  }, [status]);
 
-  // Initial load: fetch student, courses, and personalized plan in parallel
+  // Initial load: fetch student and courses in parallel.
   useEffect(() => {
     if (status !== "authenticated") return;
 
@@ -386,15 +350,14 @@ function DashboardContent() {
       try {
         const p1 = loadStudentData();
         const p2 = loadCourses();
-        const p3 = loadPersonalizedPlan();
-        await Promise.allSettled([p1, p2, p3]);
+        await Promise.allSettled([p1, p2]);
       } catch (err) {
         console.error('Initial dashboard fetch error', err);
       }
     })();
 
     return () => clearTimeout(t);
-  }, [status, loadStudentData, loadCourses, loadPersonalizedPlan]);
+  }, [status, loadStudentData, loadCourses]);
 
   useEffect(() => {
     if (!student) return;
@@ -408,32 +371,6 @@ function DashboardContent() {
     if (!student) return;
     loadMissionState();
   }, [student]);
-
-
-  const handleAnalyze = async () => {
-    if (!phrase.trim()) return;
-    setIsAnalyzing(true);
-    try {
-      const res = await fetch("/api/ai/analyze-pronunciation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phrase }),
-      });
-      const data = await res.json();
-      const feedbackArray = [
-        `Transcription: ${data.transcription}`,
-        `Confidence: ${data.confidence}%`,
-        ...(data.issues?.map((issue: string) => `Issue: ${issue}`) || []),
-        ...(data.corrections?.map((correction: string) => `Correction: ${correction}`) || []),
-      ];
-      setFeedback(feedbackArray.length > 0 ? feedbackArray : ["No feedback available"]);
-    } catch (error) {
-      console.error("Analyze error:", error);
-      setFeedback(["Unable to analyze pronunciation"]);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
 
 
 
@@ -473,6 +410,7 @@ function DashboardContent() {
 
   const resolvedStudent = student ?? fallbackStudent;
   const resolvedCourses = courses.length > 0 ? courses : fallbackCourses;
+  const isPrivateStudent = resolvedStudent?.classType === "private";
 
   if (status === "loading" && !student && !dashboardError && !fastFallback) {
     return (
@@ -624,6 +562,10 @@ function DashboardContent() {
               the app's scene layer already uses, just concentrated here where
               the student actually lands. */}
           <section className="relative overflow-hidden rounded-[36px] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
+            {/* Light sweeping through the glass, not sitting on it — see
+                .aurora-sweep. Behind the blobs and particles so it reads as
+                depth, not another spot of colour. */}
+            <div className="aurora-sweep" />
             <div
               className="pointer-events-none absolute -right-16 -top-24 h-80 w-80 rounded-full opacity-70 blur-[100px] animate-blob"
               style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--accent) 60%, transparent), transparent 70%)' }}
@@ -635,12 +577,22 @@ function DashboardContent() {
             <div className="scene-particles pointer-events-none absolute inset-0 opacity-70" />
             <div className="relative grid gap-8 lg:grid-cols-[1.45fr_0.95fr] lg:items-end">
               <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-[var(--accent-ink)]">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
-                  Student dashboard
+                <div
+                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] ${
+                    isPrivateStudent
+                      ? "border-[#c8a24a]/50 bg-[#c8a24a]/15 text-[#c8a24a]"
+                      : "border-[var(--border)] bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                  }`}
+                >
+                  <span className={`h-2 w-2 animate-pulse rounded-full ${isPrivateStudent ? "bg-[#c8a24a]" : "bg-[var(--accent)]"}`} />
+                  {isPrivateStudent ? "Private coaching" : "Student dashboard"}
                 </div>
                 <h1 className="mt-4 text-4xl font-semibold text-[var(--foreground)]">Welcome back, {resolvedStudent?.name || session?.user?.name || 'Learner'}</h1>
-                <p className="mt-4 max-w-2xl text-[var(--muted)]">Your academy experience is now a cinematic quest board with live XP, missions, and progress tracking.</p>
+                <p className="mt-4 max-w-2xl text-[var(--muted)]">
+                  {isPrivateStudent
+                    ? "A tutor dedicated to you, on your schedule — with everything the group track gets, plus the parts money buys."
+                    : "Your academy experience is now a cinematic quest board with live XP, missions, and progress tracking."}
+                </p>
                 <div className="mt-6 flex flex-wrap gap-3">
                   <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><SparklesIcon /></span> XP boost active</div>
                   <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><FlameIcon /></span> Streak {streakDays} days</div>
@@ -660,7 +612,11 @@ function DashboardContent() {
                   <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">Unlock progress</p>
                   <p className="mt-3 text-3xl font-semibold text-[var(--foreground)]">{paymentProgressPercent}%</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">
-                    {paymentFullyPaid
+                    {isPrivateStudent
+                      ? paymentFullyPaid
+                        ? "Your one-to-one coaching is fully unlocked."
+                        : "Your dedicated tutor is waiting on the rest of your tuition."
+                      : paymentFullyPaid
                       ? 'Premium library access is fully unlocked.'
                       : paymentUnlocked
                       ? 'Premium library access is unlocked.'
@@ -671,7 +627,9 @@ function DashboardContent() {
             </div>
           </section>
 
-          <section className="mt-8 grid gap-6 lg:grid-cols-4">
+          {/* 2-up on a phone rather than one long stacked column — the same
+              four numbers, half the scroll to get past them. */}
+          <section className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
             {quickStats.map((stat, index) => (
               <motion.div
                 key={stat.label}
@@ -679,7 +637,7 @@ function DashboardContent() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.06 * index, duration: 0.35 }}
                 whileHover={{ y: -4, scale: 1.01 }}
-                className="cinematic-card relative overflow-hidden rounded-[28px] p-6"
+                className="cinematic-card relative overflow-hidden rounded-[24px] p-4 sm:rounded-[28px] sm:p-6"
               >
                 <div
                   className="pointer-events-none absolute -left-10 top-10 h-24 w-24 rounded-full opacity-60 blur-3xl"
@@ -689,11 +647,13 @@ function DashboardContent() {
                   className="pointer-events-none absolute -right-10 bottom-8 h-20 w-20 rounded-full opacity-50 blur-3xl"
                   style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--accent-strong) 45%, transparent), transparent 70%)' }}
                 />
-                <div className="relative flex items-center justify-between gap-3">
+                {/* Stacked on a phone — icon then label side by side was tight
+                    at half-width — row again from sm up, where there is room. */}
+                <div className="relative flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                   <span className="text-[var(--accent)]">{stat.icon}</span>
-                  <span className="rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">{stat.label}</span>
+                  <span className="rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-2.5 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-[var(--muted)] sm:px-3 sm:text-[0.65rem] sm:tracking-[0.28em]">{stat.label}</span>
                 </div>
-                <p className="relative mt-6 text-3xl font-semibold text-[var(--foreground)]">{stat.value}</p>
+                <p className="relative mt-3 text-2xl font-semibold text-[var(--foreground)] sm:mt-6 sm:text-3xl">{stat.value}</p>
               </motion.div>
             ))}
           </section>
@@ -703,9 +663,15 @@ function DashboardContent() {
               <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Path progress</p>
+                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">{isPrivateStudent ? "Private coaching" : "Path progress"}</p>
                     <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">
-                      {paymentFullyPaid
+                      {isPrivateStudent
+                        ? paymentFullyPaid
+                          ? 'Your one-to-one tuition is fully paid — book with your tutor'
+                          : paymentUnlocked
+                          ? 'Deposit received — balance still outstanding'
+                          : 'Pay to start your one-to-one classes'
+                        : paymentFullyPaid
                         ? 'Your tuition is fully paid — enjoy your classes'
                         : paymentUnlocked
                         ? 'Deposit received — balance still outstanding'
@@ -715,7 +681,11 @@ function DashboardContent() {
                   {paymentFullyPaid ? null : (
                     <Link
                       href="/programs"
-                      className="rounded-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)] px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_30px_-8px_color-mix(in_srgb,var(--accent)_70%,transparent)] transition hover:brightness-110"
+                      className={`rounded-full px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110 ${
+                        isPrivateStudent
+                          ? "bg-gradient-to-r from-[#c8a24a] to-[#a9812f]"
+                          : "bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)] shadow-[0_10px_30px_-8px_color-mix(in_srgb,var(--accent)_70%,transparent)]"
+                      }`}
                     >
                       {paymentUnlocked ? 'Pay balance' : 'Pay deposit'}
                     </Link>
@@ -761,6 +731,26 @@ function DashboardContent() {
             </div>
 
             <div className="space-y-6">
+              {isPrivateStudent && (
+                <div className="rounded-[32px] border-2 border-[#c8a24a]/40 bg-gradient-to-br from-[#c8a24a]/10 to-transparent p-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#c8a24a]">Your one-to-one coaching</p>
+                  <h3 className="mt-3 text-xl font-semibold text-[var(--foreground)]">
+                    {resolvedStudent?.nextLive && resolvedStudent.nextLive !== "No live session scheduled"
+                      ? resolvedStudent.nextLive
+                      : "No session booked yet"}
+                  </h3>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    Your tutor books your sessions directly — check Classes for the full calendar, or message them from
+                    Community if you need a time that isn&apos;t on it yet.
+                  </p>
+                  <Link
+                    href="/calendar"
+                    className="mt-4 inline-flex rounded-full bg-[#c8a24a] px-5 py-2.5 text-sm font-semibold text-[#1a1206] transition hover:brightness-110"
+                  >
+                    View calendar
+                  </Link>
+                </div>
+              )}
               {/* Bookings made on the public exam-centre page appear here too —
                   both write the same registrations. */}
               <UpcomingExamsCard />
@@ -793,87 +783,30 @@ function DashboardContent() {
                 </div>
               </motion.div>
 
-              {/* Was two full cards (Pronunciation practice, AI learning path) —
-                  each always expanded, together the single biggest chunk of
-                  the dashboard. One card, one tab switch, same two tools. */}
-              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">AI study tools</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">
-                      {aiTab === 'pronunciation' ? 'Pronunciation practice' : 'Personalized learning path'}
-                    </h2>
-                  </div>
-                </div>
-                <div className="mt-4 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAiTab('pronunciation')}
-                    className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition ${aiTab === 'pronunciation' ? 'bg-[var(--accent)] text-white shadow-[0_6px_18px_-6px_color-mix(in_srgb,var(--accent)_70%,transparent)]' : 'bg-[var(--surface-alt)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}
-                  >
-                    Pronunciation
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAiTab('plan')}
-                    className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition ${aiTab === 'plan' ? 'bg-[var(--accent)] text-white shadow-[0_6px_18px_-6px_color-mix(in_srgb,var(--accent)_70%,transparent)]' : 'bg-[var(--surface-alt)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}
-                  >
-                    Study plan
-                  </button>
-                </div>
-
-                {aiTab === 'pronunciation' ? (
-                  <>
-                    <p className="mt-4 text-sm text-[var(--muted)]">Type your German phrase and get instant AI feedback.</p>
-                    <textarea
-                      value={phrase}
-                      onChange={(e) => setPhrase(e.target.value)}
-                      rows={4}
-                      className="mt-4 w-full rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-sm text-[var(--foreground)] focus:outline-none"
-                      placeholder="Ich möchte ein Visum beantragen."
-                    />
-                    <button
-                      onClick={handleAnalyze}
-                      disabled={isAnalyzing}
-                      className="mt-4 inline-flex w-full items-center justify-center rounded-3xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-                    >
-                      {isAnalyzing ? 'Analyzing...' : 'Analyze pronunciation'}
-                    </button>
-                    <div className="mt-4 space-y-2 text-sm text-[var(--muted)]">
-                      {feedback.map((item, index) => (
-                        <p key={`${item}-${index}`}>• {item}</p>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <select value={plannerStrategy} onChange={(e) => setPlannerStrategy(e.target.value)} className="mt-4 w-full rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-sm text-[var(--foreground)]">
-                      <option value="deterministic">Deterministic</option>
-                      <option value="fewshot">Few-shot</option>
-                      <option value="hybrid">Hybrid</option>
-                      <option value="compare">A/B compare</option>
-                    </select>
-                    <div className="mt-4 space-y-4">
-                      {personalizedPlan ? (
-                        <>
-                          {personalizedPlan.rationale ? <p className="text-sm text-[var(--muted)]">{personalizedPlan.rationale}</p> : null}
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                            {(personalizedPlan.lessons || []).slice(0, 4).map((lesson: any, idx: number) => (
-                              <div key={lesson.id || idx} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
-                                <p className="font-semibold text-[var(--foreground)]">{lesson.title}</p>
-                                <p className="mt-2 text-sm text-[var(--muted)]">{lesson.goal}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      ) : (
-                        <p className="text-sm text-[var(--muted)]">Your personalized plan will appear here once the AI recommendation service loads.</p>
-                      )}
-                    </div>
-                  </>
-                )}
-              </motion.div>
+              {/*
+                Used to be a full card here — pronunciation practice and the
+                personalized plan, always expanded, the single biggest block
+                on the page. A dashboard is a five-second glance at where you
+                stand; a text box waiting for AI feedback is a workspace, and
+                the two do not belong on the same screen. Both tools moved to
+                the AI Coach tab, next to Games — this is a doorway, not a
+                demotion.
+              */}
+              <Link
+                href="/games"
+                className="cinematic-card group flex items-center gap-4 rounded-[32px] p-6 transition hover:border-[var(--accent)]/30"
+              >
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                  <SparklesIcon className="h-6 w-6" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">AI Coach</span>
+                  <span className="mt-1 block text-lg font-semibold text-[var(--foreground)]">
+                    Pronunciation practice &amp; your study plan
+                  </span>
+                </span>
+                <ArrowRightIcon className="h-5 w-5 shrink-0 text-[var(--muted)] transition group-hover:translate-x-1 group-hover:text-[var(--accent)]" />
+              </Link>
             </div>
           </section>
 

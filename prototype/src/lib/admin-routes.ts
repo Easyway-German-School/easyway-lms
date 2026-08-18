@@ -21,6 +21,9 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // with whoever holds the student records.
   { prefix: "/admin/certificates", capability: "students" },
   { prefix: "/admin/leads", capability: "students" },
+  // A guardian's account is paperwork about a named student, same desk as
+  // the rest of the student record.
+  { prefix: "/admin/parents", capability: "students" },
   // The help desk sits with whoever holds the student records: answering a
   // ticket almost always means opening the asker's file.
   { prefix: "/admin/enquiries", capability: "students" },

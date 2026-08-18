@@ -12,7 +12,7 @@
  * unauthenticated person signs in, and nothing hardcodes a portal root again.
  */
 
-export type PortalRole = "admin" | "lecturer" | "student";
+export type PortalRole = "admin" | "lecturer" | "student" | "parent";
 
 /**
  * Roles arrive in three different shapes depending on where you are: the
@@ -24,6 +24,7 @@ export function normalizeRole(raw: unknown): PortalRole {
   const role = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   if (role === "admin") return "admin";
   if (role === "lecturer" || role === "tutor") return "lecturer";
+  if (role === "parent") return "parent";
   return "student";
 }
 
@@ -34,6 +35,8 @@ export function homePathForRole(raw: unknown): string {
       return "/admin";
     case "lecturer":
       return "/lecturer/dashboard";
+    case "parent":
+      return "/parent/dashboard";
     default:
       return "/dashboard";
   }
@@ -52,6 +55,8 @@ export function signInPathForRole(raw: unknown): string {
       return "/auth/admin";
     case "lecturer":
       return "/auth/lecturer/signin";
+    case "parent":
+      return "/auth/parent/signin";
     default:
       return "/auth/signin";
   }

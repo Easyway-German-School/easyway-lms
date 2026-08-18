@@ -54,13 +54,63 @@ const programs = [
   },
 ];
 
-type StudentInfo = { classType: string; level?: string; branchName?: string };
+type StudentInfo = {
+  classType: string;
+  level?: string;
+  branchName?: string;
+  /** Just enough of the payment picture to know if this is still a new, unpaid registrant. */
+  hasUnlockedClasses?: boolean;
+};
+
+/**
+ * The one-time nudge toward private tuition for a brand-new, unpaid registrant.
+ *
+ * The inline PremiumPrivateClasses card below already carries the full pitch —
+ * this popup exists only to make sure a student who registered and never paid
+ * actually sees it, instead of scrolling past it on their way to the checkout
+ * button. Shown once per browser session (sessionStorage, not localStorage —
+ * a shared/cyber-cafe device should not remember it forever) and never again
+ * once dismissed or once they've upgraded.
+ */
+function PrivateUpsellPopup({ onExplore, onDismiss }: { onExplore: () => void; onDismiss: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-6 sm:items-center sm:pb-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-md rounded-3xl border-2 border-[#c8a24a]/40 bg-[var(--surface)] p-6 shadow-2xl">
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#c8a24a]">Before you pay for the group class</p>
+        <h2 className="mt-3 text-xl font-bold text-[var(--foreground)]">Consider one-to-one instead</h2>
+        <p className="mt-2 text-sm text-[var(--muted)]">
+          A tutor to yourself, times you choose, and a faster route to fluency — see the private tuition package
+          below before you settle on the group track.
+        </p>
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={onExplore}
+            className="flex-1 rounded-full bg-[#c8a24a] px-5 py-2.5 text-sm font-semibold text-[#1a1206] transition hover:brightness-110"
+          >
+            Show me the package
+          </button>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="flex-1 rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+          >
+            Continue with group
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const UPSELL_SEEN_KEY = "easyway:private-upsell-seen";
 
 export default function ProgramsPage() {
   const { status } = useSession();
   const router = useRouter();
   const [selected, setSelected] = useState(programs[0].pathwayName);
   const [student, setStudent] = useState<StudentInfo | null>(null);
+  const [showUpsellPopup, setShowUpsellPopup] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -78,16 +128,34 @@ export default function ProgramsPage() {
         const res = await fetch("/api/student", { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json();
+        const classType = data.classType ?? "group";
+        const hasUnlockedClasses = Boolean(data.paymentSummary?.depositPaid ?? data.paymentSummary?.fullPaid);
         setStudent({
-          classType: data.classType ?? "group",
+          classType,
           level: data.level ?? undefined,
           branchName: data.branchName ?? undefined,
+          hasUnlockedClasses,
         });
+
+        const alreadySeen = typeof window !== "undefined" && window.sessionStorage.getItem(UPSELL_SEEN_KEY);
+        if (!alreadySeen && classType !== "private" && !hasUnlockedClasses) {
+          setShowUpsellPopup(true);
+        }
       } catch {
         // The pathway picker and checkout above still work without this.
       }
     })();
   }, [status]);
+
+  function dismissUpsellPopup() {
+    setShowUpsellPopup(false);
+    if (typeof window !== "undefined") window.sessionStorage.setItem(UPSELL_SEEN_KEY, "1");
+  }
+
+  function exploreUpsellPopup() {
+    dismissUpsellPopup();
+    document.getElementById("private-upgrade")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
 
   return (
     <div className="min-h-screen bg-[var(--surface-alt)] py-10 text-[var(--foreground)]">
@@ -179,8 +247,10 @@ export default function ProgramsPage() {
             that are still true an hour later — an upsell isn't one of them.
             It belongs with the other "study more, differently" choices, here
             and on the payment lock screen for students who haven't paid yet. */}
-        {student ? <PremiumPrivateClasses student={student} /> : null}
+        <div id="private-upgrade">{student ? <PremiumPrivateClasses student={student} /> : null}</div>
       </div>
+
+      {showUpsellPopup && <PrivateUpsellPopup onExplore={exploreUpsellPopup} onDismiss={dismissUpsellPopup} />}
     </div>
   );
 }

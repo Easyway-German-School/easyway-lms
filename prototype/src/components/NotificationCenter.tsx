@@ -83,6 +83,34 @@ function iconFor(kind: string) {
   return <Glyph className="h-5 w-5" />;
 }
 
+/**
+ * Where a notification goes when nobody set a link on it.
+ *
+ * Every notification is tappable, so one without a destination is a dead tap —
+ * and the class notices are the ones students actually chase ("is today's class
+ * still on?"). Anything about a class lands on the timetable, which is the page
+ * that answers the question they opened the notification to ask.
+ *
+ * A real `link` on the row always wins; this only fills the gap.
+ */
+const KIND_DESTINATIONS: Array<[string, string]> = [
+  ["class", "/calendar"],
+  ["attendance", "/calendar"],
+  ["material", "/materials"],
+  ["assignment", "/assignment"],
+  ["result", "/results"],
+  ["exam", "/exam-centre"],
+  ["certificate", "/certificates"],
+  ["payment", "/payments"],
+  ["tuition", "/payments"],
+  ["level.advance", "/programs"],
+];
+
+function destinationForKind(kind: string): string | null {
+  const match = KIND_DESTINATIONS.find(([prefix]) => kind === prefix || kind.startsWith(`${prefix}.`));
+  return match?.[1] ?? null;
+}
+
 const TONES: Record<string, { chip: string; dot: string; rail: string }> = {
   success: {
     chip: "bg-emerald-500/10 text-emerald-600",
@@ -278,9 +306,10 @@ export default function NotificationCenter({
     (notification: Notification) => {
       void markRead([notification.id]);
       setToasts((current) => current.filter((t) => t.id !== notification.id));
-      if (notification.link) {
+      const destination = notification.link ?? destinationForKind(notification.kind);
+      if (destination) {
         setIsOpen(false);
-        router.push(notification.link);
+        router.push(destination);
       }
     },
     [markRead, router],
@@ -480,8 +509,17 @@ export default function NotificationCenter({
         </AnimatePresence>
       </div>
 
-      {/* Toasts. Fixed to the viewport, so they are not clipped by the shell. */}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[120] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
+      {/*
+        Toasts. Fixed to the viewport, so they are not clipped by the shell.
+
+        They RISE IN FROM BELOW THE FOLD rather than sliding in from the side:
+        the toast starts fully out of frame (`y: 120`, past its own height) and
+        travels up into place. On a phone that is the bottom of the screen,
+        which is where the thumb already is and where every messaging app the
+        students use puts the same thing — and it means a notification never
+        lands over the header, the bell, or whatever they were reading.
+      */}
+      <div className="pointer-events-none fixed inset-x-4 bottom-4 z-[120] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:w-[22rem]">
         <AnimatePresence initial={false}>
           {toasts.map((toast) => {
             const tone = toneFor(toast.severity);
@@ -489,10 +527,10 @@ export default function NotificationCenter({
               <motion.button
                 key={toast.id}
                 layout
-                initial={{ opacity: 0, x: 40, scale: 0.96 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={{ opacity: 0, x: 40, scale: 0.96 }}
-                transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                initial={{ opacity: 0, y: 120, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 120, scale: 0.96 }}
+                transition={{ type: "spring", stiffness: 320, damping: 32 }}
                 onClick={() => open(toast)}
                 className={`pointer-events-auto flex w-full gap-3 rounded-2xl border border-[var(--border)] border-l-4 ${tone.rail} bg-[var(--surface)] p-3.5 text-left shadow-2xl`}
               >

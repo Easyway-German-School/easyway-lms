@@ -3,6 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { toPlayableUrl } from "@/lib/video-library";
 
 export async function GET() {
   try {
@@ -77,11 +78,18 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
-    // The client reads `fileUrl`; the column is `filePath`. Expose both so the
-    // download link resolves instead of rendering as undefined.
+    /**
+     * The client reads `fileUrl`; the column is `filePath`. Expose both so the
+     * download link resolves instead of rendering as undefined.
+     *
+     * Through `toPlayableUrl` rather than a bare `startsWith("/")` test: a
+     * bucket-hosted recording and a tutor's pasted YouTube link are both stored
+     * as absolute URLs, and prefixing those with a slash produced
+     * `/https://…`, a link that can only 404.
+     */
     const materials = records.map((material) => ({
       ...material,
-      fileUrl: material.filePath.startsWith("/") ? material.filePath : `/${material.filePath}`,
+      fileUrl: toPlayableUrl(material.filePath),
     }));
 
     return NextResponse.json({ materials, locked: false, totalPaid, tuitionFee });

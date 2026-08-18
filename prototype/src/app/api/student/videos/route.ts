@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { isPlayableVideo, toPlayableUrl, type LibraryVideo, type VideoKind } from "@/lib/video-library";
+import { isEmbeddedVideo, needsIframe, parseEmbed } from "@/lib/media-embed";
 import { reconcileRecordingsSoon } from "@/lib/class-recorder";
 
 export const dynamic = "force-dynamic";
@@ -93,6 +94,10 @@ export async function GET() {
       .filter((record) => isPlayableVideo(record.fileType))
       .map((record) => {
         const progress = progressByMaterial.get(record.id);
+        // A linked video carries its URL in filePath; the player needs the
+        // provider embed form instead, which is a different string.
+        const embed = isEmbeddedVideo(record.fileType) ? parseEmbed(record.filePath) : null;
+        const iframed = embed && needsIframe(embed.provider) ? embed : null;
         return {
           id: record.id,
           title: record.title,
@@ -110,6 +115,8 @@ export async function GET() {
           createdAt: record.createdAt.toISOString(),
           positionSeconds: progress?.positionSeconds ?? 0,
           completed: progress?.completed ?? false,
+          embedUrl: iframed?.embedUrl ?? null,
+          embedLabel: embed?.label ?? null,
         };
       });
 

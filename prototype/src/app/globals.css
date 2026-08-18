@@ -498,6 +498,35 @@ html.theme-custom ::selection {
   animation: driftField 46s ease-in-out infinite;
 }
 
+/* A slow conic sweep behind the hero — the thing that reads as "futuristic
+   glass panel" rather than "card with a gradient": light visibly moving
+   through the glass instead of sitting still on it. `mask` clips it to a ring
+   so the sweep never washes the card's own content, only its edge. Kept to a
+   single element behind everything else in the hero (see dashboard hero
+   markup) so it costs one extra layer, not one per card. */
+.aurora-sweep {
+  position: absolute;
+  inset: -35%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    color-mix(in srgb, var(--accent) 55%, transparent) 60deg,
+    transparent 140deg,
+    color-mix(in srgb, var(--accent-strong) 50%, transparent) 230deg,
+    transparent 320deg,
+    transparent 360deg
+  );
+  opacity: calc(0.16 * var(--scene-strength, 1));
+  filter: blur(60px);
+  animation: spinSlow 26s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes spinSlow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .scene-particles {
   position: absolute;
   inset: -10%;

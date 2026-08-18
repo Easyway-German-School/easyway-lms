@@ -192,45 +192,82 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         </Link>
 
         <div className="overflow-hidden rounded-3xl bg-slate-950">
-          <video
-            ref={videoRef}
-            src={video.fileUrl}
-            poster={video.thumbnailUrl ?? undefined}
-            controls
-            playsInline
-            preload="metadata"
-            onLoadedMetadata={handleLoadedMetadata}
-            onTimeUpdate={handleTimeUpdate}
-            onPause={() => flush()}
-            onEnded={() => flush()}
-            className="aspect-video w-full bg-black"
-          />
+          {/*
+            A linked video plays in the provider's own player.
+
+            None of the controls below it apply: the speed buttons drive
+            `videoRef`, which an iframe does not give us, and there is no file
+            to download. Rather than render them dead, the whole strip is
+            swapped for the one thing that is true — where the video came from.
+          */}
+          {video.embedUrl ? (
+            <iframe
+              src={video.embedUrl}
+              title={video.title}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+              allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
+              className="aspect-video w-full border-0 bg-black"
+            />
+          ) : (
+            <video
+              ref={videoRef}
+              src={video.fileUrl}
+              poster={video.thumbnailUrl ?? undefined}
+              controls
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={handleLoadedMetadata}
+              onTimeUpdate={handleTimeUpdate}
+              onPause={() => flush()}
+              onEnded={() => flush()}
+              className="aspect-video w-full bg-black"
+            />
+          )}
 
           <div className="flex flex-wrap items-center gap-3 border-t border-white/10 p-4">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-medium text-slate-400">Speed</span>
-              {SPEEDS.map((option) => (
-                <button
-                  key={option}
-                  onClick={() => setSpeed(option)}
-                  className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
-                    speed === option ? "bg-white text-slate-900" : "bg-white/10 text-white hover:bg-white/20"
-                  }`}
+            {video.embedUrl ? (
+              <>
+                <span className="text-xs font-medium text-slate-400">
+                  Playing from {video.embedLabel ?? "an external source"}
+                </span>
+                <a
+                  href={video.fileUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="ml-auto inline-flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
                 >
-                  {option}×
-                </button>
-              ))}
-            </div>
+                  Open on {video.embedLabel ?? "the original site"}
+                </a>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-slate-400">Speed</span>
+                  {SPEEDS.map((option) => (
+                    <button
+                      key={option}
+                      onClick={() => setSpeed(option)}
+                      className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                        speed === option ? "bg-white text-slate-900" : "bg-white/10 text-white hover:bg-white/20"
+                      }`}
+                    >
+                      {option}×
+                    </button>
+                  ))}
+                </div>
 
-            {/* On an unreliable connection, downloading once and watching
-                offline beats streaming three times. */}
-            <a
-              href={video.fileUrl}
-              download
-              className="ml-auto inline-flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
-            >
-              <DownloadIcon className="h-4 w-4" /> Download to watch offline
-            </a>
+                {/* On an unreliable connection, downloading once and watching
+                    offline beats streaming three times. */}
+                <a
+                  href={video.fileUrl}
+                  download
+                  className="ml-auto inline-flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+                >
+                  <DownloadIcon className="h-4 w-4" /> Download to watch offline
+                </a>
+              </>
+            )}
           </div>
         </div>
 

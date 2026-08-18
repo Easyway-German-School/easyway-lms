@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { readAssignment } from "@/lib/lecturer-assignment";
 import { lecturerCan } from "@/lib/lecturer-features";
 import { isPlayableVideo, toPlayableUrl, type LibraryVideo, type VideoKind } from "@/lib/video-library";
+import { isEmbeddedVideo, needsIframe, parseEmbed } from "@/lib/media-embed";
 import { reconcileRecordingsSoon } from "@/lib/class-recorder";
 
 export const dynamic = "force-dynamic";
@@ -109,32 +110,40 @@ export async function GET() {
       // Belt and braces: a row mis-tagged as a video the browser cannot play
       // would render an unplayable tile, which reads as a broken app.
       .filter((record) => isPlayableVideo(record.fileType))
-      .map((record) => ({
-        id: record.id,
-        title: record.title,
-        description: record.description,
-        fileUrl: toPlayableUrl(record.filePath),
-        thumbnailUrl: record.thumbnailPath ? toPlayableUrl(record.thumbnailPath) : null,
-        durationSeconds: record.durationSeconds,
-        kind: record.kind as VideoKind,
-        level: record.level ?? record.course?.level ?? null,
-        series: record.series,
-        episodeNumber: record.episodeNumber,
-        courseTitle: record.course?.title ?? null,
-        lecturerName: record.lecturer?.user?.name ?? null,
-        recordedAt: record.recordedAt?.toISOString() ?? null,
-        createdAt: record.createdAt.toISOString(),
-        /**
-         * Watch position is a STUDENT concept and is deliberately not faked
-         * here. `VideoProgress` hangs off a Student row, a tutor has none, and
-         * inventing a zero would put a "Continue watching" shelf on this page
-         * that never fills in however many times they watch something.
-         */
-        positionSeconds: 0,
-        completed: false,
-        /** Whether this tutor is the one who taught it — used to badge the tile. */
-        mine: record.lecturer?.id === lecturer.id,
-      }));
+      .map((record) => {
+        // See lib/media-embed.ts — a tutor's linked video shows the same way
+        // here as it does on the student shelf.
+        const embed = isEmbeddedVideo(record.fileType) ? parseEmbed(record.filePath) : null;
+        const iframed = embed && needsIframe(embed.provider) ? embed : null;
+        return {
+          id: record.id,
+          title: record.title,
+          description: record.description,
+          fileUrl: toPlayableUrl(record.filePath),
+          thumbnailUrl: record.thumbnailPath ? toPlayableUrl(record.thumbnailPath) : null,
+          durationSeconds: record.durationSeconds,
+          kind: record.kind as VideoKind,
+          level: record.level ?? record.course?.level ?? null,
+          series: record.series,
+          episodeNumber: record.episodeNumber,
+          courseTitle: record.course?.title ?? null,
+          lecturerName: record.lecturer?.user?.name ?? null,
+          recordedAt: record.recordedAt?.toISOString() ?? null,
+          createdAt: record.createdAt.toISOString(),
+          /**
+           * Watch position is a STUDENT concept and is deliberately not faked
+           * here. `VideoProgress` hangs off a Student row, a tutor has none, and
+           * inventing a zero would put a "Continue watching" shelf on this page
+           * that never fills in however many times they watch something.
+           */
+          positionSeconds: 0,
+          completed: false,
+          embedUrl: iframed?.embedUrl ?? null,
+          embedLabel: embed?.label ?? null,
+          /** Whether this tutor is the one who taught it — used to badge the tile. */
+          mine: record.lecturer?.id === lecturer.id,
+        };
+      });
 
     return NextResponse.json({
       videos,

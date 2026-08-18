@@ -164,6 +164,13 @@ export const TENANT_OWNED_MODELS = [
 
   /** Students the office has stopped from posting, until a moment in time. */
   "CommunityMute",
+
+  /**
+   * A parent/guardian account and the child it claims. Tenant-owned for the
+   * same reason Student is: it names a real family, and one school's parent
+   * must never be reachable from another school's admin console.
+   */
+  "Parent",
 ] as const;
 
 /**

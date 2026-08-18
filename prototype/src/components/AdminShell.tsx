@@ -21,6 +21,7 @@ import {
   CrossIcon,
   DashboardIcon,
   ExamIcon,
+  FamilyIcon,
   InboxIcon,
   IntegrationIcon,
   LecturerIcon,
@@ -80,6 +81,7 @@ const navItems: NavItem[] = [
 
   { label: 'Students', href: '/admin/students', icon: <UsersIcon />, group: 'Academics' },
   { label: 'Import students', href: '/admin/students/import', icon: <UserPlusIcon />, group: 'Academics' },
+  { label: 'Parents', href: '/admin/parents', icon: <FamilyIcon />, group: 'Academics' },
   // Two different things that both used to be called "Enquiries". A ticket is
   // a student who is already here and stuck; a lead is a stranger the school is
   // trying to enrol. One label for both is how a help request ends up counted

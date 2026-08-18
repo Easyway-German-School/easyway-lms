@@ -9,6 +9,7 @@ import PasswordInput from "@/components/PasswordInput";
 import BulkStudentAdd from "@/components/BulkStudentAdd";
 import { goalFor } from "@/lib/germany-goals";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
+import { isOnlineBranchName } from "@/lib/online-branch";
 
 type BranchOption = {
   id: string;
@@ -154,7 +155,10 @@ function StudentsRoster() {
   const [newStatus, setNewStatus] = useState("active");
   const [newClassType, setNewClassType] = useState("group");
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
+  const [newDeliveryMode, setNewDeliveryMode] = useState("physical");
   const [studentError, setStudentError] = useState("");
+  /** Shown once, right after a manual add, so the admin has something to copy. */
+  const [savedCredentials, setSavedCredentials] = useState<{ name: string; email: string; password: string } | null>(null);
   /** Which row's tutor select is mid-save, so it can be disabled while it is. */
   const [savingTutorFor, setSavingTutorFor] = useState("");
   const [selectedAdmission, setSelectedAdmission] = useState<AdmissionData>(null);
@@ -233,11 +237,13 @@ function StudentsRoster() {
 
   async function handleSaveStudent() {
     setStudentError("");
+    setSavedCredentials(null);
     if (!newName.trim() || !newEmail.trim()) {
       setStudentError("Name and email are required.");
       return;
     }
 
+    const isOnlineSelection = isOnlineBranchName(branches.find((branch) => branch.id === newBranchId)?.name);
     const payload = {
       name: newName.trim(),
       email: newEmail.trim().toLowerCase(),
@@ -247,9 +253,11 @@ function StudentsRoster() {
       status: newStatus,
       classType: newClassType,
       sessionSlot: newSessionSlot,
+      deliveryMode: isOnlineSelection ? "online" : newDeliveryMode,
     } as Record<string, unknown>;
 
     let res: Response;
+    const wasNewStudent = !editingStudentId;
 
     if (editingStudentId) {
       payload.studentId = editingStudentId;
@@ -278,6 +286,10 @@ function StudentsRoster() {
       return;
     }
 
+    if (wasNewStudent) {
+      setSavedCredentials({ name: newName.trim(), email: newEmail.trim().toLowerCase(), password: newPassword });
+    }
+
     setEditingStudentId(null);
     setNewName("");
     setNewEmail("");
@@ -286,6 +298,7 @@ function StudentsRoster() {
     setNewBranchId("");
     setNewTutorId("");
     setNewStatus("active");
+    setNewDeliveryMode("physical");
     setShowStudentForm(false);
     await loadStudents();
   }
@@ -348,7 +361,9 @@ function StudentsRoster() {
     setNewStatus(student.status || "active");
     setNewClassType(student.classType || "group");
     setNewSessionSlot(student.sessionSlot || "morning");
+    setNewDeliveryMode(student.deliveryMode === "hybrid" ? "hybrid" : "physical");
     setStudentError("");
+    setSavedCredentials(null);
     setShowStudentForm(true);
   }
 
@@ -363,7 +378,9 @@ function StudentsRoster() {
     setNewStatus("active");
     setNewClassType("group");
     setNewSessionSlot("morning");
+    setNewDeliveryMode("physical");
     setStudentError("");
+    setSavedCredentials(null);
     setShowStudentForm(false);
   }
 
@@ -730,6 +747,23 @@ function StudentsRoster() {
             looking at this page, not hunting for an importer in the sidebar. */}
         <BulkStudentAdd branches={branches} onImported={loadStudents} />
 
+        {savedCredentials ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-emerald-300 bg-emerald-50 px-6 py-4 text-sm text-emerald-800">
+            <p>
+              <strong>{savedCredentials.name}</strong> was added. Login — email:{" "}
+              <span className="font-mono">{savedCredentials.email}</span>, password:{" "}
+              <span className="font-mono">{savedCredentials.password}</span>
+            </p>
+            <button
+              type="button"
+              onClick={() => setSavedCredentials(null)}
+              className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-semibold text-emerald-800"
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         {showStudentForm ? (
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
             <div className="grid gap-4 md:grid-cols-2">
@@ -845,6 +879,26 @@ function StudentsRoster() {
                     sessions booked on the tutor&apos;s Private classes page.
                   </span>
                 )}
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Delivery mode</span>
+                {isOnlineBranchName(branches.find((branch) => branch.id === newBranchId)?.name) ? (
+                  <div className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--muted)]">
+                    Online only — set by the branch
+                  </div>
+                ) : (
+                  <select
+                    value={newDeliveryMode}
+                    onChange={(event) => setNewDeliveryMode(event.target.value)}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    <option value="physical">On campus only</option>
+                    <option value="hybrid">On campus + live video (hybrid)</option>
+                  </select>
+                )}
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Decides whether &quot;Live class&quot; shows up in this student&apos;s sidebar.
+                </span>
               </label>
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">

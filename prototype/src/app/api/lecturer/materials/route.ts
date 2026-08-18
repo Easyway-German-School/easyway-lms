@@ -5,6 +5,7 @@ import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
 import { belongsToLecturer, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
+import { EMBED_FILE_TYPE, parseEmbed } from '@/lib/media-embed';
 
 function serialise(material: {
   id: string;
@@ -95,10 +96,29 @@ export async function POST(req: NextRequest) {
     const description = String(body.description ?? '').trim();
     const courseId = String(body.courseId ?? '').trim();
 
-    const fileUrl = String(body.fileUrl ?? '').trim();
-    const fileName = String(body.fileName ?? '').trim();
-    const fileType = String(body.fileType ?? '').trim() || 'application/octet-stream';
-    const fileSize = Number(body.fileSize) || 0;
+    /**
+     * A LINK IS AN ALTERNATIVE TO A FILE, not an extra field on one.
+     *
+     * When `sourceUrl` is present nothing was uploaded, so the file fields are
+     * synthesised from the parsed link instead of being required. Everything
+     * downstream — the shelves, the student queries, the notification — then
+     * treats it as an ordinary video row. See lib/media-embed.ts.
+     */
+    const sourceUrl = String(body.sourceUrl ?? '').trim();
+    const embed = sourceUrl ? parseEmbed(sourceUrl) : null;
+    if (sourceUrl && !embed) {
+      return NextResponse.json(
+        { error: 'That link is not a video we recognise. Paste a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.' },
+        { status: 400 },
+      );
+    }
+
+    const fileUrl = embed ? embed.sourceUrl : String(body.fileUrl ?? '').trim();
+    const fileName = embed ? embed.label : String(body.fileName ?? '').trim();
+    const fileType = embed ? EMBED_FILE_TYPE : String(body.fileType ?? '').trim() || 'application/octet-stream';
+    // A link occupies no storage. Recording it as 0 keeps the tutor's "MB used"
+    // honest rather than inventing a size for something we do not host.
+    const fileSize = embed ? 0 : Number(body.fileSize) || 0;
 
     // Video-library metadata. All optional — a plain document upload sends none
     // of it and behaves exactly as it did before.
@@ -110,7 +130,7 @@ export async function POST(req: NextRequest) {
     const isRecording = String(body.isRecording ?? '') === 'true';
 
     if (!title || !fileUrl || !fileName) {
-      return NextResponse.json({ error: 'A title and a file are required' }, { status: 400 });
+      return NextResponse.json({ error: 'A title and either a file or a video link are required' }, { status: 400 });
     }
 
     // A recording belongs to a level, not a course. Everything else still
@@ -164,6 +184,10 @@ export async function POST(req: NextRequest) {
         episodeNumber: episodeRaw ? Number(episodeRaw) || null : null,
         durationSeconds: durationRaw ? Number(durationRaw) || null : null,
         recordedAt: recordedAtRaw ? new Date(recordedAtRaw) : kind === 'recording' ? new Date() : null,
+        // YouTube publishes a poster at a predictable URL, so a linked video
+        // gets a real thumbnail on the shelf instead of the grey placeholder
+        // every other provider falls back to.
+        thumbnailPath: embed?.thumbnailUrl ?? null,
       },
       include: { course: { select: { title: true } } },
     });

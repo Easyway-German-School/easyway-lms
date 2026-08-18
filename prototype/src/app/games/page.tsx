@@ -13,7 +13,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import StudentShell from "@/components/StudentShell";
-import { AlertIcon, ChainIcon, ClockIcon, PlusIcon } from "@/components/icons";
+import AICoachPanel from "@/components/AICoachPanel";
+import { AlertIcon, ChainIcon, ClockIcon, PlusIcon, SparklesIcon } from "@/components/icons";
 
 type Waiting = {
   turnId: string;
@@ -40,6 +41,9 @@ type Match = {
 export default function GamesPage() {
   const { status } = useSession();
   const router = useRouter();
+
+  /** games | coach. See components/AICoachPanel.tsx for why the two share a tab. */
+  const [tab, setTab] = useState<"games" | "coach">("games");
 
   const [waiting, setWaiting] = useState<Waiting[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -107,15 +111,36 @@ export default function GamesPage() {
         <header className="mb-6">
           <h1 className="flex items-center gap-3 text-2xl font-bold text-[var(--foreground)] sm:text-3xl">
             <ChainIcon className="h-7 w-7 text-[var(--accent)]" />
-            Games
+            AI Coach &amp; Games
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
-            Your class writes a story together, one sentence each. You get a turn, you
-            write one line in German, and it passes on. No rush — take your turn whenever
-            you pick up your phone.
+            {tab === "games"
+              ? "Your class writes a story together, one sentence each. You get a turn, you write one line in German, and it passes on. No rush — take your turn whenever you pick up your phone."
+              : "Practice your pronunciation and get a study plan built around where you actually are, not a generic curriculum."}
           </p>
         </header>
 
+        <div className="mb-6 flex gap-2">
+          <button
+            type="button"
+            onClick={() => setTab("games")}
+            className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${tab === "games" ? "bg-[var(--accent)] text-white shadow-[0_6px_18px_-6px_color-mix(in_srgb,var(--accent)_70%,transparent)]" : "bg-[var(--surface-alt)] text-[var(--muted)] hover:text-[var(--foreground)]"}`}
+          >
+            <ChainIcon className="h-4 w-4" /> Games
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("coach")}
+            className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${tab === "coach" ? "bg-[var(--accent)] text-white shadow-[0_6px_18px_-6px_color-mix(in_srgb,var(--accent)_70%,transparent)]" : "bg-[var(--surface-alt)] text-[var(--muted)] hover:text-[var(--foreground)]"}`}
+          >
+            <SparklesIcon className="h-4 w-4" /> AI Coach
+          </button>
+        </div>
+
+        {tab === "coach" ? (
+          <AICoachPanel />
+        ) : (
+        <>
         {error ? (
           <p className="mb-4 flex items-center gap-2 rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
             <AlertIcon className="h-4 w-4" /> {error}
@@ -265,6 +290,8 @@ export default function GamesPage() {
               </section>
             ) : null}
           </div>
+        )}
+        </>
         )}
       </div>
     </StudentShell>
