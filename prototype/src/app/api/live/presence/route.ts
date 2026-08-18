@@ -5,7 +5,6 @@ import {
   addInvites,
   closeLiveSession,
   declineInvite,
-  liveWhere,
   ringStudents,
   touchLiveSession,
 } from "@/lib/live-presence";
@@ -62,10 +61,23 @@ export async function POST(request: Request) {
      * possible. A room name in a request body is a claim, not a credential, and
      * "end the class" is the one action here that a bored student would enjoy
      * being able to perform on somebody else's lesson.
+     *
+     * Deliberately NOT `liveWhere()` here — that also requires `lastSeenAt` to
+     * be within the last three minutes, and this route is the ONLY thing that
+     * ever advances `lastSeenAt`. Gating the lookup on staleness makes staleness
+     * permanent: the one heartbeat that arrives a few seconds late (a
+     * backgrounded phone tab, one slow network blip) stops matching here, which
+     * means `touchLiveSession` never runs again, which means it can never match
+     * again either — a session that misses a single heartbeat was stuck stale
+     * forever, silently, with the tutor still teaching. `endedAt: null` is the
+     * only thing that should ever take a class away from its own tutor; three
+     * minutes of quiet is the right reason to stop advertising it to students
+     * (see `liveWhere()`, still used for exactly that in live-presence.ts), not
+     * a reason to lock its own tutor out of ending or reviving it.
      */
     const owned = await prisma.liveClassSession.findFirst({
       where: {
-        ...liveWhere(),
+        endedAt: null,
         ...(isAdmin && body.sessionId
           ? { id: String(body.sessionId) }
           : { OR: [{ lecturerId: lecturer?.id ?? "__none__" }, { startedByUserId: session.user.id }] }),
