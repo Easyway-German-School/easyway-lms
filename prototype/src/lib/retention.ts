@@ -2,32 +2,30 @@
  * Retention — the library reclaims its own storage.
  *
  * A school that records every class forever pays for every class forever, and
- * the honest truth about a class recording is that its usefulness collapses
- * after the cohort has moved on. This decides which tapes have stopped earning
- * their keep and reclaims them.
+ * a class recording exists to let this week's cohort catch up on this week's
+ * lesson — not to become a permanent video archive. The policy is deliberately
+ * blunt: a recording lives for one week, then it is gone.
  *
  * ---------------------------------------------------------------------------
- * WHY IT IS SAFE TO LET SOFTWARE DELETE THINGS
+ * WHY THIS IS A HARD CUTOFF, NOT AN EVIDENCE-BASED ONE
  * ---------------------------------------------------------------------------
- * Automatic deletion is the kind of feature that quietly destroys something
- * irreplaceable at 3am, so every rule here is a reason to KEEP. A recording is
- * only reclaimed when nothing argues for it:
+ * An earlier version of this policy kept a recording alive past its age if
+ * somebody was mid-watch or had watched recently, and only reclaimed it after
+ * 45-60 days of genuine idleness. That is the right shape for a video archive.
+ * It is the wrong shape for "one week and it's gone" — a rule with exceptions
+ * for staying useful is not a one-week rule, it is a "however long it stays
+ * useful" rule, which is a different feature. If a week genuinely is not
+ * enough for a given cohort, the fix is `keepForever` on that one recording
+ * (a human decision, made once), not a blanket exception that quietly extends
+ * every recording's life indefinitely.
+ *
+ * Only two things argue for keeping a recording past the week:
  *
  *   1. Marked keep-forever?            keep. A human said so; that ends it.
- *   2. Younger than the protected age? keep. The cohort is still catching up.
- *   3. Anyone part-way through it?     keep. Deleting a video a student is
- *                                      halfway through is the single worst
- *                                      thing this could do, and it is exactly
- *                                      what a naive age-based rule would do.
- *   4. Watched by anyone recently?     keep. It is demonstrably still useful.
- *   5. Otherwise                       reclaim.
+ *   2. Younger than 7 days?            keep. Its week is not up yet.
+ *   3. Otherwise                       reclaim.
  *
- * Note that rules 3 and 4 are measured, not assumed — `VideoProgress` already
- * records who watched what and where they stopped. The library knows its own
- * popularity, so retention is driven by evidence rather than by a guess about
- * how long a class stays interesting.
- *
- * And `planRetention()` is separate from `applyRetention()` on purpose: you can
+ * `planRetention()` is separate from `applyRetention()` on purpose: you can
  * always ask what it *would* do, and the answer costs nothing.
  */
 
@@ -35,16 +33,8 @@ import { prisma } from "@/lib/prisma";
 import { deleteRecordingObject } from "@/lib/recording";
 
 export const RETENTION = {
-  /**
-   * Nothing younger than this is ever considered, whatever the numbers say.
-   * A term is roughly two months; this covers the cohort's own catch-up plus
-   * the students who come back to revise before the level exam.
-   */
-  protectedDays: 45,
-  /** "Nobody has watched it in this long" — the idleness test. */
-  idleWindowDays: 60,
-  /** Watchers inside the idle window that are enough to save a recording. */
-  minRecentWatchers: 1,
+  /** A recording's whole lifespan. Nothing younger than this is ever touched. */
+  protectedDays: 7,
 } as const;
 
 export type RetentionDecision = "keep" | "reclaim";
@@ -76,8 +66,6 @@ function days(from: Date, to: Date): number {
  * What retention would do right now. Reads only — never deletes.
  */
 export async function planRetention(now: Date = new Date()): Promise<RetentionPlan> {
-  const idleSince = new Date(now.getTime() - RETENTION.idleWindowDays * 86_400_000);
-
   const recordings = await prisma.classRecording.findMany({
     where: { status: "completed", materialId: { not: null } },
     select: {
@@ -94,30 +82,9 @@ export async function planRetention(now: Date = new Date()): Promise<RetentionPl
     return { verdicts: [], reclaimable: 0, bytesReclaimable: 0 };
   }
 
-  // One query for every progress row that could argue for keeping something,
-  // rather than one query per recording.
-  const progress = await prisma.videoProgress.findMany({
-    where: { materialId: { in: recordings.map((r) => r.materialId!) } },
-    select: { materialId: true, positionSeconds: true, completed: true, updatedAt: true },
-  });
-
-  const midWatch = new Map<string, number>();
-  const recentWatchers = new Map<string, number>();
-  for (const row of progress) {
-    // Started but not finished — someone is in the middle of this.
-    if (row.positionSeconds > 30 && !row.completed) {
-      midWatch.set(row.materialId, (midWatch.get(row.materialId) ?? 0) + 1);
-    }
-    if (row.updatedAt >= idleSince) {
-      recentWatchers.set(row.materialId, (recentWatchers.get(row.materialId) ?? 0) + 1);
-    }
-  }
-
   const verdicts: RetentionVerdict[] = recordings.map((recording) => {
     const recordedAt = recording.material?.recordedAt ?? recording.startedAt;
     const ageDays = days(recordedAt, now);
-    const inProgress = midWatch.get(recording.materialId!) ?? 0;
-    const recent = recentWatchers.get(recording.materialId!) ?? 0;
 
     const base = {
       recordingId: recording.id,
@@ -133,26 +100,12 @@ export async function planRetention(now: Date = new Date()): Promise<RetentionPl
       return { ...base, decision: "keep" as const, reason: "Marked keep-forever" };
     }
     if (ageDays < RETENTION.protectedDays) {
-      return { ...base, decision: "keep" as const, reason: `Only ${ageDays} days old` };
-    }
-    if (inProgress > 0) {
-      return {
-        ...base,
-        decision: "keep" as const,
-        reason: `${inProgress} student${inProgress === 1 ? " is" : "s are"} part-way through`,
-      };
-    }
-    if (recent >= RETENTION.minRecentWatchers) {
-      return {
-        ...base,
-        decision: "keep" as const,
-        reason: `Watched by ${recent} in the last ${RETENTION.idleWindowDays} days`,
-      };
+      return { ...base, decision: "keep" as const, reason: `Only ${ageDays} of ${RETENTION.protectedDays} days old` };
     }
     return {
       ...base,
       decision: "reclaim" as const,
-      reason: `${ageDays} days old, nobody has watched it in ${RETENTION.idleWindowDays}`,
+      reason: `${ageDays} days old — past its ${RETENTION.protectedDays}-day lifespan`,
     };
   });
 

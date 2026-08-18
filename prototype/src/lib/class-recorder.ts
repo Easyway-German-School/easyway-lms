@@ -35,6 +35,7 @@ import {
   recordingPublicUrl,
   recordingStorage,
   recordingVariant,
+  verifyRecordingObject,
 } from "@/lib/recording";
 
 export type StartRecordingInput = {
@@ -216,6 +217,31 @@ export async function finaliseRecording(egress: {
     const objectKey = result?.filename || row.objectKey;
     if (!objectKey) return "unknown";
 
+    // LiveKit saying the upload finished is not the same as this app being
+    // able to read it back — see the comment on `verifyRecordingObject`. A
+    // Backblaze/R2 outage, an exhausted download quota or a rotated key all
+    // answer LiveKit's own upload just fine and only show up here, on the
+    // read side. Catching it now means a "failed" row and an admin ping,
+    // instead of a Material row that looks ready and 404s the first time a
+    // student presses play.
+    const verified = await verifyRecordingObject(objectKey);
+    if (!verified.ok) {
+      await prisma.classRecording.update({
+        where: { id: row.id },
+        data: { status: "failed", endedAt: new Date(), objectKey, error: verified.reason },
+      });
+      notifyInBackground({
+        to: { audience: "admin", capability: "materials" },
+        kind: KIND.recordingFailed,
+        severity: "critical",
+        title: "A class recording uploaded but can't be read back",
+        message: `${recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: row.startedAt })}: ${verified.reason}`,
+        link: "/admin/materials",
+        dedupeKey: `recording-verify-failed:${row.egressId}`,
+      });
+      return "failed";
+    }
+
     // LiveKit reports duration in nanoseconds, as a bigint.
     const durationSeconds = result?.duration ? Math.round(Number(result.duration) / 1_000_000_000) : null;
     const sizeBytes = result?.size ? Number(result.size) : null;
@@ -311,42 +337,54 @@ export function reconcileRecordingsSoon(): void {
   });
 }
 
+// A capture LiveKit has forgotten about (garbage-collected on its side, or
+// the egress id is simply wrong) is never going to answer `listEgress`. Left
+// alone that row sits "active" forever — nobody's fault, just nothing left to
+// ask. Past this age with no answer, it is dead and should say so.
+const STUCK_ACTIVE_HOURS = 6;
+
 export async function reconcileRecordings(): Promise<{ checked: number; finalised: number }> {
   const client = egressClient();
   if (!client || !recordingConfigured()) return { checked: 0, finalised: 0 };
 
+  // Only ACTIVE rows belong here. A row already sitting at "failed" or
+  // "aborted" already went through `finaliseRecording` once and got that
+  // status from LiveKit's own report — there is no second opinion to ask for,
+  // and re-finalising it by faking `EGRESS_COMPLETE` (the bug this used to
+  // have) is exactly how a class that genuinely never recorded ends up with a
+  // Material row pointing at a file that was never written.
   const open = await prisma.classRecording.findMany({
-    where: { materialId: null, objectKey: { not: null }, status: { not: "purged" } },
-    select: { egressId: true, objectKey: true, status: true },
+    where: { status: "active", objectKey: { not: null } },
+    select: { egressId: true, startedAt: true },
   });
   if (open.length === 0) return { checked: 0, finalised: 0 };
 
+  const staleBefore = Date.now() - STUCK_ACTIVE_HOURS * 3_600_000;
   let finalised = 0;
-  for (const { egressId, objectKey, status } of open) {
+  for (const { egressId, startedAt } of open) {
     try {
-      if (status === "active") {
-        const [info] = await client.listEgress({ egressId });
-        if (!info) continue;
-        const done =
-          info.status === EgressStatus.EGRESS_COMPLETE ||
-          info.status === EgressStatus.EGRESS_FAILED ||
-          info.status === EgressStatus.EGRESS_ABORTED;
-        if (!done) continue;
-
-        const outcome = await finaliseRecording({
-          egressId: info.egressId,
-          status: info.status,
-          error: info.error,
-          fileResults: info.fileResults,
-        });
-        if (outcome === "created" || outcome === "failed") finalised += 1;
+      const [info] = await client.listEgress({ egressId });
+      if (!info) {
+        if (startedAt.getTime() < staleBefore) {
+          await prisma.classRecording.update({
+            where: { egressId },
+            data: { status: "failed", endedAt: new Date(), error: "LiveKit has no record of this egress" },
+          });
+          finalised += 1;
+        }
         continue;
       }
+      const done =
+        info.status === EgressStatus.EGRESS_COMPLETE ||
+        info.status === EgressStatus.EGRESS_FAILED ||
+        info.status === EgressStatus.EGRESS_ABORTED;
+      if (!done) continue;
 
       const outcome = await finaliseRecording({
-        egressId,
-        status: EgressStatus.EGRESS_COMPLETE,
-        fileResults: [{ filename: objectKey ?? undefined }],
+        egressId: info.egressId,
+        status: info.status,
+        error: info.error,
+        fileResults: info.fileResults,
       });
       if (outcome === "created" || outcome === "failed") finalised += 1;
     } catch (error) {

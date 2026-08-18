@@ -17,18 +17,28 @@
  * problem we are trying to solve.
  *
  * ---------------------------------------------------------------------------
- * WHY THE FILE IS SMALL
+ * WHY THE FILE IS 1080p
  * ---------------------------------------------------------------------------
- * A German lesson is not a film. The payload is speech and whatever is on the
- * board; a grid of forty webcam tiles is decoration that costs money to store
- * and costs a student on mobile data money to watch.
+ * This used to be 640x360 — deliberately small, on the reasoning that a German
+ * lesson is speech and a whiteboard, not a film. That reasoning still holds for
+ * a *live* stream over a shaky connection, which is why the live classroom
+ * itself still runs modest simulcast layers (see `LiveKitClassroom.tsx`). It
+ * does not hold for the recording: nobody watches a lecture archive over a live
+ * link, and a rewatching student squinting at a blurred equation on the board
+ * is exactly the failure this quality bump exists to fix.
  *
- * So we do not use LiveKit's presets — the smallest is 720p30, which is built
- * for filming faces. `CLASS_ENCODING` below is tuned for a classroom instead:
- * modest video, generous audio. Audio is the lesson. This is roughly a tenth
- * the size of a naive recording of the same class, before any storage trick,
- * and it is the single largest cost lever in the whole system.
+ * The trade-off is real and was made deliberately, not by accident: 1080p at
+ * this bitrate runs roughly 4.5x the bandwidth of the old 360p profile per
+ * hour watched (about 1.3 GB/hour against 300 MB/hour). That is a bucket bill
+ * line, specifically the DOWNLOAD side of it —
+ * check `RECORDING_S3_*`'s provider dashboard for a bandwidth cap before
+ * relying on this, since a cap sized for 360p viewing will be reached far
+ * sooner at 1080p.
  *
+ * `RECORDING_VARIANT=audio` still exists for a school that would rather not
+ * pay for picture at all.
+ *
+
  * ---------------------------------------------------------------------------
  * WHY THE KEYS LOOK LIKE THAT
  * ---------------------------------------------------------------------------
@@ -48,19 +58,23 @@ import { EgressClient, EncodedFileOutput, EncodedFileType, EncodingOptions, S3Up
 import { recordingObjectStorage } from "@/lib/storage";
 
 /**
- * Tuned for a classroom rather than a film set.
+ * Full HD, tuned for a classroom rather than a film set.
  *
- * 640x360 at 20fps is legible for a whiteboard and a talking head, and dies
- * quietly on a 3G connection instead of buffering. 96kbps stereo audio is
- * deliberately generous for the size of the video: a student rewatching a
- * lesson to catch a declension needs to *hear* it, and audio is cheap.
+ * 1080p30 keeps a whiteboard or a shared screen legible when a student pauses
+ * and zooms — the 360p profile this replaced was fine for a talking head and
+ * useless for a slide with a table on it. Bitrate is set for what a static
+ * classroom shot with a whiteboard actually needs, well under what a real
+ * 1080p video-of-motion would take, so quality goes up by far more than the
+ * file size does. 128kbps stereo audio stays generous: a student rewatching a
+ * lesson to catch a declension needs to *hear* it, and audio is cheap next to
+ * video regardless of resolution.
  */
 export const CLASS_ENCODING = new EncodingOptions({
-  width: 640,
-  height: 360,
-  framerate: 20,
-  videoBitrate: 600,
-  audioBitrate: 96,
+  width: 1920,
+  height: 1080,
+  framerate: 30,
+  videoBitrate: 3000,
+  audioBitrate: 128,
 });
 
 /**
@@ -68,9 +82,10 @@ export const CLASS_ENCODING = new EncodingOptions({
  * one year of video.
  *
  * A German class is speech. Dropping the picture costs the whiteboard and
- * costs nothing else — and it is not a small saving: roughly **45 MB an hour
- * against 300**, which is the difference between 66 GB and 438 GB of storage
- * per branch per year. At that size a phone can hold an entire level offline.
+ * costs nothing else — and at 1080p it is no longer a small saving: roughly
+ * **45 MB an hour against 1.3 GB**, which is close to thirty times the
+ * storage and bandwidth for the video variant. A school on a metered bucket
+ * plan may prefer this by default rather than as a fallback.
  *
  * Set `RECORDING_VARIANT=audio` to switch. The tile still appears on the Watch
  * shelf and the player still resumes where the student stopped; there is
@@ -88,7 +103,7 @@ export function recordingVariant(): RecordingVariant {
 
 /** Roughly what an hour costs to keep, for the admin UI and the diagnostics. */
 export function mbPerHour(variant: RecordingVariant = recordingVariant()): number {
-  const kbps = variant === "audio" ? 96 + 8 : 600 + 96;
+  const kbps = variant === "audio" ? 96 + 8 : 3000 + 128;
   return Math.round((kbps * 1000 * 3600) / 8 / 1024 / 1024);
 }
 
@@ -240,6 +255,57 @@ export async function deleteRecordingObject(objectKey: string): Promise<boolean>
   } catch (error) {
     console.error(`Could not delete ${objectKey}:`, error);
     return false;
+  }
+}
+
+/**
+ * Confirm the file egress reported as finished is actually fetchable, before
+ * anything gets written to the Watch shelf.
+ *
+ * LiveKit reporting `EGRESS_COMPLETE` only means ITS upload succeeded — it says
+ * nothing about whether this app can later read the object back. A bucket that
+ * is out of download quota, or has had its key rotated, or evicted the object
+ * under a lifecycle rule, answers every GET with an error page long after the
+ * upload itself went fine. Publishing a Material row on LiveKit's word alone is
+ * how a "recording ready" notification ends up pointing at a broken player —
+ * check the one thing that actually matters (can we read it back?) before
+ * telling anyone it exists.
+ *
+ * A tiny ranged GET rather than a HEAD: R2 and B2 both support Range on GET,
+ * and a HEAD is one more request shape to have tested against every provider
+ * this ever runs on.
+ */
+export async function verifyRecordingObject(
+  objectKey: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const storage = recordingStorage();
+  if (!storage) return { ok: false, reason: "No recording storage configured" };
+
+  try {
+    const { AwsClient } = await import("aws4fetch");
+    const aws = new AwsClient({
+      accessKeyId: storage.accessKey,
+      secretAccessKey: storage.secret,
+      region: storage.region,
+      service: "s3",
+    });
+    const base = storage.endpoint
+      ? `${storage.endpoint.replace(/\/+$/, "")}/${storage.bucket}`
+      : `https://${storage.bucket}.s3.${storage.region}.amazonaws.com`;
+
+    const response = await aws.fetch(`${base}/${objectKey.replace(/^\/+/, "")}`, {
+      method: "GET",
+      headers: { Range: "bytes=0-0" },
+    });
+
+    if (response.ok || response.status === 206) return { ok: true };
+
+    const body = await response.text().catch(() => "");
+    // Bucket error bodies are small XML/JSON. Keep only enough to diagnose —
+    // this lands in `ClassRecording.error`, not a log built for megabytes.
+    return { ok: false, reason: `Bucket returned ${response.status}: ${body.slice(0, 300) || response.statusText}` };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "Unknown storage error" };
   }
 }
 

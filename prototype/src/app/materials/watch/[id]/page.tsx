@@ -7,7 +7,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import VideoThumb from "@/components/video/VideoThumb";
-import { ArrowLeftIcon, DownloadIcon } from "@/components/icons";
+import { ArrowLeftIcon } from "@/components/icons";
 import {
   formatDuration,
   isEffectivelyComplete,
@@ -191,14 +191,14 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
           <ArrowLeftIcon /> Back to the library
         </Link>
 
-        <div className="overflow-hidden rounded-3xl bg-slate-950">
+        <div className="relative overflow-hidden rounded-3xl bg-black shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)] ring-1 ring-white/10">
           {/*
             A linked video plays in the provider's own player.
 
             None of the controls below it apply: the speed buttons drive
-            `videoRef`, which an iframe does not give us, and there is no file
-            to download. Rather than render them dead, the whole strip is
-            swapped for the one thing that is true — where the video came from.
+            `videoRef`, which an iframe does not give us. Rather than render
+            them dead, the whole strip is swapped for the one thing that is
+            true — where the video came from.
           */}
           {video.embedUrl ? (
             <iframe
@@ -217,6 +217,10 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
               controls
               playsInline
               preload="metadata"
+              disablePictureInPicture
+              disableRemotePlayback
+              controlsList="nodownload noremoteplayback"
+              onContextMenu={(event) => event.preventDefault()}
               onLoadedMetadata={handleLoadedMetadata}
               onTimeUpdate={handleTimeUpdate}
               onPause={() => flush()}
@@ -225,7 +229,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
             />
           )}
 
-          <div className="flex flex-wrap items-center gap-3 border-t border-white/10 p-4">
+          <div className="flex flex-wrap items-center gap-3 border-t border-white/10 bg-gradient-to-b from-black/40 to-black/70 p-4 backdrop-blur">
             {video.embedUrl ? (
               <>
                 <span className="text-xs font-medium text-slate-400">
@@ -241,32 +245,20 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
                 </a>
               </>
             ) : (
-              <>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium text-slate-400">Speed</span>
-                  {SPEEDS.map((option) => (
-                    <button
-                      key={option}
-                      onClick={() => setSpeed(option)}
-                      className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
-                        speed === option ? "bg-white text-slate-900" : "bg-white/10 text-white hover:bg-white/20"
-                      }`}
-                    >
-                      {option}×
-                    </button>
-                  ))}
-                </div>
-
-                {/* On an unreliable connection, downloading once and watching
-                    offline beats streaming three times. */}
-                <a
-                  href={video.fileUrl}
-                  download
-                  className="ml-auto inline-flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
-                >
-                  <DownloadIcon className="h-4 w-4" /> Download to watch offline
-                </a>
-              </>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-slate-400">Speed</span>
+                {SPEEDS.map((option) => (
+                  <button
+                    key={option}
+                    onClick={() => setSpeed(option)}
+                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                      speed === option ? "bg-white text-slate-900" : "bg-white/10 text-white hover:bg-white/20"
+                    }`}
+                  >
+                    {option}×
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -288,11 +280,14 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
           </div>
         ) : null}
 
-        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-950 to-black p-6 text-white shadow-xl">
+          {/* A soft brand-colour wash in the corner — the one thing a plain
+              dark card is missing to read as "cinematic" rather than "empty". */}
+          <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-[#FF6600]/20 blur-3xl" />
+          <div className="relative flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="text-2xl font-semibold">{video.title}</h1>
-              <p className="mt-1 text-sm text-[var(--muted)]">
+              <h1 className="text-2xl font-semibold tracking-tight">{video.title}</h1>
+              <p className="mt-1.5 text-sm text-slate-300">
                 {[
                   video.kind === "recording" ? "Class recording" : "Lesson video",
                   video.level,
@@ -305,31 +300,36 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
               </p>
             </div>
             {video.completed ? (
-              <span className="rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700">Watched</span>
+              <span className="shrink-0 rounded-full bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-300 ring-1 ring-emerald-400/30">
+                Watched
+              </span>
             ) : watchPercent(video) > 0 ? (
-              <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)]">
+              <span className="shrink-0 rounded-full bg-[#FF6600]/15 px-3 py-1.5 text-xs font-semibold text-[#ffb27a] ring-1 ring-[#FF6600]/30">
                 {watchPercent(video)}% watched
               </span>
             ) : null}
           </div>
 
           {video.description ? (
-            <p className="mt-4 text-sm leading-7 text-[var(--muted)]">{video.description}</p>
+            <p className="relative mt-4 max-w-3xl text-sm leading-7 text-slate-300">{video.description}</p>
           ) : null}
         </div>
 
         {upNext.length > 0 ? (
           <div className="space-y-3">
             <h2 className="text-lg font-semibold">Up next</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="-mx-6 flex snap-x gap-4 overflow-x-auto px-6 pb-2 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-3">
               {upNext.map((item) => (
                 <Link
                   key={item.id}
                   href={`/materials/watch/${item.id}`}
-                  className="group overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] transition hover:shadow-lg"
+                  className="group w-64 shrink-0 snap-start overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] transition duration-300 hover:-translate-y-1 hover:shadow-2xl sm:w-auto"
                 >
-                  <div className="relative aspect-video bg-slate-900">
-                    <VideoThumb video={item} />
+                  <div className="relative aspect-video overflow-hidden bg-slate-900">
+                    <div className="h-full w-full transition duration-300 group-hover:scale-110">
+                      <VideoThumb video={item} />
+                    </div>
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition group-hover:opacity-100" />
                     {item.durationSeconds ? (
                       <span className="absolute right-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
                         {formatDuration(item.durationSeconds)}

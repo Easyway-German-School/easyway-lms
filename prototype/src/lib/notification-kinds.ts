@@ -49,6 +49,8 @@ export const KIND = {
   announcement: "announcement",
   /** Somebody started a game in the room's chat — see /api/community/messages. */
   gameInvite: "game.invite",
+  /** A class recording uploaded but the bucket won't serve it back — admins need to know before a student does. */
+  recordingFailed: "recording.failed",
   general: "general",
 } as const;
 
