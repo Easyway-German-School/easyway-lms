@@ -156,17 +156,17 @@ export default function SmartCalendarClient() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 rounded-2xl bg-white/15 px-4 py-2 backdrop-blur">
+          <div className="flex items-center gap-2 rounded-2xl bg-[var(--surface-alt)] px-4 py-2 backdrop-blur">
             <BoltIcon />
             <span className="text-lg font-extrabold">{percent}%</span>
           </div>
         </div>
 
-        <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-white/25">
+        <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-[var(--surface)]/25">
           <motion.div
             // White, not a theme surface: this bar sits on the brand gradient
             // hero, where the copy around it is white too.
-            className="h-full rounded-full bg-white"
+            className="h-full rounded-full bg-[var(--surface)]"
             initial={{ width: 0 }}
             animate={{ width: `${percent}%` }}
             transition={{ duration: 0.8, ease: "easeOut" }}

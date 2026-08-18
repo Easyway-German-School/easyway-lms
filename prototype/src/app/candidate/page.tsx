@@ -51,7 +51,7 @@ export default function CandidatePage() {
 
   return (
     <div className="min-h-screen bg-[linear-gradient(135deg,_#f7faff_0%,_#fffbf8_100%)]">
-      <header className="border-b border-[var(--border)] bg-white/70 backdrop-blur">
+      <header className="border-b border-[var(--border)] bg-[var(--surface-soft)] backdrop-blur">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-6 py-4">
           <BrandLogo variant="wordmark" className="h-9" />
           <div className="flex items-center gap-3">

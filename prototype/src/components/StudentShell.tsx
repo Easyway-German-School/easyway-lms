@@ -11,6 +11,7 @@ import LiveClassCall from "@/components/live/LiveClassCall";
 import MomentDock from "@/components/MomentDock";
 import GameTurnToast from "@/components/GameTurnToast";
 import NotificationCenter from "@/components/NotificationCenter";
+import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
 import SignOutButton from "@/components/SignOutButton";
 import { MomentQueueProvider } from "@/lib/moment-queue";
@@ -99,6 +100,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { status } = useSession();
   const { live } = useLiveClass();
+  useHideFloatingThemeToggle();
   const [collapsed, setCollapsed] = useState(false);
   // Below lg the sidebar is a drawer, not a column. It used to be a fixed 288px
   // pane with the content pushed 288px right, which on a phone left the portal
@@ -200,7 +202,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
 
       <aside
         data-tour="sidebar"
-        className={`fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:transition-all ${
+        className={`sidebar-glass fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-[var(--border)] transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:transition-all ${
           drawerOpen ? "translate-x-0" : "-translate-x-full"
         } w-[17rem] ${collapsed ? "lg:w-20" : "lg:w-72"}`}
       >
@@ -346,6 +348,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
             {lockedAreaLabel === "This page" ? "Student portal" : lockedAreaLabel}
           </p>
 
+          <ThemeToggle variant="compact" />
           <NotificationCenter />
         </header>
 

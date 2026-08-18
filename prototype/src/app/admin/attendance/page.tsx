@@ -166,7 +166,7 @@ export default function AttendancePage() {
         </div>
 
         {/* Form */}
-        <div className="bg-white rounded-lg border p-6 mb-8">
+        <div className="bg-[var(--surface)] rounded-lg border p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">
             {editingId ? "Edit Attendance" : "Record Attendance"}
           </h2>
@@ -253,7 +253,7 @@ export default function AttendancePage() {
                 <button
                   type="button"
                   onClick={cancelEditingAttendance}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                  className="px-4 py-2 bg-[var(--surface-alt)] text-[var(--foreground-soft)] rounded hover:bg-[var(--border)]"
                 >
                   Cancel
                 </button>
@@ -263,9 +263,9 @@ export default function AttendancePage() {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-lg border overflow-hidden">
+        <div className="bg-[var(--surface)] rounded-lg border overflow-hidden">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-[var(--surface-alt)] border-b">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-medium">
                   Student
@@ -287,13 +287,13 @@ export default function AttendancePage() {
             <tbody>
               {attendances.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
+                  <td colSpan={5} className="px-6 py-4 text-center text-[var(--muted)]">
                     No attendance records
                   </td>
                 </tr>
               ) : (
                 attendances.map((record) => (
-                  <tr key={record.id} className="border-b hover:bg-gray-50">
+                  <tr key={record.id} className="border-b hover:bg-[var(--surface-alt)]">
                     <td className="px-6 py-3">{record.student.user.name}</td>
                     <td className="px-6 py-3">
                       {new Date(record.date).toLocaleDateString()}

@@ -66,13 +66,13 @@ export default function ExamBodyComingSoon({
 
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 -rotate-[7deg] border-y border-white/25 bg-black/25 py-1.5 text-center text-[11px] font-black uppercase tracking-[0.5em] text-white/85 backdrop-blur-[1px] sm:text-sm"
+            className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 -rotate-[7deg] border-y border-[var(--border)] bg-black/25 py-1.5 text-center text-[11px] font-black uppercase tracking-[0.5em] text-white/85 backdrop-blur-[1px] sm:text-sm"
           >
             Coming soon
           </div>
 
           <div className="pointer-events-none absolute inset-0 grid place-items-center">
-            <div className="grid h-20 w-20 place-items-center rounded-3xl border border-white/30 bg-black/45 text-white shadow-2xl backdrop-blur-md sm:h-24 sm:w-24">
+            <div className="grid h-20 w-20 place-items-center rounded-3xl border border-[var(--border)] bg-black/45 text-white shadow-2xl backdrop-blur-md sm:h-24 sm:w-24">
               <LockIcon className="h-9 w-9 sm:h-10 sm:w-10" strokeWidth={1.7} />
             </div>
           </div>
@@ -94,7 +94,7 @@ export default function ExamBodyComingSoon({
 
           <ol className="mt-6 space-y-3">
             {checklist.map((step) => (
-              <li key={step.title} className="flex gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5">
+              <li key={step.title} className="flex gap-3 rounded-2xl cinematic-card p-3.5">
                 <span className="mt-0.5 shrink-0">
                   {step.done ? (
                     <CheckCircleIcon className="h-5 w-5 text-[var(--success)]" />
@@ -113,14 +113,14 @@ export default function ExamBodyComingSoon({
           {onExploreInternal ? (
             <button
               onClick={onExploreInternal}
-              className="mt-6 inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
+              className="mt-6 inline-flex items-center gap-2 rounded-full btn-glow px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
             >
               <ExamCentreIcon className="h-4 w-4" /> See EasyWay's own exams
             </button>
           ) : exploreHref ? (
             <a
               href={exploreHref}
-              className="mt-6 inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
+              className="mt-6 inline-flex items-center gap-2 rounded-full btn-glow px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
             >
               <ExamCentreIcon className="h-4 w-4" /> See EasyWay's own exams
             </a>

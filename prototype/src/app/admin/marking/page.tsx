@@ -95,31 +95,31 @@ function MarkingQueue() {
       )}
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-5">
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-5">
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Waiting</p>
           <p className="mt-2 text-3xl font-black">{data?.totalCount ?? "—"}</p>
         </div>
-        <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-5">
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-5">
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Longest wait</p>
           <p className={`mt-2 text-3xl font-black ${oldest >= STALE_DAYS ? "text-red-600" : ""}`}>
             {data ? `${oldest}d` : "—"}
           </p>
         </div>
-        <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-5">
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-5">
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Tutors involved</p>
           <p className="mt-2 text-3xl font-black">{data?.byTutor.length ?? "—"}</p>
         </div>
       </div>
 
       {data && data.byTutor.length > 0 && (
-        <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-6">
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6">
           <h2 className="text-sm font-bold uppercase tracking-[0.18em]">Whose desk it is on</h2>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setTutorFilter("")}
               className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                tutorFilter === "" ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border)] hover:bg-white"
+                tutorFilter === "" ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border)] hover:bg-[var(--surface)]"
               }`}
             >
               Everyone
@@ -133,7 +133,7 @@ function MarkingQueue() {
                 className={`rounded-full border px-4 py-2 text-sm font-semibold transition disabled:opacity-60 ${
                   tutorFilter && tutorFilter === tutor.id
                     ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-                    : "border-[var(--border)] hover:bg-white"
+                    : "border-[var(--border)] hover:bg-[var(--surface)]"
                 }`}
               >
                 {tutor.name}
@@ -146,7 +146,7 @@ function MarkingQueue() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-white/80">
+      <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)]">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-[var(--border)] text-sm">
             <thead className="bg-[var(--surface)] text-left text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">

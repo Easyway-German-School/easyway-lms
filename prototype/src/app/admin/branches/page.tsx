@@ -147,7 +147,7 @@ export default function AdminBranchesPage() {
                 <button
                   type="button"
                   onClick={cancelEditingBranch}
-                  className="rounded-lg border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold text-slate-700"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--foreground-soft)]"
                 >
                   Cancel
                 </button>

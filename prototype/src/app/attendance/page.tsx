@@ -62,7 +62,7 @@ export default function AttendancePage() {
       case "excused":
         return "bg-orange-500/10 text-orange-700 border-orange-500/20";
       default:
-        return "bg-gray-500/10 text-gray-700 border-gray-500/20";
+        return "bg-[var(--surface-alt)]0/10 text-[var(--foreground-soft)] border-gray-500/20";
     }
   };
 
@@ -90,7 +90,7 @@ export default function AttendancePage() {
           )}
 
           <div className="grid gap-4 md:grid-cols-5">
-            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+            <div className="rounded-3xl cinematic-card p-6">
               <p className="text-sm text-[var(--muted)]">Total sessions</p>
               <p className="mt-2 text-3xl font-bold">{stats.total}</p>
             </div>
@@ -112,7 +112,7 @@ export default function AttendancePage() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8">
+          <div className="rounded-3xl cinematic-card p-8">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-[var(--muted)]">Attendance rate</p>
@@ -131,11 +131,11 @@ export default function AttendancePage() {
           </div>
 
           {loading ? (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-12 text-center">
+            <div className="rounded-xl cinematic-card p-12 text-center">
               <p className="text-[var(--muted)]">Loading records…</p>
             </div>
           ) : records.length === 0 ? (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-12 text-center">
+            <div className="rounded-xl cinematic-card p-12 text-center">
               <p className="text-lg font-semibold">No attendance records yet</p>
               <p className="mt-2 text-[var(--muted)]">Your attendance will appear here once sessions begin</p>
             </div>

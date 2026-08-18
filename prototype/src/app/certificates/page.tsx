@@ -68,7 +68,7 @@ export default function CertificatesPage() {
     <StudentShell>
       <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
         <div className="mx-auto max-w-7xl px-6 py-10">
-          <div className="rounded-[32px] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
+          <div className="rounded-[32px] cinematic-card p-8 shadow-[var(--shadow)]">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Certificates</p>
@@ -113,7 +113,7 @@ export default function CertificatesPage() {
                     {data?.pending?.includes("deposit") ? (
                       <Link
                         href="/programs"
-                        className="mt-6 inline-flex rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white"
+                        className="mt-6 inline-flex rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white"
                       >
                         Pay tuition
                       </Link>
@@ -167,7 +167,7 @@ function CertificateCard({ cert, template }: { cert: CertificateView; template: 
         </div>
         <Link
           href={`/certificates/${cert.id}`}
-          className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
+          className="rounded-full btn-glow px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
         >
           Open &amp; download
         </Link>

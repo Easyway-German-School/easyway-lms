@@ -129,7 +129,7 @@ function StatPill({
       // `min-w-0` so a pill can shrink inside the flex row from `sm` up; the
       // grid handles the phone. Without it the row is un-shrinkable again and
       // the clipping comes straight back on a narrow tablet.
-      className="min-w-0 flex-1 rounded-3xl border border-white/10 bg-white/[0.06] px-3 py-4 text-center backdrop-blur-xl sm:px-4"
+      className="min-w-0 flex-1 rounded-3xl border border-[var(--border)] bg-[var(--surface)]/[0.06] px-3 py-4 text-center backdrop-blur-xl sm:px-4"
     >
       <p className="flex justify-center text-white/80">{icon}</p>
       <p className="mt-1 text-2xl font-bold text-white sm:text-3xl">
@@ -420,7 +420,7 @@ export default function ProfilePage() {
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="shrink-0 whitespace-nowrap rounded-full border border-white/25 bg-white/10 px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-white backdrop-blur transition hover:bg-white/20 sm:px-4 sm:text-xs sm:tracking-[0.18em]"
+              className="shrink-0 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-white backdrop-blur transition hover:bg-[var(--surface-alt)] sm:px-4 sm:text-xs sm:tracking-[0.18em]"
             >
               Edit profile
             </button>
@@ -430,7 +430,7 @@ export default function ProfilePage() {
         {/* ---------- Identity + stats, overlapping the cover ---------- */}
         <div className="relative -mt-24 px-6 sm:px-10">
           <div className="mx-auto max-w-6xl">
-            <div className="rounded-[36px] border border-white/10 bg-[linear-gradient(160deg,_rgba(2,15,20,0.96),_rgba(6,25,32,0.92))] p-6 shadow-[0_40px_100px_rgba(2,6,23,0.4)] backdrop-blur-2xl sm:p-8">
+            <div className="rounded-[36px] border border-[var(--border)] bg-[linear-gradient(160deg,_rgba(2,15,20,0.96),_rgba(6,25,32,0.92))] p-6 shadow-[0_40px_100px_rgba(2,6,23,0.4)] backdrop-blur-2xl sm:p-8">
               <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-end">
                 {/* Avatar with a tier-coloured story ring */}
                 <div className="relative shrink-0">
@@ -457,7 +457,7 @@ export default function ProfilePage() {
                               className="absolute inset-0 flex items-center justify-center bg-black/60"
                             >
                               <motion.span
-                                className="h-7 w-7 rounded-full border-2 border-white/30 border-t-white"
+                                className="h-7 w-7 rounded-full border-2 border-[var(--border)] border-t-white"
                                 animate={{ rotate: 360 }}
                                 transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
                               />
@@ -513,10 +513,10 @@ export default function ProfilePage() {
                   <p className="mt-1 font-mono text-sm text-[var(--muted)]">@{profile.studentCode}</p>
 
                   <div className="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
-                    <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
+                    <span className="rounded-full bg-[var(--surface-alt)] px-3 py-1.5 text-xs font-semibold text-white">
                       {profile.currentLevel} · German
                     </span>
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--surface-alt)] px-3 py-1.5 text-xs font-semibold text-white">
                       <PinIcon className="h-3.5 w-3.5" /> {profile.branch}
                     </span>
                     <span
@@ -553,7 +553,7 @@ export default function ProfilePage() {
               {/* XP bar */}
               {game && (
                 <div className="mt-6">
-                  <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+                  <div className="flex items-center justify-between text-xs font-semibold text-[var(--muted)]">
                     <span>
                       Level {game.level} → {game.level + 1}
                     </span>
@@ -561,7 +561,7 @@ export default function ProfilePage() {
                       {game.xpIntoLevel} / {game.xpForNextLevel} XP
                     </span>
                   </div>
-                  <div className="mt-2 h-3 overflow-hidden rounded-full bg-white/10">
+                  <div className="mt-2 h-3 overflow-hidden rounded-full bg-[var(--surface-alt)]">
                     <motion.div
                       className="h-full rounded-full"
                       style={{ background: ring }}
@@ -579,7 +579,7 @@ export default function ProfilePage() {
             </div>
 
             {/* ---------- Tabs ---------- */}
-            <div className="mt-8 flex gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1.5">
+            <div className="mt-8 flex gap-1 rounded-full cinematic-card p-1.5">
               {TABS.map((item) => (
                 <button
                   key={item}
@@ -613,7 +613,7 @@ export default function ProfilePage() {
                 >
                   {tab === "Overview" && (
                     <div className="grid gap-5 lg:grid-cols-3">
-                      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 lg:col-span-2">
+                      <div className="rounded-3xl cinematic-card p-6 lg:col-span-2">
                         <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
                           Learning snapshot
                         </p>
@@ -638,7 +638,7 @@ export default function ProfilePage() {
                       </div>
 
                       <div className="space-y-5">
-                        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                        <div className="rounded-3xl cinematic-card p-6">
                           <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
                             Exam readiness
                           </p>
@@ -654,7 +654,7 @@ export default function ProfilePage() {
                             />
                           </div>
                         </div>
-                        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                        <div className="rounded-3xl cinematic-card p-6">
                           <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
                             Member since
                           </p>
@@ -756,7 +756,7 @@ export default function ProfilePage() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading}
-                    className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-60"
+                    className="rounded-full btn-glow px-4 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-60"
                   >
                     {uploading ? "Uploading…" : "Change photo"}
                   </button>
@@ -853,7 +853,7 @@ export default function ProfilePage() {
                   type="button"
                   onClick={handleSave}
                   disabled={saving}
-                  className="rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[var(--accent)]/25 transition hover:brightness-110 disabled:opacity-60"
+                  className="rounded-full btn-glow px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[var(--accent)]/25 transition hover:brightness-110 disabled:opacity-60"
                 >
                   {saving ? "Saving…" : "Save changes"}
                 </button>

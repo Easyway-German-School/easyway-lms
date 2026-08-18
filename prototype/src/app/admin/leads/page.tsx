@@ -38,7 +38,7 @@ const STATUS_TONE: Record<string, string> = {
   new: "bg-blue-100 text-blue-700",
   invited: "bg-amber-100 text-amber-700",
   converted: "bg-emerald-100 text-emerald-700",
-  dropped: "bg-slate-100 text-slate-500",
+  dropped: "bg-[var(--surface-alt)] text-[var(--muted)]",
 };
 
 const STATUSES = ["new", "invited", "converted", "dropped"];
@@ -167,7 +167,7 @@ function LeadsBoard() {
       <div className="p-8">
         <div className="mb-6">
           <h1 className="text-3xl font-bold">Enquiries</h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-[var(--muted)]">
             Registrants live here until they enrol, so campaign numbers never distort the student
             roster. Inviting someone emails a prefilled signup link — they choose their own password,
             and their account starts with tuition pending.
@@ -180,7 +180,7 @@ function LeadsBoard() {
               key={s}
               onClick={() => setStatus(s)}
               className={`rounded-full px-4 py-2 text-sm font-medium capitalize transition ${
-                status === s ? "bg-slate-900 text-white" : "border bg-white hover:bg-slate-50"
+                status === s ? "bg-slate-900 text-white" : "border bg-[var(--surface)] hover:bg-[var(--surface-alt)]"
               }`}
             >
               {s} {counts[s] ? `(${counts[s]})` : ""}
@@ -210,22 +210,22 @@ function LeadsBoard() {
           <button
             onClick={() => act("drop")}
             disabled={busy || selectedIds.length === 0}
-            className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-[var(--surface-alt)] disabled:opacity-50"
           >
             Mark dropped
           </button>
           <button
             onClick={() => setShowImport(!showImport)}
-            className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-slate-50"
+            className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-[var(--surface-alt)]"
           >
             {showImport ? "Close import" : "Import CSV"}
           </button>
         </div>
 
         {showImport && (
-          <div className="mb-6 rounded-xl border bg-white p-6">
+          <div className="mb-6 rounded-xl border bg-[var(--surface)] p-6">
             <h2 className="font-semibold">Import registrants</h2>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-[var(--muted)]">
               Paste CSV including a header row. A <strong>name</strong> and <strong>email</strong> column
               are required; <strong>phone</strong>, <strong>level</strong>, <strong>session</strong> and{" "}
               <strong>notes</strong> are used when present. Existing enquiries are updated, not duplicated.
@@ -262,17 +262,17 @@ function LeadsBoard() {
         {notice && <div className="mb-4 rounded bg-emerald-100 p-4 text-emerald-800">{notice}</div>}
 
         {loading ? (
-          <div className="py-12 text-center text-slate-500">Loading…</div>
+          <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
         ) : leads.length === 0 ? (
           <div className="py-12 text-center">
-            <EmptyIcon className="mx-auto h-9 w-9 text-slate-400" />
+            <EmptyIcon className="mx-auto h-9 w-9 text-[var(--muted)]" />
             <p className="mt-2 font-semibold">Nothing here</p>
-            <p className="mt-1 text-sm text-slate-500">No enquiry matches these filters.</p>
+            <p className="mt-1 text-sm text-[var(--muted)]">No enquiry matches these filters.</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border bg-white">
+          <div className="overflow-hidden rounded-xl border bg-[var(--surface)]">
             <table className="w-full">
-              <thead className="border-b bg-slate-50 text-left text-sm">
+              <thead className="border-b bg-[var(--surface-alt)] text-left text-sm">
                 <tr>
                   <th className="px-4 py-3">
                     <input
@@ -297,7 +297,7 @@ function LeadsBoard() {
               </thead>
               <tbody>
                 {leads.map((l) => (
-                  <tr key={l.id} className="border-b text-sm hover:bg-slate-50">
+                  <tr key={l.id} className="border-b text-sm hover:bg-[var(--surface-alt)]">
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
@@ -309,15 +309,15 @@ function LeadsBoard() {
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-semibold">{l.name}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-[var(--muted)]">
                         {new Date(l.createdAt).toLocaleDateString()}
                       </p>
                     </td>
                     <td className="px-4 py-3">
-                      <p className="text-slate-700">{l.email}</p>
-                      {l.phone && <p className="text-xs text-slate-500">{l.phone}</p>}
+                      <p className="text-[var(--foreground-soft)]">{l.email}</p>
+                      {l.phone && <p className="text-xs text-[var(--muted)]">{l.phone}</p>}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">
+                    <td className="px-4 py-3 text-[var(--muted)]">
                       {l.interestedLevel ?? "—"}
                       {l.sessionSlot && <span className="capitalize"> · {l.sessionSlot}</span>}
                       {l.classType === "private" && (
@@ -325,15 +325,15 @@ function LeadsBoard() {
                           Private
                         </span>
                       )}
-                      {l.branchName && <p className="text-xs text-slate-500">{l.branchName}</p>}
+                      {l.branchName && <p className="text-xs text-[var(--muted)]">{l.branchName}</p>}
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{l.source}</td>
+                    <td className="px-4 py-3 text-xs text-[var(--muted)]">{l.source}</td>
                     <td className="px-4 py-3">
                       <span className={`rounded-full px-2 py-1 text-xs font-semibold capitalize ${STATUS_TONE[l.status] ?? STATUS_TONE.new}`}>
                         {l.status}
                       </span>
                       {l.invitedAt && l.status === "invited" && (
-                        <p className="mt-1 text-xs text-slate-500">
+                        <p className="mt-1 text-xs text-[var(--muted)]">
                           {new Date(l.invitedAt).toLocaleDateString()}
                         </p>
                       )}

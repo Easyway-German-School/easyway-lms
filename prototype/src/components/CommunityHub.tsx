@@ -1023,7 +1023,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                           <div
                             className={`mb-1.5 rounded-lg border-l-2 px-2 py-1 text-xs ${
                               message.mine
-                                ? "border-white/60 bg-white/15 text-white/85"
+                                ? "border-[var(--border)] bg-[var(--surface-alt)] text-white/85"
                                 : "border-[var(--accent)] bg-[var(--surface)] text-[var(--muted)]"
                             }`}
                           >

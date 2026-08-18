@@ -229,7 +229,7 @@ export default function GamesPage() {
               ) : null}
 
               {active.length === 0 ? (
-                <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                <div className="rounded-2xl cinematic-card p-6">
                   <p className="text-sm text-[var(--foreground)]">
                     Nothing on the go right now.
                   </p>

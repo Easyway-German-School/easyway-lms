@@ -193,7 +193,7 @@ export default function AdminExamsPage() {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-3xl font-bold">Exams</h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-[var(--muted)]">
               Schedule sittings, manage seats and enter results. Published internal sittings appear to students;
               ÖSD/telc sittings stay off student booking until the school switches that on.
             </p>
@@ -218,7 +218,7 @@ export default function AdminExamsPage() {
         )}
 
         {stats && stats.passRate !== null && (
-          <p className="mb-6 text-xs text-slate-500">
+          <p className="mb-6 text-xs text-[var(--muted)]">
             Skill averages (internal, graded sittings) — Lesen {stats.avgReading} · Hören {stats.avgListening} ·
             Schreiben {stats.avgWriting} · Sprechen {stats.avgSpeaking}
           </p>
@@ -227,19 +227,19 @@ export default function AdminExamsPage() {
         {error && <div className="mb-4 rounded bg-red-100 p-4 text-red-700">{error}</div>}
 
         {open && (
-          <div className="mb-8 grid gap-3 rounded-xl border bg-white p-6 sm:grid-cols-2">
+          <div className="mb-8 grid gap-3 rounded-xl border bg-[var(--surface)] p-6 sm:grid-cols-2">
             <label className="sm:col-span-2">
-              <span className="text-xs font-medium text-slate-600">Name</span>
+              <span className="text-xs font-medium text-[var(--muted)]">Name</span>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="EasyWay B1 end-of-level test" className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
             </label>
             <label className="sm:col-span-2">
-              <span className="text-xs font-medium text-slate-600">Description</span>
+              <span className="text-xs font-medium text-[var(--muted)]">Description</span>
               <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
                 rows={2} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
             </label>
             <label>
-              <span className="text-xs font-medium text-slate-600">Awarding body</span>
+              <span className="text-xs font-medium text-[var(--muted)]">Awarding body</span>
               <select value={form.examBody} onChange={(e) => setForm({ ...form, examBody: e.target.value })}
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
                 {bodies.map((b) => <option key={b} value={b}>{b}</option>)}
@@ -251,39 +251,39 @@ export default function AdminExamsPage() {
               )}
             </label>
             <label>
-              <span className="text-xs font-medium text-slate-600">Level</span>
+              <span className="text-xs font-medium text-[var(--muted)]">Level</span>
               <select value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value })}
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
                 {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
               </select>
             </label>
             <label>
-              <span className="text-xs font-medium text-slate-600">Exam date</span>
+              <span className="text-xs font-medium text-[var(--muted)]">Exam date</span>
               <input type="datetime-local" value={form.examDate} onChange={(e) => setForm({ ...form, examDate: e.target.value })}
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
             </label>
             <label>
-              <span className="text-xs font-medium text-slate-600">Registration deadline</span>
+              <span className="text-xs font-medium text-[var(--muted)]">Registration deadline</span>
               <input type="datetime-local" value={form.registrationDeadline} onChange={(e) => setForm({ ...form, registrationDeadline: e.target.value })}
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
             </label>
             <label>
-              <span className="text-xs font-medium text-slate-600">Fee (₦) — blank for none</span>
+              <span className="text-xs font-medium text-[var(--muted)]">Fee (₦) — blank for none</span>
               <input type="number" value={form.fee} onChange={(e) => setForm({ ...form, fee: e.target.value })}
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
             </label>
             <label>
-              <span className="text-xs font-medium text-slate-600">Seats — blank for unlimited</span>
+              <span className="text-xs font-medium text-[var(--muted)]">Seats — blank for unlimited</span>
               <input type="number" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })}
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
             </label>
             <label>
-              <span className="text-xs font-medium text-slate-600">Pass threshold per skill (0-100)</span>
+              <span className="text-xs font-medium text-[var(--muted)]">Pass threshold per skill (0-100)</span>
               <input type="number" value={form.passThreshold} onChange={(e) => setForm({ ...form, passThreshold: e.target.value })}
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
             </label>
             <label>
-              <span className="text-xs font-medium text-slate-600">Centre</span>
+              <span className="text-xs font-medium text-[var(--muted)]">Centre</span>
               <select value={form.branchId} onChange={(e) => setForm({ ...form, branchId: e.target.value })}
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
                 <option value="">Any branch</option>
@@ -304,18 +304,18 @@ export default function AdminExamsPage() {
         )}
 
         {loading ? (
-          <div className="py-12 text-center text-slate-500">Loading…</div>
+          <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
         ) : exams.length === 0 ? (
-          <div className="py-12 text-center text-slate-500">No sittings scheduled.</div>
+          <div className="py-12 text-center text-[var(--muted)]">No sittings scheduled.</div>
         ) : (
           <div className="space-y-3">
             {exams.map((exam) => (
-              <div key={exam.id} className="rounded-xl border bg-white p-5">
+              <div key={exam.id} className="rounded-xl border bg-[var(--surface)] p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold">{exam.examBody}</span>
-                      {exam.level && <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold">{exam.level}</span>}
+                      <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{exam.examBody}</span>
+                      {exam.level && <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{exam.level}</span>}
                       <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${exam.published ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
                         {exam.published ? "PUBLISHED" : "DRAFT"}
                       </span>
@@ -324,7 +324,7 @@ export default function AdminExamsPage() {
                       )}
                     </div>
                     <h3 className="mt-1.5 font-semibold">{exam.name}</h3>
-                    <p className="text-sm text-slate-500">
+                    <p className="text-sm text-[var(--muted)]">
                       {new Date(exam.examDate).toDateString()}
                       {exam.branch && ` · ${exam.branch.name}`}
                       {exam.fee !== null && ` · ₦${exam.fee.toLocaleString()}`}
@@ -352,9 +352,9 @@ export default function AdminExamsPage() {
                 {expanded === exam.id && (
                   <div className="mt-4 space-y-2 border-t pt-4">
                     {exam.registrations.length === 0 ? (
-                      <p className="text-sm text-slate-500">Nobody has booked yet.</p>
+                      <p className="text-sm text-[var(--muted)]">Nobody has booked yet.</p>
                     ) : exam.registrations.map((r) => (
-                      <div key={r.id} className="rounded bg-slate-50 p-3">
+                      <div key={r.id} className="rounded bg-[var(--surface-alt)] p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="min-w-0">
                             <p className="text-sm font-medium">
@@ -363,13 +363,13 @@ export default function AdminExamsPage() {
                                 <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">EXTERNAL</span>
                               )}
                             </p>
-                            <p className="text-xs text-slate-500">
+                            <p className="text-xs text-[var(--muted)]">
                               {r.student?.user.email ?? r.candidateEmail}
                               {r.seatNumber && ` · seat ${r.seatNumber}`}
                             </p>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${r.paymentStatus === "paid" ? "bg-emerald-100 text-emerald-700" : r.paymentStatus === "waived" ? "bg-slate-200 text-slate-600" : "bg-red-100 text-red-700"}`}>
+                            <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${r.paymentStatus === "paid" ? "bg-emerald-100 text-emerald-700" : r.paymentStatus === "waived" ? "bg-[var(--surface-alt)] text-[var(--muted)]" : "bg-red-100 text-red-700"}`}>
                               {r.paymentStatus}
                             </span>
                             {r.paymentStatus === "unpaid" && (
@@ -391,7 +391,7 @@ export default function AdminExamsPage() {
                                     <span
                                       className={`rounded px-2 py-0.5 text-[10px] font-bold ${
                                         !hasSkills
-                                          ? "bg-slate-200 text-slate-600"
+                                          ? "bg-[var(--surface-alt)] text-[var(--muted)]"
                                           : passed
                                             ? "bg-emerald-100 text-emerald-700"
                                             : "bg-red-100 text-red-700"
@@ -413,7 +413,7 @@ export default function AdminExamsPage() {
                           <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-4">
                             {SKILLS.map(({ key, label }) => (
                               <label key={key}>
-                                <span className="text-[11px] font-medium text-slate-600">{label}</span>
+                                <span className="text-[11px] font-medium text-[var(--muted)]">{label}</span>
                                 <input
                                   type="number" min={0} max={100}
                                   value={scoreDrafts[key]}
@@ -435,7 +435,7 @@ export default function AdminExamsPage() {
                         )}
 
                         {r.grade && grading !== r.id && r.grade.readingScore !== null && (
-                          <p className="mt-2 text-[11px] text-slate-500">
+                          <p className="mt-2 text-[11px] text-[var(--muted)]">
                             Lesen {r.grade.readingScore} · Hören {r.grade.listeningScore} · Schreiben {r.grade.writingScore} · Sprechen {r.grade.speakingScore}
                           </p>
                         )}

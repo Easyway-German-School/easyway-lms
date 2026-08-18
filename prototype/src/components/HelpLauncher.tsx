@@ -63,7 +63,7 @@ const POLL_MS = 90_000;
 const STATUS_COPY: Record<string, { label: string; className: string }> = {
   open: { label: "Waiting on the office", className: "bg-amber-500/15 text-amber-600" },
   pending: { label: "Answered", className: "bg-emerald-500/15 text-emerald-600" },
-  resolved: { label: "Resolved", className: "bg-slate-500/15 text-[var(--muted)]" },
+  resolved: { label: "Resolved", className: "bg-[var(--surface-alt)]0/15 text-[var(--muted)]" },
 };
 
 export default function HelpLauncher() {

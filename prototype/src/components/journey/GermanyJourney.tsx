@@ -92,7 +92,7 @@ type Journey = {
 function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeGoal: () => void }) {
   return (
     <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] px-5 py-5 text-white sm:px-7 sm:py-6">
-      <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
+      <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-[var(--surface-alt)] blur-3xl" />
       {/* The real flag, flying, rather than a flag-shaped icon. It is the
           picture at the end of the road and it belongs at the top of the card
           about that road. */}
@@ -101,12 +101,12 @@ function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeG
       </div>
 
       <div className="relative flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--surface-alt)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur">
           <MapIcon className="h-3.5 w-3.5" />
           Your road to Germany
         </span>
         {journey.tribe ? (
-          <span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur">
+          <span className="rounded-full bg-[var(--surface-alt)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur">
             {journey.tribe}
           </span>
         ) : null}
@@ -121,7 +121,7 @@ function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeG
       <button
         type="button"
         onClick={onChangeGoal}
-        className="relative mt-3 inline-flex max-w-full items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-left text-[11px] font-bold backdrop-blur transition hover:bg-white/20"
+        className="relative mt-3 inline-flex max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-1.5 text-left text-[11px] font-bold backdrop-blur transition hover:bg-[var(--surface-alt)]"
       >
         <CompassIcon className="h-3.5 w-3.5 shrink-0" />
         <span className="truncate">
@@ -137,7 +137,7 @@ function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeG
       ) : null}
 
       <div className="relative mt-4">
-        <div className="h-3 overflow-hidden rounded-full bg-white/20">
+        <div className="h-3 overflow-hidden rounded-full bg-[var(--surface-alt)]">
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${journey.percentToGermany}%` }}

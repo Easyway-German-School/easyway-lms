@@ -85,7 +85,7 @@ type Thread = {
 const STATUS_TONE: Record<string, string> = {
   open: "bg-amber-100 text-amber-700",
   pending: "bg-emerald-100 text-emerald-700",
-  resolved: "bg-slate-100 text-slate-600",
+  resolved: "bg-[var(--surface-alt)] text-[var(--muted)]",
 };
 
 const FILTERS: Array<{ value: string; label: string }> = [
@@ -177,13 +177,13 @@ function EnquiriesInner() {
   return (
     <div className="space-y-6">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Enquiries</h1>
-        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+        <h1 className="text-2xl font-bold text-[var(--foreground)] sm:text-3xl">Enquiries</h1>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--muted)]">
           Every &ldquo;need help?&rdquo; a student or tutor sends from the portal lands here. Answering in this
           window notifies them in-app and on their phone, and the whole conversation stays on the student&rsquo;s
           record — which is what it never did while this happened on WhatsApp.
         </p>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-[var(--muted)]">
           Looking for people who have not enrolled yet? That is the{" "}
           <Link href="/admin/leads" className="font-semibold text-[var(--accent)] hover:underline">
             lead funnel
@@ -194,19 +194,19 @@ function EnquiriesInner() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         {(["open", "pending", "resolved"] as TicketStatus[]).map((status) => (
-          <div key={status} className="rounded-2xl border border-slate-200 bg-white p-5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div key={status} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
               {TICKET_STATUS_LABELS[status]}
             </p>
-            <p className="mt-1 text-3xl font-bold text-slate-900">{counts[status] ?? 0}</p>
+            <p className="mt-1 text-3xl font-bold text-[var(--foreground)]">{counts[status] ?? 0}</p>
           </div>
         ))}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[22rem_1fr]">
         {/* The queue */}
-        <div className="flex min-h-0 flex-col rounded-3xl border border-slate-200 bg-white">
-          <div className="space-y-2 border-b border-slate-200 p-3">
+        <div className="flex min-h-0 flex-col rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
+          <div className="space-y-2 border-b border-[var(--border)] p-3">
             <div className="flex flex-wrap gap-1">
               {FILTERS.map((option) => (
                 <button
@@ -215,7 +215,7 @@ function EnquiriesInner() {
                   className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
                     filter === option.value
                       ? "bg-[var(--accent)] text-white"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      : "bg-[var(--surface-alt)] text-[var(--muted)] hover:bg-[var(--surface-alt)]"
                   }`}
                 >
                   {option.label}
@@ -227,12 +227,12 @@ function EnquiriesInner() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Name, email or subject"
-                className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                className="min-w-0 flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
               />
               <button
                 onClick={load}
                 aria-label="Refresh"
-                className="shrink-0 rounded-xl border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50"
+                className="shrink-0 rounded-xl border border-[var(--border)] p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
               >
                 <RefreshIcon className="h-4 w-4" />
               </button>
@@ -241,11 +241,11 @@ function EnquiriesInner() {
 
           <div className="max-h-[32rem] min-h-0 flex-1 overflow-y-auto p-2">
             {loading ? (
-              <p className="p-6 text-center text-sm text-slate-500">Loading…</p>
+              <p className="p-6 text-center text-sm text-[var(--muted)]">Loading…</p>
             ) : tickets.length === 0 ? (
               <div className="p-8 text-center">
-                <InboxIcon className="mx-auto h-8 w-8 text-slate-300" />
-                <p className="mt-2 text-sm text-slate-500">
+                <InboxIcon className="mx-auto h-8 w-8 text-[var(--muted)]" />
+                <p className="mt-2 text-sm text-[var(--muted)]">
                   {filter === "open" ? "Nothing waiting on the office." : "Nothing here."}
                 </p>
               </div>
@@ -256,18 +256,18 @@ function EnquiriesInner() {
                     key={ticket.id}
                     onClick={() => openThread(ticket.id)}
                     className={`w-full rounded-2xl p-3 text-left transition ${
-                      selected === ticket.id ? "bg-[var(--accent-soft)]" : "hover:bg-slate-50"
+                      selected === ticket.id ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--surface-alt)]"
                     }`}
                   >
                     <div className="flex items-start gap-2">
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--foreground)]">
                         {ticket.subject}
                       </span>
                       {ticket.unread ? (
                         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />
                       ) : null}
                     </div>
-                    <p className="mt-0.5 truncate text-xs text-slate-500">
+                    <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
                       {ticket.askerName ?? ticket.askerEmail}
                       {ticket.level ? ` · ${ticket.level}` : ""}
                       {ticket.branchName ? ` · ${ticket.branchName}` : ""}
@@ -276,10 +276,10 @@ function EnquiriesInner() {
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_TONE[ticket.status] ?? STATUS_TONE.open}`}>
                         {TICKET_STATUS_LABELS[ticket.status as TicketStatus] ?? ticket.status}
                       </span>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                      <span className="rounded-full bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)]">
                         {TICKET_TOPIC_LABELS[ticket.topic as TicketTopic] ?? ticket.topic}
                       </span>
-                      <span className="text-[10px] text-slate-400">{timeAgo(ticket.lastMessageAt)}</span>
+                      <span className="text-[10px] text-[var(--muted)]">{timeAgo(ticket.lastMessageAt)}</span>
                     </div>
                   </button>
                 ))}
@@ -289,19 +289,19 @@ function EnquiriesInner() {
         </div>
 
         {/* The conversation */}
-        <div className="flex min-h-[24rem] flex-col rounded-3xl border border-slate-200 bg-white">
+        <div className="flex min-h-[24rem] flex-col rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
           {!thread ? (
             <div className="grid flex-1 place-items-center p-10 text-center">
               <div>
-                <TicketIcon className="mx-auto h-10 w-10 text-slate-300" />
-                <p className="mt-3 text-sm text-slate-500">Pick a request to read and answer it.</p>
+                <TicketIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
+                <p className="mt-3 text-sm text-[var(--muted)]">Pick a request to read and answer it.</p>
               </div>
             </div>
           ) : (
             <>
-              <div className="border-b border-slate-200 p-4">
-                <h2 className="text-lg font-semibold text-slate-900">{thread.subject}</h2>
-                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <div className="border-b border-[var(--border)] p-4">
+                <h2 className="text-lg font-semibold text-[var(--foreground)]">{thread.subject}</h2>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
                   <span className="inline-flex items-center gap-1">
                     <UserIcon className="h-3.5 w-3.5" />
                     {thread.asker?.name ?? thread.asker?.email}
@@ -312,7 +312,7 @@ function EnquiriesInner() {
                       useful field on the whole ticket and it is captured
                       automatically, because a frustrated person never includes it. */}
                   {thread.fromPath ? (
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                    <span className="rounded-full bg-[var(--surface-alt)] px-2 py-0.5 font-medium text-[var(--muted)]">
                       sent from {thread.fromPath}
                     </span>
                   ) : null}
@@ -332,13 +332,13 @@ function EnquiriesInner() {
                   const fromOffice = message.authorRole === "admin";
                   return (
                     <div key={message.id} className={`flex flex-col ${fromOffice ? "items-end" : "items-start"}`}>
-                      <span className="px-1 text-[10px] font-medium text-slate-400">
+                      <span className="px-1 text-[10px] font-medium text-[var(--muted)]">
                         {fromOffice ? message.authorName ?? "The office" : message.authorName ?? "Student"} ·{" "}
                         {timeAgo(message.createdAt)}
                       </span>
                       <div
                         className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm ${
-                          fromOffice ? "bg-[var(--accent)] text-white" : "bg-slate-100 text-slate-800"
+                          fromOffice ? "bg-[var(--accent)] text-white" : "bg-[var(--surface-alt)] text-[var(--foreground)]"
                         }`}
                       >
                         {message.body}
@@ -348,13 +348,13 @@ function EnquiriesInner() {
                 })}
               </div>
 
-              <div className="space-y-2 border-t border-slate-200 p-3">
+              <div className="space-y-2 border-t border-[var(--border)] p-3">
                 <textarea
                   value={reply}
                   onChange={(event) => setReply(event.target.value.slice(0, 4000))}
                   rows={3}
                   placeholder="Answer them…"
-                  className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  className="w-full resize-none rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
                 />
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -369,7 +369,7 @@ function EnquiriesInner() {
                     <button
                       onClick={() => act("reopen")}
                       disabled={busy}
-                      className="rounded-full border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)]"
                     >
                       Reopen
                     </button>
@@ -377,7 +377,7 @@ function EnquiriesInner() {
                     <button
                       onClick={() => act("resolve")}
                       disabled={busy}
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)]"
                     >
                       <CheckCircleIcon className="h-4 w-4" />
                       Mark resolved

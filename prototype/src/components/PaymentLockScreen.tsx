@@ -45,18 +45,18 @@ function PrivateClassAlternative() {
   }
 
   return (
-    <div className="mt-6 rounded-2xl border border-white/15 bg-white/[0.04] p-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">
+    <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/[0.04] p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
         Or study one-to-one
       </p>
-      <p className="mt-2 text-sm leading-6 text-slate-200">
+      <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
         Private tuition is a tutor to yourself, at times you choose, instead of a seat in
         the group class — {naira(PRIVATE_CLASS_UPGRADE_PRICE)} for your level.
       </p>
       <button
         onClick={start}
         disabled={busy}
-        className="mt-3 rounded-full border border-white/25 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:opacity-50"
+        className="mt-3 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--surface-alt)] disabled:opacity-50"
       >
         {busy ? "Starting…" : "Study one-to-one instead"}
       </button>
@@ -97,11 +97,11 @@ function BlurredPageGhost() {
         <div className="h-4 w-3/5 rounded-full bg-slate-300/45" />
         <div className="grid grid-cols-2 gap-5 pt-4 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-28 rounded-3xl bg-white/55" />
+            <div key={i} className="h-28 rounded-3xl bg-[var(--surface-alt)]/50" />
           ))}
         </div>
         <div className="grid gap-5 lg:grid-cols-[1.4fr_0.6fr]">
-          <div className="space-y-4 rounded-3xl bg-white/55 p-6">
+          <div className="space-y-4 rounded-3xl bg-[var(--surface-alt)]/50 p-6">
             {[0, 1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="flex items-center gap-4">
                 <div className="h-11 w-11 rounded-2xl bg-slate-400/40" />
@@ -112,7 +112,7 @@ function BlurredPageGhost() {
               </div>
             ))}
           </div>
-          <div className="space-y-4 rounded-3xl bg-white/55 p-6">
+          <div className="space-y-4 rounded-3xl bg-[var(--surface-alt)]/50 p-6">
             {[0, 1, 2, 3].map((i) => (
               <div key={i} className="h-16 rounded-2xl bg-slate-300/40" />
             ))}
@@ -257,7 +257,7 @@ export default function PaymentLockScreen({
 
           {!revealed && (
             <motion.span
-              className="absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.3em] text-white backdrop-blur"
+              className="absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.3em] text-white backdrop-blur"
               animate={reduceMotion ? {} : { y: [0, -5, 0] }}
               transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
             >
@@ -295,10 +295,10 @@ export default function PaymentLockScreen({
                 initial={{ opacity: 0, scale: 0.94, x: -10 }}
                 animate={{ opacity: 1, scale: 1, x: 0 }}
                 transition={{ delay: 0.55, type: "spring", stiffness: 120, damping: 16 }}
-                className="relative flex-1 rounded-[28px] border border-white/15 bg-white/[0.07] p-7 text-left shadow-[0_30px_80px_rgba(2,6,23,0.5)] backdrop-blur-xl"
+                className="relative flex-1 rounded-[28px] border border-[var(--border)] bg-[var(--surface)]/[0.07] p-7 text-left shadow-[0_30px_80px_rgba(2,6,23,0.5)] backdrop-blur-xl"
               >
                 {/* Speech-bubble notch aimed back at the pointing hand */}
-                <span className="absolute -left-2 top-1/2 hidden h-5 w-5 -translate-y-1/2 rotate-45 border-b border-l border-white/15 bg-white/[0.07] sm:block" />
+                <span className="absolute -left-2 top-1/2 hidden h-5 w-5 -translate-y-1/2 rotate-45 border-b border-l border-[var(--border)] bg-[var(--surface)]/[0.07] sm:block" />
 
                 <p className="text-2xl font-semibold leading-snug text-white sm:text-[26px]">
                   Please proceed to pay the tuition fee to start your classes.
@@ -323,11 +323,11 @@ export default function PaymentLockScreen({
 
                 {access && access.requiredDeposit > 0 && (
                   <div className="mt-6">
-                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-300">
+                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
                       <span>Towards your seat</span>
                       <span>{progress}%</span>
                     </div>
-                    <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/10">
+                    <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-[var(--surface-alt)]">
                       <motion.div
                         className="h-full rounded-full bg-gradient-to-r from-[#FF6600] to-[#0D7C7E]"
                         initial={{ width: 0 }}
@@ -350,7 +350,7 @@ export default function PaymentLockScreen({
                   </Link>
                   <Link
                     href="/payments"
-                    className="rounded-full border border-white/20 bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/20"
+                    className="rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[var(--surface-alt)]"
                   >
                     View my payments
                   </Link>

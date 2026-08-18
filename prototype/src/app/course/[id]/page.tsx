@@ -43,7 +43,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
           <p className="mt-3 text-[var(--muted)]">This course is not available right now.</p>
           <button
             onClick={() => router.back()}
-            className="mt-6 rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-[var(--surface)]"
+            className="mt-6 rounded-full btn-glow px-5 py-3 text-sm font-semibold text-[var(--surface)]"
           >
             Go back
           </button>
@@ -81,7 +81,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
             <p className="mt-3 text-[var(--muted)]">
               This page is the course landing screen. From here, the next step would be to open lessons, assignments, or the lesson path for this course.
             </p>
-            <Link href="/lesson" className="mt-5 inline-flex rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-[var(--surface)]">
+            <Link href="/lesson" className="mt-5 inline-flex rounded-full btn-glow px-5 py-3 text-sm font-semibold text-[var(--surface)]">
               Open a lesson
             </Link>
           </div>

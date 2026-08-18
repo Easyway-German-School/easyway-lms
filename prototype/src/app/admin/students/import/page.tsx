@@ -85,7 +85,7 @@ function parseCsv(text: string): Record<string, string>[] {
 const STATUS_STYLES: Record<ImportResult["status"], string> = {
   ready: "bg-sky-500/10 text-sky-700",
   created: "bg-emerald-500/10 text-emerald-700",
-  skipped: "bg-slate-500/10 text-slate-600",
+  skipped: "bg-[var(--surface-alt)]0/10 text-[var(--muted)]",
   error: "bg-rose-500/10 text-rose-700",
 };
 

@@ -117,7 +117,7 @@ export default function CertificatePrintPage() {
           <button
             type="button"
             onClick={() => window.print()}
-            className="rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
+            className="rounded-full btn-glow px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
           >
             Download as PDF
           </button>

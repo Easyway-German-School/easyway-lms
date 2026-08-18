@@ -91,11 +91,11 @@ export default function SignOutButton({
   };
 
   const themed = tone === "themed";
-  const mutedText = themed ? "text-[var(--muted)]" : "text-slate-500";
-  const strongText = themed ? "text-[var(--foreground)]" : "text-slate-900";
-  const surface = themed ? "bg-[var(--surface)]" : "bg-white";
-  const border = themed ? "border-[var(--border)]" : "border-slate-200";
-  const hover = themed ? "hover:bg-[var(--surface-alt)]" : "hover:bg-slate-100";
+  const mutedText = themed ? "text-[var(--muted)]" : "text-[var(--muted)]";
+  const strongText = themed ? "text-[var(--foreground)]" : "text-[var(--foreground)]";
+  const surface = themed ? "bg-[var(--surface)]" : "bg-[var(--surface)]";
+  const border = themed ? "border-[var(--border)]" : "border-[var(--border)]";
+  const hover = themed ? "hover:bg-[var(--surface-alt)]" : "hover:bg-[var(--surface-alt)]";
 
   return (
     <>

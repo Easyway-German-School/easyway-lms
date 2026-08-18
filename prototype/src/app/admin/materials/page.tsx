@@ -129,14 +129,14 @@ export default function MaterialsPage() {
     <AdminShell>
       <div className="space-y-6">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Materials &amp; activity</h1>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+          <h1 className="text-2xl font-bold text-[var(--foreground)] sm:text-3xl">Materials &amp; activity</h1>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--muted)]">
             Everything the platform recorded doing: live classes and one-to-ones, the captures LiveKit made of
             them, and the files tutors uploaded by hand. The library itself is the second tab.
           </p>
         </motion.div>
 
-        <div className="flex gap-1 rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-200 sm:w-fit">
+        <div className="flex gap-1 rounded-2xl bg-[var(--surface)] p-1 shadow-sm ring-1 ring-[var(--border)] sm:w-fit">
           {(
             [
               { value: "activity" as const, label: "Activity", icon: BarChartIcon },
@@ -149,7 +149,7 @@ export default function MaterialsPage() {
                 key={item.value}
                 onClick={() => setTab(item.value)}
                 className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition sm:flex-none ${
-                  tab === item.value ? "bg-[var(--accent)] text-white" : "text-slate-600 hover:bg-slate-50"
+                  tab === item.value ? "bg-[var(--accent)] text-white" : "text-[var(--muted)] hover:bg-[var(--surface-alt)]"
                 }`}
               >
                 <Icon className="h-4 w-4" />
@@ -224,7 +224,7 @@ function ActivityTab() {
             key={option}
             onClick={() => setDays(option)}
             className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
-              days === option ? "bg-slate-900 text-white" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+              days === option ? "bg-slate-900 text-white" : "bg-[var(--surface)] text-[var(--muted)] ring-1 ring-[var(--border)] hover:bg-[var(--surface-alt)]"
             }`}
           >
             Last {option} days
@@ -233,7 +233,7 @@ function ActivityTab() {
         <button
           onClick={load}
           aria-label="Refresh"
-          className="rounded-full bg-white p-2 text-slate-500 ring-1 ring-slate-200 transition hover:bg-slate-50"
+          className="rounded-full bg-[var(--surface)] p-2 text-[var(--muted)] ring-1 ring-[var(--border)] transition hover:bg-[var(--surface-alt)]"
         >
           <RefreshIcon className="h-4 w-4" />
         </button>
@@ -280,20 +280,20 @@ function ActivityTab() {
           <RefreshIcon className="h-4 w-4" />
           {reconcileLoading ? "Reconciling…" : "Repair recording library"}
         </button>
-        {reconcileMessage ? <p className="text-sm text-slate-500">{reconcileMessage}</p> : null}
+        {reconcileMessage ? <p className="text-sm text-[var(--muted)]">{reconcileMessage}</p> : null}
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Every day in the window</h2>
-            <p className="mt-0.5 text-sm text-slate-500">
+            <h2 className="text-lg font-semibold text-[var(--foreground)]">Every day in the window</h2>
+            <p className="mt-0.5 text-sm text-[var(--muted)]">
               Stacked, so the height of a day is everything that happened on it.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
             {SERIES.map((series) => (
-              <span key={series.key} className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600">
+              <span key={series.key} className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]">
                 <span className="h-2.5 w-2.5 rounded-sm" style={{ background: series.colour }} />
                 {series.label}
               </span>
@@ -304,16 +304,16 @@ function ActivityTab() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">
-          <h2 className="text-lg font-semibold text-slate-900">Where the teaching went</h2>
-          <p className="mt-0.5 text-sm text-slate-500">Sessions by level over the window.</p>
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+          <h2 className="text-lg font-semibold text-[var(--foreground)]">Where the teaching went</h2>
+          <p className="mt-0.5 text-sm text-[var(--muted)]">Sessions by level over the window.</p>
           <RankedBars
             rows={data.byLevel.map((row) => ({ label: row.level, value: row.count }))}
             colour="#0D7C7E"
             empty="No classes were opened in this window."
           />
 
-          <h3 className="mt-6 text-sm font-semibold text-slate-900">What was uploaded</h3>
+          <h3 className="mt-6 text-sm font-semibold text-[var(--foreground)]">What was uploaded</h3>
           <RankedBars
             rows={Object.entries(data.uploadKinds).map(([kind, count]) => ({ label: kind, value: count }))}
             colour="#0EA5E9"
@@ -321,9 +321,9 @@ function ActivityTab() {
           />
         </div>
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">
-          <h2 className="text-lg font-semibold text-slate-900">Recording health</h2>
-          <p className="mt-0.5 text-sm text-slate-500">
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+          <h2 className="text-lg font-semibold text-[var(--foreground)]">Recording health</h2>
+          <p className="mt-0.5 text-sm text-[var(--muted)]">
             Failures are shown, not filtered. &ldquo;Was Tuesday recorded?&rdquo; is the question this page exists
             to answer.
           </p>
@@ -342,25 +342,25 @@ function ActivityTab() {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">
-        <h2 className="text-lg font-semibold text-slate-900">As it happened</h2>
-        <p className="mt-0.5 text-sm text-slate-500">The last forty things the platform did.</p>
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+        <h2 className="text-lg font-semibold text-[var(--foreground)]">As it happened</h2>
+        <p className="mt-0.5 text-sm text-[var(--muted)]">The last forty things the platform did.</p>
         {data.feed.length === 0 ? (
-          <p className="py-10 text-center text-sm text-slate-500">Nothing in this window.</p>
+          <p className="py-10 text-center text-sm text-[var(--muted)]">Nothing in this window.</p>
         ) : (
           <div className="mt-4 space-y-1">
             {data.feed.map((event, index) => {
               const Icon = FEED_ICON[event.type];
               return (
-                <div key={`${event.at}-${index}`} className="flex items-start gap-3 rounded-2xl p-2.5 hover:bg-slate-50">
+                <div key={`${event.at}-${index}`} className="flex items-start gap-3 rounded-2xl p-2.5 hover:bg-[var(--surface-alt)]">
                   <span className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl ${FEED_TONE[event.type]}`}>
                     <Icon className="h-4 w-4" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-slate-900">{event.title}</p>
-                    <p className="truncate text-xs text-slate-500">{event.detail}</p>
+                    <p className="truncate text-sm font-medium text-[var(--foreground)]">{event.title}</p>
+                    <p className="truncate text-xs text-[var(--muted)]">{event.detail}</p>
                   </div>
-                  <span className="shrink-0 text-xs text-slate-400">{timeAgo(event.at)}</span>
+                  <span className="shrink-0 text-xs text-[var(--muted)]">{timeAgo(event.at)}</span>
                 </div>
               );
             })}
@@ -416,14 +416,14 @@ function StackedBars({ series }: { series: Activity["series"] }) {
               {/* An empty day still gets a hairline. Without it a quiet
                   fortnight is a gap in the chart, which reads as missing data
                   rather than as nothing having happened. */}
-              {total === 0 ? <div className="h-[2px] w-full rounded-sm bg-slate-200" /> : null}
+              {total === 0 ? <div className="h-[2px] w-full rounded-sm bg-[var(--surface-alt)]" /> : null}
             </div>
           );
         })}
       </div>
       <div className="mt-2 flex gap-[3px]">
         {series.map((day, index) => (
-          <span key={day.key} className="min-w-0 flex-1 text-center text-[9px] text-slate-400">
+          <span key={day.key} className="min-w-0 flex-1 text-center text-[9px] text-[var(--muted)]">
             {index % step === 0 ? day.key.slice(5) : ""}
           </span>
         ))}
@@ -441,7 +441,7 @@ function RankedBars({
   colour: string;
   empty: string;
 }) {
-  if (rows.length === 0) return <p className="py-6 text-center text-sm text-slate-500">{empty}</p>;
+  if (rows.length === 0) return <p className="py-6 text-center text-sm text-[var(--muted)]">{empty}</p>;
   const max = Math.max(...rows.map((row) => row.value), 1);
 
   return (
@@ -449,10 +449,10 @@ function RankedBars({
       {rows.map((row) => (
         <div key={row.label}>
           <div className="flex items-center justify-between text-xs">
-            <span className="font-medium capitalize text-slate-700">{row.label}</span>
-            <span className="font-semibold text-slate-900">{row.value}</span>
+            <span className="font-medium capitalize text-[var(--foreground-soft)]">{row.label}</span>
+            <span className="font-semibold text-[var(--foreground)]">{row.value}</span>
           </div>
-          <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+          <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--surface-alt)]">
             <div
               className="h-full rounded-full transition-[width] duration-500"
               style={{ width: `${(row.value / max) * 100}%`, background: colour }}
@@ -478,23 +478,23 @@ function Stat({
   hint: string;
 }) {
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-5">
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
       <span className={`grid h-10 w-10 place-items-center rounded-xl ${tone}`}>{icon}</span>
-      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-0.5 text-3xl font-bold text-slate-900">{value.toLocaleString()}</p>
-      <p className="mt-0.5 text-xs text-slate-500">{hint}</p>
+      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{label}</p>
+      <p className="mt-0.5 text-3xl font-bold text-[var(--foreground)]">{value.toLocaleString()}</p>
+      <p className="mt-0.5 text-xs text-[var(--muted)]">{hint}</p>
     </div>
   );
 }
 
 function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-2xl bg-slate-50 p-3">
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500">
+    <div className="rounded-2xl bg-[var(--surface-alt)] p-3">
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]">
         {icon}
         {label}
       </span>
-      <p className="mt-1 text-lg font-bold text-slate-900">{value}</p>
+      <p className="mt-1 text-lg font-bold text-[var(--foreground)]">{value}</p>
     </div>
   );
 }
@@ -616,21 +616,21 @@ function LibraryTab() {
       {error ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
       {courses.length === 0 ? (
-        <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center">
-          <BookOpenIcon className="mx-auto h-9 w-9 text-slate-300" />
-          <p className="mt-3 text-sm text-slate-600">
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+          <BookOpenIcon className="mx-auto h-9 w-9 text-[var(--muted)]" />
+          <p className="mt-3 text-sm text-[var(--muted)]">
             There are no courses yet, and course material has to belong to one. Create a course first —
             recordings and level material are unaffected and still appear under Activity.
           </p>
         </div>
       ) : (
         <>
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">
-            <label className="block text-sm font-semibold text-slate-900">Course</label>
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+            <label className="block text-sm font-semibold text-[var(--foreground)]">Course</label>
             <select
               value={selectedCourseId}
               onChange={(e) => setSelectedCourseId(e.target.value)}
-              className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm sm:max-w-md"
+              className="mt-2 w-full rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm sm:max-w-md"
             >
               {courses.map((course) => (
                 <option key={course.id} value={course.id}>
@@ -640,48 +640,48 @@ function LibraryTab() {
             </select>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">
-            <h2 className="text-lg font-semibold text-slate-900">Upload material</h2>
-            <p className="mt-1 text-sm text-slate-500">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+            <h2 className="text-lg font-semibold text-[var(--foreground)]">Upload material</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
               The file lands in the Materials library of every student at this course&apos;s level, and shows on
               their dashboard as newly added. Tutors can also attach it to a specific day from the class
               timetable.
             </p>
             <form onSubmit={handleUpload} className="mt-4 grid gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700">File *</label>
+                <label className="block text-sm font-medium text-[var(--foreground-soft)]">File *</label>
                 <input
                   type="file"
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
                   required
                 />
                 {file ? (
-                  <p className="mt-1 text-sm text-slate-500">
+                  <p className="mt-1 text-sm text-[var(--muted)]">
                     {file.name} ({(file.size / 1024).toFixed(2)} KB)
                   </p>
                 ) : null}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700">Title *</label>
+                <label className="block text-sm font-medium text-[var(--foreground-soft)]">Title *</label>
                 <input
                   type="text"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   placeholder="e.g., Module 1 Study Guide"
-                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700">Description</label>
+                <label className="block text-sm font-medium text-[var(--foreground-soft)]">Description</label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   placeholder="Optional description"
-                  className="mt-1 h-20 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 h-20 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
                 />
               </div>
 
@@ -696,13 +696,13 @@ function LibraryTab() {
             </form>
           </div>
 
-          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white">
+          <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[36rem]">
-                <thead className="border-b border-slate-200 bg-slate-50">
+                <thead className="border-b border-[var(--border)] bg-[var(--surface-alt)]">
                   <tr>
                     {["Title", "Type", "Size", "Uploaded", ""].map((heading) => (
-                      <th key={heading} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <th key={heading} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                         {heading}
                       </th>
                     ))}
@@ -711,13 +711,13 @@ function LibraryTab() {
                 <tbody>
                   {materials.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-5 py-10 text-center text-sm text-slate-500">
+                      <td colSpan={5} className="px-5 py-10 text-center text-sm text-[var(--muted)]">
                         No materials uploaded for this course.
                       </td>
                     </tr>
                   ) : (
                     materials.map((material) => (
-                      <tr key={material.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                      <tr key={material.id} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-alt)]">
                         <td className="px-5 py-3">
                           <a
                             href={material.fileUrl}
@@ -728,25 +728,25 @@ function LibraryTab() {
                             {material.title}
                           </a>
                           {material.description ? (
-                            <p className="mt-0.5 text-xs text-slate-500">{material.description}</p>
+                            <p className="mt-0.5 text-xs text-[var(--muted)]">{material.description}</p>
                           ) : null}
                         </td>
                         <td className="px-5 py-3">
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-600">
+                          <span className="rounded-full bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--muted)]">
                             {material.fileType}
                           </span>
                         </td>
-                        <td className="px-5 py-3 text-sm text-slate-600">
+                        <td className="px-5 py-3 text-sm text-[var(--muted)]">
                           {(material.fileSize / 1024).toFixed(0)} KB
                         </td>
-                        <td className="px-5 py-3 text-sm text-slate-600">
+                        <td className="px-5 py-3 text-sm text-[var(--muted)]">
                           {new Date(material.createdAt).toLocaleDateString()}
                         </td>
                         <td className="px-5 py-3">
                           <button
                             onClick={() => handleDelete(material.id)}
                             aria-label={`Delete ${material.title}`}
-                            className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                            className="rounded-lg p-2 text-[var(--muted)] transition hover:bg-rose-50 hover:text-rose-600"
                           >
                             <TrashIcon className="h-4 w-4" />
                           </button>

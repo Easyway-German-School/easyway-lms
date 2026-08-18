@@ -126,7 +126,7 @@ function nairaShort(value: number) {
 
 /** Older money is redder. The colour is the ageing, not decoration. */
 const BUCKET_TONE: Record<string, string> = {
-  current: "border-slate-300 bg-slate-50 text-slate-700",
+  current: "border-[var(--border-strong)] bg-[var(--surface-alt)] text-[var(--foreground-soft)]",
   d14_30: "border-amber-300 bg-amber-50 text-amber-800",
   d31_60: "border-orange-300 bg-orange-50 text-orange-800",
   d61_90: "border-red-300 bg-red-50 text-red-700",
@@ -161,7 +161,7 @@ function Tile({
     </>
   );
 
-  const base = "block rounded-3xl border border-[var(--border)] bg-white/80 p-5 shadow-sm transition";
+  const base = "block rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-5 shadow-sm transition";
   return href ? (
     <Link href={href} className={`${base} hover:-translate-y-0.5 hover:border-[var(--accent)]/40`}>
       {body}
@@ -267,7 +267,7 @@ function FinanceWorkspace() {
             type="button"
             onClick={() => void load()}
             disabled={loading}
-            className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-white disabled:opacity-50"
+            className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-[var(--surface)] disabled:opacity-50"
           >
             {loading ? "Refreshing…" : "Refresh"}
           </button>
@@ -304,7 +304,7 @@ function FinanceWorkspace() {
             className={`rounded-full border px-5 py-2 text-sm font-semibold transition ${
               tab === entry.id
                 ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-                : "border-[var(--border)] bg-white hover:bg-slate-50"
+                : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-alt)]"
             }`}
           >
             {entry.label}
@@ -340,7 +340,7 @@ function FinanceWorkspace() {
           </div>
 
           <div className="grid gap-5 xl:grid-cols-2">
-            <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm">
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm">
               <h2 className="text-sm font-bold uppercase tracking-[0.18em]">Ageing</h2>
               <p className="mt-1 text-xs text-[var(--muted)]">
                 By days since enrolment. Settled students are excluded.
@@ -370,7 +370,7 @@ function FinanceWorkspace() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm">
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm">
               <h2 className="text-sm font-bold uppercase tracking-[0.18em]">Who to ring first</h2>
               <p className="mt-1 text-xs text-[var(--muted)]">Largest balance, longest standing.</p>
               <div className="mt-5 space-y-2">
@@ -398,7 +398,7 @@ function FinanceWorkspace() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm">
             <h2 className="text-sm font-bold uppercase tracking-[0.18em]">Invoices raised</h2>
             <p className="mt-1 text-xs text-[var(--muted)]">
               Invoices are raised at checkout, so this counts transactions rather than the whole fee book — which is
@@ -425,7 +425,7 @@ function FinanceWorkspace() {
               <button
                 type="button"
                 onClick={() => setFocus("")}
-                className="rounded-full border border-current px-4 py-2 text-sm font-bold hover:bg-white/60"
+                className="rounded-full border border-current px-4 py-2 text-sm font-bold hover:bg-[var(--surface-soft)]"
               >
                 Clear
               </button>
@@ -437,7 +437,7 @@ function FinanceWorkspace() {
               type="button"
               onClick={() => setBucket("")}
               className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                bucket === "" ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border)] bg-white"
+                bucket === "" ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border)] bg-[var(--surface)]"
               }`}
             >
               All ages
@@ -449,7 +449,7 @@ function FinanceWorkspace() {
                 onClick={() => setBucket(entry.id)}
                 title={entry.hint}
                 className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                  bucket === entry.id ? BUCKET_TONE[entry.id] ?? BUCKET_TONE.current : "border-[var(--border)] bg-white"
+                  bucket === entry.id ? BUCKET_TONE[entry.id] ?? BUCKET_TONE.current : "border-[var(--border)] bg-[var(--surface)]"
                 }`}
               >
                 {entry.label}
@@ -459,12 +459,12 @@ function FinanceWorkspace() {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Name, email or branch"
-              className="ml-auto rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm"
+              className="ml-auto rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm"
             />
             <select
               value={sort}
               onChange={(event) => setSort(event.target.value)}
-              className="rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold"
+              className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold"
             >
               <option value="owed">Largest balance</option>
               <option value="oldest">Longest outstanding</option>
@@ -476,7 +476,7 @@ function FinanceWorkspace() {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold"
+                className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold"
               >
                 Clear filters
               </button>
@@ -488,7 +488,7 @@ function FinanceWorkspace() {
             above stay on the whole book, so a filtered view never restates what the school is owed.
           </p>
 
-          <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-white/80">
+          <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)]">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-[var(--border)] text-sm">
                 <thead className="bg-[var(--surface)] text-left text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
@@ -583,7 +583,7 @@ function FinanceWorkspace() {
             />
           </div>
 
-          <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm">
             <h2 className="text-sm font-bold uppercase tracking-[0.18em]">
               Received, last {data.cash.windowMonths} months
             </h2>
@@ -609,7 +609,7 @@ function FinanceWorkspace() {
           </div>
 
           <div className="grid gap-5 xl:grid-cols-2">
-            <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm">
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm">
               <h2 className="text-sm font-bold uppercase tracking-[0.18em]">How it arrived</h2>
               <div className="mt-5 space-y-3">
                 {data.cash.byMethod.length === 0 && (
@@ -629,7 +629,7 @@ function FinanceWorkspace() {
                           {naira(entry.amount)} · {entry.count}
                         </span>
                       </div>
-                      <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                      <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-[var(--surface-alt)]">
                         <div className="h-full rounded-full bg-[var(--accent-strong)]" style={{ width: `${share}%` }} />
                       </div>
                     </Link>
@@ -638,7 +638,7 @@ function FinanceWorkspace() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm">
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm">
               <div className="flex items-baseline justify-between">
                 <h2 className="text-sm font-bold uppercase tracking-[0.18em]">Latest receipts</h2>
                 <Link href="/admin/payments" className="text-xs font-bold text-[var(--accent)] hover:underline">
@@ -676,7 +676,7 @@ function FinanceWorkspace() {
             { title: "By branch", rows: data.byBranch, filter: (key: string) => setBranchId(key === "unassigned" ? "" : key) },
             { title: "By level", rows: data.byLevel, filter: (key: string) => setLevel(key) },
           ].map((group) => (
-            <div key={group.title} className="rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm">
+            <div key={group.title} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm">
               <h2 className="text-sm font-bold uppercase tracking-[0.18em]">{group.title}</h2>
               <p className="mt-1 text-xs text-[var(--muted)]">Sorted by what is still owed.</p>
               <div className="mt-5 space-y-4">
@@ -700,7 +700,7 @@ function FinanceWorkspace() {
                       </span>
                     </div>
                     <div className="mt-1.5 flex items-center gap-3">
-                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--surface-alt)]">
                         <div
                           className="h-full rounded-full bg-[var(--accent-strong)]"
                           style={{ width: `${row.collectionRate}%` }}
@@ -720,7 +720,7 @@ function FinanceWorkspace() {
       )}
 
       {loading && !data && (
-        <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-8 text-center text-sm text-[var(--muted)]">
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-8 text-center text-sm text-[var(--muted)]">
           Loading the fee book…
         </div>
       )}

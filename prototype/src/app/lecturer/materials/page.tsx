@@ -334,7 +334,7 @@ export default function LecturerMaterials() {
                             className={`rounded-lg border px-4 py-2.5 text-left text-sm transition ${
                               formData.isRecording === option.value
                                 ? 'border-[var(--accent)] bg-[var(--surface)] font-semibold text-[var(--foreground)]'
-                                : 'border-[var(--border)] bg-white/50 text-[var(--muted)]'
+                                : 'border-[var(--border)] bg-[var(--surface-alt)] text-[var(--muted)]'
                             }`}
                           >
                             <span className="flex items-center gap-2">{option.icon}{option.label}</span>

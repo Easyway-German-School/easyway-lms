@@ -82,13 +82,13 @@ export default function EssayGrader() {
               <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Mission rules</p>
               <h2 className="mt-3 text-2xl font-semibold">What this quest rewards</h2>
             </div>
-            <ul className="space-y-3 text-sm leading-7 text-slate-300">
+            <ul className="space-y-3 text-sm leading-7 text-[var(--muted)]">
               <li>• Grammar and sentence structure</li>
               <li>• Vocabulary precision and register</li>
               <li>• Task completion and cohesion</li>
               <li>• Spelling, connectors, and confidence</li>
             </ul>
-            <div className="rounded-3xl bg-white/10 p-4 text-sm text-slate-200">Every submission gives you feedback, a score, and a clear next-step objective.</div>
+            <div className="rounded-3xl bg-[var(--surface-alt)] p-4 text-sm text-[var(--foreground)]">Every submission gives you feedback, a score, and a clear next-step objective.</div>
           </aside>
         </section>
 

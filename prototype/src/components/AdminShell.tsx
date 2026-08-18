@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from '@/components/BrandLogo';
 import NotificationCenter from '@/components/NotificationCenter';
+import ThemeToggle, { useHideFloatingThemeToggle } from '@/components/ThemeToggle';
 import PortalUpdates from '@/components/PortalUpdates';
 import SignOutButton from '@/components/SignOutButton';
 import {
@@ -141,6 +142,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const router = useRouter();
   const pathname = usePathname();
   const { data: session, status } = useSession();
+  useHideFloatingThemeToggle();
   const [collapsed, setCollapsed] = useState(false);
   // Below lg the sidebar is a drawer. The admin area is used from a phone at
   // the front desk more often than the desktop-only layout assumed.
@@ -273,7 +275,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
       {/* Sidebar */}
       <aside
-        className={`fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-[var(--border)] bg-[var(--surface-soft)] shadow-[var(--shadow)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:transition-all ${
+        className={`sidebar-glass fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-[var(--border)] transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:transition-all ${
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         } w-[17rem] ${collapsed ? 'lg:w-20' : 'lg:w-72'}`}
       >
@@ -408,6 +410,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             {navItems.find((item) => pathname === item.href)?.label ?? 'Admin'}
           </p>
 
+          <ThemeToggle variant="compact" />
           <NotificationCenter />
         </header>
 

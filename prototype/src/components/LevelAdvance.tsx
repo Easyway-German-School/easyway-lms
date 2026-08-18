@@ -147,7 +147,7 @@ function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClos
               initial={{ scale: 0.4, opacity: 0.5 }}
               animate={{ scale: 2.4, opacity: 0 }}
               transition={{ duration: 2.4, delay: ring * 0.7, repeat: Infinity, ease: "easeOut" }}
-              className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full border border-white/40"
+              className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full border border-[var(--border)]"
             />
           ))}
 
@@ -162,7 +162,7 @@ function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClos
 
           <div className="mt-4 flex items-center gap-4">
             <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.25 }}>
-              <div className="grid h-16 w-16 place-items-center rounded-2xl bg-white/15 text-xl font-bold backdrop-blur">
+              <div className="grid h-16 w-16 place-items-center rounded-2xl bg-[var(--surface-alt)] text-xl font-bold backdrop-blur">
                 {offer.currentLevel}
               </div>
             </motion.div>
@@ -182,7 +182,7 @@ function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClos
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: 0.55, type: "spring", stiffness: 300, damping: 18 }}
                 >
-                  <div className="grid h-16 w-16 place-items-center rounded-2xl bg-white text-xl font-bold text-[#0D7C7E] shadow-lg">
+                  <div className="grid h-16 w-16 place-items-center rounded-2xl bg-[var(--surface)] text-xl font-bold text-[#0D7C7E] shadow-lg">
                     {offer.nextLevel}
                   </div>
                 </motion.div>
@@ -217,7 +217,7 @@ function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClos
             <Link
               href={action.href}
               onClick={onClose}
-              className="flex-1 rounded-full bg-[var(--accent)] px-6 py-3.5 text-center text-sm font-bold text-white shadow-lg transition hover:brightness-110"
+              className="flex-1 rounded-full btn-glow px-6 py-3.5 text-center text-sm font-bold text-white shadow-lg transition hover:brightness-110"
             >
               {action.label}
             </Link>
@@ -270,7 +270,7 @@ function AdvanceCard({ offer, onOpen }: { offer: LevelAdvanceOffer; onOpen: () =
         <div className="flex flex-wrap gap-3">
           <Link
             href={action.href}
-            className="rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white transition hover:brightness-110"
+            className="rounded-full btn-glow px-6 py-3 text-sm font-bold text-white transition hover:brightness-110"
           >
             {action.label}
           </Link>

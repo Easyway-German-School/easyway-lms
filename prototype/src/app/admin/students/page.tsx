@@ -568,7 +568,7 @@ function StudentsRoster() {
             <button
               type="button"
               onClick={clearFocus}
-              className="shrink-0 rounded-full border border-current px-4 py-2 text-sm font-bold transition hover:bg-white/60"
+              className="shrink-0 rounded-full border border-current px-4 py-2 text-sm font-bold transition hover:bg-[var(--surface-soft)]"
             >
               Clear focus
             </button>
@@ -859,7 +859,7 @@ function StudentsRoster() {
                 <button
                   type="button"
                   onClick={cancelEditingStudent}
-                  className="rounded-lg border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold text-slate-700"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--foreground-soft)]"
                 >
                   Cancel
                 </button>

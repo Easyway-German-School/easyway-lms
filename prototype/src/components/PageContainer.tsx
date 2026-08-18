@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import InstallPrompt from "@/components/InstallPrompt";
-import ThemeToggle from "@/components/ThemeToggle";
+import ThemeToggle, { FloatingThemeToggleProvider } from "@/components/ThemeToggle";
 
 export default function PageContainer({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -20,16 +20,24 @@ export default function PageContainer({ children }: { children: React.ReactNode 
     >
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="scene-stars" />
+        <div className="scene-particles" />
         <div className="scene-grid" />
         <div className="scene-aurora left-10 top-16" />
         <div className="scene-aurora right-16 top-24" />
+        <div className="scene-aurora violet-drift" />
         <div className="scene-halo right-1/3 top-1/2" />
         <div className="scene-scanline" />
       </div>
-      <div className="relative opacity-100 transition-opacity duration-200">
-        {children}
-      </div>
-      {!isAuthRoute ? <ThemeToggle /> : null}
+      {/* The three portal shells (Student/Lecturer/Admin) each mount a compact
+          toggle in their own header via useHideFloatingThemeToggle(), which
+          hides this floating one so pages with shell chrome never show the
+          switch twice. Pages with no shell — the marketing site, auth,
+          standalone signup flows — keep the floating corner button. */}
+      <FloatingThemeToggleProvider render={(visible) => (visible && !isAuthRoute ? <ThemeToggle /> : null)}>
+        <div className="relative opacity-100 transition-opacity duration-200">
+          {children}
+        </div>
+      </FloatingThemeToggleProvider>
       {/* Wraps all three portals, so students, tutors and staff are each
           offered the install from wherever they happen to be. It registers the
           service worker too, which is why it is not itself gated on the route. */}

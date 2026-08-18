@@ -614,39 +614,52 @@ function DashboardContent() {
           <div className="mb-6">
             <JourneyMapPoster level={resolvedStudent.level} />
           </div>
-          <section className="relative overflow-hidden rounded-[36px] border border-white/60 bg-gradient-to-r from-[var(--accent-strong)] via-[var(--accent)] to-[#FF8533] p-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.16)]">
-            <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/15 blur-3xl" />
-            <div className="pointer-events-none absolute bottom-0 left-0 h-32 w-32 rounded-full bg-slate-950/10 blur-3xl" />
-            <div className="absolute right-6 top-6 h-24 w-24 rounded-full border border-white/20 hero-orb bg-white/10" />
-            <div className="absolute right-6 top-6 h-24 w-24 rounded-full border border-white/20 pulse-ring" />
-            <div className="absolute left-8 top-8 h-2.5 w-24 rounded-full bg-white/25" />
-            <div className="grid gap-8 lg:grid-cols-[1.45fr_0.95fr] lg:items-end">
+          {/* The hero used to be a flat solid orange-to-orange fill — legible,
+              but it read as "theme colours applied to a box" rather than an
+              actual design, and it broke down in Nacht/Dämmerung because a
+              literal brand-orange panel does not belong to any of the three
+              palettes. It is a dark glass panel now in every theme, and the
+              brand colour shows up as ambient LIGHT (drifting glow orbs, a
+              particle field) instead of as paint — the same trick the rest of
+              the app's scene layer already uses, just concentrated here where
+              the student actually lands. */}
+          <section className="relative overflow-hidden rounded-[36px] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
+            <div
+              className="pointer-events-none absolute -right-16 -top-24 h-80 w-80 rounded-full opacity-70 blur-[100px] animate-blob"
+              style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--accent) 60%, transparent), transparent 70%)' }}
+            />
+            <div
+              className="pointer-events-none absolute -left-24 -bottom-24 h-72 w-72 rounded-full opacity-60 blur-[100px] animate-blob animation-delay-4000"
+              style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--accent-strong) 55%, transparent), transparent 70%)' }}
+            />
+            <div className="scene-particles pointer-events-none absolute inset-0 opacity-70" />
+            <div className="relative grid gap-8 lg:grid-cols-[1.45fr_0.95fr] lg:items-end">
               <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-white/85 backdrop-blur-sm glow-pill">
-                  <span className="h-2 w-2 rounded-full bg-emerald-300" />
+                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-[var(--accent-ink)]">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
                   Student dashboard
                 </div>
-                <h1 className="mt-4 text-4xl font-semibold">Welcome back, {resolvedStudent?.name || session?.user?.name || 'Learner'}</h1>
-                <p className="mt-4 max-w-2xl text-slate-100">Your academy experience is now a cinematic quest board with live XP, missions, and progress tracking.</p>
+                <h1 className="mt-4 text-4xl font-semibold text-[var(--foreground)]">Welcome back, {resolvedStudent?.name || session?.user?.name || 'Learner'}</h1>
+                <p className="mt-4 max-w-2xl text-[var(--muted)]">Your academy experience is now a cinematic quest board with live XP, missions, and progress tracking.</p>
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <div className="glass-chip flex items-center gap-2 rounded-full px-3 py-2 text-sm text-white"><SparklesIcon /> XP boost active</div>
-                  <div className="glass-chip flex items-center gap-2 rounded-full px-3 py-2 text-sm text-white"><FlameIcon /> Streak {streakDays} days</div>
-                  <div className="glass-chip flex items-center gap-2 rounded-full px-3 py-2 text-sm text-white"><TargetIcon /> Next: {insights.nextMilestone}</div>
+                  <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><SparklesIcon /></span> XP boost active</div>
+                  <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><FlameIcon /></span> Streak {streakDays} days</div>
+                  <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><TargetIcon /></span> Next: {insights.nextMilestone}</div>
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
-                <motion.div whileHover={{ y: -4, scale: 1.01 }} className="rounded-[28px] border border-white/20 bg-white/10 p-5 backdrop-blur-sm">
-                  <p className="text-xs uppercase tracking-[0.3em] text-white/80">Current level</p>
-                  <p className="mt-3 text-3xl font-semibold">{level}</p>
-                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/20">
-                    <div className="h-full rounded-full bg-gradient-to-r from-white to-amber-300" style={{ width: `${xpProgress}%` }} />
+                <motion.div whileHover={{ y: -4, scale: 1.01 }} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">Current level</p>
+                  <p className="mt-3 text-3xl font-semibold text-[var(--foreground)]">{level}</p>
+                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--border)]">
+                    <div className="h-full rounded-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)]" style={{ width: `${xpProgress}%` }} />
                   </div>
-                  <p className="mt-2 text-sm text-slate-100">{xp} XP to your next milestone</p>
+                  <p className="mt-2 text-sm text-[var(--muted)]">{xp} XP to your next milestone</p>
                 </motion.div>
-                <motion.div whileHover={{ y: -4, scale: 1.01 }} className="rounded-[28px] border border-white/20 bg-white/10 p-5 backdrop-blur-sm">
-                  <p className="text-xs uppercase tracking-[0.3em] text-white/80">Unlock progress</p>
-                  <p className="mt-3 text-3xl font-semibold">{paymentProgressPercent}%</p>
-                  <p className="mt-2 text-sm text-slate-100">
+                <motion.div whileHover={{ y: -4, scale: 1.01 }} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">Unlock progress</p>
+                  <p className="mt-3 text-3xl font-semibold text-[var(--foreground)]">{paymentProgressPercent}%</p>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
                     {paymentFullyPaid
                       ? 'Premium library access is fully unlocked.'
                       : paymentUnlocked
@@ -666,15 +679,21 @@ function DashboardContent() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.06 * index, duration: 0.35 }}
                 whileHover={{ y: -4, scale: 1.01 }}
-                className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle,_rgba(255,255,255,0.08),_rgba(15,23,42,0.2))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.18)] backdrop-blur-2xl"
+                className="cinematic-card relative overflow-hidden rounded-[28px] p-6"
               >
-                <div className="absolute -left-10 top-10 h-24 w-24 rounded-full bg-[rgba(255,136,34,0.15)] blur-3xl" />
-                <div className="absolute -right-10 bottom-8 h-20 w-20 rounded-full bg-[rgba(13,174,255,0.14)] blur-3xl" />
-                <div className="flex items-center justify-between gap-3 relative">
-                  <span className="text-white/90">{stat.icon}</span>
-                  <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.28em] text-slate-200 backdrop-blur-sm">{stat.label}</span>
+                <div
+                  className="pointer-events-none absolute -left-10 top-10 h-24 w-24 rounded-full opacity-60 blur-3xl"
+                  style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--accent) 45%, transparent), transparent 70%)' }}
+                />
+                <div
+                  className="pointer-events-none absolute -right-10 bottom-8 h-20 w-20 rounded-full opacity-50 blur-3xl"
+                  style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--accent-strong) 45%, transparent), transparent 70%)' }}
+                />
+                <div className="relative flex items-center justify-between gap-3">
+                  <span className="text-[var(--accent)]">{stat.icon}</span>
+                  <span className="rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">{stat.label}</span>
                 </div>
-                <p className="mt-6 text-3xl font-semibold text-white drop-shadow-[0_10px_20px_rgba(0,0,0,0.45)]">{stat.value}</p>
+                <p className="relative mt-6 text-3xl font-semibold text-[var(--foreground)]">{stat.value}</p>
               </motion.div>
             ))}
           </section>
@@ -694,12 +713,15 @@ function DashboardContent() {
                     </h2>
                   </div>
                   {paymentFullyPaid ? null : (
-                    <Link href="/programs" className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]">
+                    <Link
+                      href="/programs"
+                      className="rounded-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)] px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_30px_-8px_color-mix(in_srgb,var(--accent)_70%,transparent)] transition hover:brightness-110"
+                    >
                       {paymentUnlocked ? 'Pay balance' : 'Pay deposit'}
                     </Link>
                   )}
                 </div>
-                <div className="mt-6 rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-6 shadow-inner shadow-slate-100">
+                <div className="mt-6 rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-6 shadow-[inset_0_2px_10px_rgba(0,0,0,0.15)]">
                   <p className="text-sm text-[var(--muted)]">{paymentUnlocked ? 'Your premium learning library is unlocked.' : `You’ve paid ${Math.max(effectivePayment?.totalPaid ?? 0, effectiveTotalPaid).toLocaleString()} of ${tuitionFee.toLocaleString()} NGN tuition.`}</p>
                   <div className="mt-5 h-3 overflow-hidden rounded-full bg-[var(--border)]">
                     <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${paymentProgressPercent}%` }} />
@@ -708,7 +730,7 @@ function DashboardContent() {
                 </div>
               </motion.div>
 
-              <div className="rounded-[32px] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[0_16px_50px_rgba(15,23,42,0.06)]">
+              <div className="cinematic-card rounded-[32px] p-8">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Daily missions</p>
@@ -720,13 +742,16 @@ function DashboardContent() {
                   {displayMissions.slice(0, 3).map((quest) => {
                     const done = quest.id ? completedMissionIds[quest.id] : quest.done;
                     return (
-                      <div key={quest.id || quest.title} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
-                        <div className="flex items-start justify-between gap-4">
+                      <div key={quest.id || quest.title} className="group flex items-start gap-4 rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
+                        <span
+                          className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${done ? 'bg-[var(--success)]' : 'bg-[var(--accent)] shadow-[0_0_10px_2px_color-mix(in_srgb,var(--accent)_65%,transparent)] group-hover:animate-pulse'}`}
+                        />
+                        <div className="flex flex-1 items-start justify-between gap-4">
                           <div>
                             <p className="font-semibold text-[var(--foreground)]">{quest.title}</p>
                             <p className="mt-2 text-sm text-[var(--muted)]">{quest.description}</p>
                           </div>
-                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${done ? 'bg-[var(--success-soft)] text-[var(--success)]' : 'bg-[var(--surface-alt)] text-[var(--muted)]'}`}>{done ? 'Completed' : 'Pending'}</span>
+                          <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${done ? 'bg-[var(--success-soft)] text-[var(--success)]' : 'bg-[var(--surface-alt)] text-[var(--muted)]'}`}>{done ? 'Completed' : 'Pending'}</span>
                         </div>
                       </div>
                     );
@@ -748,7 +773,7 @@ function DashboardContent() {
                     <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Course highlights</p>
                     <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">Your active courses</h2>
                   </div>
-                  <Link href="/materials" className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">Open library</Link>
+                  <Link href="/materials" className="rounded-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)] px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_30px_-8px_color-mix(in_srgb,var(--accent)_70%,transparent)] transition hover:brightness-110">Open library</Link>
                 </div>
                 <div className="mt-6 space-y-4">
                   {resolvedCourses.slice(0, 3).map((course) => (
@@ -784,14 +809,14 @@ function DashboardContent() {
                   <button
                     type="button"
                     onClick={() => setAiTab('pronunciation')}
-                    className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] ${aiTab === 'pronunciation' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface-alt)] text-[var(--muted)]'}`}
+                    className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition ${aiTab === 'pronunciation' ? 'bg-[var(--accent)] text-white shadow-[0_6px_18px_-6px_color-mix(in_srgb,var(--accent)_70%,transparent)]' : 'bg-[var(--surface-alt)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}
                   >
                     Pronunciation
                   </button>
                   <button
                     type="button"
                     onClick={() => setAiTab('plan')}
-                    className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] ${aiTab === 'plan' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface-alt)] text-[var(--muted)]'}`}
+                    className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition ${aiTab === 'plan' ? 'bg-[var(--accent)] text-white shadow-[0_6px_18px_-6px_color-mix(in_srgb,var(--accent)_70%,transparent)]' : 'bg-[var(--surface-alt)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}
                   >
                     Study plan
                   </button>

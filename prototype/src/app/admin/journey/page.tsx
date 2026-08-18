@@ -287,7 +287,7 @@ export default function AdminJourneyPage() {
               {neverStarted.slice(0, 12).map((row) => (
                 <div
                   key={row.studentId}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/80 px-4 py-3"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[var(--surface-soft)] px-4 py-3"
                 >
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-[var(--foreground)]">{row.name}</p>
@@ -299,7 +299,7 @@ export default function AdminJourneyPage() {
                     <span className="rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-800">
                       {row.notStartedReason ? REASON_LABEL[row.notStartedReason] ?? row.notStartedReason : "Never answered"}
                     </span>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700">
+                    <span className="rounded-full bg-[var(--surface-alt)] px-2.5 py-1 font-semibold text-[var(--foreground-soft)]">
                       asked {row.notStartedCount}×
                     </span>
                     {row.outstanding > 0 ? (
@@ -420,7 +420,7 @@ export default function AdminJourneyPage() {
                       <td className="px-4 py-3">
                         <span
                           className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            PAYMENT_TONE[row.paymentStatus] ?? "bg-slate-100 text-slate-700"
+                            PAYMENT_TONE[row.paymentStatus] ?? "bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
                           }`}
                         >
                           {row.paymentStatus}

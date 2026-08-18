@@ -153,7 +153,7 @@ export default function AdminPromotionsPage() {
       <div className="p-8">
         <div className="mb-6">
           <h1 className="text-3xl font-bold">Class promotions</h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-[var(--muted)]">
             Students whose session has finished but who are still on the same level. Check the
             payment column before moving anyone — an unpaid student is usually held back.
           </p>
@@ -172,7 +172,7 @@ export default function AdminPromotionsPage() {
           <button
             onClick={download}
             disabled={candidates.length === 0}
-            className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-[var(--surface-alt)] disabled:opacity-50"
           >
             Export CSV
           </button>
@@ -190,19 +190,19 @@ export default function AdminPromotionsPage() {
         {notice && <div className="mb-4 rounded bg-emerald-100 p-4 text-emerald-800">{notice}</div>}
 
         {loading ? (
-          <div className="py-12 text-center text-slate-500">Loading…</div>
+          <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
         ) : candidates.length === 0 ? (
           <div className="py-12 text-center">
             <CheckCircleIcon className="mx-auto h-9 w-9 text-emerald-500" />
             <p className="mt-2 font-semibold">Everyone is in the right class</p>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-[var(--muted)]">
               No student has a finished session and an unchanged level.
             </p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border bg-white">
+          <div className="overflow-hidden rounded-xl border bg-[var(--surface)]">
             <table className="w-full">
-              <thead className="border-b bg-slate-50 text-left text-sm">
+              <thead className="border-b bg-[var(--surface-alt)] text-left text-sm">
                 <tr>
                   <th className="px-4 py-3">
                     <input
@@ -228,7 +228,7 @@ export default function AdminPromotionsPage() {
               </thead>
               <tbody>
                 {candidates.map((c) => (
-                  <tr key={c.studentId} className="border-b text-sm hover:bg-slate-50">
+                  <tr key={c.studentId} className="border-b text-sm hover:bg-[var(--surface-alt)]">
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
@@ -240,21 +240,21 @@ export default function AdminPromotionsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-semibold">{c.name}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-[var(--muted)]">
                         {c.studentCode && <span className="font-mono">{c.studentCode} · </span>}
                         {c.email}
                       </p>
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{c.branchName ?? "—"}</td>
+                    <td className="px-4 py-3 text-[var(--muted)]">{c.branchName ?? "—"}</td>
                     <td className="px-4 py-3">
                       {c.atTopOfLadder ? (
-                        <span className="text-xs text-slate-500">{c.level} · top of ladder</span>
+                        <span className="text-xs text-[var(--muted)]">{c.level} · top of ladder</span>
                       ) : (
                         <span className="font-medium">{c.level} → {c.nextLevel}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 capitalize text-slate-600">{c.sessionSlot}</td>
-                    <td className="px-4 py-3 text-slate-600">
+                    <td className="px-4 py-3 capitalize text-[var(--muted)]">{c.sessionSlot}</td>
+                    <td className="px-4 py-3 text-[var(--muted)]">
                       {c.monthsOverdue === 0
                         ? "just finished"
                         : `${c.monthsOverdue} month${c.monthsOverdue === 1 ? "" : "s"}`}

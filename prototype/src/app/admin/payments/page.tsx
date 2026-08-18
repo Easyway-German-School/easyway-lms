@@ -323,7 +323,7 @@ function PaymentsLedger() {
                 type="button"
                 onClick={() => setShowForm(false)}
                 disabled={formBusy}
-                className="rounded-lg border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold text-slate-700"
+                className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--foreground-soft)]"
               >
                 Cancel
               </button>
@@ -367,7 +367,7 @@ function PaymentsLedger() {
                         <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
                           payment.status === "completed" ? "bg-green-100 text-green-700" :
                           payment.status === "pending" ? "bg-yellow-100 text-yellow-700" :
-                          payment.status === "failed" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-700"
+                          payment.status === "failed" ? "bg-red-100 text-red-700" : "bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
                         }`}>
                           {payment.status}
                         </span>

@@ -90,8 +90,8 @@ function LessonContent() {
           <h1 className="text-4xl font-bold">{lesson.title}</h1>
           <p className="mt-2 text-slate-200">{lesson.description}</p>
           <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-100">
-            <span className="rounded-full bg-white/15 px-3 py-1">{lesson.type}</span>
-            <span className="rounded-full bg-white/15 px-3 py-1">{lesson.duration} mins</span>
+            <span className="rounded-full bg-[var(--surface-alt)] px-3 py-1">{lesson.type}</span>
+            <span className="rounded-full bg-[var(--surface-alt)] px-3 py-1">{lesson.duration} mins</span>
             <span className="rounded-full bg-amber-400/20 px-3 py-1 font-semibold text-amber-100">Reward: +{Math.max(25, lesson.duration)} XP</span>
             {completion?.status === "completed" && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/25 px-3 py-1 text-emerald-100"><CheckIcon className="h-3.5 w-3.5" /> Completed</span>
@@ -130,7 +130,7 @@ function LessonContent() {
         {/* Action */}
         {!completion?.completedAt && (
           <div className="rounded-3xl bg-emerald-500/10 p-8 shadow-sm space-y-4">
-            <h3 className="text-xl font-semibold text-slate-950">
+            <h3 className="text-xl font-semibold text-[var(--foreground)]">
               {lesson?.type === "assignment" ? "Submit Assignment" : "Complete this lesson"}
             </h3>
             {lesson?.type === "assignment" ? (

@@ -89,7 +89,7 @@ function DayPopover({ node, below, col }: { node: ClassNode; below: boolean; col
       transition={{ duration: 0.14 }}
       // Opens downward for cells in the top row, otherwise upward — a popover
       // above a first-row cell is clipped off the top of the card.
-      className={`absolute z-30 w-56 max-w-[calc(100vw-3rem)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left shadow-xl ${anchor.box} ${
+      className={`absolute z-30 w-56 max-w-[calc(100vw-3rem)] rounded-2xl cinematic-card p-3 text-left shadow-xl ${anchor.box} ${
         below ? "top-full mt-2" : "bottom-full mb-2"
       }`}
       role="tooltip"

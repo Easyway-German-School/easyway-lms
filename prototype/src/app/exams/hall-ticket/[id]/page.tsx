@@ -96,13 +96,13 @@ export default function HallTicketPage() {
         <button
           type="button"
           onClick={() => window.print()}
-          className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
+          className="inline-flex items-center gap-2 rounded-full btn-glow px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
         >
           <PrinterIcon className="h-4 w-4" /> Print hall ticket
         </button>
       </div>
 
-      <div className="mx-auto max-w-2xl rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow)] print:rounded-none print:border-0 print:shadow-none">
+      <div className="mx-auto max-w-2xl rounded-[28px] cinematic-card p-8 shadow-[var(--shadow)] print:rounded-none print:border-0 print:shadow-none">
         <div className="flex items-center justify-between border-b border-[var(--border)] pb-6">
           <BrandLogo variant="wordmark" className="h-9" />
           <span className="rounded-full bg-[var(--accent-soft)] px-4 py-1.5 text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">

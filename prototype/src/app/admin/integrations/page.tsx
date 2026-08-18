@@ -277,26 +277,26 @@ export default function AdminIntegrationsPage() {
                 </div>
 
                 {connector.testResult && (
-                  <div className="mt-4 rounded-3xl border border-[var(--border)] bg-white p-4 text-sm">
+                  <div className="mt-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
                     <p className={`font-semibold ${connector.testResult.success ? "text-emerald-700" : "text-red-700"}`}>
                       {connector.testResult.success ? "Connection successful" : "Connection failed"}
                     </p>
                     <p className="mt-2 text-[var(--muted)]">{connector.testResult.message}</p>
                     {connector.testResult.details != null && (
-                      <pre className="mt-3 max-h-48 overflow-auto rounded bg-slate-100 p-3 text-xs text-slate-700">
+                      <pre className="mt-3 max-h-48 overflow-auto rounded bg-[var(--surface-alt)] p-3 text-xs text-[var(--foreground-soft)]">
                         {JSON.stringify(connector.testResult.details, null, 2)}
                       </pre>
                     )}
                   </div>
                 )}
                 {connector.dataResult && (
-                  <div className="mt-4 rounded-3xl border border-[var(--border)] bg-white p-4 text-sm">
+                  <div className="mt-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
                     <p className={`font-semibold ${connector.dataResult.success ? "text-emerald-700" : "text-red-700"}`}>
                       {connector.dataResult.success ? "Sample data retrieved" : "Data fetch failed"}
                     </p>
                     <p className="mt-2 text-[var(--muted)]">{connector.dataResult.message}</p>
                     {connector.dataResult.data != null ? (
-                      <pre className="mt-3 max-h-48 overflow-auto rounded bg-slate-100 p-3 text-xs text-slate-700">
+                      <pre className="mt-3 max-h-48 overflow-auto rounded bg-[var(--surface-alt)] p-3 text-xs text-[var(--foreground-soft)]">
                         {JSON.stringify(connector.dataResult.data, null, 2)}
                       </pre>
                     ) : null}
@@ -308,13 +308,13 @@ export default function AdminIntegrationsPage() {
                   </div>
                 )}
                 {connector.syncResult && (
-                  <div className="mt-4 rounded-3xl border border-[var(--border)] bg-white p-4 text-sm">
+                  <div className="mt-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
                     <p className={`font-semibold ${connector.syncResult.success ? "text-emerald-700" : "text-red-700"}`}>
                       {connector.syncResult.success ? "Sync successful" : "Sync failed"}
                     </p>
                     <p className="mt-2 text-[var(--muted)]">{connector.syncResult.message}</p>
                     {connector.syncResult.details != null ? (
-                      <pre className="mt-3 max-h-32 overflow-auto rounded bg-slate-100 p-3 text-xs text-slate-700">
+                      <pre className="mt-3 max-h-32 overflow-auto rounded bg-[var(--surface-alt)] p-3 text-xs text-[var(--foreground-soft)]">
                         {JSON.stringify(connector.syncResult.details, null, 2)}
                       </pre>
                     ) : null}

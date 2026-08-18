@@ -57,11 +57,11 @@ function UnsubscribeContent() {
         </div>
       ) : (
         <>
-          <p className="mt-3 text-sm leading-6 text-slate-600">
+          <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
             Unsubscribe <span className="font-semibold">{email || "this address"}</span> from
             newsletters and class announcements?
           </p>
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-[var(--muted)]">
             Essential mail about your payments, exam registrations and account will still be sent.
           </p>
 

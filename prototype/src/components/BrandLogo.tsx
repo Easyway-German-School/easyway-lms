@@ -128,7 +128,7 @@ export default function BrandLogo({
       <div className="leading-tight">
         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">{firstWord}</p>
         {restWords.length > 0 && (
-          <p className="text-xs font-bold text-slate-900">{restWords.join(" ")}</p>
+          <p className="text-xs font-bold text-[var(--foreground)]">{restWords.join(" ")}</p>
         )}
       </div>
     </div>

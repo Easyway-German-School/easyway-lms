@@ -155,7 +155,7 @@ export default function StoryPage() {
               </div>
             ) : null}
 
-            <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+            <section className="rounded-2xl cinematic-card p-5 sm:p-6">
               {story.length === 0 ? (
                 <p className="text-sm text-[var(--muted)]">
                   Nobody has written anything yet. The first sentence is the hardest — and
@@ -179,7 +179,7 @@ export default function StoryPage() {
             </section>
 
             {turn ? (
-              <section className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+              <section className="mt-5 rounded-2xl cinematic-card p-5">
                 {turn.canPlay ? (
                   <>
                     <p className="text-sm font-semibold text-[var(--foreground)]">
@@ -223,7 +223,7 @@ export default function StoryPage() {
                         type="button"
                         onClick={() => void submit()}
                         disabled={sending || draft.trim() === ""}
-                        className="rounded-xl bg-[var(--accent)] px-6 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+                        className="rounded-xl btn-glow px-6 py-2.5 text-sm font-bold text-white disabled:opacity-50"
                       >
                         {sending ? "Sending…" : "Add my sentence"}
                       </button>

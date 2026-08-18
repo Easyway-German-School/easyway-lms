@@ -37,13 +37,13 @@ type Suppression = { id: string; email: string; reason: string; createdAt: strin
 
 const STATUS_TONE: Record<string, string> = {
   sent: "bg-emerald-100 text-emerald-700",
-  queued: "bg-slate-100 text-slate-700",
+  queued: "bg-[var(--surface-alt)] text-[var(--foreground-soft)]",
   sending: "bg-blue-100 text-blue-700",
   failed: "bg-red-100 text-red-700",
   suppressed: "bg-amber-100 text-amber-700",
   // Deliberately held back rather than failed — see the queue's "cancelled"
   // status. Grey, because nothing went wrong and nobody needs to act.
-  cancelled: "bg-slate-100 text-slate-500",
+  cancelled: "bg-[var(--surface-alt)] text-[var(--muted)]",
 };
 
 export default function AdminEmailComposePage() {
@@ -239,7 +239,7 @@ export default function AdminEmailComposePage() {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-3xl font-bold">Compose email</h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-[var(--muted)]">
               Everything is queued and delivered by the worker, never sent inline.
             </p>
           </div>
@@ -253,14 +253,14 @@ export default function AdminEmailComposePage() {
 
         <div className="mb-6 grid gap-3 sm:grid-cols-5">
           {["queued", "sent", "failed", "suppressed", "sending"].map((k) => (
-            <div key={k} className="rounded-xl border bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-500">{k}</p>
+            <div key={k} className="rounded-xl border bg-[var(--surface)] p-4">
+              <p className="text-xs uppercase tracking-wide text-[var(--muted)]">{k}</p>
               <p className="mt-1 text-2xl font-bold">{counts[k] ?? 0}</p>
             </div>
           ))}
         </div>
 
-        <div className="rounded-xl border bg-white p-6">
+        <div className="rounded-xl border bg-[var(--surface)] p-6">
           {/* WHO. Group first, because it changes what the other three mean —
               payment status is meaningless for a tutor. */}
           <div className="grid gap-3 sm:grid-cols-4">
@@ -292,7 +292,7 @@ export default function AdminEmailComposePage() {
             there is work to lose.
           */}
           <div className="mt-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Start from a template</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Start from a template</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {EMAIL_TEMPLATES.map((template) => (
                 <button
@@ -305,10 +305,10 @@ export default function AdminEmailComposePage() {
                     setBlocks(templateBlocks(template));
                     setNotice(`Loaded "${template.name}". Replace anything in [square brackets] before you send.`);
                   }}
-                  className="rounded-xl border bg-white p-3 text-left transition hover:border-slate-900"
+                  className="rounded-xl border bg-[var(--surface)] p-3 text-left transition hover:border-slate-900"
                 >
-                  <p className="text-sm font-semibold text-slate-900">{template.name}</p>
-                  <p className="mt-0.5 text-xs leading-4 text-slate-500">{template.purpose}</p>
+                  <p className="text-sm font-semibold text-[var(--foreground)]">{template.name}</p>
+                  <p className="mt-0.5 text-xs leading-4 text-[var(--muted)]">{template.purpose}</p>
                 </button>
               ))}
             </div>
@@ -316,9 +316,9 @@ export default function AdminEmailComposePage() {
 
           {/* WRITE IT FOR ME. Optional, above the real fields, exactly as on
               the tutors' announcements page — one pattern, two portals. */}
-          <div className="mt-4 rounded-xl border border-dashed bg-slate-50 p-4">
+          <div className="mt-4 rounded-xl border border-dashed bg-[var(--surface-alt)] p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Write it for me — optional</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Write it for me — optional</p>
               <div className="ml-auto flex flex-wrap items-center gap-1">
                 {engines.map((option) => (
                   <button
@@ -328,7 +328,7 @@ export default function AdminEmailComposePage() {
                     onClick={() => setEngine(option.id)}
                     title={option.detail}
                     className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                      engine === option.id ? "bg-slate-900 text-white" : "border text-slate-600 hover:text-slate-900"
+                      engine === option.id ? "bg-slate-900 text-white" : "border text-[var(--muted)] hover:text-[var(--foreground)]"
                     }`}
                   >
                     {option.label}
@@ -351,7 +351,7 @@ export default function AdminEmailComposePage() {
               >
                 {drafting ? "Writing…" : "Draft this for me"}
               </button>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[var(--muted)]">
                 {engines.find((e) => e.id === engine)?.detail ?? "Replaces the blocks below. Nothing is sent."}
               </p>
             </div>
@@ -374,7 +374,7 @@ export default function AdminEmailComposePage() {
             />
           </div>
 
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-[var(--muted)]">
             Everyone gets this in their portal, as a push notification, and by email. An unsubscribe footer is added to
             the email automatically — bulk mail without one gets filtered as spam.
           </p>
@@ -393,9 +393,9 @@ export default function AdminEmailComposePage() {
           </div>
 
           {preview && (
-            <div className="mt-4 rounded-lg bg-slate-50 p-4">
+            <div className="mt-4 rounded-lg bg-[var(--surface-alt)] p-4">
               <p className="text-sm font-semibold">{preview.count} recipient{preview.count === 1 ? "" : "s"}</p>
-              <div className="mt-2 max-h-40 overflow-y-auto text-xs text-slate-600">
+              <div className="mt-2 max-h-40 overflow-y-auto text-xs text-[var(--muted)]">
                 {preview.sample.map((r) => (
                   <div key={r.email}>{r.name} · {r.email} · {r.level}</div>
                 ))}
@@ -408,16 +408,16 @@ export default function AdminEmailComposePage() {
         </div>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-          <div className="overflow-hidden rounded-xl border bg-white">
+          <div className="overflow-hidden rounded-xl border bg-[var(--surface)]">
             <div className="border-b px-4 py-3"><h2 className="font-semibold">Recent messages</h2></div>
             <div className="max-h-96 overflow-y-auto">
               {recent.length === 0 ? (
-                <p className="p-6 text-sm text-slate-500">Nothing queued yet.</p>
+                <p className="p-6 text-sm text-[var(--muted)]">Nothing queued yet.</p>
               ) : recent.map((m) => (
                 <div key={m.id} className="flex items-start justify-between gap-3 border-b px-4 py-3 last:border-0">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{m.subject}</p>
-                    <p className="text-xs text-slate-500">{m.to} · {m.type}</p>
+                    <p className="text-xs text-[var(--muted)]">{m.to} · {m.type}</p>
                     {m.lastError && <p className="mt-0.5 text-xs text-red-600">{m.lastError}</p>}
                   </div>
                   <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold uppercase ${STATUS_TONE[m.status] ?? ""}`}>
@@ -428,18 +428,18 @@ export default function AdminEmailComposePage() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border bg-white">
+          <div className="overflow-hidden rounded-xl border bg-[var(--surface)]">
             <div className="border-b px-4 py-3">
               <h2 className="font-semibold">Suppressed</h2>
-              <p className="text-xs text-slate-500">Never emailed again</p>
+              <p className="text-xs text-[var(--muted)]">Never emailed again</p>
             </div>
             <div className="max-h-96 overflow-y-auto">
               {suppressions.length === 0 ? (
-                <p className="p-6 text-sm text-slate-500">Nobody suppressed.</p>
+                <p className="p-6 text-sm text-[var(--muted)]">Nobody suppressed.</p>
               ) : suppressions.map((s) => (
                 <div key={s.id} className="border-b px-4 py-3 last:border-0">
                   <p className="truncate text-sm">{s.email}</p>
-                  <p className="text-xs text-slate-500">{s.reason}</p>
+                  <p className="text-xs text-[var(--muted)]">{s.reason}</p>
                 </div>
               ))}
             </div>

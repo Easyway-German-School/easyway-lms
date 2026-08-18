@@ -325,7 +325,7 @@ export default function AdminCertificatesPage() {
         )}
 
         {/* ---- Live preview ---- */}
-        <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-4 shadow-sm sm:p-6">
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-4 shadow-sm sm:p-6">
           <div className="mx-auto max-w-4xl">
             <CertificateDocument certificate={previewCert} template={template} />
           </div>
@@ -333,7 +333,7 @@ export default function AdminCertificatesPage() {
 
         <div className="grid gap-5 xl:grid-cols-2">
           {/* ---- Editor ---- */}
-          <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h2 className="text-sm font-bold uppercase tracking-[0.18em]">Design and wording</h2>
               <span className="text-xs text-[var(--muted)]">
@@ -477,7 +477,7 @@ export default function AdminCertificatesPage() {
                   <div className="mt-2 grid gap-1 sm:grid-cols-2">
                     {CERTIFICATE_TOKENS.map((entry) => (
                       <p key={entry.token} className="text-xs text-[var(--muted)]">
-                        <code className="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-[var(--foreground)]">
+                        <code className="rounded bg-[var(--surface)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--foreground)]">
                           {entry.token}
                         </code>{" "}
                         {entry.describes}
@@ -509,7 +509,7 @@ export default function AdminCertificatesPage() {
           </div>
 
           {/* ---- Issue ---- */}
-          <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm">
             <h2 className="text-sm font-bold uppercase tracking-[0.18em]">Issue certificates</h2>
             <p className="mt-1 text-xs text-[var(--muted)]">
               Students used to have to mint their own by opening their certificates page, so whoever never looked never
@@ -537,7 +537,7 @@ export default function AdminCertificatesPage() {
                     className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
                       scope === option.id
                         ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-                        : "border-[var(--border)] bg-white hover:bg-slate-50"
+                        : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-alt)]"
                     }`}
                   >
                     {option.label}

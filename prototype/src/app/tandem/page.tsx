@@ -195,10 +195,10 @@ export default function TandemPartner() {
               <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Session transcript</p>
               <h2 className="mt-3 text-2xl font-semibold">Live speech analysis</h2>
             </div>
-            <div className="mt-5 rounded-3xl bg-slate-900 p-5 text-sm leading-7 text-slate-300">
+            <div className="mt-5 rounded-3xl bg-slate-900 p-5 text-sm leading-7 text-[var(--muted)]">
               <p>{transcript}</p>
             </div>
-            <div className="mt-6 rounded-3xl bg-slate-900 p-5 text-sm leading-7 text-slate-300">
+            <div className="mt-6 rounded-3xl bg-slate-900 p-5 text-sm leading-7 text-[var(--muted)]">
               {feedback.map((item, index) => (
                 <p key={index} className="mt-3">{item}</p>
               ))}

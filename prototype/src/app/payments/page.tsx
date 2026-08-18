@@ -96,7 +96,7 @@ export default function PaymentsPage() {
         <div className="mx-auto max-w-7xl px-6 py-10">
           {/* Renders nothing once tuition is settled. */}
           <TuitionNudge className="mb-6" />
-          <div className="rounded-[32px] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
+          <div className="rounded-[32px] cinematic-card p-8 shadow-[var(--shadow)]">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Payments</p>
@@ -118,7 +118,7 @@ export default function PaymentsPage() {
                   <CheckIcon className="h-4 w-4" /> Tuition fully paid
                 </span>
               ) : (
-                <Link href="/programs" className="inline-flex items-center justify-center rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-110">
+                <Link href="/programs" className="inline-flex items-center justify-center rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-110">
                   Make a payment
                 </Link>
               )}

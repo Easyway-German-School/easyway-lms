@@ -171,18 +171,18 @@ export default function CohortResult({
   };
 
   return (
-    <section className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-white">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+    <section className="mt-4 overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
         <div className="min-w-0">
-          <p className="flex items-center gap-2 text-sm font-bold text-slate-900">
+          <p className="flex items-center gap-2 text-sm font-bold text-[var(--foreground)]">
             <UsersIcon className="h-4 w-4 text-[var(--accent)]" />
             {cohort.rows.length} student{cohort.rows.length === 1 ? "" : "s"}
           </p>
-          <p className="mt-0.5 truncate text-xs text-slate-500">{cohort.label}</p>
+          <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{cohort.label}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold text-slate-500">
+          <span className="text-xs font-semibold text-[var(--muted)]">
             {selected.size} selected
             {showMoney && totalOwed > 0 ? ` · ${naira(totalOwed)} owed` : ""}
           </span>
@@ -190,7 +190,7 @@ export default function CohortResult({
             type="button"
             onClick={exportCsv}
             disabled={selected.size === 0}
-            className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)] disabled:opacity-40"
           >
             <DownloadIcon className="h-3.5 w-3.5" />
             Export CSV
@@ -218,22 +218,22 @@ export default function CohortResult({
       )}
 
       {composing && (
-        <div className="space-y-2.5 border-b border-slate-200 bg-slate-50 px-4 py-4">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+        <div className="space-y-2.5 border-b border-[var(--border)] bg-[var(--surface-alt)] px-4 py-4">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
             Goes to the bell and the phone of {selected.size} student{selected.size === 1 ? "" : "s"}
           </p>
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value.slice(0, 120))}
             placeholder="Subject — e.g. Your tuition balance"
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[var(--accent)]"
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent)]"
           />
           <textarea
             value={message}
             onChange={(event) => setMessage(event.target.value.slice(0, 2000))}
             rows={4}
             placeholder="Write it as you would say it at the desk. Ask the assistant above to draft it if you like."
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[var(--accent)]"
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm outline-none focus:border-[var(--accent)]"
           />
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -247,11 +247,11 @@ export default function CohortResult({
             <button
               type="button"
               onClick={() => setComposing(false)}
-              className="rounded-full border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 transition hover:bg-white"
+              className="rounded-full border border-[var(--border)] px-4 py-2.5 text-xs font-bold text-[var(--muted)] transition hover:bg-[var(--surface)]"
             >
               Cancel
             </button>
-            <span className="text-[11px] text-slate-500">
+            <span className="text-[11px] text-[var(--muted)]">
               This one is not undoable. Everything else on this panel is.
             </span>
           </div>
@@ -272,7 +272,7 @@ export default function CohortResult({
           sideways, and the admin area is used from a phone at the front desk. */}
       <div className="max-h-[26rem] overflow-auto">
         <table className="w-full min-w-[44rem] border-collapse text-left text-sm">
-          <thead className="sticky top-0 z-10 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+          <thead className="sticky top-0 z-10 bg-[var(--surface-alt)] text-[11px] uppercase tracking-wider text-[var(--muted)]">
             <tr>
               <th className="w-10 px-3 py-2.5">
                 <button
@@ -282,7 +282,7 @@ export default function CohortResult({
                     setSelected(allSelected ? new Set() : new Set(cohort.rows.map((row) => row.id)))
                   }
                   className={`grid h-4 w-4 place-items-center rounded border ${
-                    allSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-slate-300 bg-white"
+                    allSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--border-strong)] bg-[var(--surface)]"
                   }`}
                 >
                   {allSelected && <CheckIcon className="h-3 w-3" strokeWidth={3} />}
@@ -303,25 +303,25 @@ export default function CohortResult({
                 <tr
                   key={row.id}
                   onClick={() => toggle(row.id)}
-                  className={`cursor-pointer border-t border-slate-100 transition ${
-                    isSelected ? "bg-[var(--accent)]/5" : "hover:bg-slate-50"
+                  className={`cursor-pointer border-t border-[var(--border)] transition ${
+                    isSelected ? "bg-[var(--accent)]/5" : "hover:bg-[var(--surface-alt)]"
                   }`}
                 >
                   <td className="px-3 py-2.5">
                     <span
                       className={`grid h-4 w-4 place-items-center rounded border ${
-                        isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-slate-300"
+                        isSelected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--border-strong)]"
                       }`}
                     >
                       {isSelected && <CheckIcon className="h-3 w-3" strokeWidth={3} />}
                     </span>
                   </td>
                   <td className="px-3 py-2.5">
-                    <span className="block font-semibold text-slate-900">{row.name}</span>
-                    <span className="block text-xs text-slate-500">{row.email}</span>
+                    <span className="block font-semibold text-[var(--foreground)]">{row.name}</span>
+                    <span className="block text-xs text-[var(--muted)]">{row.email}</span>
                   </td>
-                  <td className="px-3 py-2.5 text-slate-700">{row.level}</td>
-                  <td className="px-3 py-2.5 text-slate-700">{row.branch ?? "—"}</td>
+                  <td className="px-3 py-2.5 text-[var(--foreground-soft)]">{row.level}</td>
+                  <td className="px-3 py-2.5 text-[var(--foreground-soft)]">{row.branch ?? "—"}</td>
                   {showMoney && (
                     <td className="px-3 py-2.5">
                       <span
@@ -334,7 +334,7 @@ export default function CohortResult({
                     </td>
                   )}
                   {showAttendance && (
-                    <td className="px-3 py-2.5 text-slate-700">
+                    <td className="px-3 py-2.5 text-[var(--foreground-soft)]">
                       {row.daysSinceSeen === null || row.daysSinceSeen === undefined ? (
                         <span className="font-semibold text-rose-600">Never</span>
                       ) : (
@@ -344,7 +344,7 @@ export default function CohortResult({
                       )}
                     </td>
                   )}
-                  <td className="px-3 py-2.5 text-xs text-slate-600">{row.goal ?? "Not asked yet"}</td>
+                  <td className="px-3 py-2.5 text-xs text-[var(--muted)]">{row.goal ?? "Not asked yet"}</td>
                 </tr>
               );
             })}

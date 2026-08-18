@@ -133,13 +133,13 @@ export default function MaterialsPage() {
             <div className="rounded-3xl border border-amber-400/40 bg-amber-500/10 p-6 text-sm text-amber-900">
               <p className="font-semibold">Materials are locked</p>
               <p className="mt-2">{lockedMessage}</p>
-              <a href="/programs" className="mt-4 inline-flex rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">
+              <a href="/programs" className="mt-4 inline-flex rounded-full btn-glow px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">
                 Pay tuition now
               </a>
             </div>
           ) : null}
 
-          <div className="flex gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1.5">
+          <div className="flex gap-2 rounded-2xl cinematic-card p-1.5">
             {(
               [
                 { value: "watch" as const, icon: <FilmIcon />, label: `Watch${videos.length ? ` (${videos.length})` : ""}` },
@@ -162,7 +162,7 @@ export default function MaterialsPage() {
           </div>
 
           {loading ? (
-            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-12 text-center">
+            <div className="rounded-3xl cinematic-card p-12 text-center">
               <p className="text-[var(--muted)]">Loading your materials…</p>
             </div>
           ) : tab === "watch" ? (
@@ -187,7 +187,7 @@ export default function MaterialsPage() {
               </div>
 
               {filteredDocuments.length === 0 ? (
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-12 text-center">
+                <div className="rounded-xl cinematic-card p-12 text-center">
                   <p className="text-lg font-semibold">No documents found</p>
                   <p className="mt-2 text-[var(--muted)]">Check back later for new course materials</p>
                 </div>
@@ -198,7 +198,7 @@ export default function MaterialsPage() {
                       key={material.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="flex items-center gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 transition hover:bg-[var(--surface-alt)]"
+                      className="flex items-center gap-4 rounded-3xl cinematic-card p-6 transition hover:bg-[var(--surface-alt)]"
                     >
                       <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
                         {fileTypeIcon(material.fileType)}
@@ -218,7 +218,7 @@ export default function MaterialsPage() {
                         href={material.fileUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="shrink-0 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+                        className="shrink-0 rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white transition hover:brightness-110"
                       >
                         Download
                       </a>

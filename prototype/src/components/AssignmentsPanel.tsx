@@ -171,7 +171,7 @@ export default function AssignmentsPanel() {
   }
 
   if (loading) {
-    return <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="h-24 animate-pulse rounded-3xl bg-slate-200/60" />)}</div>;
+    return <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="h-24 animate-pulse rounded-3xl bg-[var(--surface-alt)]/60" />)}</div>;
   }
 
   // ---- Taking a quiz -------------------------------------------------------
@@ -180,7 +180,7 @@ export default function AssignmentsPanel() {
     const low = remaining > 0 && remaining < 60_000;
 
     return (
-      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+      <div className="rounded-3xl cinematic-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-4">
           <div>
             <h2 className="text-lg font-bold">{active.title}</h2>
@@ -303,7 +303,7 @@ export default function AssignmentsPanel() {
           <button
             onClick={() => submit(false)}
             disabled={busy}
-            className="rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white disabled:opacity-60"
+            className="rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {busy ? "Submitting…" : "Submit answers"}
           </button>
@@ -321,7 +321,7 @@ export default function AssignmentsPanel() {
   // ---- Handing in a document ----------------------------------------------
   if (active && active.type === "document") {
     return (
-      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+      <div className="rounded-3xl cinematic-card p-6">
         <h2 className="text-lg font-bold">{active.title}</h2>
         {active.description && <p className="mt-1 text-sm text-[var(--muted)]">{active.description}</p>}
 
@@ -337,7 +337,7 @@ export default function AssignmentsPanel() {
           <button
             onClick={() => submit(false)}
             disabled={busy || !docText.trim()}
-            className="rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white disabled:opacity-60"
+            className="rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             {busy ? "Submitting…" : "Hand in"}
           </button>
@@ -355,7 +355,7 @@ export default function AssignmentsPanel() {
       {error && <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">{error}</div>}
 
       {assignments.length === 0 ? (
-        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center">
+        <div className="rounded-3xl cinematic-card p-10 text-center">
           <PencilIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
           <p className="mt-3 text-sm font-semibold">No assignments yet</p>
           <p className="mt-1 text-sm text-[var(--muted)]">Work set by your tutor will appear here.</p>
@@ -364,7 +364,7 @@ export default function AssignmentsPanel() {
         assignments.map((a) => {
           const done = Boolean(a.submission?.submittedAt);
           return (
-            <div key={a.id} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
+            <div key={a.id} className="rounded-3xl cinematic-card p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -412,7 +412,7 @@ export default function AssignmentsPanel() {
                     <button
                       onClick={() => open(a)}
                       disabled={busy}
-                      className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                      className="rounded-full btn-glow px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                     >
                       {a.type === "quiz" ? "Start" : "Open"}
                     </button>

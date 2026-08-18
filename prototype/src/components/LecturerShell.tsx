@@ -7,6 +7,7 @@ import BrandLogo from "@/components/BrandLogo";
 import HelpLauncher from "@/components/HelpLauncher";
 import PortalUpdates from "@/components/PortalUpdates";
 import NotificationCenter from "@/components/NotificationCenter";
+import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import SignOutButton from "@/components/SignOutButton";
 import {
   AssignmentIcon,
@@ -86,6 +87,7 @@ const navItems: NavItem[] = [
 export default function LecturerShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  useHideFloatingThemeToggle();
   const [collapsed, setCollapsed] = useState(false);
   const [revoked, setRevoked] = useState(false);
   /**
@@ -163,7 +165,7 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
   })();
 
   return (
-    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(10,124,255,0.10),_transparent_30%),linear-gradient(135deg,_#f7faff_0%,_#eef3ff_100%)] text-[var(--foreground)]">
+    <div className="app-canvas flex min-h-screen text-[var(--foreground)]">
       {drawerOpen && (
         <button
           aria-label="Close menu"
@@ -173,11 +175,11 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
       )}
 
       <aside
-        className={`fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-white/60 bg-white/95 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:bg-white/80 lg:transition-all ${
+        className={`sidebar-glass fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-[var(--border)] transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:transition-all ${
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         } w-[17rem] ${collapsed ? 'lg:w-20' : 'lg:w-72'}`}
       >
-        <div className="border-b border-slate-200/70 p-4">
+        <div className="border-b border-[var(--border)] p-4">
           <div className="flex items-center justify-between gap-3">
             {collapsed && <BrandLogo variant="mark" className="hidden h-10 w-10 lg:block" />}
             <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
@@ -189,14 +191,14 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
             <button
               onClick={() => setCollapsed(!collapsed)}
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              className="hidden rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:block"
+              className="hidden rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:block"
             >
               {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
             </button>
             <button
               onClick={() => setDrawerOpen(false)}
               aria-label="Close menu"
-              className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:hidden"
+              className="rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:hidden"
             >
               <CrossIcon className="h-5 w-5" />
             </button>
@@ -215,10 +217,10 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
                   className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition-all duration-200 ${
                     active
                       ? 'bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_8px_24px_rgba(10,124,255,0.12)]'
-                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+                      : 'text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]'
                   }`}
                 >
-                  <span className={`flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-base shadow-sm transition ${active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-slate-300'}`}>{item.icon}</span>
+                  <span className={`flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'}`}>{item.icon}</span>
                   {!collapsed && <span className="font-medium">{item.label}</span>}
                 </button>
               );
@@ -226,9 +228,9 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
           </div>
         </nav>
 
-        <div className="border-t border-slate-200/70 p-3">
+        <div className="border-t border-[var(--border)] p-3">
           <SignOutButton callbackUrl="/auth/lecturer/signin" collapsed={collapsed} tone="slate" portalLabel="the tutor portal" />
-          <p className={`mt-2 px-3 text-xs text-slate-500 ${collapsed ? 'lg:text-center' : ''}`}>
+          <p className={`mt-2 px-3 text-xs text-[var(--muted)] ${collapsed ? 'lg:text-center' : ''}`}>
             {collapsed ? 'v1' : 'AI-ready lecturer workspace'}
           </p>
         </div>
@@ -249,11 +251,11 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
         missed at the time.
       */}
       <main className={`min-w-0 flex-1 overflow-x-clip transition-all duration-300 ${collapsed ? 'lg:ml-20' : 'lg:ml-72'}`}>
-        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-white/60 bg-white/80 px-3 py-2 backdrop-blur-xl sm:px-5">
+        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2 backdrop-blur-xl sm:px-5">
           <button
             onClick={() => setDrawerOpen(true)}
             aria-label="Open menu"
-            className="grid h-10 w-10 place-items-center rounded-xl text-slate-600 transition hover:bg-slate-100 lg:hidden"
+            className="grid h-10 w-10 place-items-center rounded-xl text-[var(--muted)] transition hover:bg-[var(--surface-alt)] lg:hidden"
           >
             <MenuIcon className="h-5 w-5" />
           </button>
@@ -262,28 +264,29 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
             <BrandLogo variant="wordmark" className="h-7" />
           </div>
 
-          <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-slate-700 lg:block">
+          <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-[var(--foreground-soft)] lg:block">
             {navItems.find((item) => pathname === item.href)?.label ?? 'Lecturer portal'}
           </p>
 
+          <ThemeToggle variant="compact" />
           <NotificationCenter />
         </header>
 
         {blockedFeature ? (
           <div className="p-6">
-            <div className="mx-auto mt-10 max-w-lg rounded-[28px] border border-slate-200 bg-white p-8 text-center shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
+            <div className="mx-auto mt-10 max-w-lg rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-8 text-center shadow-[var(--shadow)]">
               <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
                 <ShieldIcon className="h-7 w-7" />
               </span>
-              <h1 className="mt-4 text-xl font-bold text-slate-900">Not part of your role</h1>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
+              <h1 className="mt-4 text-xl font-bold text-[var(--foreground)]">Not part of your role</h1>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
                 The school has not given you{' '}
-                <strong className="font-semibold text-slate-800">
+                <strong className="font-semibold text-[var(--foreground)]">
                   {LECTURER_FEATURE_LABELS[blockedFeature]}
                 </strong>
                 . Nothing is broken — not every tutor takes these, so the office decides who does.
               </p>
-              <p className="mt-3 text-xs leading-5 text-slate-500">
+              <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
                 An admin can switch it on from your tutor record, without changing anybody else&rsquo;s.
               </p>
               <button

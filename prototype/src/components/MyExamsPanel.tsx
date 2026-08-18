@@ -156,7 +156,7 @@ export default function MyExamsPanel() {
   }
 
   if (loading) {
-    return <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="h-28 animate-pulse rounded-3xl bg-slate-200/60" />)}</div>;
+    return <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="h-28 animate-pulse rounded-3xl bg-[var(--surface-alt)]/60" />)}</div>;
   }
 
   const shownUpcoming = upcoming.filter((exam) => matchesFilter(filter, exam.examBody));
@@ -179,7 +179,7 @@ export default function MyExamsPanel() {
 
       {/* Two labels, as the school asked for, plus the combined view they both
           came from — so nobody has to guess which tab a booking landed in. */}
-      <div className="inline-flex flex-wrap gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1">
+      <div className="inline-flex flex-wrap gap-1 rounded-full cinematic-card p-1">
         {(["all", "easyway", "osd"] as ExamFilter[]).map((option) => (
           <button
             key={option}
@@ -204,7 +204,7 @@ export default function MyExamsPanel() {
       <section>
         <h2 className="text-lg font-bold">Coming up</h2>
         {shownUpcoming.length === 0 ? (
-          <div className="mt-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+          <div className="mt-3 rounded-3xl cinematic-card p-8 text-center">
             <CalendarIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
             <p className="mt-3 text-sm font-semibold">
               {filter === "all" ? "No exams booked" : `No ${FILTER_LABELS[filter].toLowerCase()} booked`}
@@ -222,7 +222,7 @@ export default function MyExamsPanel() {
             {shownUpcoming.map((e) => {
               const days = daysUntil(e.examDate);
               return (
-                <div key={e.registrationId} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                <div key={e.registrationId} className="rounded-3xl cinematic-card p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -253,7 +253,7 @@ export default function MyExamsPanel() {
                           <button
                             onClick={() => payFee(e.registrationId)}
                             disabled={payingId === e.registrationId}
-                            className="mt-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                            className="mt-2 rounded-full btn-glow px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
                           >
                             {payingId === e.registrationId ? "Opening checkout…" : `Pay ₦${e.fee.toLocaleString()}`}
                           </button>
@@ -291,7 +291,7 @@ export default function MyExamsPanel() {
             <h2 className="text-lg font-bold">Open for registration</h2>
             <div className="mt-3 space-y-3">
               {shownAvailable.map((e) => (
-                <div key={e.id} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                <div key={e.id} className="rounded-3xl cinematic-card p-5">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -312,7 +312,7 @@ export default function MyExamsPanel() {
                       <button
                         onClick={() => book(e.id)}
                         disabled={busyId === e.id || e.full || e.deadlinePassed}
-                        className="mt-2 rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        className="mt-2 rounded-full btn-glow px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
                       >
                         {e.full ? "Full" : busyId === e.id ? "Booking…" : "Register"}
                       </button>

@@ -126,7 +126,7 @@ export default function PlayPage() {
             type="button"
             onClick={() => void join({ gameId: offer.id })}
             disabled={joining}
-            className="mb-6 w-full rounded-2xl bg-[var(--accent)] px-5 py-4 text-left text-white disabled:opacity-60"
+            className="mb-6 w-full rounded-2xl btn-glow px-5 py-4 text-left text-white disabled:opacity-60"
           >
             <span className="block text-xs uppercase tracking-widest opacity-80">
               Your class is playing

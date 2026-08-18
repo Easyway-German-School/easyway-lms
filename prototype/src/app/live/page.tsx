@@ -52,10 +52,10 @@ function Lobby({
           {/* Only shown to a student, and only because it is true: the tutor is
               already in the room by the time a student can be here at all. */}
           {!isTutor && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--surface-alt)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">
               <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--surface)]" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--surface)]" />
               </span>
               Live
             </span>
@@ -108,7 +108,7 @@ function Lobby({
                 className={`rounded-2xl border p-4 text-left transition ${
                   active
                     ? "border-[var(--accent)] bg-[var(--accent-soft)] shadow-[0_8px_24px_rgba(10,124,255,0.12)]"
-                    : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-slate-300"
+                    : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--border-strong)]"
                 } ${single ? "cursor-default" : ""}`}
               >
                 <div className="flex items-center justify-between gap-2">

@@ -66,7 +66,7 @@ function roleBadge(role: string) {
   const r = (role || "").toLowerCase();
   if (r === "admin") return { label: "Office", className: "bg-purple-100 text-purple-700" };
   if (r === "lecturer") return { label: "Tutor", className: "bg-blue-100 text-blue-700" };
-  return { label: "Student", className: "bg-slate-100 text-slate-600" };
+  return { label: "Student", className: "bg-[var(--surface-alt)] text-[var(--muted)]" };
 }
 
 export default function AdminCommunityPage() {

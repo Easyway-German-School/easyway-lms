@@ -148,12 +148,12 @@ function AssignmentContent() {
                 <ArrowLeftIcon /> Back to dashboard
               </Link>
             </div>
-            <h1 className="text-4xl font-bold text-slate-950">Submit Assignment</h1>
+            <h1 className="text-4xl font-bold text-[var(--foreground)]">Submit Assignment</h1>
             <p className="text-[var(--muted)] mt-2">{lesson.title}</p>
           </header>
 
           <div className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm space-y-6">
-            <h2 className="text-2xl font-bold text-slate-950">Instructions</h2>
+            <h2 className="text-2xl font-bold text-[var(--foreground)]">Instructions</h2>
             <div className="prose prose-sm max-w-none">
               <p className="text-[var(--foreground-soft)] whitespace-pre-wrap">{lesson.content}</p>
             </div>
@@ -161,10 +161,10 @@ function AssignmentContent() {
 
           {!submitted ? (
             <form onSubmit={handleSubmit} className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm space-y-6">
-              <h2 className="text-2xl font-bold text-slate-950">Your Submission</h2>
+              <h2 className="text-2xl font-bold text-[var(--foreground)]">Your Submission</h2>
               
               <div>
-                <label className="block text-sm font-semibold text-slate-950 mb-2">Write your response</label>
+                <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">Write your response</label>
                 <textarea
                   value={submission}
                   onChange={(e) => setSubmission(e.target.value)}
@@ -174,7 +174,7 @@ function AssignmentContent() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-950 mb-2">Or upload a file</label>
+                <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">Or upload a file</label>
                 <div className="border-2 border-dashed border-[var(--border-strong)] rounded-lg p-6 text-center hover:border-emerald-500 transition">
                   <input
                     type="file"

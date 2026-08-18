@@ -223,7 +223,7 @@ function timeAgo(iso: string) {
 
 function Card({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
-    <div className="rounded-3xl border border-[var(--border)] bg-white/80 p-6 shadow-sm">
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-soft)] p-6 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--foreground)]">{title}</h2>
         {hint && <p className="text-xs text-[var(--muted)]">{hint}</p>}
@@ -371,7 +371,7 @@ function Vital({
   }[tone];
 
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-white/80 p-4">
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-soft)] p-4">
       <div className="flex items-center gap-2 text-[var(--muted)]">
         <span className="text-[var(--accent)]">{icon}</span>
         <p className="text-[10px] font-bold uppercase tracking-[0.16em]">{label}</p>
@@ -487,7 +487,7 @@ export default function StudentDossierPage() {
             <button
               type="button"
               onClick={() => void load()}
-              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-white"
+              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-[var(--surface)]"
             >
               Refresh
             </button>
@@ -507,10 +507,10 @@ export default function StudentDossierPage() {
                 <img
                   src={identity.photoUrl}
                   alt={identity.name}
-                  className="h-28 w-28 rounded-2xl border-2 border-white/20 object-cover"
+                  className="h-28 w-28 rounded-2xl border-2 border-[var(--border)] object-cover"
                 />
               ) : (
-                <div className="flex h-28 w-28 items-center justify-center rounded-2xl border-2 border-dashed border-white/25 text-3xl font-black text-white/40">
+                <div className="flex h-28 w-28 items-center justify-center rounded-2xl border-2 border-dashed border-[var(--border)] text-3xl font-black text-white/40">
                   {identity.name.slice(0, 1).toUpperCase()}
                 </div>
               )}
@@ -520,7 +520,7 @@ export default function StudentDossierPage() {
                     ? "bg-emerald-500 text-white"
                     : identity.status === "graduated"
                       ? "bg-sky-500 text-white"
-                      : "bg-slate-500 text-white"
+                      : "bg-[var(--surface-alt)]0 text-white"
                 }`}
               >
                 {identity.status}
@@ -546,7 +546,7 @@ export default function StudentDossierPage() {
                 ].map((chip) => (
                   <span
                     key={chip}
-                    className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold capitalize"
+                    className="rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-1 text-xs font-semibold capitalize"
                   >
                     {chip}
                   </span>
@@ -988,14 +988,14 @@ export default function StudentDossierPage() {
         <div className="flex flex-wrap gap-3">
           <Link
             href="/admin/students"
-            className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold transition hover:bg-white"
+            className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold transition hover:bg-[var(--surface)]"
           >
             Back to the roster
           </Link>
           {identity.email && (
             <a
               href={`mailto:${identity.email}`}
-              className="flex items-center gap-2 rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold transition hover:bg-white"
+              className="flex items-center gap-2 rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold transition hover:bg-[var(--surface)]"
             >
               <MailIcon />
               Email {identity.name.split(" ")[0]}

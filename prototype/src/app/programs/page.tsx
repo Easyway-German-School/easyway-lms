@@ -90,7 +90,7 @@ export default function ProgramsPage() {
   }, [status]);
 
   return (
-    <div className="min-h-screen bg-[var(--surface-alt)] py-10 text-slate-950">
+    <div className="min-h-screen bg-[var(--surface-alt)] py-10 text-[var(--foreground)]">
       <div className="mx-auto max-w-6xl space-y-8 px-6 md:px-10">
         <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
           <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Tuition &amp; pathways</p>
@@ -125,12 +125,12 @@ export default function ProgramsPage() {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-sm uppercase tracking-[0.2em] text-slate-300">Pathway</p>
+                      <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Pathway</p>
                       <h3 className="mt-3 text-2xl font-semibold">{program.title}</h3>
                     </div>
                     <span
                       className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
-                        active ? "bg-[#c8a24a] text-[#1a1206]" : "bg-white/10 text-white/80"
+                        active ? "bg-[#c8a24a] text-[#1a1206]" : "bg-[var(--surface-alt)] text-white/80"
                       }`}
                     >
                       {active ? "Selected" : "Select"}
@@ -152,7 +152,7 @@ export default function ProgramsPage() {
         </section>
 
         <section className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
-          <h2 className="text-3xl font-semibold text-slate-950">Why Easyway&rsquo;s portal is different</h2>
+          <h2 className="text-3xl font-semibold text-[var(--foreground)]">Why Easyway&rsquo;s portal is different</h2>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
             <div className="rounded-3xl border border-[var(--border)] p-6">
               <h3 className="text-xl font-semibold">Outcome-first</h3>

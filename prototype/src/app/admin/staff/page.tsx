@@ -271,7 +271,7 @@ export default function AdminStaffPage() {
           </span>
           <div className="min-w-0">
             <h1 className="text-xl font-bold sm:text-3xl">Admin accounts</h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-[var(--muted)]">
               Who works in the office, how they sign in, and which parts of the system each of them
               can open.
             </p>
@@ -282,13 +282,13 @@ export default function AdminStaffPage() {
             The single most-asked question about these accounts, answered on
             the page that creates them rather than in somebody's head. */}
         <div className="mb-5 rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-4">
-          <p className="flex items-center gap-2 text-sm font-bold text-slate-900">
+          <p className="flex items-center gap-2 text-sm font-bold text-[var(--foreground)]">
             <KeyIcon className="h-4 w-4 shrink-0" />
             How admins sign in
           </p>
-          <p className="mt-1.5 text-sm leading-6 text-slate-600">
+          <p className="mt-1.5 text-sm leading-6 text-[var(--muted)]">
             Everyone below signs in at{" "}
-            <code className="rounded bg-white px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-900">
+            <code className="rounded bg-[var(--surface)] px-1.5 py-0.5 font-mono text-xs font-semibold text-[var(--foreground)]">
               {signInPath}
             </code>{" "}
             with the email and password set here — not the student sign-in page. Whatever role they
@@ -325,7 +325,7 @@ export default function AdminStaffPage() {
             </dl>
             <button
               onClick={() => setHandover(null)}
-              className="mt-3 rounded-full border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800"
+              className="mt-3 rounded-full border border-emerald-300 bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-emerald-800"
             >
               I have written it down
             </button>
@@ -349,7 +349,7 @@ export default function AdminStaffPage() {
               setShowMine((current) => !current);
               setShowNew(false);
             }}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
           >
             <KeyIcon className="h-4 w-4" />
             Change my own password
@@ -363,16 +363,16 @@ export default function AdminStaffPage() {
               event.preventDefault();
               void create();
             }}
-            className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5"
+            className="mb-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5"
           >
-            <h2 className="text-sm font-bold text-slate-900">New admin account</h2>
+            <h2 className="text-sm font-bold text-[var(--foreground)]">New admin account</h2>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Full name">
                 <input
                   required
                   value={draft.name}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm"
                   placeholder="Ada Okafor"
                 />
               </Field>
@@ -383,7 +383,7 @@ export default function AdminStaffPage() {
                   autoComplete="off"
                   value={draft.email}
                   onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm"
                   placeholder="ada@easywayacademy.com"
                 />
               </Field>
@@ -395,7 +395,7 @@ export default function AdminStaffPage() {
                   autoComplete="new-password"
                   value={draft.password}
                   onChange={(e) => setDraft({ ...draft, password: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 font-mono text-sm"
+                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 font-mono text-sm"
                   placeholder="Set one you can read out"
                 />
               </Field>
@@ -403,7 +403,7 @@ export default function AdminStaffPage() {
                 <select
                   value={draft.adminRole}
                   onChange={(e) => setDraft({ ...draft, adminRole: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm"
                 >
                   {roles.map((r) => (
                     <option key={r.value} value={r.value}>
@@ -414,7 +414,7 @@ export default function AdminStaffPage() {
               </Field>
             </div>
 
-            <p className="mt-2.5 text-xs text-slate-500">
+            <p className="mt-2.5 text-xs text-[var(--muted)]">
               {ROLE_SUMMARY[draft.adminRole]} You can adjust exactly what they reach once the
               account exists.
             </p>
@@ -436,10 +436,10 @@ export default function AdminStaffPage() {
               event.preventDefault();
               void changeMyPassword();
             }}
-            className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5"
+            className="mb-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5"
           >
-            <h2 className="text-sm font-bold text-slate-900">Change my password</h2>
-            <p className="mt-1 text-xs text-slate-500">
+            <h2 className="text-sm font-bold text-[var(--foreground)]">Change my password</h2>
+            <p className="mt-1 text-xs text-[var(--muted)]">
               Your current password is required — a session left open on a shared machine should not
               be enough to change it.
             </p>
@@ -451,7 +451,7 @@ export default function AdminStaffPage() {
                   autoComplete="current-password"
                   value={mine.currentPassword}
                   onChange={(e) => setMine({ ...mine, currentPassword: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm"
                 />
               </Field>
               <Field label="New password — at least 8 characters">
@@ -462,7 +462,7 @@ export default function AdminStaffPage() {
                   autoComplete="new-password"
                   value={mine.newPassword}
                   onChange={(e) => setMine({ ...mine, newPassword: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm"
                 />
               </Field>
             </div>
@@ -490,18 +490,18 @@ export default function AdminStaffPage() {
         {/* ---- Role reference -------------------------------------------- */}
         <div className="mb-5 grid gap-3 sm:grid-cols-3">
           {roles.map((r) => (
-            <div key={r.value} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4">
+            <div key={r.value} className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
               <p className="text-sm font-semibold">{r.label}</p>
-              <p className="mt-1 text-xs text-slate-500">{ROLE_SUMMARY[r.value]}</p>
+              <p className="mt-1 text-xs text-[var(--muted)]">{ROLE_SUMMARY[r.value]}</p>
             </div>
           ))}
         </div>
 
         {/* ---- The people ------------------------------------------------ */}
         {loading ? (
-          <div className="py-12 text-center text-slate-500">Loading…</div>
+          <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
         ) : admins.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-200 py-12 text-center text-slate-500">
+          <div className="rounded-2xl border border-dashed border-[var(--border)] py-12 text-center text-[var(--muted)]">
             No admin accounts yet.
           </div>
         ) : (
@@ -513,14 +513,14 @@ export default function AdminStaffPage() {
               const busy = savingId === admin.id;
 
               return (
-                <div key={admin.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <div key={admin.id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
                   {/* Stacked on a phone: a name, a role select and three
                       buttons on one flex-wrap row is the ragged block this
                       page used to be below 640px. */}
                   <div className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate font-semibold text-slate-900">{admin.name ?? "—"}</p>
+                        <p className="truncate font-semibold text-[var(--foreground)]">{admin.name ?? "—"}</p>
                         {admin.mfaEnabled && (
                           <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700">
                             2FA on
@@ -537,7 +537,7 @@ export default function AdminStaffPage() {
                           </span>
                         )}
                       </div>
-                      <p className="mt-0.5 flex items-center gap-1.5 text-sm text-slate-500">
+                      <p className="mt-0.5 flex items-center gap-1.5 text-sm text-[var(--muted)]">
                         <MailIcon className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{admin.email}</span>
                       </p>
@@ -548,7 +548,7 @@ export default function AdminStaffPage() {
                         value={admin.adminRole}
                         disabled={busy}
                         onChange={(e) => save(admin.id, { adminRole: e.target.value })}
-                        className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:opacity-60 lg:flex-none"
+                        className="min-w-0 flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60 lg:flex-none"
                       >
                         {roles.map((r) => (
                           <option key={r.value} value={r.value}>
@@ -559,7 +559,7 @@ export default function AdminStaffPage() {
 
                       <button
                         onClick={() => (isEditing ? setEditing(null) : startEditing(admin))}
-                        className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                        className="whitespace-nowrap rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
                       >
                         {isEditing ? "Close" : "Login details"}
                       </button>
@@ -569,7 +569,7 @@ export default function AdminStaffPage() {
                           setExpanded(isOpen ? null : admin.id);
                           setEditing(null);
                         }}
-                        className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                        className="whitespace-nowrap rounded-xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
                       >
                         {isOpen ? "Done" : "Access"}
                       </button>
@@ -578,7 +578,7 @@ export default function AdminStaffPage() {
                         onClick={() => revoke(admin)}
                         disabled={busy}
                         aria-label={`Remove admin access for ${admin.name ?? admin.email}`}
-                        className="rounded-xl border border-slate-200 p-2 text-slate-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                        className="rounded-xl border border-[var(--border)] p-2 text-[var(--muted)] transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                       >
                         <TrashIcon className="h-4 w-4" />
                       </button>
@@ -604,11 +604,11 @@ export default function AdminStaffPage() {
                           setEditing(null);
                         }
                       }}
-                      className="border-t border-slate-100 bg-slate-50/60 p-4"
+                      className="border-t border-[var(--border)] bg-[var(--surface-alt)]/60 p-4"
                     >
-                      <p className="mb-3 text-xs text-slate-500">
+                      <p className="mb-3 text-xs text-[var(--muted)]">
                         What this person types at{" "}
-                        <code className="rounded bg-white px-1 py-0.5 font-mono">{signInPath}</code>.
+                        <code className="rounded bg-[var(--surface)] px-1 py-0.5 font-mono">{signInPath}</code>.
                         Changing the email changes their username.
                       </p>
 
@@ -617,7 +617,7 @@ export default function AdminStaffPage() {
                           <input
                             value={account.name}
                             onChange={(e) => setAccount({ ...account, name: e.target.value })}
-                            className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                            className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm"
                           />
                         </Field>
                         <Field label="Email">
@@ -625,7 +625,7 @@ export default function AdminStaffPage() {
                             type="email"
                             value={account.email}
                             onChange={(e) => setAccount({ ...account, email: e.target.value })}
-                            className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                            className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm"
                           />
                         </Field>
                         <Field label="New password — leave blank to keep the current one">
@@ -636,12 +636,12 @@ export default function AdminStaffPage() {
                             value={account.password}
                             onChange={(e) => setAccount({ ...account, password: e.target.value })}
                             placeholder="••••••••"
-                            className="w-full rounded-xl border border-slate-200 px-3 py-2.5 font-mono text-sm"
+                            className="w-full rounded-xl border border-[var(--border)] px-3 py-2.5 font-mono text-sm"
                           />
                         </Field>
                       </div>
 
-                      <p className="mt-2 text-xs text-slate-500">
+                      <p className="mt-2 text-xs text-[var(--muted)]">
                         Nobody can read an existing password, including you — resetting replaces it.
                         Tell the person the new one yourself.
                       </p>
@@ -657,7 +657,7 @@ export default function AdminStaffPage() {
                         <button
                           type="button"
                           onClick={() => setEditing(null)}
-                          className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600"
+                          className="rounded-xl border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--muted)]"
                         >
                           Cancel
                         </button>
@@ -667,8 +667,8 @@ export default function AdminStaffPage() {
 
                   {/* ---- Capabilities ---------------------------------- */}
                   {isOpen && (
-                    <div className="border-t border-slate-100 bg-slate-50/60 p-4">
-                      <p className="mb-3 text-xs text-slate-500">
+                    <div className="border-t border-[var(--border)] bg-[var(--surface-alt)]/60 p-4">
+                      <p className="mb-3 text-xs text-[var(--muted)]">
                         Ticked is what they can reach. Anything different from the{" "}
                         <span className="font-semibold">{admin.label}</span> preset is marked, and
                         stays marked if the preset changes later.
@@ -689,7 +689,7 @@ export default function AdminStaffPage() {
                                   ? "border-emerald-300 bg-emerald-50"
                                   : revoked
                                     ? "border-amber-300 bg-amber-50"
-                                    : "border-slate-200 bg-white hover:border-slate-300"
+                                    : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)]"
                               }`}
                             >
                               <input
@@ -700,7 +700,7 @@ export default function AdminStaffPage() {
                                 className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
                               />
                               <span className="min-w-0 flex-1">
-                                <span className="block font-medium text-slate-800">
+                                <span className="block font-medium text-[var(--foreground)]">
                                   {capability.label}
                                 </span>
                                 {granted && (
@@ -724,8 +724,8 @@ export default function AdminStaffPage() {
                           box gates the /admin/branches area itself, this one
                           narrows which branches' students, staff and other
                           branch-scoped records this person can reach at all. */}
-                      <div className="mt-4 border-t border-slate-200 pt-4">
-                        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm hover:border-slate-300">
+                      <div className="mt-4 border-t border-[var(--border)] pt-4">
+                        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm hover:border-[var(--border-strong)]">
                           <input
                             type="checkbox"
                             checked={branchRestrictOpen[admin.id] ?? admin.branchIds !== null}
@@ -734,10 +734,10 @@ export default function AdminStaffPage() {
                             className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block font-medium text-slate-800">
+                            <span className="block font-medium text-[var(--foreground)]">
                               Restrict to specific branches
                             </span>
-                            <span className="mt-0.5 block text-xs text-slate-500">
+                            <span className="mt-0.5 block text-xs text-[var(--muted)]">
                               {admin.branchIds === null
                                 ? "Off — this person can see every branch."
                                 : `On — limited to ${admin.branchIds.length} of ${branches.length} branch${branches.length === 1 ? "" : "es"}.`}
@@ -748,7 +748,7 @@ export default function AdminStaffPage() {
                         {(branchRestrictOpen[admin.id] ?? admin.branchIds !== null) && (
                           <div className="mt-2 grid gap-2 sm:grid-cols-2">
                             {branches.length === 0 ? (
-                              <p className="text-xs text-slate-500">No branches exist yet.</p>
+                              <p className="text-xs text-[var(--muted)]">No branches exist yet.</p>
                             ) : (
                               branches.map((branch) => {
                                 const checked = (admin.branchIds ?? []).includes(branch.id);
@@ -758,7 +758,7 @@ export default function AdminStaffPage() {
                                     className={`flex cursor-pointer items-center gap-2 rounded-xl border p-2.5 text-sm transition ${
                                       checked
                                         ? "border-emerald-300 bg-emerald-50"
-                                        : "border-slate-200 bg-white hover:border-slate-300"
+                                        : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)]"
                                     }`}
                                   >
                                     <input
@@ -768,7 +768,7 @@ export default function AdminStaffPage() {
                                       onChange={() => toggleBranch(admin, branch.id)}
                                       className="h-4 w-4 shrink-0 accent-[var(--accent)]"
                                     />
-                                    <span className="min-w-0 flex-1 truncate font-medium text-slate-800">
+                                    <span className="min-w-0 flex-1 truncate font-medium text-[var(--foreground)]">
                                       {branch.name}
                                     </span>
                                   </label>
@@ -780,7 +780,7 @@ export default function AdminStaffPage() {
                         {(branchRestrictOpen[admin.id] ?? admin.branchIds !== null) &&
                           branches.length > 0 &&
                           (admin.branchIds ?? []).length === 0 && (
-                            <p className="mt-2 text-xs text-slate-500">
+                            <p className="mt-2 text-xs text-[var(--muted)]">
                               Nothing picked yet — until at least one branch is ticked, this is the
                               same as leaving the restriction off.
                             </p>
@@ -791,7 +791,7 @@ export default function AdminStaffPage() {
                         <button
                           onClick={() => save(admin.id, { capabilities: admin.presetCapabilities })}
                           disabled={busy}
-                          className="mt-4 w-full rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 sm:w-auto"
+                          className="mt-4 w-full rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)] disabled:opacity-50 sm:w-auto"
                         >
                           Reset to the {admin.label} preset
                         </button>
@@ -811,7 +811,7 @@ export default function AdminStaffPage() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block min-w-0">
-      <span className="mb-1 block text-xs font-semibold text-slate-600">{label}</span>
+      <span className="mb-1 block text-xs font-semibold text-[var(--muted)]">{label}</span>
       {children}
     </label>
   );

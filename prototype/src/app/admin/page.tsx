@@ -495,7 +495,7 @@ export default function AdminHomePage() {
                       <span className="text-[var(--foreground)] group-hover:text-[var(--accent)]">{row.label}</span>
                       <span className="text-[var(--muted)]">{row.value}</span>
                     </div>
-                    <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                    <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-[var(--surface-alt)]">
                       <motion.div
                         className={`h-full rounded-full ${row.color}`}
                         initial={{ width: 0 }}
@@ -685,7 +685,7 @@ export default function AdminHomePage() {
                     </div>
                     {branch.collectionRate != null && (
                       <div className="mt-1.5 flex items-center gap-3">
-                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--surface-alt)]">
                           <motion.div
                             className="h-full rounded-full bg-[var(--accent-strong)]"
                             initial={{ width: 0 }}
@@ -848,12 +848,12 @@ export default function AdminHomePage() {
                   <span
                     className={`ml-3 shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
                       !connector.enabled
-                        ? "bg-slate-100 text-slate-600"
+                        ? "bg-[var(--surface-alt)] text-[var(--muted)]"
                         : connector.status === "error" || connector.status === "degraded"
                         ? "bg-red-100 text-red-700"
                         : connector.status === "connected"
                         ? "bg-emerald-100 text-emerald-700"
-                        : "bg-slate-100 text-slate-600"
+                        : "bg-[var(--surface-alt)] text-[var(--muted)]"
                     }`}
                   >
                     {connector.enabled ? connector.status : "off"}

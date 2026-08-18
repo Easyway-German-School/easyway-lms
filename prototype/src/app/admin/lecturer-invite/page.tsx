@@ -204,13 +204,13 @@ function PortalAccessFields({
               className={`rounded-2xl border p-3 text-left transition ${
                 on
                   ? "border-[var(--accent)] bg-[var(--accent-soft)]"
-                  : "border-[var(--border)] bg-[var(--background)] hover:border-slate-300"
+                  : "border-[var(--border)] bg-[var(--background)] hover:border-[var(--border-strong)]"
               }`}
             >
               <span className="flex items-center gap-2">
                 <span
                   className={`grid h-4 w-4 shrink-0 place-items-center rounded border text-[10px] font-black ${
-                    on ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-slate-300"
+                    on ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--border-strong)]"
                   }`}
                 >
                   {on ? "✓" : ""}

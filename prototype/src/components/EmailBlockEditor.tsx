@@ -206,12 +206,12 @@ export default function EmailBlockEditor({ blocks, onChange, subject, senderName
           anything. It is also what stops a pasted image URL or link from
           navigating the admin portal out from under whoever is composing.
         */}
-        <div className="mt-2 overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
+        <div className="mt-2 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
           <iframe
             title="Email preview"
             sandbox=""
             srcDoc={previewHtml}
-            className="block h-[560px] border-0 bg-white"
+            className="block h-[560px] border-0 bg-[var(--surface)]"
             style={{ width: device === "phone" ? 390 : 720, maxWidth: "100%" }}
           />
         </div>
