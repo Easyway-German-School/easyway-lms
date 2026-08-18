@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { readAssignment } from "@/lib/lecturer-assignment";
 import { lecturerCan } from "@/lib/lecturer-features";
 import { isPlayableVideo, toPlayableUrl, type LibraryVideo, type VideoKind } from "@/lib/video-library";
+import { reconcileRecordingsSoon } from "@/lib/class-recorder";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,17 @@ export async function GET() {
     if (!lecturer) {
       return NextResponse.json({ error: "No tutor profile found for this account" }, { status: 404 });
     }
+
+    /**
+     * The tutor checking their own Recordings page is exactly the same "is my
+     * tape back yet" moment as a student opening the Watch shelf — but only the
+     * student route ever nudged `reconcileRecordings()`. A tutor was left
+     * relying entirely on the LiveKit webhook (fast, but not guaranteed) and a
+     * cron that runs once a day (see vercel.json) — the worst possible night to
+     * miss the fast path is the one where the tutor is refreshing this page
+     * waiting to confirm it worked. Same fire-and-forget, same throttle.
+     */
+    reconcileRecordingsSoon();
 
     // The sidebar hides this; the route is what refuses it.
     if (!lecturerCan(lecturer.features, "recordings")) {
