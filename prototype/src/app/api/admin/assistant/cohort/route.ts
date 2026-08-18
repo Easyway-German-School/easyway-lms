@@ -67,6 +67,7 @@ export async function POST(request: Request) {
     kind: KIND.announcement,
     severity: "info",
     link,
+    push: true,
     // Deliberately NOT deduped. The office chases the same unpaid balance more
     // than once on purpose, and a silent drop of the second chase would look
     // like the portal had sent it.

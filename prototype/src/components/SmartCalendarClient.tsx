@@ -261,6 +261,7 @@ export default function SmartCalendarClient() {
                   openIndex={openIndex}
                   shake={shake}
                   onTap={tapNode}
+                  close={() => setOpenIndex(null)}
                 />
               </div>
 

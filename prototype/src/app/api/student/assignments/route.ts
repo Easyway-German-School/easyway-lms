@@ -276,6 +276,7 @@ export async function POST(req: NextRequest) {
           message: `${session.user?.name ?? "A student"} handed in "${assignment.title}".`,
           link: "/lecturer/assignments/mark",
           dedupeKey: `assignment-submitted:${assignmentId}:${student.id}`,
+          push: true,
         }).catch((error) => console.error("Assignment submission notification failed", error));
       }
 

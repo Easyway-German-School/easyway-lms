@@ -64,7 +64,10 @@ const ANONYMOUS_CONTENT_TYPES = new Set(["image/jpeg", "image/png", "image/webp"
 const AUTHENTICATED_CONTENT_TYPES = new Set([
   ...ANONYMOUS_CONTENT_TYPES,
   "image/gif",
-  "image/heic",
+  // No image/heic: the client (lib/upload.ts) always converts HEIC/HEIF to
+  // JPEG before it gets this far, so a raw HEIC reaching this route means the
+  // conversion was bypassed — and it is a format most non-Apple software
+  // can't render anyway, so there is nothing to gain by accepting it.
   "application/pdf",
   "audio/mpeg",
   "audio/mp4",

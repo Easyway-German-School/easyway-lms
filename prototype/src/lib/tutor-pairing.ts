@@ -77,6 +77,7 @@ export async function setStudentTutor(input: {
           ? `${tutorName} will be taking your private classes. They will be in touch to agree your times, and your sessions will appear on your calendar once booked.`
           : `${tutorName} is now your tutor. They can see your progress and will be marking your work.`,
       link: student.classType === "private" ? "/calendar" : "/classes",
+      push: true,
     }).catch((error) => console.error("Tutor pairing notification failed", error));
 
     await notify({
@@ -86,6 +87,7 @@ export async function setStudentTutor(input: {
       title: "A student was added to your class",
       message: `The office assigned ${studentName} to you. They are on your roster, your register and your gradebook from now.`,
       link: "/lecturer/students",
+      push: true,
     }).catch((error) => console.error("Tutor pairing notification failed", error));
   } else if (student.tutorId) {
     const previous = await prisma.lecturer.findUnique({
@@ -100,6 +102,7 @@ export async function setStudentTutor(input: {
         title: "A student was removed from your class",
         message: `The office moved ${studentName} off your roster. They no longer appear on your register or gradebook.`,
         link: "/lecturer/students",
+        push: true,
       }).catch((error) => console.error("Tutor pairing notification failed", error));
     }
   }

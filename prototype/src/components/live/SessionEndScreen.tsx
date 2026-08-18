@@ -123,33 +123,40 @@ export default function SessionEndScreen({
    */
   const classOver = outcome.reason === "ended" || recap?.stillLive === false;
   const removed = outcome.reason === "removed" && !classOver;
-  const dropped = outcome.reason === "dropped" && !classOver && !removed;
+  const switched = outcome.reason === "switched" && !classOver && !removed;
+  const dropped = outcome.reason === "dropped" && !classOver && !removed && !switched;
 
   const headline = removed
     ? "You were removed from the class"
-    : dropped
-      ? "You lost connection to the class"
-      : isTutor
-        ? "Your live class just ended"
-        : classOver
-          ? "Your class has ended"
-          : "You have left the class";
+    : switched
+      ? "You continued this class on another device"
+      : dropped
+        ? "You lost connection to the class"
+        : isTutor
+          ? "Your live class just ended"
+          : classOver
+            ? "Your class has ended"
+            : "You have left the class";
 
   const subline = removed
     ? "Your tutor removed you from this session. If you think that was a mistake, reach out to them directly."
-    : dropped
-      ? "Your internet dropped out rather than the lesson finishing. If the class is still running you can go straight back in."
-      : isTutor
-        ? "Everyone has been returned to their dashboard. The recording is being filed into the video library now."
-        : classOver
-          ? "Thanks for coming. The recording lands in your video library shortly, so anything you missed is not lost."
-          : "The class is carrying on without you — you can rejoin any time while it is still running.";
+    : switched
+      ? "This session moved to a device that just signed in as you. If that wasn't you, secure your account and let the office know."
+      : dropped
+        ? "Your internet dropped out rather than the lesson finishing. If the class is still running you can go straight back in."
+        : isTutor
+          ? "Everyone has been returned to their dashboard. The recording is being filed into the video library now."
+          : classOver
+            ? "Thanks for coming. The recording lands in your video library shortly, so anything you missed is not lost."
+            : "The class is carrying on without you — you can rejoin any time while it is still running.";
 
   const recording = recap?.recording ?? null;
   // Removed is deliberately not offered a straight way back in — a tutor who
   // just asked somebody to leave is not expecting them to reappear a second
   // later, and the button that undid every other exit here would undo this one.
-  const canRejoin = !removed && (dropped || (!classOver && recap?.stillLive !== false));
+  // Switched gets one too, the same as dropped — switching back to this
+  // device is exactly as valid a next step as switching away from it was.
+  const canRejoin = !removed && (dropped || switched || (!classOver && recap?.stillLive !== false));
 
   return (
     <motion.div
@@ -168,6 +175,8 @@ export default function SessionEndScreen({
             <CrossCircleIcon className="h-7 w-7" />
           ) : dropped ? (
             <SignalIcon className="h-7 w-7" />
+          ) : switched ? (
+            <BroadcastIcon className="h-7 w-7" />
           ) : (
             <CheckCircleIcon className="h-7 w-7" />
           )}
@@ -259,7 +268,7 @@ export default function SessionEndScreen({
               className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110"
             >
               <BroadcastIcon className="h-4 w-4" />
-              {dropped ? "Try to rejoin" : "Rejoin the class"}
+              {dropped ? "Try to rejoin" : switched ? "Continue here instead" : "Rejoin the class"}
             </button>
           ) : null}
 

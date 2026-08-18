@@ -169,6 +169,7 @@ export async function POST(request: NextRequest) {
       title: `Your ${type} result is in`,
       message: "Your tutor has entered a new score. Open your results to see it.",
       link: "/results",
+      push: true,
     }).catch((error) => console.error("Grade notification failed", error));
   }
 

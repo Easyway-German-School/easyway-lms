@@ -23,6 +23,37 @@ export type UploadedFile = {
 /** Which prefix the file lands under. Must be one the presign route allows. */
 export type UploadFolder = "files" | "materials" | "photos";
 
+type Heic2Any = (options: { blob: Blob; toType?: string; quality?: number }) => Promise<Blob | Blob[]>;
+
+/**
+ * iPhones default to saving photos as HEIC/HEIF, which almost nothing outside
+ * Apple's own software can decode — a HEIC avatar renders as an empty circle
+ * on Android, on Windows, in Chrome and Firefox everywhere. Converted here,
+ * once, before the bytes go anywhere, so every one of the dozen pickers that
+ * call `uploadFile` gets the fix without knowing it happened.
+ *
+ * A blank `file.type` with a `.heic`/`.heif` name covers Android and some
+ * older Safari builds, which hand the browser a photo with no MIME type at
+ * all rather than a wrong one.
+ */
+async function convertHeicIfNeeded(file: File): Promise<File> {
+  const looksHeic =
+    file.type === "image/heic" ||
+    file.type === "image/heif" ||
+    (!file.type && /\.(heic|heif)$/i.test(file.name));
+  if (!looksHeic) return file;
+
+  try {
+    const heic2any = ((await import("heic2any")).default as unknown) as Heic2Any;
+    const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+    const blob = Array.isArray(converted) ? converted[0] : converted;
+    const name = file.name.replace(/\.(heic|heif)$/i, "") + ".jpg";
+    return new File([blob], name, { type: "image/jpeg" });
+  } catch {
+    throw new Error("This photo format can't be processed automatically — please choose a JPG or PNG.");
+  }
+}
+
 async function readAsBase64(file: File): Promise<string> {
   const reader = new FileReader();
   const result = await new Promise<string | ArrayBuffer | null>((resolve, reject) => {
@@ -37,7 +68,8 @@ async function readAsBase64(file: File): Promise<string> {
   return result.split(",")[1];
 }
 
-export async function uploadFile(file: File, folder: UploadFolder = "files"): Promise<UploadedFile> {
+export async function uploadFile(rawFile: File, folder: UploadFolder = "files"): Promise<UploadedFile> {
+  const file = await convertHeicIfNeeded(rawFile);
   const contentType = file.type || "application/octet-stream";
 
   const presign = await fetch("/api/media/presign", {

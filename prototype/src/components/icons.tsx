@@ -768,6 +768,14 @@ export const SignalIcon = icon("SignalIcon", (
   </>
 ));
 
+/** A phone handset — switching a session to another device. */
+export const DeviceIcon = icon("DeviceIcon", (
+  <>
+    <rect x="7" y="2" width="10" height="20" rx="2" />
+    <path d="M11 18h2" />
+  </>
+));
+
 /** Go edge-to-edge. Four corners opening outwards. */
 export const ExpandIcon = icon("ExpandIcon", (
   <>

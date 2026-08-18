@@ -382,8 +382,8 @@ export async function POST(request: Request) {
         title: "A game started",
         message: `${created.author.name ?? "Someone"} started "${gameMatch.title}" — jump in.`,
         link: `/games/${gameMatch.id}`,
-        senderId: viewer.userId,
         push: true,
+        senderId: viewer.userId,
         dedupeKey: `game-invite:${gameMatch.id}`,
       }).catch((error) => console.error("Game invite notification failed", error));
     }

@@ -147,6 +147,7 @@ export async function POST(request: Request) {
           message: `Your ${student.level} certificate has been issued.`,
           emailBody: `Your ${student.level} certificate has been issued. Open it from the Certificates page to view, print or share it — it carries a serial and a verification link an employer or consulate can check.`,
           link: "/certificates",
+          push: true,
           // Re-running a bulk issue is safe and idempotent; this stops the
           // second run congratulating anybody twice even if a row was somehow
           // recreated.

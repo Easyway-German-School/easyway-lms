@@ -877,6 +877,7 @@ export async function completeLevelForStudents(
       kind: "level-complete",
       severity: "success",
       link: "/dashboard",
+      push: true,
       dedupeKey: `level-complete:${now.toISOString().slice(0, 10)}`,
     }).catch((error) => {
       console.error("Level-complete announcement failed", error);

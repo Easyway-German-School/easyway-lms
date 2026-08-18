@@ -330,6 +330,7 @@ async function announceChange(args: {
     title,
     message,
     link: "/calendar",
+    push: true,
     // One announcement per day per state. A tutor who saves the same
     // postponement twice does not send it twice.
     dedupeKey: `session:${branchId}:${level}:${day.toISOString()}:${saved.status}:${saved.postponedTo?.toISOString() ?? ""}:${saved.materialId ?? ""}`,

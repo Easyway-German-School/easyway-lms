@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 
 import Link from "next/link";
@@ -195,6 +196,7 @@ function Region({
   openIndex,
   shake,
   onTap,
+  close,
 }: {
   month: Month;
   monthNodes: ClassNode[];
@@ -203,6 +205,7 @@ function Region({
   openIndex: number | null;
   shake: number | null;
   onTap: (node: ClassNode) => void;
+  close: () => void;
 }) {
   const reduced = usePrefersReducedMotion();
   const uid = useId().replace(/:/g, "");
@@ -436,11 +439,12 @@ function Region({
           )}
         </div>
 
-        {/* The open class, below the map rather than floating over it — a
-            popover positioned on a waypoint covers the waypoints around it. */}
+        {/* Popped up centered over everything, not appended below the map —
+            on mobile the map is taller than the viewport, and a card left in
+            normal document flow needed a scroll to ever be seen. */}
         <AnimatePresence mode="wait">
           {openIndex !== null && monthNodes.some((node) => node.index === openIndex) && (
-            <ClassCard node={monthNodes.find((node) => node.index === openIndex)!} />
+            <ClassCard node={monthNodes.find((node) => node.index === openIndex)!} close={close} />
           )}
         </AnimatePresence>
       </div>
@@ -448,20 +452,67 @@ function Region({
   );
 }
 
-function ClassCard({ node }: { node: ClassNode }) {
+function ClassCard({ node, close }: { node: ClassNode; close: () => void }) {
   const summary = nodeSummary(node);
   const date = new Date(node.date);
+  const [portalTarget, setPortalTarget] = useState<Element | null>(null);
 
-  return (
+  // Portalled to the document body: this component renders inside shell
+  // layouts that can be transformed (a sliding sidebar), and a `fixed`
+  // element inside a transformed ancestor stops being viewport-fixed —
+  // the same trap the sign-out modal hit.
+  useEffect(() => {
+    setPortalTarget(document.body);
+  }, []);
+
+  const sheet = (
     <motion.div
-      key={node.index}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ duration: 0.2 }}
-      className="mt-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm"
+      className="fixed inset-0 z-[150] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={close}
+      role="dialog"
+      aria-modal="true"
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <motion.div
+        onClick={(event) => event.stopPropagation()}
+        initial={{ y: 60, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 40, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        className="max-h-[86vh] w-full max-w-lg overflow-y-auto rounded-t-[28px] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl sm:rounded-[28px]"
+      >
+        <button
+          type="button"
+          onClick={close}
+          aria-label="Close"
+          className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-full bg-[var(--surface-alt)] text-[var(--muted)] transition hover:bg-[var(--border)] hover:text-[var(--foreground)]"
+        >
+          <CrossIcon className="h-4 w-4" />
+        </button>
+
+        <ClassCardBody node={node} summary={summary} date={date} />
+      </motion.div>
+    </motion.div>
+  );
+
+  if (!portalTarget) return null;
+  return createPortal(sheet, portalTarget);
+}
+
+function ClassCardBody({
+  node,
+  summary,
+  date,
+}: {
+  node: ClassNode;
+  summary: ReturnType<typeof nodeSummary>;
+  date: Date;
+}) {
+  return (
+    <div className="relative">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 pr-8">
         <p className="text-base font-extrabold">
           {node.weekday} {shortDate(date)} · {summary.when}
         </p>
@@ -511,7 +562,7 @@ function ClassCard({ node }: { node: ClassNode }) {
           <AttachmentIcon className="h-3.5 w-3.5" /> {summary.material.title}
         </a>
       )}
-    </motion.div>
+    </div>
   );
 }
 
@@ -673,12 +724,14 @@ export default function JourneyMap({
   openIndex,
   shake,
   onTap,
+  close,
 }: {
   months: Month[];
   nodes: ClassNode[];
   openIndex: number | null;
   shake: number | null;
   onTap: (node: ClassNode) => void;
+  close: () => void;
 }) {
   const [ref, cols] = useResponsiveCols();
 
@@ -701,6 +754,7 @@ export default function JourneyMap({
           openIndex={openIndex}
           shake={shake}
           onTap={onTap}
+          close={close}
         />
       ))}
     </div>

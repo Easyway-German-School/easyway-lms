@@ -177,6 +177,7 @@ export async function POST(req: NextRequest) {
       message: "Your tutor finished marking your work. Open your results to see it.",
       link: "/results",
       dedupeKey: `submission-marked:${submission.id}`,
+      push: true,
     }).catch((error) => console.error("Marking notification failed", error));
 
     return NextResponse.json({ score: final.score, earned: final.earned, possible: final.possible });

@@ -393,6 +393,7 @@ export async function PATCH(request: NextRequest) {
           ? body.statusNote.trim()
           : LECTURER_STATUS_META[nextStatus].description,
       link: "/lecturer/dashboard",
+      push: true,
     }).catch((error) => console.error("Status notification failed", error));
   }
 
@@ -414,6 +415,7 @@ export async function PATCH(request: NextRequest) {
         ? `You are now assigned to ${label}. Your roster, timetable and attendance lists have already been updated.`
         : "Your class assignment was cleared. Contact the office before your next session.",
       link: "/lecturer/classes",
+      push: true,
     }).catch((error) => console.error("Assignment notification failed", error));
   }
 

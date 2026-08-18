@@ -312,6 +312,7 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
         kind: KIND.announcement,
         severity: "info",
         link: "/dashboard",
+        push: true,
       });
 
       return {
@@ -610,6 +611,7 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
           kind: KIND.levelAdvance,
           severity: "success",
           link: "/calendar",
+          push: true,
         });
       }
 

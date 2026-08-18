@@ -391,6 +391,12 @@ export default function StudentDossierPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [photoBroken, setPhotoBroken] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetResult, setResetResult] = useState<{ password: string; email: string; emailed: boolean } | null>(null);
+
   const load = useCallback(
     async (showSpinner = true) => {
       if (!id) return;
@@ -411,9 +417,34 @@ export default function StudentDossierPage() {
     [id],
   );
 
+  const resetPassword = useCallback(async () => {
+    if (!id) return;
+    setResetBusy(true);
+    setResetError(null);
+    try {
+      const response = await fetch(`/api/admin/students/${id}/password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Could not reset the password");
+      setResetResult({ password: json.password, email: json.email, emailed: Boolean(json.emailed) });
+      void load(false);
+    } catch (resetErr) {
+      setResetError(resetErr instanceof Error ? resetErr.message : "Could not reset the password");
+    } finally {
+      setResetBusy(false);
+    }
+  }, [id, load]);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setPhotoBroken(false);
+  }, [id]);
 
   /**
    * The live part. Twenty seconds is slow enough to be free and fast enough
@@ -502,12 +533,13 @@ export default function StudentDossierPage() {
         >
           <div className="flex flex-wrap items-start gap-6">
             <div className="relative">
-              {identity.photoUrl ? (
+              {identity.photoUrl && !photoBroken ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={identity.photoUrl}
                   alt={identity.name}
                   className="h-28 w-28 rounded-2xl border-2 border-[var(--border)] object-cover"
+                  onError={() => setPhotoBroken(true)}
                 />
               ) : (
                 <div className="flex h-28 w-28 items-center justify-center rounded-2xl border-2 border-dashed border-[var(--border)] text-3xl font-black text-white/40">
@@ -941,6 +973,27 @@ export default function StudentDossierPage() {
               <Field label="Notifications sent" value={`${engagement.notifications.length}`} />
             </div>
 
+            {account.userId && (
+              <div className="mt-5 border-t border-[var(--border)] pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetError(null);
+                    setResetResult(null);
+                    setResetOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] px-4 py-2 text-xs font-bold uppercase tracking-wide text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+                >
+                  <LockIcon className="h-3.5 w-3.5" />
+                  Reset their password
+                </button>
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  For when they&apos;ve called in locked out. Sets a new password immediately and emails it to them — no
+                  waiting on the self-service reset link.
+                </p>
+              </div>
+            )}
+
             {engagement.videos.length > 0 && (
               <div className="mt-5 border-t border-[var(--border)] pt-4">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -1003,6 +1056,81 @@ export default function StudentDossierPage() {
           )}
         </div>
       </div>
+
+      {resetOpen && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
+          onClick={() => !resetBusy && setResetOpen(false)}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-md rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl"
+          >
+            {!resetResult ? (
+              <>
+                <h2 className="text-lg font-bold text-[var(--foreground)]">Reset {identity.name.split(" ")[0]}&apos;s password?</h2>
+                <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                  This sets a brand new password immediately — their old one stops working — and emails it to{" "}
+                  <span className="font-semibold text-[var(--foreground)]">{identity.email ?? "their address"}</span>{" "}
+                  right away.
+                </p>
+                {resetError && <p className="mt-3 text-sm font-semibold text-[var(--danger)]">{resetError}</p>}
+                <div className="mt-5 flex justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setResetOpen(false)}
+                    disabled={resetBusy}
+                    className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold transition hover:bg-[var(--surface-alt)] disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void resetPassword()}
+                    disabled={resetBusy}
+                    className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+                  >
+                    {resetBusy ? "Resetting…" : "Reset password"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold text-[var(--foreground)]">New password set</h2>
+                <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                  {resetResult.emailed
+                    ? `Emailed to ${resetResult.email}.`
+                    : `Could not email ${resetResult.email} — read it out or send it another way.`}
+                </p>
+                <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Password</p>
+                  <p className="mt-1 select-all break-all font-mono text-base font-semibold text-[var(--foreground)]">
+                    {resetResult.password}
+                  </p>
+                </div>
+                <div className="mt-5 flex justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(resetResult.password);
+                    }}
+                    className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold transition hover:bg-[var(--surface-alt)]"
+                  >
+                    Copy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setResetOpen(false)}
+                    className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
+                  >
+                    Done
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </AdminShell>
   );
 }

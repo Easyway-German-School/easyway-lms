@@ -3,6 +3,7 @@
 import {
   CameraIcon,
   CommunityIcon,
+  DeviceIcon,
   DotsVerticalIcon,
   ExitIcon,
   ExpandIcon,
@@ -63,9 +64,15 @@ import { qualityModesFor, qualitySpec, type QualityMode, type RoomRole } from "@
  *             exact fact as `DisconnectReason.PARTICIPANT_REMOVED`, which is
  *             what keeps it from being misreported as "dropped" — a student
  *             who was asked to leave should not be told their WiFi failed.
+ *   switched — they (or someone with their login) opened this same class on
+ *             another device. LiveKit refuses a second connection under one
+ *             identity by disconnecting the first with `DUPLICATE_IDENTITY`,
+ *             which is otherwise indistinguishable from "removed" — and
+ *             telling somebody they were removed when they just switched to
+ *             their phone is its own way of losing their trust.
  */
 export type LeaveOutcome = {
-  reason: "self" | "ended" | "dropped" | "removed";
+  reason: "self" | "ended" | "dropped" | "removed" | "switched";
   /** How long this person was actually in the room, not how long the class ran. */
   durationMs: number;
 };
@@ -134,7 +141,7 @@ function ParticipantTile({
   mode,
   large,
   isSpeaking,
-  revision,
+  revision: topologyRevision,
   levels,
   handPosition,
   light,
@@ -148,8 +155,12 @@ function ParticipantTile({
   large?: boolean;
   isSpeaking?: boolean;
   /**
-   * Bumped by every room event. It is a dependency of the attach effect, and
-   * that is the whole point — see the comment inside.
+   * Bumped by track/participant topology events only (publish, subscribe,
+   * mute, connect, disconnect) — deliberately NOT by `ActiveSpeakersChanged`.
+   * It is a dependency of the attach effect, and that is the whole point —
+   * see the comment inside. If this ever gets wired back to something that
+   * fires on every speaking event, every tile's video/audio element will
+   * detach and reattach (a visible blink) each time anyone talks.
    */
   revision: number;
   levels: AudioLevelStore;
@@ -231,9 +242,12 @@ function ParticipantTile({
      * so `attach()` was never called again and the student stared at their own
      * black rectangle for the whole lesson.
      *
-     * Depending on `revision` re-runs this on every room event, which is the
-     * cheap and reliable version of the fix. `track.attach(el)` on an element
-     * it is already attached to is a no-op, so re-running costs nothing.
+     * Depending on `topologyRevision` re-runs this on every topology event,
+     * which is the cheap and reliable version of the fix. `track.attach(el)`
+     * on an element it is already attached to is a no-op, so re-running costs
+     * nothing — as long as it isn't re-running on every speaking tick too,
+     * which is what `topologyRevision` (as opposed to the room's general
+     * `revision`) exists to prevent.
      */
     participant.on("trackSubscribed", attach);
     participant.on("trackUnsubscribed", attach);
@@ -257,7 +271,7 @@ function ParticipantTile({
       }
       if (audioEl) participant.getTrackPublication(Track.Source.Microphone)?.track?.detach(audioEl);
     };
-  }, [participant, showVideo, revision]);
+  }, [participant, showVideo, topologyRevision]);
 
   const micMuted = !participant.isMicrophoneEnabled;
   const tutor = isTutor(participant);
@@ -502,7 +516,7 @@ export default function LiveKitClassroom({
   /** Which tile the travelling green light is parked on. */
   const [lightIdentity, setLightIdentity] = useState<string | null>(null);
   const [immersive, setImmersive] = useState(false);
-  const [panel, setPanel] = useState<"hands" | "chat" | null>(null);
+  const [panel, setPanel] = useState<"hands" | "chat" | "switch" | null>(null);
   /**
    * A quiz the tutor has unlocked for this cohort, or null.
    *
@@ -518,10 +532,31 @@ export default function LiveKitClassroom({
   const [quizDismissed, setQuizDismissed] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
   // Room state lives on the Room object, not in React. Rather than mirroring it
-  // (and drifting), events bump this counter and the component re-reads. Tiles
-  // take it as a prop so their attach effect re-runs — see ParticipantTile.
+  // (and drifting), events bump this counter and the component re-reads.
   const [revision, forceRender] = useState(0);
   const bump = useCallback(() => forceRender((n) => n + 1), []);
+  /**
+   * A SEPARATE counter for track/participant topology only — publish,
+   * subscribe, mute, connect, disconnect. Tiles take this one as a prop so
+   * their attach effect re-runs — see ParticipantTile.
+   *
+   * It used to be the same counter as `revision`, which is also bumped by
+   * `ActiveSpeakersChanged` — an event LiveKit fires many times a second
+   * while anyone is talking. Since the attach effect's cleanup detaches the
+   * video/audio element before every re-run, that meant every tile in the
+   * room detached and reattached its media stream (a visible black flash)
+   * on every speaking tick, for anyone at all speaking, not just the tile
+   * whose track actually changed. Splitting it so only real topology events
+   * re-run the attach effect keeps the fix for the blank-camera bug (see the
+   * comment in ParticipantTile) without also re-triggering it on every
+   * speaking event.
+   */
+  const [topologyRevision, forceTopologyRender] = useState(0);
+  const bumpTopology = useCallback(() => forceTopologyRender((n) => n + 1), []);
+  const bumpAll = useCallback(() => {
+    bump();
+    bumpTopology();
+  }, [bump, bumpTopology]);
 
   /** Set while our own click is inside `setMicrophoneEnabled`, so the forced-mute listener below can tell a self-toggle from a tutor's mute. */
   const selfMicToggleRef = useRef(false);
@@ -636,7 +671,7 @@ export default function LiveKitClassroom({
         // seconds spent negotiating a connection are not minutes of lesson.
         joinedAtRef.current = Date.now();
         setStatus("connected");
-        bump();
+        bumpAll();
       })
       .on(RoomEvent.Reconnecting, () => setStatus("reconnecting"))
       .on(RoomEvent.Reconnected, () => setStatus("connected"))
@@ -648,20 +683,27 @@ export default function LiveKitClassroom({
          * call, so pressing Leave (which disconnects deliberately) does not
          * report the same departure twice.
          *
-         * Anything left is either a real drop or a tutor's removal, and the
-         * reason LiveKit hands back is how those two are told apart —
-         * `PARTICIPANT_REMOVED` is the one case where "your connection dropped"
-         * would be an outright lie.
+         * Anything left is a real drop, a tutor's removal, or a second device
+         * taking over this identity, and the reason LiveKit hands back is how
+         * those are told apart — `PARTICIPANT_REMOVED` is the one case where
+         * "your connection dropped" would be an outright lie, and
+         * `DUPLICATE_IDENTITY` is the one case where "removed" would be.
          */
         if (!cancelled) {
-          finishRef.current(reason === DisconnectReason.PARTICIPANT_REMOVED ? "removed" : "dropped");
+          finishRef.current(
+            reason === DisconnectReason.PARTICIPANT_REMOVED
+              ? "removed"
+              : reason === DisconnectReason.DUPLICATE_IDENTITY
+                ? "switched"
+                : "dropped",
+          );
         }
       })
-      .on(RoomEvent.ParticipantConnected, bump)
-      .on(RoomEvent.ParticipantDisconnected, bump)
-      .on(RoomEvent.TrackSubscribed, bump)
-      .on(RoomEvent.TrackUnsubscribed, bump)
-      .on(RoomEvent.TrackMuted, bump)
+      .on(RoomEvent.ParticipantConnected, bumpAll)
+      .on(RoomEvent.ParticipantDisconnected, bumpAll)
+      .on(RoomEvent.TrackSubscribed, bumpAll)
+      .on(RoomEvent.TrackUnsubscribed, bumpAll)
+      .on(RoomEvent.TrackMuted, bumpAll)
       .on(RoomEvent.TrackMuted, (publication, trackParticipant) => {
         // A server-forced mute (the tutor's Mute button) and a self-toggle both
         // fire this same event — `selfMicToggleRef` is the only way to tell
@@ -675,10 +717,13 @@ export default function LiveKitClassroom({
           setModerationNotice("Your microphone was muted by the tutor.");
         }
       })
-      .on(RoomEvent.TrackUnmuted, bump)
+      .on(RoomEvent.TrackUnmuted, bumpAll)
+      // Deliberately plain `bump`, NOT `bumpAll` — see the comment on
+      // `topologyRevision` above. This event fires many times a second while
+      // anyone is speaking, and must never re-run a tile's media attach effect.
       .on(RoomEvent.ActiveSpeakersChanged, bump)
-      .on(RoomEvent.LocalTrackPublished, bump)
-      .on(RoomEvent.LocalTrackUnpublished, bump)
+      .on(RoomEvent.LocalTrackPublished, bumpAll)
+      .on(RoomEvent.LocalTrackUnpublished, bumpAll)
       .on(RoomEvent.AudioPlaybackStatusChanged, () => setAudioBlocked(!room.canPlaybackAudio))
       .on(RoomEvent.ConnectionQualityChanged, (connectionQuality, participant) => {
         // Only our own link matters for the pill — a classmate's bad network
@@ -745,7 +790,7 @@ export default function LiveKitClassroom({
       }
       if (!cancelled) {
         setAudioBlocked(!room.canPlaybackAudio);
-        bump();
+        bumpAll();
       }
     })();
 
@@ -754,7 +799,7 @@ export default function LiveKitClassroom({
       room.disconnect();
       roomRef.current = null;
     };
-  }, [url, token, initialQuality, bump]);
+  }, [url, token, initialQuality, bump, bumpAll]);
 
   // Switching mode re-negotiates what the server sends us. Video publications
   // are disabled outright in audio mode; in every other mode the tile size
@@ -958,7 +1003,7 @@ export default function LiveKitClassroom({
   }, [liveSessionId, router]);
 
   const interactions = useRoomInteractions(roomRef.current, role, revision);
-  const levels = useAudioLevels(roomRef.current, revision);
+  const levels = useAudioLevels(roomRef.current, topologyRevision);
 
   /**
    * Leaving, and why the tutor's version is awaited.
@@ -1263,7 +1308,7 @@ export default function LiveKitClassroom({
               mode="low"
               large
               isSpeaking={ringIds.has(stageParticipant.identity)}
-              revision={revision}
+              revision={topologyRevision}
               levels={levels}
               handPosition={null}
               light={null}
@@ -1474,7 +1519,7 @@ export default function LiveKitClassroom({
                       mode={mode}
                       large
                       isSpeaking={ringIds.has(stageParticipant.identity)}
-                      revision={revision}
+                      revision={topologyRevision}
                       levels={levels}
                       handPosition={handPositions.get(stageParticipant.identity) ?? null}
                       light={lightFor(stageParticipant)}
@@ -1499,7 +1544,7 @@ export default function LiveKitClassroom({
                       participant={participant}
                       mode={mode}
                       isSpeaking={ringIds.has(participant.identity)}
-                      revision={revision}
+                      revision={topologyRevision}
                       levels={levels}
                       handPosition={handPositions.get(participant.identity) ?? null}
                       light={lightFor(participant)}
@@ -1538,6 +1583,14 @@ export default function LiveKitClassroom({
                   Chat
                 </button>
                 <button
+                  onClick={() => setPanel("switch")}
+                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    panel === "switch" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Device
+                </button>
+                <button
                   onClick={() => setPanel(null)}
                   aria-label="Close panel"
                   className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-400 transition hover:text-white"
@@ -1557,6 +1610,8 @@ export default function LiveKitClassroom({
                     onClearHands={interactions.clearHands}
                   />
                 </div>
+              ) : panel === "switch" ? (
+                <SwitchDevicePanel />
               ) : (
                 <ChatPanel chat={interactions.chat} onSend={interactions.sendChat} />
               )}
@@ -1634,6 +1689,17 @@ export default function LiveKitClassroom({
               {interactions.unreadChat}
             </span>
           ) : null}
+        </button>
+
+        <button
+          onClick={() => setPanel(panel === "switch" ? null : "switch")}
+          title="Continue this class on another device — a phone, say — without losing your seat."
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+            panel === "switch" ? "bg-white/20 text-white" : "bg-white/10 text-white hover:bg-white/20"
+          }`}
+        >
+          <DeviceIcon className="h-4 w-4" />
+          Switch device
         </button>
 
         {role === "tutor" && others.length > 0 ? (
@@ -1737,6 +1803,79 @@ export default function LiveKitClassroom({
           : "If your connection struggles we drop a level for you automatically — you can always put it back."}{" "}
         Audio stays full quality at every setting, and the class recording is always in your video library afterwards.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Hand this class off to another device without losing your seat.
+ *
+ * No server round-trip is needed to know which class to point at — `/live`
+ * always resolves "whichever class I'm signed in and currently in" from the
+ * session, on any device. Opening it elsewhere connects a second LiveKit
+ * participant under this same identity, and LiveKit's own duplicate-identity
+ * handling steps this device aside automatically (see the `Disconnected`
+ * handler above) — this panel only makes that easy to do on purpose, either
+ * by scanning a code or by a push notification straight to the lock screen.
+ */
+function SwitchDevicePanel() {
+  const [qr, setQr] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const QRCode = (await import("qrcode")).default;
+        const url = `${window.location.origin}/live`;
+        const dataUrl = await QRCode.toDataURL(url, { width: 220, margin: 1 });
+        if (!cancelled) setQr(dataUrl);
+      } catch (error) {
+        console.error("Could not build the switch-device code", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const sendLink = useCallback(async () => {
+    setSending(true);
+    try {
+      const response = await fetch("/api/live/session/switch-device", { method: "POST" });
+      const json = await response.json().catch(() => ({}));
+      setSent(response.ok && json.sent > 0);
+    } catch {
+      setSent(false);
+    } finally {
+      setSending(false);
+    }
+  }, []);
+
+  return (
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto text-sm text-slate-300">
+      <p>
+        Open this same class on another device — your phone, say — and it picks up right where you are now. This
+        device steps aside on its own the moment the new one connects.
+      </p>
+
+      {qr ? (
+        <div className="grid place-items-center rounded-2xl bg-white p-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={qr} alt="Scan to continue this class on another device" className="h-40 w-40" />
+        </div>
+      ) : (
+        <div className="grid h-40 place-items-center text-xs text-slate-500">Building your code…</div>
+      )}
+
+      <button
+        onClick={() => void sendLink()}
+        disabled={sending || sent}
+        className="w-full rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:opacity-60"
+      >
+        {sent ? "Sent — check your other device" : sending ? "Sending…" : "Send myself a link instead"}
+      </button>
     </div>
   );
 }
