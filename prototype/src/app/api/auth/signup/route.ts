@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { assignStudentCode } from "@/lib/student-code";
 import { notifyAdminsOfRegistration } from "@/lib/admin-alerts";
 import { sendRegistrationConfirmation } from "@/lib/registration-email";
+import { sendParentAccountCreatedEmail } from "@/lib/parent-account-email";
 import { linkLeadOnSignup } from "@/lib/leads";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
@@ -142,6 +144,10 @@ export async function POST(request: NextRequest) {
       allowParentLogin,
       transportRoute,
       heardFrom,
+      // The optional 4th step of the signup wizard: a parent/guardian account
+      // to create and link alongside this student's, in the same submit. See
+      // the parent-account block near the end of this handler.
+      parent,
     } = body || {};
 
     const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
@@ -440,6 +446,79 @@ export async function POST(request: NextRequest) {
         classType: normalizedClassType,
         deliveryMode: normalizedDeliveryMode,
       });
+
+      /**
+       * The optional 4th step: "add a parent/guardian to monitor this
+       * account." Entirely skippable — most signups carry no `parent` at
+       * all — and, like the two side effects above, unable to fail the
+       * signup that already succeeded.
+       *
+       * Two shapes:
+       *   - the parent's email is new: a second, linked account is created
+       *     with a generated password, mailed to them.
+       *   - the parent's email already belongs to a PARENT account with no
+       *     child linked yet: that account is linked rather than duplicated
+       *     — `Parent.userId` is unique, so one login cannot own two Parent
+       *     rows. An email that already belongs to anything else (a
+       *     student, an admin, or a parent already watching a different
+       *     child) is left alone; this form is not how somebody else's
+       *     account gets claimed or reassigned.
+       */
+      if (studentId && parent && typeof parent === "object") {
+        try {
+          const parentName = typeof (parent as any).name === "string" ? (parent as any).name.trim() : "";
+          const parentEmail =
+            typeof (parent as any).email === "string" ? (parent as any).email.trim().toLowerCase() : "";
+          const parentPhone = typeof (parent as any).phone === "string" ? (parent as any).phone.trim() : "";
+
+          if (parentName && parentEmail && parentEmail !== normalizedEmail) {
+            const existingParentUser = await prisma.user.findUnique({
+              where: { email: parentEmail },
+              include: { parent: true },
+            });
+
+            if (!existingParentUser) {
+              const temporaryPassword = crypto.randomBytes(9).toString("base64url");
+              const hashedParentPassword = await bcryptjs.hash(temporaryPassword, 10);
+
+              await prisma.user.create({
+                data: {
+                  email: parentEmail,
+                  name: parentName,
+                  password: hashedParentPassword,
+                  role: "PARENT",
+                  tenantId: currentTenantId(),
+                  parent: {
+                    create: {
+                      phone: parentPhone || null,
+                      studentId,
+                      childName: normalizedName,
+                      childEmail: normalizedEmail,
+                    },
+                  },
+                },
+              });
+
+              await sendParentAccountCreatedEmail({
+                parentName,
+                parentEmail,
+                temporaryPassword,
+                studentName: normalizedName,
+              });
+            } else if (existingParentUser.role === "PARENT" && existingParentUser.parent && !existingParentUser.parent.studentId) {
+              await prisma.parent.update({
+                where: { userId: existingParentUser.id },
+                data: { studentId, childName: normalizedName, childEmail: normalizedEmail },
+              });
+            }
+            // Any other existing-account shape (a student, an admin, or a
+            // parent already linked elsewhere) is left untouched — see the
+            // doc-comment above.
+          }
+        } catch (parentError) {
+          console.error("Linked parent account creation failed:", parentError);
+        }
+      }
     }
 
     return NextResponse.json(

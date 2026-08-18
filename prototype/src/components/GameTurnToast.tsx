@@ -15,11 +15,55 @@ import { ChainIcon } from "@/components/icons";
  * who is playing, starting one: all of that stays on /games. This is only
  * "someone needs a sentence from you," with a link to go write it.
  */
+/**
+ * How long "Later" buys. Every other queued moment owns a longer-than-one-
+ * visit memory of its own (a server stamp, a per-level localStorage key) —
+ * this one didn't, and `StudentShell` (and the queue inside it) remounts on
+ * every single page navigation, not once per session. So a real waiting turn
+ * re-claimed the toast, and won the queue, on the very next page the student
+ * opened — "Later" was answered by the same popup a click away. A few hours'
+ * snooze is what the other moments get in spirit; the turn itself is still
+ * exactly where it was in the game.
+ */
+const SNOOZE_KEY = "ew-game-turn-snoozed-until";
+const SNOOZE_MS = 3 * 60 * 60 * 1000;
+
+function isSnoozed(): boolean {
+  try {
+    const until = Number(window.localStorage.getItem(SNOOZE_KEY) ?? 0);
+    return Date.now() < until;
+  } catch {
+    return false;
+  }
+}
+
+function snooze() {
+  try {
+    window.localStorage.setItem(SNOOZE_KEY, String(Date.now() + SNOOZE_MS));
+  } catch {
+    // Private browsing can refuse storage — worst case the toast reappears
+    // sooner than intended, which is the behaviour before this fix existed.
+  }
+}
+
+function clearSnooze() {
+  try {
+    window.localStorage.removeItem(SNOOZE_KEY);
+  } catch {
+    // See snooze() above.
+  }
+}
+
 export default function GameTurnToast() {
   const { status } = useSession();
   const [waitingCount, setWaitingCount] = useState(0);
-  const due = waitingCount > 0;
+  const [snoozed, setSnoozed] = useState(true); // starts true so SSR/first paint never flashes it before the localStorage check below runs
+  const due = waitingCount > 0 && !snoozed;
   const { open, close } = useMoment("game-turn", due);
+
+  useEffect(() => {
+    setSnoozed(isSnoozed());
+  }, []);
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -30,7 +74,12 @@ export default function GameTurnToast() {
         const res = await fetch("/api/games", { cache: "no-store" });
         if (!res.ok || cancelled) return;
         const data = await res.json();
-        setWaitingCount(Array.isArray(data.waiting) ? data.waiting.length : 0);
+        const count = Array.isArray(data.waiting) ? data.waiting.length : 0;
+        setWaitingCount(count);
+        // Re-checked on the same poll rather than left as whatever it was on
+        // mount, so a snooze that expires while the tab stays open quietly
+        // lifts itself instead of needing a reload to notice.
+        setSnoozed(isSnoozed());
       } catch {
         // A missed check just tries again on the next tick.
       }
@@ -48,6 +97,16 @@ export default function GameTurnToast() {
 
   if (!open) return null;
 
+  const handleLater = () => {
+    snooze();
+    setSnoozed(true);
+    close();
+  };
+  const handleTakeTurn = () => {
+    clearSnooze();
+    close();
+  };
+
   return (
     <div className="fixed bottom-6 left-1/2 z-50 w-[min(92vw,420px)] -translate-x-1/2 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-5 py-4 text-sm text-[var(--foreground)] shadow-xl shadow-black/10">
       <div className="flex items-start gap-3">
@@ -64,12 +123,12 @@ export default function GameTurnToast() {
           <div className="mt-3 flex items-center gap-3">
             <Link
               href="/games"
-              onClick={close}
+              onClick={handleTakeTurn}
               className="rounded-full bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white"
             >
               Take my turn
             </Link>
-            <button type="button" onClick={close} className="text-xs text-[var(--muted)]">
+            <button type="button" onClick={handleLater} className="text-xs text-[var(--muted)]">
               Later
             </button>
           </div>

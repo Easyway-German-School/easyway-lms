@@ -33,6 +33,7 @@ const PERSONAL_KEYS = [
   "pendingPaystackAmount",
   "pendingPaystackPathwayName",
   "paystackPaymentSuccess",
+  "ew-game-turn-snoozed-until",
 ];
 const PERSONAL_KEY_PREFIXES = ["ew-advance-seen-"];
 

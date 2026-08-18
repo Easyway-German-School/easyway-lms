@@ -2,7 +2,6 @@
 
 import { type FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { buildApiUrl } from "@/lib/api";
 import BrandLoader from "@/components/BrandLoader";
@@ -83,6 +82,20 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [heardFrom] = useState("");
   const [emergencyContactName] = useState("");
   const [emergencyContactInfo] = useState("");
+  /**
+   * The optional 4th step. Off by default — most students sign themselves up
+   * and this whole panel is skippable — but a parent registering on their
+   * child's behalf turns it on and gives their OWN email, so the school
+   * knows who is actually watching this account. No password field: that
+   * account's login is generated and mailed once the form is submitted,
+   * because asking somebody to invent and remember a second password inside
+   * somebody else's signup is exactly the friction that would make this
+   * step skipped by the people who most need it.
+   */
+  const [parentEnabled, setParentEnabled] = useState(false);
+  const [parentName, setParentName] = useState("");
+  const [parentEmail, setParentEmail] = useState("");
+  const [parentPhone, setParentPhone] = useState("");
   // Online-only answers. They decide what the classroom optimises for, so they
   // are asked once at signup rather than left for the student to discover
   // through a frozen video mid-lesson.
@@ -95,7 +108,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [showSuccess, setShowSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(1);
-  const stepCount = 3;
+  const stepCount = 4;
   const router = useRouter();
   const selectedBranch = branches.find((branch) => branch.id === branchId) || null;
 
@@ -122,11 +135,13 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
     ? [
         { label: "Program", stamp: "Chosen", line: "Willkommen! First — which level are you starting at, and when can you actually make class? Everything after this is shaped around that answer." },
         { label: "Your setup", stamp: "Ready", line: "Now the part most schools skip: how you get online. Tell us honestly and we tune your video to your line, so your first lesson does not freeze." },
+        { label: "Parent/Guardian", stamp: "Optional", line: "Registering for yourself? Skip this. Registering for your child, or want a parent kept in the loop? Add their email and we set up their own account too." },
         { label: "Launch", stamp: "Enrolled", line: "That is everything. Finish up and your dashboard, your timetable and your classmates are waiting on the other side." },
       ]
     : [
         { label: "Program", stamp: "Chosen", line: "Willkommen! Let us start with where you are learning and where you are heading. Germany is the destination — this is choosing the road." },
         { label: "Profile", stamp: "Known", line: "Now a little about you. Your tutor sees this, so it is how you stop being a row in a spreadsheet and start being a student they know." },
+        { label: "Parent/Guardian", stamp: "Optional", line: "Registering for yourself? Skip this. Registering for your child, or want a parent kept in the loop? Add their email and we set up their own account too." },
         { label: "Launch", stamp: "Enrolled", line: "That is everything. Finish up and your dashboard, your timetable and your classmates are waiting on the other side." },
       ];
 
@@ -153,6 +168,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   };
   const maxDob = new Date(Date.now() - 10 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const isAusbildungPathway = pathway === "Ausbildung (vocational training)";
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
   // The Nigerian-states dropdown only makes sense inside Nigeria. Online reaches
   // the diaspora, so outside Nigeria the field becomes free text — a student in
@@ -182,6 +198,12 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         isDobValid(dob) &&
         (!isAusbildungPathway || profession.trim() !== "") &&
         (!isOnline || (device !== "" && connection !== "" && timezone !== ""))
+      : step === 3
+      ? // Skippable by default. Only gates forward progress once the parent
+        // section has actually been turned on — a toggle nobody touched must
+        // never block anybody's signup.
+        (!parentEnabled ||
+          (parentName.trim() !== "" && isValidEmail(parentEmail) && parentEmail.trim().toLowerCase() !== email.trim().toLowerCase()))
       : true;
   const nextButtonLabel = !isLastStep ? "Next" : "Finish signup";
   const branchHint = selectedBranch
@@ -387,6 +409,10 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         // answer to any of it, and an empty object in their admission record
         // would just be noise for whoever reads it in the admin later.
         ...(isOnline ? { online: { timezone, device, connection } } : {}),
+        // The optional 4th step. Omitted entirely when skipped, rather than
+        // sent empty, so the server's "was a parent section filled in?" check
+        // stays a simple truthiness test.
+        ...(parentEnabled ? { parent: { name: parentName, email: parentEmail, phone: parentPhone } } : {}),
       } as Record<string, unknown>;
 
       const res = await fetch(buildApiUrl("/api/auth/signup"), {
@@ -409,7 +435,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
       // A campus student still gets the confirmation page, which is where the
       // office's next-steps instructions live.
       if (isOnline) {
-        setSuccessMessage("Welcome to EasyWay Online. Taking you to your dashboard…");
+        setSuccessMessage(
+          parentEnabled
+            ? "Welcome to EasyWay Online. Taking you to your dashboard — your parent/guardian's login is on its way to their email."
+            : "Welcome to EasyWay Online. Taking you to your dashboard…",
+        );
         setShowSuccess(true);
 
         const signedIn = await signIn("credentials", {
@@ -425,7 +455,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         return;
       }
 
-      setSuccessMessage("Signup successful. You will receive confirmation and can sign in next.");
+      setSuccessMessage(
+        parentEnabled
+          ? "Signup successful. You will receive confirmation and can sign in next — your parent/guardian's login is on its way to their email."
+          : "Signup successful. You will receive confirmation and can sign in next.",
+      );
       setShowSuccess(true);
       window.setTimeout(() => {
         router.replace("/auth/signup/success");
@@ -464,27 +498,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
             <p className="text-xs font-semibold uppercase tracking-[0.36em] text-white/70">Enrolment · EasyWay German</p>
             <h1 className="mt-4 text-3xl font-semibold leading-tight sm:text-5xl">{pageTitle || "Start your German journey"}</h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-white/85">
-              Three short steps and you are enrolled — your level, your class times, your tutor. Most people finish this
-              in under four minutes.
+              A few short steps and you are enrolled — your level, your class times, your tutor. Registering for your
+              child? There is a spot further in to add their own parent account too.
             </p>
           </div>
         </div>
-
-        {/* This form enrols the STUDENT. A parent has their own, separate
-            account and their own form — see /auth/parent/signup — so this
-            is a way out rather than a step in the enrolment itself. */}
-        <Link
-          href="/auth/parent/signup"
-          className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-white/80 px-5 py-4 text-sm text-[var(--foreground)] shadow-sm transition hover:border-[var(--accent)] hover:bg-white"
-        >
-          <span className="grid h-9 w-9 flex-none place-items-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
-            <FamilyIcon className="h-5 w-5" />
-          </span>
-          <span>
-            <span className="font-semibold">Are you a parent or guardian?</span>{" "}
-            <span className="text-[var(--muted)]">Create your own account to follow your child's classes instead.</span>
-          </span>
-        </Link>
 
         {/*
           `p-8` unconditionally was costing 64px of a 375px screen, and the page
@@ -859,6 +877,80 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <p className="mt-2 text-xs text-[var(--muted)]">{isAusbildungPathway ? "Pick the vocational track you are registering for." : "Choose the closest match. Select “Other / not listed” if your occupation is not shown."}</p>
               </div>
             </div>
+          ) : step === 3 ? (
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 grid h-10 w-10 flex-none place-items-center rounded-2xl bg-white/80 text-[var(--accent)] shadow-sm">
+                    <FamilyIcon className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h2 className="text-base font-semibold text-[var(--foreground)]">Add a parent or guardian?</h2>
+                    <p className="mt-1 text-sm text-[var(--muted)]">
+                      Entirely optional — most students skip this. If you are a parent registering for your child, or
+                      you just want somebody kept in the loop, add their details below and we set up a separate,
+                      linked account for them automatically. They get their own login by email once you finish.
+                    </p>
+                  </div>
+                </div>
+
+                <label className="mt-5 flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-white px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={parentEnabled}
+                    onChange={(e) => setParentEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-[var(--border)] text-[var(--accent)]"
+                  />
+                  <span className="text-sm font-semibold text-[var(--foreground)]">
+                    Set up a parent/guardian account for this student
+                  </span>
+                </label>
+
+                {parentEnabled ? (
+                  <div className="mt-4 grid gap-4 md:grid-cols-3">
+                    <div>
+                      <label htmlFor="parentName" className="block text-sm font-semibold text-[var(--muted)]">Parent/guardian name</label>
+                      <input
+                        id="parentName"
+                        value={parentName}
+                        onChange={(e) => setParentName(e.target.value)}
+                        className="mt-1 w-full rounded-xl border px-3 py-2 bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="parentEmail" className="block text-sm font-semibold text-[var(--muted)]">Parent/guardian email</label>
+                      <input
+                        id="parentEmail"
+                        type="email"
+                        value={parentEmail}
+                        onChange={(e) => setParentEmail(e.target.value)}
+                        className="mt-1 w-full rounded-xl border px-3 py-2 bg-white"
+                      />
+                      {parentEmail && !isValidEmail(parentEmail) ? (
+                        <p className="mt-2 text-xs text-rose-600">Please check this email address.</p>
+                      ) : parentEmail && parentEmail.trim().toLowerCase() === email.trim().toLowerCase() ? (
+                        <p className="mt-2 text-xs text-rose-600">This must be different from the student's own email above.</p>
+                      ) : null}
+                    </div>
+                    <div>
+                      <label htmlFor="parentPhone" className="block text-sm font-semibold text-[var(--muted)]">Parent/guardian phone</label>
+                      <input
+                        id="parentPhone"
+                        type="tel"
+                        value={parentPhone}
+                        onChange={(e) => setParentPhone(e.target.value)}
+                        className="mt-1 w-full rounded-xl border px-3 py-2 bg-white"
+                      />
+                    </div>
+                    <p className="text-xs text-[var(--muted)] md:col-span-3">
+                      No password to set here — their login is generated automatically and emailed to them, with a
+                      link to their own parent sign-in page. The school confirms the link to this student before
+                      anything shows in their account.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           ) : (
             <div className="space-y-6">
               <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
@@ -895,6 +987,17 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                       <p>Connection: {CONNECTION_OPTIONS.find((option) => option.value === connection)?.label || "Not specified"}</p>
                     </div>
                     <p className="mt-3 text-xs text-[var(--muted)]">You can change any of this later on your Profile — nothing here is locked in.</p>
+                  </div>
+                ) : null}
+                {parentEnabled ? (
+                  <div className="rounded-3xl border border-[var(--border)] bg-white p-4 md:col-span-2">
+                    <h3 className="text-sm font-semibold text-[var(--foreground)]">Parent/guardian</h3>
+                    <p className="mt-2 text-sm text-[var(--muted)]">Name: {parentName}</p>
+                    <p className="mt-2 text-sm text-[var(--muted)]">Email: {parentEmail}</p>
+                    <p className="mt-2 text-sm text-[var(--muted)]">Phone: {parentPhone || "Not specified"}</p>
+                    <p className="mt-3 text-xs text-[var(--muted)]">
+                      A separate account is created for them and their login is emailed to this address.
+                    </p>
                   </div>
                 ) : null}
               </div>
