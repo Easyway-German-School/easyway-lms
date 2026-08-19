@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { analyzePronunciation } from "@/lib/ai";
 import { requireAuthSession } from "@/lib/auth";
+import { reserveStudentAiRequest } from "@/lib/ai-limits";
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,6 +21,11 @@ export async function POST(request: NextRequest) {
         { error: "Phrase must be at least 3 characters" },
         { status: 400 }
       );
+    }
+
+    const quota = await reserveStudentAiRequest(session.user.id, "pronunciation");
+    if (!quota.allowed) {
+      return NextResponse.json({ error: "Daily pronunciation limit reached. Try again tomorrow." }, { status: 429 });
     }
 
     const result = await analyzePronunciation(phrase);

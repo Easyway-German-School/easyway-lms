@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateMissionPracticeFeedback } from "@/lib/ai";
 import { requireAiUser } from "@/lib/ai-guard";
+import { reserveStudentAiRequest } from "@/lib/ai-limits";
 
 export async function POST(req: Request) {
   // A student feature, so any signed-in account — but not the whole internet.
@@ -22,6 +23,11 @@ export async function POST(req: Request) {
         },
         { status: 200 }
       );
+    }
+
+    const quota = await reserveStudentAiRequest(gate.userId, "missionPractice");
+    if (!quota.allowed) {
+      return NextResponse.json({ error: "Daily mission practice limit reached. Try again tomorrow." }, { status: 429 });
     }
 
     const result = await generateMissionPracticeFeedback({

@@ -1390,8 +1390,16 @@ function localProvider(): Provider | null {
 
 function getAIProvider(workload: AiWorkload = "interactive"): Provider {
   const forced = String(process.env.AI_PROVIDER ?? "").toLowerCase();
-  if (forced === "claude" || forced === "ollama" || forced === "deepseek" || forced === "anythingllm" || forced === "mock") {
+  if (forced === "claude" || forced === "groq" || forced === "ollama" || forced === "deepseek" || forced === "anythingllm" || forced === "mock") {
     return forced;
+  }
+
+  // Admin authoring uses the office Ollama runtime when available, then Groq
+  // on Vercel, keeping Claude reserved for student learning.
+  if (workload === "backoffice") {
+    return localProvider() ?? (hasKey(process.env.GROQ_API_KEY) ? "groq" : null) ??
+      (hasKey(process.env.DEEPSEEK_API_KEY) ? "deepseek" : null) ??
+      (hasKey(process.env.ANTHROPIC_API_KEY) ? "claude" : "mock");
   }
 
   /**

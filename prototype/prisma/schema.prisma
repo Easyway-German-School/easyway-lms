@@ -137,6 +137,7 @@ model User {
   gameTurnsWritten  GameTurn[]               @relation("GameTurnAuthor")
   constraintDecks   ConstraintDeck[]
   sentTutorMessages TutorMessage[]
+  studentAiUsage    StudentAiUsage[]
 
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
@@ -247,6 +248,7 @@ model Tenant {
   quizGameAnswers         QuizGameAnswer[]
   tutorMessages           TutorMessage[]
   sessionNotes            SessionNote[]
+  studentAiUsage          StudentAiUsage[]
   gameMatches             GameMatch[]
   gameTurns               GameTurn[]
   constraintDecks         ConstraintDeck[]
@@ -674,6 +676,22 @@ model AiCache {
   updatedAt DateTime @updatedAt
 
   @@index([task, status])
+}
+
+model StudentAiUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  kind      String
+  day       DateTime @db.Date
+  count     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, kind, day])
+  @@index([tenantId, day])
 }
 
 model JourneyEvent {
