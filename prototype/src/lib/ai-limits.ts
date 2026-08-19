@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { currentTenantId } from "@/lib/tenant/context";
 
 export const AI_DAILY_LIMITS = {
   essay: 3,
@@ -13,12 +14,13 @@ export async function reserveStudentAiRequest(
   kind: StudentAiKind,
 ): Promise<{ allowed: true; remaining: number } | { allowed: false; remaining: 0 }> {
   const limit = AI_DAILY_LIMITS[kind];
+  const tenantId = currentTenantId();
   const now = new Date();
   const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
   await prisma.studentAiUsage.upsert({
     where: { userId_kind_day: { userId, kind, day } },
-    create: { userId, kind, day, count: 0 },
+    create: { userId, tenantId, kind, day, count: 0 },
     update: {},
   });
 

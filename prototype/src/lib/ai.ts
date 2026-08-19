@@ -1432,8 +1432,8 @@ function getAIProvider(workload: AiWorkload = "interactive"): Provider {
  * without this the answer is a guess about what the environment looked like
  * that week.
  */
-export function activeModelName(): string {
-  const provider = getAIProvider();
+export function activeModelName(workload: AiWorkload = "interactive"): string {
+  const provider = getAIProvider(workload);
   if (provider === "claude") return CLAUDE_MODEL;
   if (provider === "groq") return GROQ_MODEL;
   if (provider === "ollama" || provider === "anythingllm") return getOllamaModel();
