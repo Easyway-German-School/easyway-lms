@@ -52,9 +52,42 @@ import { useEffect, useState } from "react";
  *   4. A blink, on the same randomised clock the djinn used, so she is never
  *      quite still.
  *
- * `pointAngle` cannot bend a fixed-pose photo's arm the way it swung the
- * djinn's. A small arrow badge appears beside her and rotates to the bearing
- * instead — the tour needs something that points, not specifically an arm.
+ * `pointAngle` first shipped as a small rotating arrow badge next to her,
+ * because a fixed-pose photo cannot bend its arm to an arbitrary bearing the
+ * way the djinn's SVG could. It has since been replaced with an actual
+ * pointing-pose render: the djinn clamped `pointAngle` to -110..110 degrees,
+ * all of it on her right side, so its arm was never actually asked to point
+ * LEFT — only somewhere between up-right and
+ * down-right, so one real photo of her pointing covers every angle the prop
+ * has ever been given. What is lost is per-degree precision — she gestures
+ * generally rightward now rather than at an exact bearing — and what is
+ * gained is that she is visibly pointing rather than standing next to a
+ * floating arrow, which reads better at every size this renders at.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY SOME MOODS GET THEIR OWN PHOTO AND MOST DO NOT
+ * ---------------------------------------------------------------------------
+ * `becca-bust.png` is one expression (warm, closed-mouth-adjacent smile) and
+ * covers five moods — `greeting`, `happy`, `cheerful`, `smiling`, `proud` —
+ * differentiated only by glow colour and the djinn's old accessory
+ * vocabulary, same as the first version of this file. That is a real limit:
+ * it cannot look surprised or sad, because the pixels do not move.
+ *
+ * `thinking`/`curious`, `concerned`/`frowning`/`angry`, and `celebrating`
+ * each got a dedicated render instead — genuinely different faces, not
+ * recoloured versions of the same one. `POSE_IMAGES` below is the mapping,
+ * and it is deliberately many-to-one in places: `frowning` and `angry` share
+ * the concerned photo rather than getting their own, because those are rare
+ * moods and a fourth expression was not worth asking for.
+ *
+ * Every non-base photo skips the blink and cheek overlays. Both are
+ * positioned in `FACE`, measured against `becca-bust.png`'s specific crop —
+ * a different render has a different face position, and guessing coordinates
+ * for five more photos without a way to visually verify the result risks
+ * landing a "blink" on someone's forehead. The photos that need it least are
+ * exactly the ones losing it: each of these already carries a distinct,
+ * deliberate expression, so idle-blink liveliness matters far less here than
+ * it does on the one photo that has to hold a page for minutes.
  *
  * ---------------------------------------------------------------------------
  * WHY THE BUST CROP, EVERYWHERE
@@ -106,11 +139,27 @@ const MOODS: Record<MascotMood, MoodSpec> = {
   celebrating: { glow: "#FFC46B", cheeks: true, sparkle: true, bounce: true },
 };
 
+const BASE_IMAGE = "/mascot/becca-bust.png";
+const POINTING_IMAGE = "/mascot/becca-pointing-right-bust.png";
+
+/** Moods with their own render. Anything not listed here falls back to `BASE_IMAGE`. */
+const POSE_IMAGES: Partial<Record<MascotMood, string>> = {
+  thinking: "/mascot/becca-thinking-bust.png",
+  curious: "/mascot/becca-thinking-bust.png",
+  concerned: "/mascot/becca-concerned-bust.png",
+  frowning: "/mascot/becca-concerned-bust.png",
+  angry: "/mascot/becca-concerned-bust.png",
+  celebrating: "/mascot/becca-celebrating-bust.png",
+};
+
 /**
  * Facial-feature positions, as fractions of `becca-bust.png` — measured
  * against the actual crop (see the verification pass in the commit that
  * added this file) rather than eyeballed against the original studio photo,
  * which is a different crop with different proportions.
+ *
+ * Only ever applied when `BASE_IMAGE` is the one on screen — see the WHY
+ * SOME MOODS GET THEIR OWN PHOTO note above for why the others don't get it.
  */
 const FACE = {
   blink: { left: 31, top: 35.5, width: 32, height: 5 },
@@ -120,7 +169,13 @@ const FACE = {
 
 export default function Mascot({
   mood = "greeting",
-  /** Degrees clockwise from pointing right. A pointer badge rotates to this bearing; `null` hides it. */
+  /**
+   * Degrees clockwise from pointing right. `null` means "not pointing." The
+   * number no longer aims anything — the djinn clamped this to -110..110
+   * (see the module comment), which never actually reached her left side, so
+   * one pointing-pose photo covers the whole range this prop is given. It
+   * now only decides whether that render is shown.
+   */
   pointAngle = null,
   /** A travelling bob, used while the tour moves her between steps. */
   walking = false,
@@ -134,11 +189,16 @@ export default function Mascot({
   const reduceMotion = useReducedMotion();
   const spec = MOODS[mood];
   const pointing = typeof pointAngle === "number";
+  const image = pointing ? POINTING_IMAGE : (POSE_IMAGES[mood] ?? BASE_IMAGE);
+  const usingBaseImage = image === BASE_IMAGE;
 
-  /** Same randomised-clock blink the djinn used — never quite still, never a metronome. */
+  /**
+   * Same randomised-clock blink the djinn used — never quite still, never a
+   * metronome. Only runs against `BASE_IMAGE`; see `FACE`'s comment for why.
+   */
   const [blinking, setBlinking] = useState(false);
   useEffect(() => {
-    if (reduceMotion) return;
+    if (reduceMotion || !usingBaseImage) return;
     let timer: number;
     const schedule = () => {
       timer = window.setTimeout(() => {
@@ -151,7 +211,7 @@ export default function Mascot({
     };
     schedule();
     return () => window.clearTimeout(timer);
-  }, [reduceMotion]);
+  }, [reduceMotion, usingBaseImage]);
 
   /**
    * One float cycle drives both the lift AND the ground shadow, so the two
@@ -199,7 +259,7 @@ export default function Mascot({
 
       <motion.div className="relative h-full w-full" animate={float} style={{ transformOrigin: "50% 100%" }}>
         <img
-          src="/mascot/becca-bust.png"
+          src={image}
           alt="Your EasyWay guide"
           className="h-full w-full select-none"
           style={{
@@ -220,9 +280,13 @@ export default function Mascot({
         {/* Blink: a soft, blurred shadow rather than a hard-edged patch, so
             it reads as closing eyes even without pixel-perfect placement
             against a photo — unlike a drawn face, there is no ground truth
-            to snap to. */}
+            to snap to. `usingBaseImage` never actually goes false while
+            `blinking` is true (the effect that sets it is itself gated the
+            same way), but it's checked again here rather than trusted,
+            since it's cheap and "a blink lands on the wrong photo" is
+            exactly the kind of bug that survives a quick read of the effect. */}
         <AnimatePresence>
-          {blinking && (
+          {blinking && usingBaseImage && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 0.85 }}
@@ -242,9 +306,14 @@ export default function Mascot({
           )}
         </AnimatePresence>
 
-        {/* Cheeks — the djinn's own warm blush, repositioned for the bust crop. */}
+        {/* Cheeks — the djinn's own warm blush, repositioned for the bust
+            crop. Gated to `BASE_IMAGE` for the same reason blink is: `FACE`
+            is only measured against that one photo. `celebrating`, the one
+            mood this actually costs something, already has genuine blush
+            painted into its own render, so nothing is lost there but the
+            animated pulse. */}
         <AnimatePresence>
-          {spec.cheeks && (
+          {spec.cheeks && usingBaseImage && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.5 }} exit={{ opacity: 0 }}>
               <div
                 className="absolute rounded-full blur-[3px]"
@@ -292,42 +361,39 @@ export default function Mascot({
           )}
         </AnimatePresence>
 
-        {/* Sparkles, for the genuinely good moods. */}
+        {/* Sparkles, for the genuinely good moods.
+            An SVG `transform` attribute takes unitless user-space numbers,
+            never a percentage — `translate(4%, 22%)` is not a smaller step,
+            it is invalid, and the browser drops the whole transform. That
+            silently zeroed every sparkle back to `(0, 0)` — stacked in the
+            top-left corner as three overlapping specks — since this was
+            first written, without ever throwing in a way the app would
+            surface. Positioning the wrapper with CSS `left`/`top` instead
+            (percentages there ARE valid) is the same trick blink, cheeks,
+            sweat and steam already use elsewhere in this file — this is the
+            one spot that quietly wasn't following it. */}
         {!reduceMotion && spec.sparkle && (
-          <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+          <>
             {[
-              { x: "4%", y: "22%", d: 0 },
-              { x: "94%", y: "34%", d: 1.4 },
-              { x: "10%", y: "84%", d: 2.6 },
+              { left: "4%", top: "22%", d: 0 },
+              { left: "88%", top: "30%", d: 1.4 },
+              { left: "10%", top: "80%", d: 2.6 },
             ].map((spark) => (
-              <motion.path
-                key={`${spark.x}-${spark.y}`}
-                d="M0 -7l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"
-                transform={`translate(${spark.x}, ${spark.y})`}
-                fill="#FFC46B"
+              <motion.svg
+                key={`${spark.left}-${spark.top}`}
+                viewBox="-8 -8 16 16"
+                className="pointer-events-none absolute h-[14%] w-[14%] overflow-visible"
+                style={{ left: spark.left, top: spark.top }}
                 initial={{ opacity: 0, scale: 0.4 }}
                 animate={{ opacity: [0, 1, 0], scale: [0.4, 1.15, 0.4], rotate: [0, 90] }}
                 transition={{ duration: 3.4, repeat: Infinity, delay: spark.d, ease: "easeInOut" }}
-              />
+              >
+                <path d="M0 -7l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="#FFC46B" />
+              </motion.svg>
             ))}
-          </svg>
+          </>
         )}
 
-        {/* The pointer badge — what replaced bending an arm. Rotates to the
-            bearing the tour computed, bobbing gently so it reads as "look
-            there" rather than a static icon. */}
-        {pointing && (
-          <motion.div
-            className="absolute grid place-items-center rounded-full bg-white shadow-lg"
-            style={{ right: "-8%", top: "42%", width: "24%", height: "24%" }}
-            animate={reduceMotion ? { rotate: pointAngle! } : { rotate: pointAngle!, x: [0, 3, 0], y: [0, -2, 0] }}
-            transition={{ duration: 1.1, repeat: reduceMotion ? 0 : Infinity, ease: "easeInOut" }}
-          >
-            <svg viewBox="0 0 24 24" className="h-3/5 w-3/5" fill="none">
-              <path d="M4 12h14M13 6l6 6-6 6" stroke="#FF6600" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </motion.div>
-        )}
       </motion.div>
     </div>
   );
