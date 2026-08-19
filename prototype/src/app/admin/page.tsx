@@ -71,6 +71,21 @@ type Overview = {
     pendingExamRegistrations: number;
     ungradedSubmissions: number;
     leadsAwaitingInvite: number;
+    // A different question from `atRisk` above — engagement/dropout risk,
+    // not payment. See lib/student-risk.ts.
+    churnRiskCount: number;
+    churnRiskRule: string;
+    churnRiskIds: string[];
+    churnRisk: Array<{
+      id: string;
+      name: string;
+      email: string;
+      level: string;
+      branch: string;
+      branchId: string | null;
+      reason: string;
+      score: number;
+    }>;
   };
   health: {
     emailProvider: { name: string; configured: boolean };
@@ -524,6 +539,17 @@ export default function AdminHomePage() {
                 // somebody pays while this page is open the roster shows them
                 // as settled rather than the two lists quietly disagreeing.
                 href: focusHref("behind_tuition"),
+              },
+              {
+                label: "Going quiet",
+                value: data?.actionQueue.churnRiskCount ?? 0,
+                hint: "Attendance or activity has dropped",
+                // A different rule from "Behind on tuition" above — this one
+                // catches a fully-paid student who has stopped showing up,
+                // not somebody who owes money. See lib/student-risk.ts. No
+                // finance-page fallback (unlike focusHref) — the fee ledger
+                // has no equivalent view for this rule.
+                href: to("/admin/students?focus=churn_risk"),
               },
               {
                 label: "Exam registrations pending",

@@ -7,6 +7,7 @@ import {
   computeAll,
   summariseReceivables,
 } from "@/lib/finance/receivables";
+import { computeChurnRisk, RECENT_WINDOW_DAYS } from "@/lib/student-risk";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -36,6 +37,7 @@ export async function GET() {
   const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
   const thirtyDaysAgo = new Date(now.getTime() - 30 * DAY);
+  const riskWindowStart = new Date(now.getTime() - RECENT_WINDOW_DAYS * DAY);
 
   const [
     students,
@@ -64,6 +66,11 @@ export async function GET() {
         branch: { select: { id: true, name: true } },
         user: { select: { name: true, email: true } },
         payments: { where: { status: "completed" }, select: { amount: true } },
+        // Churn-risk inputs — see lib/student-risk.ts.
+        notStartedCount: true,
+        attendances: { where: { date: { gte: riskWindowStart } }, select: { present: true, status: true } },
+        videoProgress: { orderBy: { updatedAt: "desc" }, take: 1, select: { updatedAt: true } },
+        journeyEvents: { orderBy: { occurredAt: "desc" }, take: 1, select: { occurredAt: true } },
       },
       take: 5000,
     }).catch(() => []),
@@ -157,6 +164,49 @@ export async function GET() {
       paid: row.paid,
       owed: row.owedOnDeposit,
       daysEnrolled: row.daysEnrolled,
+    }));
+
+  /**
+   * CHURN RISK — a different question from `atRisk` above.
+   *
+   * `atRisk` means one specific thing: behind on tuition. A fully-paid
+   * student who has gone quiet for three weeks is invisible to it. This is
+   * the other signal — engagement/dropout risk — kept under its own name
+   * ("churn risk" / "Going quiet") everywhere so the two are never confused.
+   * See lib/student-risk.ts.
+   *
+   * `finance` and `students` are the same length in the same order (`finance`
+   * is `students.map(...)` via computeAll), so this zips by index rather than
+   * a second pass over the database.
+   */
+  const churnRisk = students
+    .map((student, i) => {
+      const financeRow = finance[i];
+      const risk = computeChurnRisk(
+        {
+          id: student.id,
+          createdAt: student.createdAt,
+          notStartedCount: student.notStartedCount,
+          recentAttendance: student.attendances,
+          lastVideoActivityAt: student.videoProgress[0]?.updatedAt ?? null,
+          lastJourneyEventAt: student.journeyEvents[0]?.occurredAt ?? null,
+          behindOnTuition: financeRow.behindOnTuition,
+        },
+        now,
+      );
+      return { financeRow, risk };
+    })
+    .filter(({ risk }) => risk.level === "high" || risk.level === "critical")
+    .sort((a, b) => b.risk.score - a.risk.score)
+    .map(({ financeRow, risk }) => ({
+      id: financeRow.id,
+      name: financeRow.name,
+      email: financeRow.email,
+      level: financeRow.level,
+      branch: financeRow.branch,
+      branchId: financeRow.branchId,
+      reason: risk.reasons[0] ?? "Showing signs of disengaging",
+      score: risk.score,
     }));
 
   // ---- Revenue trend ---------------------------------------------------
@@ -381,6 +431,15 @@ export async function GET() {
       pendingExamRegistrations,
       ungradedSubmissions,
       leadsAwaitingInvite: leadCounts.new ?? 0,
+
+      /**
+       * Not financial data, so unlike `atRisk` this needs no `canSeeMoney`
+       * strip — a Secretary sees exactly the same row a bursar would.
+       */
+      churnRiskCount: churnRisk.length,
+      churnRiskRule: "High or critical churn risk — attendance, activity, or repeated \"not yet\" answers",
+      churnRiskIds: churnRisk.map((student) => student.id),
+      churnRisk: churnRisk.slice(0, 8),
     },
 
     health: {

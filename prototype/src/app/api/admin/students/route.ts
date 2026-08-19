@@ -9,6 +9,7 @@ import {
   focusPreset,
   type StudentFinance,
 } from "@/lib/finance/receivables";
+import { computeChurnRisk, churnRiskPreset, RECENT_WINDOW_DAYS } from "@/lib/student-risk";
 import { setStudentTutor } from "@/lib/tutor-pairing";
 import { isOnlineBranch } from "@/lib/online-branch";
 
@@ -44,12 +45,18 @@ export async function GET(request: Request) {
    * escape hatch for a tile that already knows precisely who it meant.
    */
   const focus = focusPreset(url.searchParams.get("focus"));
+  /**
+   * A second, independent preset namespace — churn risk isn't a financial
+   * rule, so it doesn't live in FOCUS_PRESETS. The two ids never collide, so
+   * this only ever fires when `focus` (finance) came back empty.
+   */
+  const riskFocus = focus ? null : churnRiskPreset(url.searchParams.get("focus"));
   const agingBucket = url.searchParams.get("agingBucket");
   const idsParam = url.searchParams.get("ids");
   const ids = idsParam
     ? new Set(idsParam.split(",").map((id) => id.trim()).filter(Boolean))
     : null;
-  const hasDerivedFilter = Boolean(focus || agingBucket || ids);
+  const hasDerivedFilter = Boolean(focus || riskFocus || agingBucket || ids);
 
   const whereClause: any = {};
   if (branchId) whereClause.branchId = branchId;
@@ -97,6 +104,9 @@ export async function GET(request: Request) {
     whereClause.tutorId = tutorId;
   }
 
+  const now = new Date();
+  const riskWindowStart = new Date(now.getTime() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
   const include = {
     user: true,
     branch: true,
@@ -107,9 +117,24 @@ export async function GET(request: Request) {
     invoices: {
       include: { payments: true },
     },
+    // Churn-risk inputs — see lib/student-risk.ts. Kept lightweight: a bounded
+    // window for attendance, and only the single most recent row for the two
+    // recency signals.
+    attendances: {
+      where: { date: { gte: riskWindowStart } },
+      select: { present: true, status: true },
+    },
+    videoProgress: {
+      orderBy: { updatedAt: "desc" as const },
+      take: 1,
+      select: { updatedAt: true },
+    },
+    journeyEvents: {
+      orderBy: { occurredAt: "desc" as const },
+      take: 1,
+      select: { occurredAt: true },
+    },
   };
-
-  const now = new Date();
 
   /**
    * A derived filter cannot be pushed into SQL, so the page has to be cut after
@@ -126,9 +151,8 @@ export async function GET(request: Request) {
   });
 
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const withFinance = rawStudents.map((student) => ({
-    student,
-    finance: computeStudentFinance(
+  const withFinance = rawStudents.map((student) => {
+    const finance = computeStudentFinance(
       {
         id: student.id,
         level: student.level,
@@ -140,9 +164,21 @@ export async function GET(request: Request) {
         payments: student.payments,
       },
       now,
-    ),
-    raw: student,
-  }));
+    );
+    const risk = computeChurnRisk(
+      {
+        id: student.id,
+        createdAt: student.createdAt,
+        notStartedCount: student.notStartedCount,
+        recentAttendance: student.attendances,
+        lastVideoActivityAt: student.videoProgress[0]?.updatedAt ?? null,
+        lastJourneyEventAt: student.journeyEvents[0]?.occurredAt ?? null,
+        behindOnTuition: finance.behindOnTuition,
+      },
+      now,
+    );
+    return { student, finance, risk, raw: student };
+  });
 
   let matched = withFinance;
   if (focus) {
@@ -158,6 +194,9 @@ export async function GET(request: Request) {
         payments: entry.raw.payments,
       }),
     );
+  }
+  if (riskFocus) {
+    matched = matched.filter((entry) => riskFocus.matches(entry.risk));
   }
   if (agingBucket) {
     matched = matched.filter((entry) => entry.finance.owed > 0 && entry.finance.agingBucket === agingBucket);
@@ -185,9 +224,11 @@ export async function GET(request: Request) {
    */
   const canSeeMoney = gate.admin.can("payments");
 
-  const enriched = pageRows.map(({ student, finance }) => ({
+  const enriched = pageRows.map(({ student, finance, risk }) => ({
     ...student,
     _finance: canSeeMoney ? finance : stripMoney(finance),
+    // Not financial data, so it isn't gated behind the `payments` capability.
+    _risk: risk,
     // Kept under its old name so nothing that reads it breaks. It now comes off
     // the tuition fee rather than the sum of raised invoices: most students who
     // owe the school money have no Invoice row at all, so the old figure read
@@ -206,10 +247,14 @@ export async function GET(request: Request) {
     totalCount,
     canSeeMoney,
     // Echoed so the page can title and explain itself without keeping its own
-    // copy of the wording — one edit to the preset changes both ends.
+    // copy of the wording — one edit to the preset changes both ends. Finance
+    // and churn-risk presets share this one slot since a request only ever
+    // matches one or the other.
     focus: focus
       ? { id: focus.id, label: focus.label, hint: focus.hint, tone: focus.tone }
-      : null,
+      : riskFocus
+        ? { id: riskFocus.id, label: riskFocus.label, hint: riskFocus.hint, tone: riskFocus.tone }
+        : null,
     agingBucket: agingBucket
       ? AGING_BUCKETS.find((bucket) => bucket.id === agingBucket) ?? null
       : null,

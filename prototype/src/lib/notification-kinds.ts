@@ -51,6 +51,8 @@ export const KIND = {
   gameInvite: "game.invite",
   /** A class recording uploaded but the bucket won't serve it back — admins need to know before a student does. */
   recordingFailed: "recording.failed",
+  /** One or more of a tutor's students look like they're drifting away — see src/lib/student-risk.ts. */
+  studentAtRisk: "student.at_risk",
   general: "general",
 } as const;
 

@@ -90,6 +90,19 @@ async function handleGET(request: NextRequest) {
     }),
   );
 
+  /**
+   * A tutor's students going quiet — low attendance, no portal activity, or
+   * repeated "not yet" answers — used to be invisible until somebody in the
+   * office happened to notice. This flags it to the tutor directly, at most
+   * once a week per tutor (see the dedupeKey in notifyTutorsOfChurnRisk).
+   */
+  results.push(
+    await run("churn-risk", async () => {
+      const { notifyTutorsOfChurnRisk } = await import("@/lib/student-risk");
+      return notifyTutorsOfChurnRisk();
+    }),
+  );
+
   results.push(
     await run("recording-reconcile", async () => {
       const { reconcileRecordings } = await import("@/lib/class-recorder");
