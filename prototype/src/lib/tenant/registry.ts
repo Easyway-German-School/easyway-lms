@@ -180,6 +180,7 @@ export const TENANT_OWNED_MODELS = [
    */
   "TutorMessage",
   "SessionNote",
+  "StudentAiUsage",
 ] as const;
 
 /**

@@ -28,9 +28,15 @@ export default function AiUsagePage() {
     setLoading(true);
     try {
       const response = await fetch("/api/admin/ai-usage", { cache: "no-store" });
-      const data = await response.json();
+      const text = await response.text();
+      let data: { error?: string } & Partial<Usage> = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(`AI usage service returned an invalid response (${response.status}).`);
+      }
       if (!response.ok) throw new Error(data.error || "Could not load AI usage.");
-      setUsage(data);
+      setUsage(data as Usage);
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load AI usage.");
