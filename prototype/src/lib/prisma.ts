@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { createGuardExtension } from "@/lib/prisma-guard";
 import { createTenantExtension } from "@/lib/tenant/extension";
 import { currentScope } from "@/lib/tenant/context";
+import { createColdStartRetryExtension } from "@/lib/prisma-cold-start-retry";
 
 const globalForPrisma = global as unknown as {
   prismaBase: PrismaClient | undefined;
@@ -21,6 +22,15 @@ function buildGuarded() {
   globalForPrisma.prismaBase = base;
 
   /**
+   * OUTERMOST, so it covers every query below it too: the guard, the tenant
+   * filter, all of it. Neon suspends this database after a few idle minutes,
+   * and the first query to wake it can hit a closed door before the compute
+   * has finished starting — see src/lib/prisma-cold-start-retry.ts for why a
+   * short retry here, rather than a keep-alive ping, is the fix.
+   */
+  const woken = base.$extends(createColdStartRetryExtension());
+
+  /**
    * Every query in the application goes through the guard.
    *
    * Wiring it here rather than at the call sites is the whole point. A rule
@@ -28,7 +38,7 @@ function buildGuarded() {
    * somebody adds in a hurry, and the routes most likely to be written in a
    * hurry are the ones that delete things. See src/lib/prisma-guard.ts.
    */
-  return base.$extends(createGuardExtension(base));
+  return woken.$extends(createGuardExtension(base));
 }
 
 function buildClient() {
