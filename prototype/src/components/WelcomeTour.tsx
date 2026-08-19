@@ -507,16 +507,30 @@ export default function WelcomeTour() {
     }
   }
 
-  // The pointing hand sits at roughly 88% across and 55% down the artwork.
-  const handX = guideLeft + guideSize * 0.88;
-  const handY = guideTop + guideSize * 0.55;
+  // Becca now has a real photo for each arm, so which one shows has to match
+  // which side of her the target is actually on — not just "pointing" in the
+  // abstract. Decided off the target's position relative to her CENTRE,
+  // before the hand position (which depends on the decision) is picked.
+  const guideCenterX = guideLeft + guideSize / 2;
   const targetX = hole ? hole.left + hole.width / 2 : 0;
   const targetY = hole ? hole.top + hole.height / 2 : 0;
+  const pointingLeft = hole ? targetX < guideCenterX : false;
 
-  const angle = hole ? (Math.atan2(targetY - handY, targetX - handX) * 180) / Math.PI : 0;
-  // The arm is drawn pointing right and swings about the shoulder; clamped so
-  // it never folds back through the body.
-  const armAngle = Math.max(-110, Math.min(110, angle));
+  // The pointing hand sits at roughly 88% across (right-pointing photo) or
+  // 12% across (mirrored, left-pointing photo), 55% down.
+  const handX = guideLeft + guideSize * (pointingLeft ? 0.12 : 0.88);
+  const handY = guideTop + guideSize * 0.55;
+
+  const rawAngle = hole ? (Math.atan2(targetY - handY, targetX - handX) * 180) / Math.PI : 0;
+  // Mascot picks its left- vs right-pointing photo off whether |pointAngle|
+  // passes 90°. That has to agree with `pointingLeft` above rather than being
+  // left to the raw arctangent, which can land under 90° even when the
+  // target is on the left, if it is only slightly left and mostly above or
+  // below — the photo would then point the wrong way while the arrow, drawn
+  // from the correct hand, still started on the correct side.
+  const armAngle = pointingLeft
+    ? Math.sign(rawAngle || 1) * Math.max(90.01, Math.min(110, Math.abs(rawAngle)))
+    : Math.max(-90, Math.min(90, rawAngle));
 
   return (
     <AnimatePresence>
@@ -620,7 +634,12 @@ export default function WelcomeTour() {
             >
               <Mascot
                 mood={isLast ? "celebrating" : walking ? "happy" : "greeting"}
-                pointAngle={armAngle}
+                // Only the steps with a real spotlight (`hole`) should show her
+                // pointing. The welcome and closing steps have no target, and
+                // `armAngle` is a meaningless 0 there — passing it regardless
+                // used to put her in the pointing pose even on the Hallo
+                // screen, where she is meant to be waving.
+                pointAngle={hole ? armAngle : null}
                 walking={walking}
                 className="h-full w-full drop-shadow-2xl"
               />

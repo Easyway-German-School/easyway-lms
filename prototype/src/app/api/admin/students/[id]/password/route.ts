@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import { sendStudentPasswordResetEmail } from "@/lib/student-password-reset-email";
+import { generateTempPassword } from "@/lib/student-password";
 
 /**
  * The office's fast path for a locked-out student, called in and unable to
@@ -19,15 +20,6 @@ import { sendStudentPasswordResetEmail } from "@/lib/student-password-reset-emai
 export const dynamic = "force-dynamic";
 
 const MIN_PASSWORD = 8;
-const RANDOM_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-
-function generatePassword(length = 12): string {
-  let out = "";
-  for (let i = 0; i < length; i++) {
-    out += RANDOM_CHARS[Math.floor(Math.random() * RANDOM_CHARS.length)];
-  }
-  return out;
-}
 
 function badPassword(password: string): string | null {
   if (password.length < MIN_PASSWORD) return `Password must be at least ${MIN_PASSWORD} characters`;
@@ -53,7 +45,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   });
   if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
 
-  const password = custom ?? generatePassword();
+  const password = custom ?? generateTempPassword();
   const hash = await bcryptjs.hash(password, 10);
 
   await prisma.user.update({

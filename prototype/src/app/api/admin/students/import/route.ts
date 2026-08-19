@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { assignStudentCode } from "@/lib/student-code";
 import { LEVELS } from "@/lib/levels";
 import { bestMatch, matchBatch, matchLevel, matchSessionSlot } from "@/lib/fuzzy-match";
+import { generateTempPassword } from "@/lib/student-password";
 
 import { requireCapability } from "@/lib/admin-roles";
 export const dynamic = "force-dynamic";
@@ -40,11 +41,6 @@ function money(value: string): number {
   // Offices type "150,000", "₦150000" and "150000.00". All mean the same thing.
   const digits = value.replace(/[^0-9.]/g, "");
   return Math.max(0, Math.round(Number(digits) || 0));
-}
-
-/** Readable, sayable-over-the-phone temporary password. */
-function tempPassword(): string {
-  return `Easyway${Math.floor(1000 + Math.random() * 9000)}!`;
 }
 
 export async function POST(request: NextRequest) {
@@ -184,7 +180,7 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      const password = tempPassword();
+      const password = generateTempPassword();
 
       try {
         const user = await prisma.user.create({
@@ -211,7 +207,7 @@ export async function POST(request: NextRequest) {
         const student = await prisma.student.findUnique({ where: { userId: user.id }, select: { id: true } });
         let studentCode: string | null = null;
         if (student) {
-          studentCode = await assignStudentCode(student.id, { level, batch });
+          studentCode = await assignStudentCode(student.id, { level, batch, branch });
 
           // Money already collected, recorded so the paywall does not lock a
           // student out of a class they have paid for.

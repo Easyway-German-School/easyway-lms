@@ -148,6 +148,7 @@ function StudentsRoster() {
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newLevel, setNewLevel] = useState("A1");
   const [newBranchId, setNewBranchId] = useState<string>("");
@@ -158,7 +159,14 @@ function StudentsRoster() {
   const [newDeliveryMode, setNewDeliveryMode] = useState("physical");
   const [studentError, setStudentError] = useState("");
   /** Shown once, right after a manual add, so the admin has something to copy. */
-  const [savedCredentials, setSavedCredentials] = useState<{ name: string; email: string; password: string } | null>(null);
+  const [savedCredentials, setSavedCredentials] = useState<{
+    name: string;
+    email: string;
+    password: string;
+    studentCode?: string | null;
+  } | null>(null);
+  /** Whether the "send their login by email?" prompt has been answered yet, for the credentials just created. */
+  const [sendCredsState, setSendCredsState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   /** Which row's tutor select is mid-save, so it can be disabled while it is. */
   const [savingTutorFor, setSavingTutorFor] = useState("");
   const [selectedAdmission, setSelectedAdmission] = useState<AdmissionData>(null);
@@ -238,6 +246,7 @@ function StudentsRoster() {
   async function handleSaveStudent() {
     setStudentError("");
     setSavedCredentials(null);
+    setSendCredsState("idle");
     if (!newName.trim() || !newEmail.trim()) {
       setStudentError("Name and email are required.");
       return;
@@ -247,6 +256,7 @@ function StudentsRoster() {
     const payload = {
       name: newName.trim(),
       email: newEmail.trim().toLowerCase(),
+      phone: newPhone.trim(),
       level: newLevel,
       branchId: newBranchId || null,
       tutorId: newTutorId || null,
@@ -261,18 +271,18 @@ function StudentsRoster() {
 
     if (editingStudentId) {
       payload.studentId = editingStudentId;
+      // A password left blank here means "leave it alone" — only new students
+      // require one; editing an existing one must never silently reset it.
+      if (newPassword.trim()) payload.password = newPassword.trim();
       res = await fetch("/api/admin/students", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
     } else {
-      if (!newPassword.trim()) {
-        setStudentError("Password is required for new students.");
-        return;
-      }
-
-      payload.password = newPassword;
+      // A blank password is fine on create too — the server mints a readable
+      // temporary one and hands it back, same as the CSV and paste-many tools.
+      if (newPassword.trim()) payload.password = newPassword.trim();
       res = await fetch("/api/admin/students", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -287,12 +297,19 @@ function StudentsRoster() {
     }
 
     if (wasNewStudent) {
-      setSavedCredentials({ name: newName.trim(), email: newEmail.trim().toLowerCase(), password: newPassword });
+      const data = await res.json().catch(() => ({}));
+      setSavedCredentials({
+        name: newName.trim(),
+        email: newEmail.trim().toLowerCase(),
+        password: typeof data?.password === "string" ? data.password : newPassword.trim(),
+        studentCode: data?.studentCode ?? null,
+      });
     }
 
     setEditingStudentId(null);
     setNewName("");
     setNewEmail("");
+    setNewPhone("");
     setNewPassword("");
     setNewLevel("A1");
     setNewBranchId("");
@@ -301,6 +318,24 @@ function StudentsRoster() {
     setNewDeliveryMode("physical");
     setShowStudentForm(false);
     await loadStudents();
+  }
+
+  /** The "send it now?" action behind the credentials banner — single-add's version of the bulk tools' prompt. */
+  async function sendSavedCredentials() {
+    if (!savedCredentials) return;
+    setSendCredsState("sending");
+    try {
+      const res = await fetch("/api/admin/students/send-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ students: [savedCredentials] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const ok = res.ok && data?.results?.[0]?.emailed;
+      setSendCredsState(ok ? "sent" : "error");
+    } catch {
+      setSendCredsState("error");
+    }
   }
 
   /**
@@ -354,6 +389,7 @@ function StudentsRoster() {
     setEditingStudentId(student.id);
     setNewName(student.user.name || "");
     setNewEmail(student.user.email);
+    setNewPhone(typeof (student.admission as AdmissionData)?.phone === "string" ? String((student.admission as AdmissionData)?.phone) : "");
     setNewPassword("");
     setNewLevel(student.level || "A1");
     setNewBranchId(student.branch?.id || "");
@@ -371,6 +407,7 @@ function StudentsRoster() {
     setEditingStudentId(null);
     setNewName("");
     setNewEmail("");
+    setNewPhone("");
     setNewPassword("");
     setNewLevel("A1");
     setNewBranchId("");
@@ -748,19 +785,55 @@ function StudentsRoster() {
         <BulkStudentAdd branches={branches} onImported={loadStudents} />
 
         {savedCredentials ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-emerald-300 bg-emerald-50 px-6 py-4 text-sm text-emerald-800">
-            <p>
-              <strong>{savedCredentials.name}</strong> was added. Login — email:{" "}
-              <span className="font-mono">{savedCredentials.email}</span>, password:{" "}
-              <span className="font-mono">{savedCredentials.password}</span>
-            </p>
-            <button
-              type="button"
-              onClick={() => setSavedCredentials(null)}
-              className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-semibold text-emerald-800"
-            >
-              Dismiss
-            </button>
+          <div className="space-y-3 rounded-3xl border border-emerald-300 bg-emerald-50 px-6 py-4 text-sm text-emerald-800">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p>
+                <strong>{savedCredentials.name}</strong> was added
+                {savedCredentials.studentCode ? ` — ${savedCredentials.studentCode}` : ""}. Login — email:{" "}
+                <span className="font-mono">{savedCredentials.email}</span>, password:{" "}
+                <span className="font-mono">{savedCredentials.password}</span>
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSavedCredentials(null);
+                  setSendCredsState("idle");
+                }}
+                className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-semibold text-emerald-800"
+              >
+                Dismiss
+              </button>
+            </div>
+            {/* The credentials stay on screen either way — this is only about
+                whether the student also gets them by email right now. */}
+            <div className="flex flex-wrap items-center gap-3 border-t border-emerald-200 pt-3">
+              {sendCredsState === "sent" ? (
+                <p className="font-semibold">Their login details have been emailed to them.</p>
+              ) : sendCredsState === "error" ? (
+                <>
+                  <p className="font-semibold text-amber-700">Could not send that email — try again, or hand the login over directly.</p>
+                  <button
+                    type="button"
+                    onClick={() => void sendSavedCredentials()}
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
+                  >
+                    Retry
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p>Send {savedCredentials.name.split(" ")[0]} their login details by email now?</p>
+                  <button
+                    type="button"
+                    disabled={sendCredsState === "sending"}
+                    onClick={() => void sendSavedCredentials()}
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                  >
+                    {sendCredsState === "sending" ? "Sending…" : "Yes, email it now"}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         ) : null}
 
@@ -784,12 +857,29 @@ function StudentsRoster() {
                 />
               </label>
               <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Password</span>
-                <PasswordInput
-                                    value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
+                <span className="font-semibold text-[var(--muted)]">Phone</span>
+                <input
+                  value={newPhone}
+                  onChange={(event) => setNewPhone(event.target.value)}
+                  placeholder="e.g. 0812 345 6789"
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 />
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">
+                  {editingStudentId ? "New password" : "Password"}
+                </span>
+                <PasswordInput
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder={editingStudentId ? "Leave blank to keep the current one" : "Leave blank to auto-generate one"}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  {editingStudentId
+                    ? "Only set this if you want to change their password — it is left alone otherwise."
+                    : "Leave this empty and a readable temporary password is generated automatically."}
+                </span>
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Level</span>

@@ -402,6 +402,7 @@ export async function POST(request: NextRequest) {
           studentCode = await assignStudentCode(created.id, {
             level: normalizedLevel,
             batch: (normalizedAdmission as any)?.batch,
+            branch: branchRow,
           });
           // Close the enquiry this signup came from, so the office stops
           // chasing someone who has already enrolled.

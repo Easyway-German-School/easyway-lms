@@ -23,6 +23,7 @@ type ImportResult = {
   corrections?: string[];
   password?: string;
   studentCode?: string | null;
+  emailed?: boolean;
 };
 
 const TEMPLATE_HEADERS = ["name", "email", "phone", "branch", "level", "batch", "session", "amount_paid"];
@@ -97,6 +98,7 @@ export default function ImportStudentsPage() {
   const [imported, setImported] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [sendState, setSendState] = useState<"idle" | "sending" | "done">("idle");
 
   const rows = useMemo(() => parseCsv(csv), [csv]);
 
@@ -114,11 +116,37 @@ export default function ImportStudentsPage() {
       setResults(payload.results || []);
       setCounts(payload.counts || {});
       setPreviewed(true);
-      if (!dryRun) setImported(true);
+      if (!dryRun) {
+        setImported(true);
+        setSendState("idle");
+      }
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Import failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** The CSV importer's version of the "send it now?" prompt. */
+  async function sendLogins() {
+    const toSend = results.filter((r) => r.status === "created" && r.password);
+    if (toSend.length === 0) return;
+    setSendState("sending");
+    try {
+      const response = await fetch("/api/admin/students/send-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          students: toSend.map((r) => ({ name: r.name, email: r.email, password: r.password, studentCode: r.studentCode })),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      const emailedByAddress = new Set(
+        (data.results ?? []).filter((r: { email: string; emailed: boolean }) => r.emailed).map((r: { email: string }) => r.email),
+      );
+      setResults((rows) => rows.map((row) => (emailedByAddress.has(row.email) ? { ...row, emailed: true } : row)));
+    } finally {
+      setSendState("done");
     }
   }
 
@@ -274,12 +302,30 @@ export default function ImportStudentsPage() {
                   Temporary passwords are shown once and never stored in readable form. Students should change theirs on
                   first sign-in.
                 </p>
-                <button
-                  onClick={downloadPasswords}
-                  className="mt-3 rounded-full bg-emerald-600 px-5 py-2 text-xs font-semibold text-white"
-                >
-                  Download logins CSV
-                </button>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={downloadPasswords}
+                    className="rounded-full bg-emerald-600 px-5 py-2 text-xs font-semibold text-white"
+                  >
+                    Download logins CSV
+                  </button>
+                  <button
+                    onClick={() => void sendLogins()}
+                    disabled={sendState === "sending"}
+                    className="rounded-full border border-emerald-600 px-5 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                  >
+                    {sendState === "sending"
+                      ? "Sending…"
+                      : sendState === "done"
+                        ? "Send login emails again"
+                        : "Send everyone their login emails now?"}
+                  </button>
+                  {sendState === "done" ? (
+                    <span className="text-xs text-emerald-800">
+                      {results.filter((r) => r.status === "created" && r.emailed).length} of {counts.created ?? 0} emailed.
+                    </span>
+                  ) : null}
+                </div>
               </div>
             ) : null}
 

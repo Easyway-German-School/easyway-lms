@@ -35,6 +35,7 @@ type ResultRow = {
   note: string;
   password?: string;
   studentCode?: string | null;
+  emailed?: boolean;
 };
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -103,6 +104,7 @@ export default function BulkStudentAdd({
   const [preview, setPreview] = useState<ResultRow[] | null>(null);
   const [created, setCreated] = useState<ResultRow[] | null>(null);
   const [error, setError] = useState("");
+  const [sendState, setSendState] = useState<"idle" | "sending" | "done">("idle");
 
   const parsed = useMemo(() => {
     return text
@@ -167,12 +169,37 @@ export default function BulkStudentAdd({
       } else {
         setCreated(data.results ?? []);
         setPreview(null);
+        setSendState("idle");
         onImported?.();
       }
     } catch {
       setError("Network problem — nothing was imported.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** The batch version of the single-add form's "send it now?" prompt. */
+  async function sendLogins() {
+    if (!created) return;
+    const toSend = created.filter((row) => row.status === "created" && row.password);
+    if (toSend.length === 0) return;
+    setSendState("sending");
+    try {
+      const response = await fetch("/api/admin/students/send-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          students: toSend.map((row) => ({ name: row.name, email: row.email, password: row.password, studentCode: row.studentCode })),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      const emailedByAddress = new Set(
+        (data.results ?? []).filter((r: { email: string; emailed: boolean }) => r.emailed).map((r: { email: string }) => r.email),
+      );
+      setCreated((rows) => rows?.map((row) => (emailedByAddress.has(row.email) ? { ...row, emailed: true } : row)) ?? rows);
+    } finally {
+      setSendState("done");
     }
   }
 
@@ -266,6 +293,17 @@ export default function BulkStudentAdd({
               Download logins CSV
             </button>
             <button
+              onClick={() => void sendLogins()}
+              disabled={madeCount === 0 || sendState === "sending"}
+              className="rounded-full border border-[var(--accent)] px-5 py-2.5 text-sm font-bold text-[var(--accent)] transition hover:bg-[var(--accent)]/10 disabled:opacity-40"
+            >
+              {sendState === "sending"
+                ? "Sending…"
+                : sendState === "done"
+                  ? "Send login emails again"
+                  : "Send everyone their login emails now?"}
+            </button>
+            <button
               onClick={reset}
               className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
             >
@@ -280,6 +318,7 @@ export default function BulkStudentAdd({
                   <th className="px-3 py-2">Student</th>
                   <th className="px-3 py-2">Student ID</th>
                   <th className="px-3 py-2">Result</th>
+                  <th className="px-3 py-2">Email</th>
                 </tr>
               </thead>
               <tbody>
@@ -302,6 +341,19 @@ export default function BulkStudentAdd({
                       >
                         {row.note}
                       </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {row.status !== "created" ? (
+                        "—"
+                      ) : row.emailed ? (
+                        <span className="text-emerald-600">Sent</span>
+                      ) : sendState === "sending" ? (
+                        <span className="text-[var(--muted)]">Sending…</span>
+                      ) : sendState === "done" ? (
+                        <span className="text-red-600">Not sent</span>
+                      ) : (
+                        <span className="text-[var(--muted)]">Not sent yet</span>
+                      )}
                     </td>
                   </tr>
                 ))}

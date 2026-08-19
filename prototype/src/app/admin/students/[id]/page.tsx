@@ -16,6 +16,7 @@ import {
   LockIcon,
   MailIcon,
   MapIcon,
+  PencilIcon,
   PulseIcon,
   ResultsIcon,
   ShieldIcon,
@@ -397,6 +398,54 @@ export default function StudentDossierPage() {
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetResult, setResetResult] = useState<{ password: string; email: string; emailed: boolean } | null>(null);
 
+  /**
+   * Editing is deliberately behind its own modal rather than inline fields —
+   * this file is read from during a live phone call, and a value that changes
+   * the moment someone glances at it is how a fat-finger becomes a wrong
+   * timetable. Opening "Edit details" is a decision; reading the page is not.
+   */
+  const [editOpen, setEditOpen] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    level: "A1",
+    sessionSlot: "morning",
+    classType: "group",
+    deliveryMode: "physical",
+    branchId: "",
+    status: "active",
+    pathway: "",
+  });
+
+  useEffect(() => {
+    fetch("/api/admin/branches")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload) => setBranches(payload?.branches || []))
+      .catch(() => {});
+  }, []);
+
+  function openEdit() {
+    if (!data) return;
+    setEditForm({
+      name: data.identity.name || "",
+      email: data.identity.email || "",
+      phone: data.identity.phone || "",
+      level: data.identity.level || "A1",
+      sessionSlot: data.identity.sessionSlot || "morning",
+      classType: data.identity.classType || "group",
+      deliveryMode: data.identity.deliveryMode === "hybrid" ? "hybrid" : "physical",
+      branchId: data.identity.branch?.id || "",
+      status: data.identity.status || "active",
+      pathway: data.identity.pathway || "",
+    });
+    setEditError(null);
+    setEditOpen(true);
+  }
+
   const load = useCallback(
     async (showSpinner = true) => {
       if (!id) return;
@@ -416,6 +465,27 @@ export default function StudentDossierPage() {
     },
     [id],
   );
+
+  const saveEdit = useCallback(async () => {
+    if (!id) return;
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      const response = await fetch("/api/admin/students", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: id, ...editForm, branchId: editForm.branchId || null }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Could not save these changes");
+      setEditOpen(false);
+      void load(false);
+    } catch (saveErr) {
+      setEditError(saveErr instanceof Error ? saveErr.message : "Could not save these changes");
+    } finally {
+      setEditBusy(false);
+    }
+  }, [id, editForm, load]);
 
   const resetPassword = useCallback(async () => {
     if (!id) return;
@@ -521,6 +591,14 @@ export default function StudentDossierPage() {
               className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-[var(--surface)]"
             >
               Refresh
+            </button>
+            <button
+              type="button"
+              onClick={openEdit}
+              className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+            >
+              <PencilIcon className="h-3.5 w-3.5" />
+              Edit details
             </button>
           </div>
         </div>
@@ -1128,6 +1206,155 @@ export default function StudentDossierPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {editOpen && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
+          onClick={() => !editBusy && setEditOpen(false)}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-2xl rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl"
+          >
+            <h2 className="text-lg font-bold text-[var(--foreground)]">Edit {identity.name.split(" ")[0]}&apos;s details</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Saved changes take effect immediately — the student sees them the next time they open their portal.
+            </p>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Name</span>
+                <input
+                  value={editForm.name}
+                  onChange={(event) => setEditForm((form) => ({ ...form, name: event.target.value }))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Email</span>
+                <input
+                  value={editForm.email}
+                  onChange={(event) => setEditForm((form) => ({ ...form, email: event.target.value }))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Phone</span>
+                <input
+                  value={editForm.phone}
+                  onChange={(event) => setEditForm((form) => ({ ...form, phone: event.target.value }))}
+                  placeholder="e.g. 0812 345 6789"
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Level</span>
+                <select
+                  value={editForm.level}
+                  onChange={(event) => setEditForm((form) => ({ ...form, level: event.target.value }))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  {["A1", "A2", "B1", "B2", "C1", "C2"].map((level) => (
+                    <option key={level} value={level}>{level}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Session</span>
+                <select
+                  value={editForm.sessionSlot}
+                  onChange={(event) => setEditForm((form) => ({ ...form, sessionSlot: event.target.value }))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="morning">Morning</option>
+                  <option value="afternoon">Afternoon</option>
+                  <option value="evening">Evening</option>
+                </select>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Class type</span>
+                <select
+                  value={editForm.classType}
+                  onChange={(event) => setEditForm((form) => ({ ...form, classType: event.target.value }))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="group">Group class</option>
+                  <option value="private">Private (one-to-one)</option>
+                </select>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Branch</span>
+                <select
+                  value={editForm.branchId}
+                  onChange={(event) => setEditForm((form) => ({ ...form, branchId: event.target.value }))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">Unassigned</option>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Delivery mode</span>
+                <select
+                  value={editForm.deliveryMode}
+                  onChange={(event) => setEditForm((form) => ({ ...form, deliveryMode: event.target.value }))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="physical">On campus only</option>
+                  <option value="hybrid">On campus + live video (hybrid)</option>
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Placing them on the Online branch overrides this to online automatically.
+                </span>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Status</span>
+                <select
+                  value={editForm.status}
+                  onChange={(event) => setEditForm((form) => ({ ...form, status: event.target.value }))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="active">Active</option>
+                  <option value="paused">Paused</option>
+                  <option value="graduated">Graduated</option>
+                </select>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Pathway</span>
+                <input
+                  value={editForm.pathway}
+                  onChange={(event) => setEditForm((form) => ({ ...form, pathway: event.target.value }))}
+                  placeholder="e.g. Language training"
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+
+            {editError && <p className="mt-4 text-sm font-semibold text-[var(--danger)]">{editError}</p>}
+
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setEditOpen(false)}
+                disabled={editBusy}
+                className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold transition hover:bg-[var(--surface-alt)] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveEdit()}
+                disabled={editBusy}
+                className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+              >
+                {editBusy ? "Saving…" : "Save changes"}
+              </button>
+            </div>
           </div>
         </div>
       )}

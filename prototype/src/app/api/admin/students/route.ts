@@ -12,6 +12,8 @@ import {
 import { computeChurnRisk, churnRiskPreset, RECENT_WINDOW_DAYS } from "@/lib/student-risk";
 import { setStudentTutor } from "@/lib/tutor-pairing";
 import { isOnlineBranch } from "@/lib/online-branch";
+import { assignStudentCode } from "@/lib/student-code";
+import { generateTempPassword } from "@/lib/student-password";
 
 export async function GET(request: Request) {
   const gate = await requireCapability("students");
@@ -285,7 +287,12 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  const password = typeof body.password === "string" ? body.password : "";
+  const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+  // A password left blank is not an error here — the office is not always the
+  // one who knows what to type, so an admin-created account gets a readable
+  // temporary password minted for it, the same as a CSV or paste-many import.
+  const password =
+    typeof body.password === "string" && body.password.trim() ? body.password.trim() : generateTempPassword();
   const level = typeof body.level === "string" ? body.level : "A1";
   const branchId = typeof body.branchId === "string" ? body.branchId : null;
   const tutorId = typeof body.tutorId === "string" ? body.tutorId : null;
@@ -296,8 +303,8 @@ export async function POST(request: Request) {
     : "morning";
   const requestedDeliveryMode = body.deliveryMode === "hybrid" ? "hybrid" : "physical";
 
-  if (!name || !email || !password) {
-    return NextResponse.json({ error: "Name, email, and password are required" }, { status: 400 });
+  if (!name || !email) {
+    return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
   }
 
   if (password.length < 8) {
@@ -348,13 +355,25 @@ export async function POST(request: Request) {
             classType,
             sessionSlot,
             deliveryMode,
+            admission: phone ? { phone } : undefined,
           },
         },
       },
     });
 
+    const student = await prisma.student.findUnique({ where: { userId: user.id }, select: { id: true } });
+    const studentCode = student ? await assignStudentCode(student.id, { level, branch: branchRow }) : null;
+
     return NextResponse.json(
-      { user: { id: user.id, email: user.email, name: user.name }, classType, deliveryMode },
+      {
+        user: { id: user.id, email: user.email, name: user.name },
+        classType,
+        deliveryMode,
+        studentCode,
+        // Handed back so the admin screen has it even when it typed nothing
+        // and this route generated one — the only place it is ever shown.
+        password,
+      },
       { status: 201 },
     );
   } catch (error) {
@@ -382,6 +401,10 @@ export async function PATCH(request: Request) {
     ? body.deliveryMode
     : undefined;
   const newPassword = typeof body.password === "string" ? body.password : "";
+  const pathway = typeof body.pathway === "string" && body.pathway.trim() ? body.pathway.trim() : undefined;
+  // Only touched when the key is present at all, so an edit that isn't about
+  // the phone number (a status change, a tutor swap) never clobbers it.
+  const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
 
   if (!studentId) {
     return NextResponse.json({ error: "Student ID is required" }, { status: 400 });
@@ -439,8 +462,22 @@ export async function PATCH(request: Request) {
       classType?: string;
       sessionSlot?: string;
       deliveryMode?: string;
+      pathway?: string;
+      // JSON blob field — typed loosely on purpose, same as whereClause above.
+      admission?: any;
     };
     if (level) updateStudent.level = level;
+    if (pathway) updateStudent.pathway = pathway;
+    /**
+     * The phone number lives inside the JSON admission blob rather than a
+     * column of its own — see the signup route, which writes it the same way.
+     * Read-modify-write so editing the phone here never wipes out whatever
+     * else the admission form collected (father's phone, city, and so on).
+     */
+    if (phone !== undefined) {
+      const existingAdmission = (student.admission ?? {}) as Record<string, unknown>;
+      updateStudent.admission = { ...existingAdmission, phone: phone || undefined };
+    }
     if (body.branchId !== undefined) updateStudent.branchId = branchId;
     /**
      * deliveryMode follows the branch — an admin moving a student INTO the

@@ -54,15 +54,21 @@ import { useEffect, useState } from "react";
  *
  * `pointAngle` first shipped as a small rotating arrow badge next to her,
  * because a fixed-pose photo cannot bend its arm to an arbitrary bearing the
- * way the djinn's SVG could. It has since been replaced with an actual
- * pointing-pose render: the djinn clamped `pointAngle` to -110..110 degrees,
- * all of it on her right side, so its arm was never actually asked to point
- * LEFT — only somewhere between up-right and
- * down-right, so one real photo of her pointing covers every angle the prop
- * has ever been given. What is lost is per-degree precision — she gestures
- * generally rightward now rather than at an exact bearing — and what is
- * gained is that she is visibly pointing rather than standing next to a
- * floating arrow, which reads better at every size this renders at.
+ * way the djinn's SVG could. It has since been replaced with actual
+ * pointing-pose renders — one arm out to her right, one to her left — so a
+ * tour step whose target sits on either side of her gets a photo that
+ * actually reaches toward it, not a mirrored guess. What is lost is
+ * per-degree precision — she gestures generally toward one side rather than
+ * at an exact bearing — and what is gained is that she is visibly pointing
+ * rather than standing next to a floating arrow, which reads better at every
+ * size this renders at.
+ *
+ * Which of the two photos shows is read off `pointAngle`'s own sign: within
+ * -90..90 degrees of straight right, the right-pointing photo; beyond that,
+ * the left one. Callers that only ever point one direction (the djinn's old
+ * -110..110 clamp bent everything rightward and only ever showed one photo)
+ * do not need to know this split exists — passing any angle in the direction
+ * they mean still picks the matching photo.
  *
  * ---------------------------------------------------------------------------
  * WHY SOME MOODS GET THEIR OWN PHOTO AND MOST DO NOT
@@ -140,7 +146,8 @@ const MOODS: Record<MascotMood, MoodSpec> = {
 };
 
 const BASE_IMAGE = "/mascot/becca-bust.png";
-const POINTING_IMAGE = "/mascot/becca-pointing-right-bust.png";
+const POINTING_RIGHT_IMAGE = "/mascot/becca-pointing-right-bust.png";
+const POINTING_LEFT_IMAGE = "/mascot/becca-pointing-left-bust.png";
 
 /** Moods with their own render. Anything not listed here falls back to `BASE_IMAGE`. */
 const POSE_IMAGES: Partial<Record<MascotMood, string>> = {
@@ -170,11 +177,10 @@ const FACE = {
 export default function Mascot({
   mood = "greeting",
   /**
-   * Degrees clockwise from pointing right. `null` means "not pointing." The
-   * number no longer aims anything — the djinn clamped this to -110..110
-   * (see the module comment), which never actually reached her left side, so
-   * one pointing-pose photo covers the whole range this prop is given. It
-   * now only decides whether that render is shown.
+   * Degrees clockwise from pointing right. `null` means "not pointing."
+   * Within -90..90 shows the right-pointing photo; beyond that, the left one
+   * — see the module comment. Doesn't aim a limb to an exact bearing, only
+   * picks which of the two photos to show.
    */
   pointAngle = null,
   /** A travelling bob, used while the tour moves her between steps. */
@@ -189,7 +195,12 @@ export default function Mascot({
   const reduceMotion = useReducedMotion();
   const spec = MOODS[mood];
   const pointing = typeof pointAngle === "number";
-  const image = pointing ? POINTING_IMAGE : (POSE_IMAGES[mood] ?? BASE_IMAGE);
+  // Beyond 90 degrees either side of straight right, the target is behind her
+  // right shoulder — the left-pointing photo is the one that actually reaches it.
+  const pointingLeft = pointing && Math.abs(pointAngle) > 90;
+  const image = pointing
+    ? (pointingLeft ? POINTING_LEFT_IMAGE : POINTING_RIGHT_IMAGE)
+    : (POSE_IMAGES[mood] ?? BASE_IMAGE);
   const usingBaseImage = image === BASE_IMAGE;
 
   /**
