@@ -7,6 +7,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import VideoThumb from "@/components/video/VideoThumb";
+import CinemaPlayer from "@/components/video/CinemaPlayer";
 import { ArrowLeftIcon } from "@/components/icons";
 import {
   formatDuration,
@@ -18,12 +19,6 @@ import {
 /** How often the player checkpoints, in seconds of playback. */
 const SAVE_EVERY_SECONDS = 15;
 
-/**
- * Language learners rewatch at half speed to catch a word and at 1.5× to
- * revise. Both are worth a button.
- */
-const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
-
 export default function WatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
 
@@ -34,7 +29,6 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
   const [error, setError] = useState<string | null>(null);
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
   const [resumedFrom, setResumedFrom] = useState<number | null>(null);
-  const [speed, setSpeed] = useState<number>(1);
 
   const video = useMemo(() => videos.find((item) => item.id === id) ?? null, [videos, id]);
 
@@ -152,10 +146,6 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
     };
   }, [flush]);
 
-  useEffect(() => {
-    if (videoRef.current) videoRef.current.playbackRate = speed;
-  }, [speed]);
-
   const body = (() => {
     if (loading) return <BrandLoader size="lg" title="Video wird geladen…" message="Loading your video." />;
 
@@ -192,46 +182,20 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         </Link>
 
         <div className="relative overflow-hidden rounded-3xl bg-black shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)] ring-1 ring-white/10">
-          {/*
-            A linked video plays in the provider's own player.
-
-            None of the controls below it apply: the speed buttons drive
-            `videoRef`, which an iframe does not give us. Rather than render
-            them dead, the whole strip is swapped for the one thing that is
-            true — where the video came from.
-          */}
           {video.embedUrl ? (
-            <iframe
-              src={video.embedUrl}
-              title={video.title}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-              allowFullScreen
-              referrerPolicy="strict-origin-when-cross-origin"
-              className="aspect-video w-full border-0 bg-black"
-            />
-          ) : (
-            <video
-              ref={videoRef}
-              src={video.fileUrl}
-              poster={video.thumbnailUrl ?? undefined}
-              controls
-              playsInline
-              preload="metadata"
-              disablePictureInPicture
-              disableRemotePlayback
-              controlsList="nodownload noremoteplayback"
-              onContextMenu={(event) => event.preventDefault()}
-              onLoadedMetadata={handleLoadedMetadata}
-              onTimeUpdate={handleTimeUpdate}
-              onPause={() => flush()}
-              onEnded={() => flush()}
-              className="aspect-video w-full bg-black"
-            />
-          )}
-
-          <div className="flex flex-wrap items-center gap-3 border-t border-white/10 bg-gradient-to-b from-black/40 to-black/70 p-4 backdrop-blur">
-            {video.embedUrl ? (
-              <>
+            // A linked video plays in the provider's own player — there is no
+            // <video> element here for CinemaPlayer to wrap, so the embed gets
+            // a plain iframe and a strip naming where it came from instead.
+            <>
+              <iframe
+                src={video.embedUrl}
+                title={video.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                allowFullScreen
+                referrerPolicy="strict-origin-when-cross-origin"
+                className="aspect-video w-full border-0 bg-black"
+              />
+              <div className="flex flex-wrap items-center gap-3 border-t border-white/10 bg-gradient-to-b from-black/40 to-black/70 p-4 backdrop-blur">
                 <span className="text-xs font-medium text-slate-400">
                   Playing from {video.embedLabel ?? "an external source"}
                 </span>
@@ -243,24 +207,21 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
                 >
                   Open on {video.embedLabel ?? "the original site"}
                 </a>
-              </>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-medium text-slate-400">Speed</span>
-                {SPEEDS.map((option) => (
-                  <button
-                    key={option}
-                    onClick={() => setSpeed(option)}
-                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
-                      speed === option ? "bg-white text-slate-900" : "bg-white/10 text-white hover:bg-white/20"
-                    }`}
-                  >
-                    {option}×
-                  </button>
-                ))}
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            <CinemaPlayer
+              ref={videoRef}
+              src={video.fileUrl}
+              poster={video.thumbnailUrl}
+              title={video.title}
+              onLoadedMetadata={handleLoadedMetadata}
+              onTimeUpdate={handleTimeUpdate}
+              onPause={() => flush()}
+              onEnded={() => flush()}
+              className="aspect-video w-full"
+            />
+          )}
         </div>
 
         {resumedFrom ? (

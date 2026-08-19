@@ -812,6 +812,13 @@ export const ChevronRightIcon = icon("ChevronRightIcon", <path d="m9.5 5.5 6.5 6
 export const ChevronDownIcon = icon("ChevronDownIcon", <path d="m5.5 9.5 6.5 6.5 6.5-6.5" />);
 export const ArrowRightIcon = icon("ArrowRightIcon", <><path d="M4 12h15" /><path d="m13 6 6 6-6 6" /></>);
 export const ArrowLeftIcon = icon("ArrowLeftIcon", <><path d="M20 12H5" /><path d="m11 6-6 6 6 6" /></>);
+export const ExternalLinkIcon = icon("ExternalLinkIcon", (
+  <>
+    <path d="M9 6H6.5A1.5 1.5 0 0 0 5 7.5v10A1.5 1.5 0 0 0 6.5 19h10a1.5 1.5 0 0 0 1.5-1.5V15" />
+    <path d="M13 5h6v6" />
+    <path d="M20 4 11 13" />
+  </>
+));
 export const PlusIcon = icon("PlusIcon", <path d="M12 5v14M5 12h14" />);
 export const TrashIcon = icon("TrashIcon", (
   <>
@@ -986,5 +993,37 @@ export const DotsVerticalIcon = icon("DotsVerticalIcon", (
     <circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none" />
     <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
     <circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none" />
+  </>
+));
+
+/* -------------------------------------------------------------------- player */
+
+export const PauseIcon = icon("PauseIcon", (
+  <>
+    <rect x="7" y="5" width="4" height="14" rx="1" />
+    <rect x="13" y="5" width="4" height="14" rx="1" />
+  </>
+));
+
+/** Ten seconds back, with the "10" the ear reads off a real player. */
+export const SkipBackIcon = icon("SkipBackIcon", (
+  <>
+    <path d="M8.5 5.5 3.8 9l4.7 3.5" />
+    <path d="M3.8 9h9a6.8 6.8 0 1 1-5.8 10.3" />
+  </>
+));
+
+/** Ten seconds forward — the mirror of SkipBackIcon. */
+export const SkipForwardIcon = icon("SkipForwardIcon", (
+  <>
+    <path d="M15.5 5.5 20.2 9l-4.7 3.5" />
+    <path d="M20.2 9h-9a6.8 6.8 0 1 0 5.8 10.3" />
+  </>
+));
+
+export const PictureInPictureIcon = icon("PictureInPictureIcon", (
+  <>
+    <rect x="3" y="4.5" width="18" height="14" rx="2" />
+    <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
   </>
 ));

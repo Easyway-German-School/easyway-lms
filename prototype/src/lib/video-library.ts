@@ -89,6 +89,16 @@ export function formatDuration(seconds?: number | null): string {
   return minutes > 0 ? `${minutes}m` : `${secs}s`;
 }
 
+/** "4:07" or "1:02:33" — the clock readout in the player chrome, not the tile. */
+export function formatClock(seconds?: number | null): string {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  return `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
 /** 0–100, for the red progress bar under a thumbnail. */
 export function watchPercent(video: Pick<LibraryVideo, "positionSeconds" | "durationSeconds" | "completed">): number {
   if (video.completed) return 100;

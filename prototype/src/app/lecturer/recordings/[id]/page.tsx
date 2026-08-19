@@ -6,6 +6,7 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import LecturerShell from "@/components/LecturerShell";
 import BrandLoader from "@/components/BrandLoader";
+import CinemaPlayer from "@/components/video/CinemaPlayer";
 import { formatDuration, type LibraryVideo } from "@/lib/video-library";
 
 type TutorVideo = LibraryVideo & { mine: boolean };
@@ -78,17 +79,22 @@ export default function LecturerRecordingPage({ params }: { params: Promise<{ id
         ) : video ? (
           <>
             <div className="overflow-hidden rounded-3xl bg-slate-950">
-              <video
-                src={video.fileUrl}
-                poster={video.thumbnailUrl ?? undefined}
-                controls
-                playsInline
+              {video.embedUrl ? (
+                <iframe
+                  src={video.embedUrl}
+                  title={video.title}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                  allowFullScreen
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  className="aspect-video w-full border-0 bg-black"
+                />
+              ) : (
                 // Not autoplay: a tutor may open this in a staff room, and a
                 // class recording starting itself at full volume is the kind of
-                // thing that makes people stop using a feature.
-                preload="metadata"
-                className="aspect-video w-full bg-black"
-              />
+                // thing that makes people stop using a feature. CinemaPlayer
+                // never autoplays on load, so no prop is needed for that.
+                <CinemaPlayer src={video.fileUrl} poster={video.thumbnailUrl} title={video.title} className="aspect-video w-full" />
+              )}
             </div>
 
             <div>

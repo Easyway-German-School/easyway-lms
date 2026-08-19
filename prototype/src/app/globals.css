@@ -678,3 +678,96 @@ html.theme-custom ::selection {
     transform: none !important;
   }
 }
+
+/*
+ * The cinema video player (CinemaPlayer.tsx).
+ *
+ * Its scrubber and volume slider are a blue-to-yellow gradient rather than the
+ * school's orange — a deliberate one-off so the playhead reads instantly
+ * against the black chrome, the way a real cinema app's does. It never
+ * inherits `--accent`, on purpose: an orange scrubber would blend into the
+ * orange "class tape" badge and the orange progress rail on the tile behind
+ * it, and the point of this colour is contrast, not brand consistency.
+ */
+.cine-player {
+  --cine-blue: #38bdf8;
+  --cine-yellow: #fde047;
+}
+
+.cine-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  padding: 6px 0;
+  box-sizing: content-box;
+  background-clip: content-box;
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.cine-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--cine-blue), var(--cine-yellow));
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.15), 0 1px 4px rgba(0, 0, 0, 0.5);
+  border: none;
+}
+
+.cine-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--cine-blue), var(--cine-yellow));
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.15), 0 1px 4px rgba(0, 0, 0, 0.5);
+  border: none;
+}
+
+.cine-scrub {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  padding: 7px 0;
+  box-sizing: content-box;
+  background-clip: content-box;
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.cine-scrub::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  margin-top: 0;
+  background: radial-gradient(circle at 35% 30%, var(--cine-yellow), var(--cine-blue) 75%);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18), 0 0 14px rgba(56, 189, 248, 0.55),
+    0 0 14px rgba(253, 224, 71, 0.35);
+  border: none;
+}
+
+.cine-scrub::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, var(--cine-yellow), var(--cine-blue) 75%);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18), 0 0 14px rgba(56, 189, 248, 0.55),
+    0 0 14px rgba(253, 224, 71, 0.35);
+  border: none;
+}
+
+@keyframes cine-spin {
+  to { transform: rotate(360deg); }
+}
+.cine-spin { animation: cine-spin 0.9s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cine-spin { animation-duration: 1.6s; }
+}
