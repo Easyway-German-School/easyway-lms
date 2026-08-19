@@ -62,9 +62,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [batch, setBatch] = useState("");
   const [sessionSlot, setSessionSlot] = useState("");
   /**
-   * physical | hybrid — how a CAMPUS student attends. The Online branch has no
-   * choice to make (it is online by definition), so this control only appears
-   * for a campus branch and the server ignores it for an online one.
+   * physical | hybrid — how the student attends. The server always forces
+   * "online" for an Online-branch signup regardless of what this sends, so for
+   * an online student the choice is informational (flags interest in an
+   * in-person meetup) rather than gating anything — see normalizedDeliveryMode
+   * in the signup route.
    */
   const [deliveryMode, setDeliveryMode] = useState("physical");
   /** group | private — a private student books a tutor rather than a seat. */
@@ -598,25 +600,41 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                   <p className="mt-2 text-xs text-[var(--muted)]">Choose the level that best matches your current language confidence. A1/A2 are for beginners, B1/B2 are for learners moving into stronger communication, and C1 is for professional learners.</p>
                 </div>
               </div>
-              {/* How you attend. Only a campus branch has a decision to make:
-                  the Online branch is online by definition, and the server
-                  forces it there regardless of what this form sends. */}
-              {selectedBranch && !isOnline ? (
+              {/* How you attend. A campus branch is choosing a real product
+                  (a seat in a room vs. a live video feed); an Online-branch
+                  student is choosing an informational flag only, since the
+                  server always forces "online" for that branch regardless of
+                  what this sends. Shown for both, worded for each. */}
+              {selectedBranch ? (
                 <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
                   <p className="text-sm font-semibold text-[var(--foreground)]">How will you attend?</p>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {[
-                      {
-                        value: "physical",
-                        title: "On campus",
-                        blurb: `Attend your classes in person at the ${selectedBranch.name} branch.`,
-                      },
-                      {
-                        value: "hybrid",
-                        title: "Online / hybrid",
-                        blurb: "Attend on campus when you can, and join the same class live over video when you cannot.",
-                      },
-                    ].map((option) => (
+                    {(isOnline
+                      ? [
+                          {
+                            value: "physical",
+                            title: "Online only",
+                            blurb: "Join every class live over video. This is what most online students choose.",
+                          },
+                          {
+                            value: "hybrid",
+                            title: "Online / hybrid",
+                            blurb: "Join live over video, and flag interest in an in-person meetup if one opens near you.",
+                          },
+                        ]
+                      : [
+                          {
+                            value: "physical",
+                            title: "On campus",
+                            blurb: `Attend your classes in person at the ${selectedBranch.name} branch.`,
+                          },
+                          {
+                            value: "hybrid",
+                            title: "Online / hybrid",
+                            blurb: "Attend on campus when you can, and join the same class live over video when you cannot.",
+                          },
+                        ]
+                    ).map((option) => (
                       <button
                         key={option.value}
                         type="button"
@@ -633,9 +651,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                     ))}
                   </div>
                   <p className="mt-3 text-xs text-[var(--muted)]">
-                    {deliveryMode === "hybrid"
-                      ? "You will have the live classroom in your portal as well as your campus timetable."
-                      : "Your portal will show your campus timetable. Choose online/hybrid if you also want to join live over video."}
+                    {isOnline
+                      ? "Either way you get full access to live classes and recordings — this just tells the office whether to reach out about in-person meetups."
+                      : deliveryMode === "hybrid"
+                        ? "You will have the live classroom in your portal as well as your campus timetable."
+                        : "Your portal will show your campus timetable. Choose online/hybrid if you also want to join live over video."}
                   </p>
                 </div>
               ) : null}
@@ -964,7 +984,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                   <p className="mt-2 text-sm text-[var(--muted)]">Pathway: {pathway}</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">Level: {level}</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">
-                    Attending: {isOnline ? "Online only" : deliveryMode === "hybrid" ? "Online / hybrid" : "On campus"}
+                    Attending: {deliveryMode === "hybrid" ? "Online / hybrid" : isOnline ? "Online only" : "On campus"}
                   </p>
                   <p className="mt-2 text-sm text-[var(--muted)]">
                     Class: {classType === "private" ? "Private (one-to-one)" : "Group class"}

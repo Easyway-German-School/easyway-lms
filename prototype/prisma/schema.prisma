@@ -136,6 +136,7 @@ model User {
   gameTurnsAssigned GameTurn[]               @relation("GameTurnAssignee")
   gameTurnsWritten  GameTurn[]               @relation("GameTurnAuthor")
   constraintDecks   ConstraintDeck[]
+  sentTutorMessages TutorMessage[]
 
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
@@ -244,6 +245,8 @@ model Tenant {
   quizGames               QuizGame[]
   quizGamePlayers         QuizGamePlayer[]
   quizGameAnswers         QuizGameAnswer[]
+  tutorMessages           TutorMessage[]
+  sessionNotes            SessionNote[]
   gameMatches             GameMatch[]
   gameTurns               GameTurn[]
   constraintDecks         ConstraintDeck[]
@@ -550,6 +553,10 @@ model Student {
   liveInvites           LiveClassInvite[]
   quizGamePlays         QuizGamePlayer[]
   supportTickets        SupportTicket[]
+  /** Direct 1:1 thread with an assigned tutor. Only meaningful for classType=private. */
+  tutorMessages         TutorMessage[]
+  /** What the tutor wrote up after each private session. */
+  sessionNotes          SessionNote[]
   // Parent/guardian accounts linked to this student. Plural because more than
   // one guardian can watch the same child (father and mother, say), each with
   // their own login.
@@ -1624,6 +1631,8 @@ model Lecturer {
   privateClasses PrivateClass[]
   liveSessions   LiveClassSession[]
   quizGames      QuizGame[]
+  tutorMessages  TutorMessage[]
+  sessionNotes   SessionNote[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -2522,6 +2531,8 @@ model PrivateClass {
   materialId String?
   material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
 
+  sessionNotes SessionNote[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2530,6 +2541,72 @@ model PrivateClass {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([studentId, scheduledAt])
+  @@index([tenantId])
+}
+
+/**
+ * The private-tier DM: one thread per (student, tutor) pair, not scoped
+ * through the branch/level Community spaces at all — a 1:1 coaching
+ * relationship isn't a room, and forcing it through Channel/Space would
+ * borrow moderation and read-tracking built for a cohort chat, not a pair.
+ */
+model TutorMessage {
+  id String @id @default(cuid())
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  tutorId String
+  tutor   Lecturer @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  /** Whichever side actually sent it — the student's User or the tutor's User. */
+  senderId String
+  sender   User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  body String
+
+  readByStudentAt DateTime?
+  readByTutorAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, createdAt])
+  @@index([tutorId, createdAt])
+  @@index([tenantId])
+}
+
+/**
+ * The tutor's write-up after a private session — the tangible proof of what
+ * the 1:1 relationship actually covered, shown back to the student and to
+ * whoever pays the invoice. Deliberately separate from PrivateClass.notes,
+ * which is the tutor's own scheduling scratch pad: this is written FOR the
+ * student to read.
+ */
+model SessionNote {
+  id String @id @default(cuid())
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  tutorId String
+  tutor   Lecturer @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  privateClassId String?
+  privateClass   PrivateClass? @relation(fields: [privateClassId], references: [id], onDelete: SetNull)
+
+  summary String
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, createdAt])
   @@index([tenantId])
 }
 

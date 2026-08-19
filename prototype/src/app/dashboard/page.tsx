@@ -7,14 +7,16 @@ import { useSession } from "next-auth/react";
 import BrandLoader from "@/components/BrandLoader";
 import PaymentSuccessToastClient from "@/components/PaymentSuccessToastClient";
 import TuitionNudge from "@/components/TuitionNudge";
+import PrivateUpgradeNudge from "@/components/PrivateUpgradeNudge";
 import LiveClassBanner from "@/components/live/LiveClassBanner";
 import LevelAdvance from "@/components/LevelAdvance";
 import WelcomeTour from "@/components/WelcomeTour";
 import NotificationInvite from "@/components/NotificationInvite";
-import { ArrowRightIcon, BookOpenIcon, CompassIcon, FlameIcon, SparklesIcon, TargetIcon, TrendingUpIcon } from "@/components/icons";
+import { ArrowRightIcon, BookOpenIcon, CompassIcon, FlameIcon, SparklesIcon, StarIcon, TargetIcon, TrendingUpIcon, UserIcon, VideoIcon } from "@/components/icons";
 import { summarizeGamification } from "@/lib/gamification";
 import { REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { useGamification } from "@/lib/useGamification";
+import { useLiveClass } from "@/lib/useLiveClass";
 
 type Mission = {
   id?: string;
@@ -33,6 +35,11 @@ type Student = {
   branchName?: string | null;
   /** group | private — drives whether the private-class upsell shows. */
   classType?: string;
+  tutorId?: string | null;
+  tutorName?: string | null;
+  tutorPhotoUrl?: string | null;
+  tutorSpecialization?: string | null;
+  tutorBio?: string | null;
   pathway?: string;
   examReadiness?: number;
   /** Used to make the notification ask concrete: "your next class is …". */
@@ -73,6 +80,9 @@ type PendingPayment = {
 import StudentShell from "@/components/StudentShell";
 import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
+import TutorBioCard from "@/components/TutorBioCard";
+import TutorMessagesCard from "@/components/TutorMessagesCard";
+import SessionNotesCard from "@/components/SessionNotesCard";
 import JourneyMapPoster from "@/components/JourneyMapPoster";
 import GermanyJourney from "@/components/journey/GermanyJourney";
 
@@ -87,6 +97,7 @@ export default function DashboardPage() {
 function DashboardContent() {
   const { data: session, status } = useSession();
   const { game } = useGamification();
+  const { live } = useLiveClass();
   const [student, setStudent] = useState<Student | null>(null);
   const [paymentSummary, setPaymentSummary] = useState<Student["paymentSummary"] | null>(null);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -412,6 +423,26 @@ function DashboardContent() {
   const resolvedCourses = courses.length > 0 ? courses : fallbackCourses;
   const isPrivateStudent = resolvedStudent?.classType === "private";
 
+  /**
+   * Shared card styling for the private tier — the dark radial-gold panel
+   * from PremiumPrivateClasses, reused as the surface for every card on this
+   * page rather than just the hero, so a private student never scrolls back
+   * into a light "everyone else" card. Declared once here instead of
+   * repeating the ternary at every card, since it is the same swap six times
+   * over.
+   */
+  const eliteSurface = "border-[#D4AF37]/25 bg-[radial-gradient(circle_at_15%_0%,_#1c1917_0%,_#0b0a09_60%,_#000000_100%)]";
+  const cardClass = isPrivateStudent ? `relative overflow-hidden rounded-[32px] border p-8 ${eliteSurface}` : "cinematic-card rounded-[32px] p-8";
+  const eyebrowClass = isPrivateStudent ? "text-[#E8C766]" : "text-[var(--muted)]";
+  const headingClass = isPrivateStudent ? "text-white" : "text-[var(--foreground)]";
+  const mutedClass = isPrivateStudent ? "text-white/50" : "text-[var(--muted)]";
+  const innerPanelClass = isPrivateStudent
+    ? "border-[#D4AF37]/20 bg-white/[0.03] backdrop-blur-sm"
+    : "border-[var(--border)] bg-[var(--surface-alt)]";
+  const trackClass = isPrivateStudent ? "bg-white/10" : "bg-[var(--border)]";
+  const fillStyle = isPrivateStudent ? { background: "linear-gradient(to right, #D4AF37, #F4E3B2)" } : undefined;
+  const goldButtonClass = "bg-gradient-to-r from-[#D4AF37] via-[#E8C766] to-[#D4AF37] text-[#1c1508] shadow-[0_14px_30px_-10px_rgba(212,175,55,0.6)] hover:brightness-110";
+
   if (status === "loading" && !student && !dashboardError && !fastFallback) {
     return (
       <StudentShell>
@@ -535,6 +566,15 @@ function DashboardContent() {
           {/* Above the hero on purpose: a student with a balance should meet it
               before anything else, and it disappears entirely once settled. */}
           <TuitionNudge className="mb-6" />
+          {/* Same slot the balance band just vacated — a group student stops
+              seeing TuitionNudge the moment they finish paying, and this is
+              what a FULLY PAID group student sees there instead. See
+              PrivateUpgradeNudge for why "paid in full" is the gate rather
+              than "just registered", which the /programs popup already
+              covers at the moment they choose how to pay. */}
+          <div className="mb-6">
+            <PrivateUpgradeNudge classType={resolvedStudent?.classType} fullPaid={paymentFullyPaid} />
+          </div>
           {/* Sits above the hero for the same reason the nudge does: a student
               whose level has just ended needs to meet that before their
               streak. Fires ONLY when a super admin has signed the level off —
@@ -561,57 +601,137 @@ function DashboardContent() {
               particle field) instead of as paint — the same trick the rest of
               the app's scene layer already uses, just concentrated here where
               the student actually lands. */}
-          <section className="relative overflow-hidden rounded-[36px] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
+          <section
+            className={`relative overflow-hidden rounded-[36px] border p-8 ${
+              isPrivateStudent
+                ? "border-[#D4AF37]/25 bg-[radial-gradient(circle_at_15%_0%,_#1c1917_0%,_#0b0a09_55%,_#000000_100%)] shadow-[0_30px_90px_-30px_rgba(212,175,55,0.35)]"
+                : "border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]"
+            }`}
+          >
             {/* Light sweeping through the glass, not sitting on it — see
                 .aurora-sweep. Behind the blobs and particles so it reads as
-                depth, not another spot of colour. */}
-            <div className="aurora-sweep" />
+                depth, not another spot of colour. Private gets its own gold
+                sheen instead — this whole panel is meant to read as a
+                different tier of the product, the way the upgrade card
+                already does (see PremiumPrivateClasses), not the same glass
+                with a gold badge stapled on. */}
+            {isPrivateStudent ? (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 -translate-x-full bg-[linear-gradient(115deg,transparent_35%,rgba(255,255,255,0.06)_50%,transparent_65%)] [animation:pan_7s_ease-in-out_infinite]"
+              />
+            ) : (
+              <div className="aurora-sweep" />
+            )}
             <div
               className="pointer-events-none absolute -right-16 -top-24 h-80 w-80 rounded-full opacity-70 blur-[100px] animate-blob"
-              style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--accent) 60%, transparent), transparent 70%)' }}
+              style={{
+                background: isPrivateStudent
+                  ? "radial-gradient(circle, rgba(212,175,55,0.35), transparent 70%)"
+                  : "radial-gradient(circle, color-mix(in srgb, var(--accent) 60%, transparent), transparent 70%)",
+              }}
             />
             <div
               className="pointer-events-none absolute -left-24 -bottom-24 h-72 w-72 rounded-full opacity-60 blur-[100px] animate-blob animation-delay-4000"
-              style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--accent-strong) 55%, transparent), transparent 70%)' }}
+              style={{
+                background: isPrivateStudent
+                  ? "radial-gradient(circle, rgba(255,102,0,0.28), transparent 70%)"
+                  : "radial-gradient(circle, color-mix(in srgb, var(--accent-strong) 55%, transparent), transparent 70%)",
+              }}
             />
-            <div className="scene-particles pointer-events-none absolute inset-0 opacity-70" />
+            {!isPrivateStudent && <div className="scene-particles pointer-events-none absolute inset-0 opacity-70" />}
             <div className="relative grid gap-8 lg:grid-cols-[1.45fr_0.95fr] lg:items-end">
               <div>
-                <div
-                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] ${
+                <div className="flex flex-wrap items-center gap-3">
+                  <div
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] ${
+                      isPrivateStudent
+                        ? "border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#E8C766]"
+                        : "border-[var(--border)] bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                    }`}
+                  >
+                    <span className={`h-2 w-2 animate-pulse rounded-full ${isPrivateStudent ? "bg-[#D4AF37]" : "bg-[var(--accent)]"}`} />
+                    {isPrivateStudent ? "Private membership" : "Student dashboard"}
+                  </div>
+                  {isPrivateStudent && (
+                    <span className="inline-flex items-center gap-1 text-[#E8C766]/80">
+                      {[0, 1, 2].map((i) => (
+                        <StarIcon key={i} className="h-3.5 w-3.5" strokeWidth={1.4} />
+                      ))}
+                    </span>
+                  )}
+                </div>
+                <h1
+                  className={`mt-4 text-4xl font-semibold ${
                     isPrivateStudent
-                      ? "border-[#c8a24a]/50 bg-[#c8a24a]/15 text-[#c8a24a]"
-                      : "border-[var(--border)] bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                      ? "bg-gradient-to-r from-white via-[#F4E3B2] to-[#D4AF37] bg-clip-text text-transparent"
+                      : "text-[var(--foreground)]"
                   }`}
                 >
-                  <span className={`h-2 w-2 animate-pulse rounded-full ${isPrivateStudent ? "bg-[#c8a24a]" : "bg-[var(--accent)]"}`} />
-                  {isPrivateStudent ? "Private coaching" : "Student dashboard"}
-                </div>
-                <h1 className="mt-4 text-4xl font-semibold text-[var(--foreground)]">Welcome back, {resolvedStudent?.name || session?.user?.name || 'Learner'}</h1>
-                <p className="mt-4 max-w-2xl text-[var(--muted)]">
+                  Welcome back, {resolvedStudent?.name || session?.user?.name || 'Learner'}
+                </h1>
+                <p className={`mt-4 max-w-2xl ${isPrivateStudent ? "text-white/60" : "text-[var(--muted)]"}`}>
                   {isPrivateStudent
                     ? "A tutor dedicated to you, on your schedule — with everything the group track gets, plus the parts money buys."
                     : "Your academy experience is now a cinematic quest board with live XP, missions, and progress tracking."}
                 </p>
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><SparklesIcon /></span> XP boost active</div>
-                  <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><FlameIcon /></span> Streak {streakDays} days</div>
-                  <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><TargetIcon /></span> Next: {insights.nextMilestone}</div>
+                  {isPrivateStudent ? (
+                    <>
+                      <div className="flex items-center gap-2 rounded-full border border-[#D4AF37]/25 bg-white/[0.04] px-3 py-2 text-sm text-white/70 backdrop-blur-sm">
+                        <span className="text-[#E8C766]"><UserIcon className="h-4 w-4" /></span>
+                        {resolvedStudent?.tutorName ? `Tutor: ${resolvedStudent.tutorName}` : "Tutor being assigned"}
+                      </div>
+                      <div className="flex items-center gap-2 rounded-full border border-[#D4AF37]/25 bg-white/[0.04] px-3 py-2 text-sm text-white/70 backdrop-blur-sm">
+                        <span className="text-[#E8C766]"><FlameIcon className="h-4 w-4" /></span> Streak {streakDays} days
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><SparklesIcon /></span> XP boost active</div>
+                      <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><FlameIcon /></span> Streak {streakDays} days</div>
+                      <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground-soft)]"><span className="text-[var(--accent)]"><TargetIcon /></span> Next: {insights.nextMilestone}</div>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
-                <motion.div whileHover={{ y: -4, scale: 1.01 }} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5">
-                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">Current level</p>
-                  <p className="mt-3 text-3xl font-semibold text-[var(--foreground)]">{level}</p>
-                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--border)]">
-                    <div className="h-full rounded-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)]" style={{ width: `${xpProgress}%` }} />
+                <motion.div
+                  whileHover={{ y: -4, scale: 1.01 }}
+                  className={`rounded-[28px] border p-5 ${
+                    isPrivateStudent ? "border-[#D4AF37]/20 bg-white/[0.03] backdrop-blur-sm" : "border-[var(--border)] bg-[var(--surface-alt)]"
+                  }`}
+                >
+                  <p className={`text-xs uppercase tracking-[0.3em] ${isPrivateStudent ? "text-white/40" : "text-[var(--muted)]"}`}>Current level</p>
+                  <p className={`mt-3 text-3xl font-semibold ${isPrivateStudent ? "text-white" : "text-[var(--foreground)]"}`}>{level}</p>
+                  <div className={`mt-4 h-2 overflow-hidden rounded-full ${isPrivateStudent ? "bg-white/10" : "bg-[var(--border)]"}`}>
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${xpProgress}%`,
+                        background: isPrivateStudent ? "linear-gradient(to right, #D4AF37, #F4E3B2)" : undefined,
+                      }}
+                    >
+                      {!isPrivateStudent && <div className="h-full w-full rounded-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)]" />}
+                    </div>
                   </div>
-                  <p className="mt-2 text-sm text-[var(--muted)]">{xp} XP to your next milestone</p>
+                  <p className={`mt-2 text-sm ${isPrivateStudent ? "text-white/50" : "text-[var(--muted)]"}`}>{xp} XP to your next milestone</p>
                 </motion.div>
-                <motion.div whileHover={{ y: -4, scale: 1.01 }} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5">
-                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">Unlock progress</p>
-                  <p className="mt-3 text-3xl font-semibold text-[var(--foreground)]">{paymentProgressPercent}%</p>
-                  <p className="mt-2 text-sm text-[var(--muted)]">
+                <motion.div
+                  whileHover={{ y: -4, scale: 1.01 }}
+                  className={`rounded-[28px] border p-5 ${
+                    isPrivateStudent ? "border-[#D4AF37]/20 bg-white/[0.03] backdrop-blur-sm" : "border-[var(--border)] bg-[var(--surface-alt)]"
+                  }`}
+                >
+                  <p className={`text-xs uppercase tracking-[0.3em] ${isPrivateStudent ? "text-white/40" : "text-[var(--muted)]"}`}>Unlock progress</p>
+                  <p
+                    className={`mt-3 text-3xl font-semibold ${
+                      isPrivateStudent ? "bg-gradient-to-r from-[#F4E3B2] to-[#D4AF37] bg-clip-text text-transparent" : "text-[var(--foreground)]"
+                    }`}
+                  >
+                    {paymentProgressPercent}%
+                  </p>
+                  <p className={`mt-2 text-sm ${isPrivateStudent ? "text-white/50" : "text-[var(--muted)]"}`}>
                     {isPrivateStudent
                       ? paymentFullyPaid
                         ? "Your one-to-one coaching is fully unlocked."
@@ -637,34 +757,44 @@ function DashboardContent() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.06 * index, duration: 0.35 }}
                 whileHover={{ y: -4, scale: 1.01 }}
-                className="cinematic-card relative overflow-hidden rounded-[24px] p-4 sm:rounded-[28px] sm:p-6"
+                className={`relative overflow-hidden rounded-[24px] p-4 sm:rounded-[28px] sm:p-6 ${
+                  isPrivateStudent ? `border ${eliteSurface}` : "cinematic-card"
+                }`}
               >
                 <div
                   className="pointer-events-none absolute -left-10 top-10 h-24 w-24 rounded-full opacity-60 blur-3xl"
-                  style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--accent) 45%, transparent), transparent 70%)' }}
+                  style={{
+                    background: isPrivateStudent
+                      ? "radial-gradient(circle, rgba(212,175,55,0.3), transparent 70%)"
+                      : "radial-gradient(circle, color-mix(in srgb, var(--accent) 45%, transparent), transparent 70%)",
+                  }}
                 />
                 <div
                   className="pointer-events-none absolute -right-10 bottom-8 h-20 w-20 rounded-full opacity-50 blur-3xl"
-                  style={{ background: 'radial-gradient(circle, color-mix(in srgb, var(--accent-strong) 45%, transparent), transparent 70%)' }}
+                  style={{
+                    background: isPrivateStudent
+                      ? "radial-gradient(circle, rgba(255,102,0,0.25), transparent 70%)"
+                      : "radial-gradient(circle, color-mix(in srgb, var(--accent-strong) 45%, transparent), transparent 70%)",
+                  }}
                 />
                 {/* Stacked on a phone — icon then label side by side was tight
                     at half-width — row again from sm up, where there is room. */}
                 <div className="relative flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                  <span className="text-[var(--accent)]">{stat.icon}</span>
-                  <span className="rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-2.5 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-[var(--muted)] sm:px-3 sm:text-[0.65rem] sm:tracking-[0.28em]">{stat.label}</span>
+                  <span className={isPrivateStudent ? "text-[#E8C766]" : "text-[var(--accent)]"}>{stat.icon}</span>
+                  <span className={`rounded-full border px-2.5 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.2em] sm:px-3 sm:text-[0.65rem] sm:tracking-[0.28em] ${innerPanelClass} ${mutedClass}`}>{stat.label}</span>
                 </div>
-                <p className="relative mt-3 text-2xl font-semibold text-[var(--foreground)] sm:mt-6 sm:text-3xl">{stat.value}</p>
+                <p className={`relative mt-3 text-2xl font-semibold sm:mt-6 sm:text-3xl ${headingClass}`}>{stat.value}</p>
               </motion.div>
             ))}
           </section>
 
           <section className="mt-8 grid gap-6 xl:grid-cols-[1.4fr_0.9fr]">
             <div className="space-y-6">
-              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} whileHover={{ y: -3, scale: 1.005 }} className={cardClass}>
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">{isPrivateStudent ? "Private coaching" : "Path progress"}</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">
+                    <p className={`text-sm uppercase tracking-[0.3em] ${eyebrowClass}`}>{isPrivateStudent ? "Private coaching" : "Path progress"}</p>
+                    <h2 className={`mt-3 text-2xl font-semibold ${headingClass}`}>
                       {isPrivateStudent
                         ? paymentFullyPaid
                           ? 'Your one-to-one tuition is fully paid — book with your tutor'
@@ -681,47 +811,70 @@ function DashboardContent() {
                   {paymentFullyPaid ? null : (
                     <Link
                       href="/programs"
-                      className={`rounded-full px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110 ${
+                      className={`rounded-full px-5 py-3 text-sm font-semibold shadow-lg transition hover:brightness-110 ${
                         isPrivateStudent
-                          ? "bg-gradient-to-r from-[#c8a24a] to-[#a9812f]"
-                          : "bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)] shadow-[0_10px_30px_-8px_color-mix(in_srgb,var(--accent)_70%,transparent)]"
+                          ? goldButtonClass
+                          : "text-white bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)] shadow-[0_10px_30px_-8px_color-mix(in_srgb,var(--accent)_70%,transparent)]"
                       }`}
                     >
                       {paymentUnlocked ? 'Pay balance' : 'Pay deposit'}
                     </Link>
                   )}
                 </div>
-                <div className="mt-6 rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-6 shadow-[inset_0_2px_10px_rgba(0,0,0,0.15)]">
-                  <p className="text-sm text-[var(--muted)]">{paymentUnlocked ? 'Your premium learning library is unlocked.' : `You’ve paid ${Math.max(effectivePayment?.totalPaid ?? 0, effectiveTotalPaid).toLocaleString()} of ${tuitionFee.toLocaleString()} NGN tuition.`}</p>
-                  <div className="mt-5 h-3 overflow-hidden rounded-full bg-[var(--border)]">
-                    <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${paymentProgressPercent}%` }} />
+                <div className={`mt-6 rounded-[28px] border p-6 shadow-[inset_0_2px_10px_rgba(0,0,0,0.15)] ${innerPanelClass}`}>
+                  <p className={`text-sm ${mutedClass}`}>{paymentUnlocked ? 'Your premium learning library is unlocked.' : `You’ve paid ${Math.max(effectivePayment?.totalPaid ?? 0, effectiveTotalPaid).toLocaleString()} of ${tuitionFee.toLocaleString()} NGN tuition.`}</p>
+                  <div className={`mt-5 h-3 overflow-hidden rounded-full ${trackClass}`}>
+                    <div className={`h-full rounded-full ${isPrivateStudent ? "" : "bg-[var(--accent)]"}`} style={{ width: `${paymentProgressPercent}%`, ...(fillStyle ?? {}) }} />
                   </div>
-                  <p className="mt-3 text-sm text-[var(--muted)]">{paymentProgressPercent}% complete</p>
+                  <p className={`mt-3 text-sm ${mutedClass}`}>{paymentProgressPercent}% complete</p>
                 </div>
               </motion.div>
 
-              <div className="cinematic-card rounded-[32px] p-8">
+              <div className={cardClass}>
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Daily missions</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">Quest board</h2>
+                    <p className={`text-sm uppercase tracking-[0.3em] ${eyebrowClass}`}>{isPrivateStudent ? "This week's focus" : "Daily missions"}</p>
+                    <h2 className={`mt-3 text-2xl font-semibold ${headingClass}`}>{isPrivateStudent ? "Your coaching plan" : "Quest board"}</h2>
                   </div>
-                  <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">{missionCompletePercent}% complete</span>
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] ${
+                      isPrivateStudent ? "bg-[#D4AF37]/10 text-[#E8C766]" : "bg-[var(--accent-soft)] text-[var(--accent)]"
+                    }`}
+                  >
+                    {missionCompletePercent}% complete
+                  </span>
                 </div>
                 <div className="mt-6 space-y-4">
                   {displayMissions.slice(0, 3).map((quest) => {
                     const done = quest.id ? completedMissionIds[quest.id] : quest.done;
                     return (
-                      <div key={quest.id || quest.title} className="group flex items-start gap-4 rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
+                      <div
+                        key={quest.id || quest.title}
+                        className={`group flex items-start gap-4 rounded-[28px] border p-5 transition-all duration-200 ${
+                          isPrivateStudent ? `${innerPanelClass} hover:border-[#D4AF37]/40` : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]"
+                        }`}
+                      >
                         <span
-                          className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${done ? 'bg-[var(--success)]' : 'bg-[var(--accent)] shadow-[0_0_10px_2px_color-mix(in_srgb,var(--accent)_65%,transparent)] group-hover:animate-pulse'}`}
+                          className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${
+                            done
+                              ? 'bg-[var(--success)]'
+                              : isPrivateStudent
+                              ? "bg-[#D4AF37] shadow-[0_0_10px_2px_rgba(212,175,55,0.5)] group-hover:animate-pulse"
+                              : 'bg-[var(--accent)] shadow-[0_0_10px_2px_color-mix(in_srgb,var(--accent)_65%,transparent)] group-hover:animate-pulse'
+                          }`}
                         />
                         <div className="flex flex-1 items-start justify-between gap-4">
                           <div>
-                            <p className="font-semibold text-[var(--foreground)]">{quest.title}</p>
-                            <p className="mt-2 text-sm text-[var(--muted)]">{quest.description}</p>
+                            <p className={`font-semibold ${headingClass}`}>{quest.title}</p>
+                            <p className={`mt-2 text-sm ${mutedClass}`}>{quest.description}</p>
                           </div>
-                          <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${done ? 'bg-[var(--success-soft)] text-[var(--success)]' : 'bg-[var(--surface-alt)] text-[var(--muted)]'}`}>{done ? 'Completed' : 'Pending'}</span>
+                          <span
+                            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
+                              done ? 'bg-[var(--success-soft)] text-[var(--success)]' : isPrivateStudent ? "bg-white/[0.03] text-white/40" : 'bg-[var(--surface-alt)] text-[var(--muted)]'
+                            }`}
+                          >
+                            {done ? 'Completed' : 'Pending'}
+                          </span>
                         </div>
                       </div>
                     );
@@ -732,24 +885,83 @@ function DashboardContent() {
 
             <div className="space-y-6">
               {isPrivateStudent && (
-                <div className="rounded-[32px] border-2 border-[#c8a24a]/40 bg-gradient-to-br from-[#c8a24a]/10 to-transparent p-6">
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#c8a24a]">Your one-to-one coaching</p>
-                  <h3 className="mt-3 text-xl font-semibold text-[var(--foreground)]">
-                    {resolvedStudent?.nextLive && resolvedStudent.nextLive !== "No live session scheduled"
-                      ? resolvedStudent.nextLive
-                      : "No session booked yet"}
-                  </h3>
-                  <p className="mt-2 text-sm text-[var(--muted)]">
-                    Your tutor books your sessions directly — check Classes for the full calendar, or message them from
-                    Community if you need a time that isn&apos;t on it yet.
+                <div className="relative overflow-hidden rounded-[32px] border border-[#D4AF37]/30 bg-[radial-gradient(circle_at_20%_0%,_#1c1917_0%,_#0b0a09_60%,_#000000_100%)] p-6">
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-[#D4AF37] opacity-[0.14] blur-3xl"
+                  />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#E8C766]">Your one-to-one coaching</p>
+                    {live?.personal && (
+                      <span className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white">
+                        <motion.span
+                          className="h-1.5 w-1.5 rounded-full bg-[#4ADE80]"
+                          animate={{ opacity: [1, 0.3, 1] }}
+                          transition={{ duration: 1.4, repeat: Infinity }}
+                        />
+                        Live now
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="relative mt-4 flex items-center gap-3">
+                    <span className="grid h-12 w-12 flex-none place-items-center overflow-hidden rounded-full border border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#E8C766]">
+                      {resolvedStudent?.tutorPhotoUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={resolvedStudent.tutorPhotoUrl} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <UserIcon className="h-5 w-5" />
+                      )}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">
+                        {live?.personal && live?.tutorName ? live.tutorName : resolvedStudent?.tutorName || "Tutor being assigned"}
+                      </p>
+                      <p className="truncate text-xs text-white/50">
+                        {live?.personal
+                          ? "is waiting for you right now"
+                          : resolvedStudent?.nextLive && resolvedStudent.nextLive !== "No live session scheduled"
+                          ? resolvedStudent.nextLive
+                          : "No session booked yet"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="relative mt-4 text-sm leading-6 text-white/50">
+                    {live?.personal
+                      ? "They rang the room for you specifically — this is not a shared class link."
+                      : "Your tutor books your sessions directly — check Classes for the full calendar, or message them from Community if you need a time that isn't on it yet."}
                   </p>
-                  <Link
-                    href="/calendar"
-                    className="mt-4 inline-flex rounded-full bg-[#c8a24a] px-5 py-2.5 text-sm font-semibold text-[#1a1206] transition hover:brightness-110"
-                  >
-                    View calendar
-                  </Link>
+
+                  {live?.personal ? (
+                    <Link
+                      href={`/live?code=${live.joinCode}`}
+                      className="relative mt-4 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#D4AF37] via-[#E8C766] to-[#D4AF37] px-5 py-2.5 text-sm font-bold text-[#1c1508] shadow-[0_14px_30px_-10px_rgba(212,175,55,0.6)] transition hover:brightness-110"
+                    >
+                      <VideoIcon className="h-4 w-4" />
+                      Join now
+                    </Link>
+                  ) : (
+                    <Link
+                      href="/calendar"
+                      className="relative mt-4 inline-flex rounded-full bg-[#D4AF37] px-5 py-2.5 text-sm font-semibold text-[#1a1206] transition hover:brightness-110"
+                    >
+                      View calendar
+                    </Link>
+                  )}
                 </div>
+              )}
+              {isPrivateStudent && (
+                <>
+                  <TutorBioCard
+                    tutorName={resolvedStudent?.tutorName}
+                    tutorPhotoUrl={resolvedStudent?.tutorPhotoUrl}
+                    tutorSpecialization={resolvedStudent?.tutorSpecialization}
+                    tutorBio={resolvedStudent?.tutorBio}
+                  />
+                  <TutorMessagesCard tutorName={resolvedStudent?.tutorName} />
+                  <SessionNotesCard />
+                </>
               )}
               {/* Bookings made on the public exam-centre page appear here too —
                   both write the same registrations. */}
@@ -757,26 +969,44 @@ function DashboardContent() {
 
               <NewMaterialsCard />
 
-              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} whileHover={{ y: -3, scale: 1.005 }} className={cardClass}>
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Course highlights</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">Your active courses</h2>
+                    <p className={`text-sm uppercase tracking-[0.3em] ${eyebrowClass}`}>{isPrivateStudent ? "Your curriculum" : "Course highlights"}</p>
+                    <h2 className={`mt-3 text-2xl font-semibold ${headingClass}`}>Your active courses</h2>
                   </div>
-                  <Link href="/materials" className="rounded-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)] px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_30px_-8px_color-mix(in_srgb,var(--accent)_70%,transparent)] transition hover:brightness-110">Open library</Link>
+                  <Link
+                    href="/materials"
+                    className={`rounded-full px-5 py-3 text-sm font-semibold shadow-[0_10px_30px_-8px_color-mix(in_srgb,var(--accent)_70%,transparent)] transition hover:brightness-110 ${
+                      isPrivateStudent ? goldButtonClass + " shadow-none" : "text-white bg-gradient-to-r from-[var(--accent)] to-[var(--accent-strong)]"
+                    }`}
+                  >
+                    Open library
+                  </Link>
                 </div>
                 <div className="mt-6 space-y-4">
                   {resolvedCourses.slice(0, 3).map((course) => (
-                    <div key={course.id} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
+                    <div
+                      key={course.id}
+                      className={`rounded-[28px] border p-5 transition-all duration-200 ${
+                        isPrivateStudent ? `${innerPanelClass} hover:border-[#D4AF37]/40` : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]"
+                      }`}
+                    >
                       <div className="flex items-center justify-between gap-4">
                         <div>
-                          <p className="font-semibold text-[var(--foreground)]">{course.title}</p>
-                          <p className="mt-1 text-sm text-[var(--muted)]">{course.description}</p>
+                          <p className={`font-semibold ${headingClass}`}>{course.title}</p>
+                          <p className={`mt-1 text-sm ${mutedClass}`}>{course.description}</p>
                         </div>
-                        <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">{course.progress}%</span>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] ${
+                            isPrivateStudent ? "bg-[#D4AF37]/10 text-[#E8C766]" : "bg-[var(--accent-soft)] text-[var(--accent)]"
+                          }`}
+                        >
+                          {course.progress}%
+                        </span>
                       </div>
-                      <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--border)]">
-                        <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${course.progress}%` }} />
+                      <div className={`mt-4 h-2 overflow-hidden rounded-full ${trackClass}`}>
+                        <div className={`h-full rounded-full ${isPrivateStudent ? "" : "bg-[var(--accent)]"}`} style={{ width: `${course.progress}%`, ...(fillStyle ?? {}) }} />
                       </div>
                     </div>
                   ))}
@@ -794,36 +1024,51 @@ function DashboardContent() {
               */}
               <Link
                 href="/games"
-                className="cinematic-card group flex items-center gap-4 rounded-[32px] p-6 transition hover:border-[var(--accent)]/30"
+                className={`group flex items-center gap-4 rounded-[32px] p-6 transition ${
+                  isPrivateStudent ? `${cardClass} hover:border-[#D4AF37]/40` : "cinematic-card hover:border-[var(--accent)]/30"
+                }`}
               >
-                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                <span
+                  className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl ${
+                    isPrivateStudent ? "bg-[#D4AF37]/10 text-[#E8C766]" : "bg-[var(--accent-soft)] text-[var(--accent)]"
+                  }`}
+                >
                   <SparklesIcon className="h-6 w-6" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">AI Coach</span>
-                  <span className="mt-1 block text-lg font-semibold text-[var(--foreground)]">
+                  <span className={`block text-sm font-semibold uppercase tracking-[0.2em] ${eyebrowClass}`}>AI Coach</span>
+                  <span className={`mt-1 block text-lg font-semibold ${headingClass}`}>
                     Pronunciation practice &amp; your study plan
                   </span>
                 </span>
-                <ArrowRightIcon className="h-5 w-5 shrink-0 text-[var(--muted)] transition group-hover:translate-x-1 group-hover:text-[var(--accent)]" />
+                <ArrowRightIcon
+                  className={`h-5 w-5 shrink-0 transition group-hover:translate-x-1 ${
+                    isPrivateStudent ? "text-white/40 group-hover:text-[#E8C766]" : "text-[var(--muted)] group-hover:text-[var(--accent)]"
+                  }`}
+                />
               </Link>
             </div>
           </section>
 
           <section className="mt-8">
-            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} whileHover={{ y: -3, scale: 1.005 }} className="cinematic-card rounded-[32px] p-8">
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} whileHover={{ y: -3, scale: 1.005 }} className={cardClass}>
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Announcements</p>
-                  <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">What’s new</h2>
+                  <p className={`text-sm uppercase tracking-[0.3em] ${eyebrowClass}`}>Announcements</p>
+                  <h2 className={`mt-3 text-2xl font-semibold ${headingClass}`}>What’s new</h2>
                 </div>
               </div>
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 {displayAnnouncements.map((item) => (
-                  <div key={item.title} className="rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
-                    <p className="font-semibold text-[var(--foreground)]">{item.title}</p>
-                    <p className="mt-2 text-sm text-[var(--muted)]">{item.text}</p>
-                    <p className="mt-3 text-xs uppercase tracking-[0.3em] text-[var(--muted)]">{item.time}</p>
+                  <div
+                    key={item.title}
+                    className={`rounded-[28px] border p-5 transition-all duration-200 ${
+                      isPrivateStudent ? `${innerPanelClass} hover:border-[#D4AF37]/40` : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]"
+                    }`}
+                  >
+                    <p className={`font-semibold ${headingClass}`}>{item.title}</p>
+                    <p className={`mt-2 text-sm ${mutedClass}`}>{item.text}</p>
+                    <p className={`mt-3 text-xs uppercase tracking-[0.3em] ${mutedClass}`}>{item.time}</p>
                   </div>
                 ))}
               </div>

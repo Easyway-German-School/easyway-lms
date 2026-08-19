@@ -2,10 +2,10 @@
 
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import LecturerShell from "@/components/LecturerShell";
 import TutorLivePanel from "@/components/live/TutorLivePanel";
-import { AttachmentIcon, BroadcastIcon, PrivateClassIcon } from "@/components/icons";
+import { AttachmentIcon, BroadcastIcon, PrivateClassIcon, SendIcon } from "@/components/icons";
 
 /**
  * One-to-one class booking.
@@ -37,6 +37,8 @@ type PrivateClass = {
 
 type Lecturer = { id: string; name: string };
 type Material = { id: string; title: string };
+type TutorMessage = { id: string; body: string; isMine: boolean; createdAt: string };
+type SessionNote = { id: string; summary: string; sessionTopic: string | null; sessionDate: string | null; createdAt: string };
 
 /**
  * Translucent tints rather than solid pastels.
@@ -83,6 +85,16 @@ export default function LecturerPrivateClassesPage() {
   const [lecturerId, setLecturerId] = useState("");
   const [materialId, setMaterialId] = useState("");
 
+  const [messages, setMessages] = useState<TutorMessage[]>([]);
+  const [draftMessage, setDraftMessage] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+
+  const [notes, setNotes] = useState<SessionNote[]>([]);
+  const [draftNote, setDraftNote] = useState("");
+  const [notePrivateClassId, setNotePrivateClassId] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -107,6 +119,75 @@ export default function LecturerPrivateClassesPage() {
   }, [studentId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadThread = useCallback(async (id: string) => {
+    if (!id) { setMessages([]); setNotes([]); return; }
+    try {
+      const [msgRes, noteRes] = await Promise.all([
+        fetch(`/api/lecturer/tutor-messages?studentId=${encodeURIComponent(id)}`, { cache: "no-store" }),
+        fetch(`/api/lecturer/session-notes?studentId=${encodeURIComponent(id)}`, { cache: "no-store" }),
+      ]);
+      if (msgRes.ok) setMessages((await msgRes.json()).messages ?? []);
+      if (noteRes.ok) setNotes((await noteRes.json()).notes ?? []);
+    } catch {
+      // Left as-is on a failed poll.
+    }
+  }, []);
+
+  useEffect(() => {
+    loadThread(studentId);
+    if (!studentId) return;
+    const timer = window.setInterval(() => loadThread(studentId), 20_000);
+    return () => window.clearInterval(timer);
+  }, [studentId, loadThread]);
+
+  useEffect(() => {
+    messageListRef.current?.scrollTo({ top: messageListRef.current.scrollHeight });
+  }, [messages]);
+
+  async function sendMessage() {
+    const text = draftMessage.trim();
+    if (!text || !studentId || sendingMessage) return;
+    setSendingMessage(true);
+    setDraftMessage("");
+    try {
+      const res = await fetch("/api/lecturer/tutor-messages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ studentId, body: text }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMessages((prev) => [...prev, data.message]);
+      } else {
+        setDraftMessage(text);
+      }
+    } catch {
+      setDraftMessage(text);
+    } finally {
+      setSendingMessage(false);
+    }
+  }
+
+  async function addNote() {
+    const text = draftNote.trim();
+    if (!text || !studentId || savingNote) return;
+    setSavingNote(true);
+    try {
+      const res = await fetch("/api/lecturer/session-notes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ studentId, summary: text, privateClassId: notePrivateClassId || undefined }),
+      });
+      if (res.ok) {
+        setDraftNote("");
+        setNotePrivateClassId("");
+        await loadThread(studentId);
+      }
+    } finally {
+      setSavingNote(false);
+    }
+  }
 
   async function book() {
     if (!studentId || !when) return;
@@ -333,6 +414,108 @@ export default function LecturerPrivateClassesPage() {
                 })}
               </div>
             )}
+
+            <div className="mt-8 grid gap-6 lg:grid-cols-2">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                <h2 className="font-semibold">Message {selected?.name || "this student"}</h2>
+                <p className="mt-1 text-xs text-[var(--muted)]">Goes straight to them, nowhere else.</p>
+                <div ref={messageListRef} className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
+                  {messages.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-[var(--muted)]">No messages yet.</p>
+                  ) : (
+                    messages.map((m) => (
+                      <div key={m.id} className={`flex ${m.isMine ? "justify-end" : "justify-start"}`}>
+                        <div
+                          className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm leading-5 ${
+                            m.isMine ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] bg-[var(--surface-alt)] text-[var(--foreground)]"
+                          }`}
+                        >
+                          {m.body}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <input
+                    value={draftMessage}
+                    onChange={(e) => setDraftMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void sendMessage();
+                      }
+                    }}
+                    disabled={!studentId}
+                    placeholder="Type a message…"
+                    className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-50"
+                  />
+                  <button
+                    onClick={() => void sendMessage()}
+                    disabled={!studentId || !draftMessage.trim() || sendingMessage}
+                    className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-[var(--accent)] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Send"
+                  >
+                    <SendIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                <h2 className="font-semibold">Session notes</h2>
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  What you write here is what {selected?.name || "the student"} sees as proof of what a session covered.
+                </p>
+                <div className="mt-4 space-y-3">
+                  <textarea
+                    value={draftNote}
+                    onChange={(e) => setDraftNote(e.target.value)}
+                    disabled={!studentId}
+                    placeholder="We covered separable verbs and practised ordering food…"
+                    rows={3}
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-50"
+                  />
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={notePrivateClassId}
+                      onChange={(e) => setNotePrivateClassId(e.target.value)}
+                      disabled={!studentId}
+                      className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-50"
+                    >
+                      <option value="">No linked session</option>
+                      {classes.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {new Date(c.scheduledAt).toLocaleDateString()} — {c.topic || "Untitled"}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => void addNote()}
+                      disabled={!studentId || !draftNote.trim() || savingNote}
+                      className="shrink-0 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {savingNote ? "Saving…" : "Add note"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-5 space-y-3">
+                  {notes.length === 0 ? (
+                    <p className="py-4 text-center text-sm text-[var(--muted)]">No notes written yet.</p>
+                  ) : (
+                    notes.map((n) => (
+                      <div key={n.id} className="rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] p-3.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-semibold text-[var(--foreground)]">{n.sessionTopic || "Coaching session"}</p>
+                          <span className="shrink-0 text-xs text-[var(--muted)]">{new Date(n.sessionDate || n.createdAt).toLocaleDateString()}</span>
+                        </div>
+                        <p className="mt-1.5 text-sm text-[var(--foreground-soft)]">{n.summary}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
           </>
         )}
       </div>

@@ -171,6 +171,15 @@ export const TENANT_OWNED_MODELS = [
    * must never be reachable from another school's admin console.
    */
   "Parent",
+
+  /**
+   * The private-tier 1:1 DM and the tutor's write-up after each session.
+   * Both name one school's student and one school's tutor by id and quote
+   * what was actually said or taught — the same category of leak as
+   * SupportTicket above, and just as clearly nobody else's to read.
+   */
+  "TutorMessage",
+  "SessionNote",
 ] as const;
 
 /**

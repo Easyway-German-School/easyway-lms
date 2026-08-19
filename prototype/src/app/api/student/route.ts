@@ -18,6 +18,9 @@ export async function GET() {
         user: true,
         // Tuition is priced by branch as well as level.
         branch: { select: { name: true } },
+        // Only ever populated for a private student, but harmless to join
+        // for everyone else since tutorId is null there.
+        tutor: { select: { id: true, photoUrl: true, specialization: true, bio: true, user: { select: { name: true } } } },
         enrollments: {
           include: {
             pathway: true,
@@ -60,6 +63,7 @@ export async function GET() {
         include: {
           user: true,
           branch: { select: { name: true } },
+          tutor: { select: { id: true, photoUrl: true, specialization: true, bio: true, user: { select: { name: true } } } },
           enrollments: {
             include: {
               pathway: true,
@@ -108,6 +112,11 @@ export async function GET() {
       branchName: student.branch?.name ?? null,
       classType: student.classType,
       deliveryMode: student.deliveryMode,
+      tutorId: student.tutor?.id ?? null,
+      tutorName: student.tutor?.user?.name ?? null,
+      tutorPhotoUrl: student.tutor?.photoUrl ?? null,
+      tutorSpecialization: student.tutor?.specialization ?? null,
+      tutorBio: student.tutor?.bio ?? null,
       pathway: student.pathway,
       nextLive: student.nextLive,
       examReadiness: student.examReadiness,
