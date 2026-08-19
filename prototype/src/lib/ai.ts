@@ -466,6 +466,12 @@ export async function generateCourseOutline(courseInfo: any): Promise<{ modules:
   if (provider === "ollama" || provider === "anythingllm") {
     return generateCourseOutlineWithOllama(courseInfo);
   }
+  // No local runtime reachable (true on Vercel) — this used to fall straight
+  // to the mock even with a funded hosted key. Now it asks whichever hosted
+  // model callHostedText finds before giving up.
+  if (provider === "claude" || provider === "groq" || provider === "deepseek") {
+    return generateCourseOutlineWithHosted(courseInfo);
+  }
   return generateCourseOutlineMock(courseInfo);
 }
 
@@ -474,6 +480,9 @@ export async function generateLessonPackage(lessonData: any): Promise<{ summary:
   // Either local runner: callLocalModel tries AnythingLLM before Ollama.
   if (provider === "ollama" || provider === "anythingllm") {
     return generateLessonPackageWithOllama(lessonData);
+  }
+  if (provider === "claude" || provider === "groq" || provider === "deepseek") {
+    return generateLessonPackageWithHosted(lessonData);
   }
   return generateLessonPackageMock(lessonData);
 }
@@ -491,6 +500,9 @@ export async function parseUploadedContent(content: string): Promise<{
   // Either local runner: callLocalModel tries AnythingLLM before Ollama.
   if (provider === "ollama" || provider === "anythingllm") {
     return parseUploadedContentWithOllama(content);
+  }
+  if (provider === "claude" || provider === "groq" || provider === "deepseek") {
+    return parseUploadedContentWithHosted(content);
   }
   return parseUploadedContentMock(content);
 }
@@ -680,6 +692,13 @@ export async function summarizeText(text: string): Promise<string> {
   // Either local runner: callLocalModel tries AnythingLLM before Ollama.
   if (provider === "ollama" || provider === "anythingllm") {
     return summarizeTextWithOllama(text);
+  }
+  if (provider === "claude" || provider === "groq" || provider === "deepseek") {
+    const raw = await callHostedText(
+      `Summarize the following German learning content into a concise paragraph that preserves the main ideas and structure. Return only the summary text, no JSON.\n\nCONTENT:\n${text}`,
+      500,
+    );
+    return raw || summarizeTextMock(text);
   }
   return summarizeTextMock(text);
 }
@@ -982,6 +1001,71 @@ Make the package interactive, mission-driven, and suitable for classroom or self
   } catch {
     return generateLessonPackageMock(lessonData);
   }
+}
+
+async function generateCourseOutlineWithHosted(courseInfo: any) {
+  const prompt = `Create a practical German course outline for the following course.\nTitle: ${courseInfo.title}\nLevel: ${courseInfo.level || 'A2'}\nDescription: ${courseInfo.description}\nReturn valid JSON with {modules:[{title,description,lessons:[{title,description,duration,type}]}]} and include 3 modules with 2-3 lessons each.${JSON_ONLY}`;
+  const raw = await callHostedText(prompt, 1200);
+  const parsed = parseModelJson<any>(raw);
+  if (parsed?.modules && Array.isArray(parsed.modules)) return parsed;
+  return generateCourseOutlineMock(courseInfo);
+}
+
+async function generateLessonPackageWithHosted(lessonData: any) {
+  const prompt = `Create an AI-powered German lesson package based on the following input.
+Title: ${lessonData.title || "New lesson"}
+Level: ${lessonData.level || "A1"}
+Description: ${lessonData.description || "Focus on a practical language skill."}
+Audience: ${lessonData.audience || "German learners"}
+Tone: ${lessonData.tone || "Friendly and gamified"}
+Return valid JSON with:
+  summary, objectives (array), grammarFocus (array), vocabulary (array), quizQuestions (array of {question,type,options,answer}), modules (array of {title,description,lessons:[{title,description,type,duration}]}), missions (array of {title,description,reward}).
+Make the package interactive, mission-driven, and suitable for classroom or self-study.${JSON_ONLY}`;
+  const raw = await callHostedText(prompt, 2000);
+  const parsed = parseModelJson<any>(raw);
+  if (parsed?.summary && Array.isArray(parsed.objectives) && Array.isArray(parsed.modules)) return parsed;
+  return generateLessonPackageMock(lessonData);
+}
+
+async function parseUploadedContentWithHosted(content: string) {
+  const prompt = `Analyze this German learning content and extract structured information. Return valid JSON.
+
+CONTENT:
+${content.slice(0, 5000)}
+
+Return this exact JSON structure:
+{
+  "title": "Generated title from content (max 50 chars)",
+  "objectives": ["objective 1", "objective 2", "objective 3"],
+  "grammarFocus": ["grammar topic 1", "grammar topic 2"],
+  "vocabulary": ["word1", "word2", "word3", "word4", "word5"],
+  "keyTopics": ["topic1", "topic2"],
+  "suggestedLevel": "A1|A2|B1|B2|C1|C2",
+  "quizQuestions": [
+    {
+      "question": "What is...?",
+      "type": "multiple-choice",
+      "options": ["option1", "option2", "option3", "option4"],
+      "answer": "correct option"
+    }
+  ]
+}
+
+Generate 3-5 quiz questions based on the content. Be specific to German language learning.${JSON_ONLY}`;
+  const raw = await callHostedText(prompt, 1400);
+  const parsed = parseModelJson<any>(raw);
+  if (parsed?.title && Array.isArray(parsed.objectives)) {
+    return {
+      title: parsed.title || "Parsed lesson",
+      objectives: parsed.objectives || [],
+      grammarFocus: parsed.grammarFocus || [],
+      vocabulary: parsed.vocabulary || [],
+      keyTopics: parsed.keyTopics || [],
+      quizQuestions: parsed.quizQuestions || [],
+      suggestedLevel: parsed.suggestedLevel || "A2",
+    };
+  }
+  return parseUploadedContentMock(content);
 }
 
 function generateDailyMissionsMock(profile: any) {

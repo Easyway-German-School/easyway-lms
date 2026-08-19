@@ -141,8 +141,20 @@ const CLAUDE_MODEL = process.env.ANTHROPIC_ASSISTANT_MODEL || "claude-opus-5";
  */
 const MAX_TOKENS = 4_000;
 
+/**
+ * Claude is gated behind an explicit opt-in for THIS brain, separate from
+ * whether the key exists.
+ *
+ * The key is funded for the student-facing features in ai.ts, on a small
+ * test budget ($20). Every admin-assistant question would otherwise also bid
+ * against that budget at Opus rates, and the assistant already has a hosted
+ * brain that costs the platform nothing: Groq, trusted the same as Claude
+ * for actions (see canBrainAct()). So the admin assistant stays on Groq by
+ * default and Claude is reserved for students until the budget is proven out
+ * — flip ASSISTANT_USE_CLAUDE=true to let this brain spend from it too.
+ */
 export function hasHostedBrain(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(process.env.ANTHROPIC_API_KEY) && process.env.ASSISTANT_USE_CLAUDE === "true";
 }
 
 export function hasGroqBrain(): boolean {
