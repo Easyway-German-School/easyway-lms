@@ -1,5 +1,5 @@
 "use client";
-import { CalendarIcon } from "@/components/icons";
+import { CalendarIcon, ExternalLinkIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useState } from "react";
 import ExamBodyComingSoon from "@/components/ExamBodyComingSoon";
@@ -88,6 +88,14 @@ function daysUntil(iso: string) {
   const diff = new Date(iso).getTime() - Date.now();
   return Math.ceil(diff / 86_400_000);
 }
+
+/**
+ * Goethe registration happens entirely on goethe.de — EasyWay never touches
+ * the booking or the fee, so this is a plain outbound link rather than an
+ * exam body in our own booking flow (see ExamBodyComingSoon for why we don't
+ * put a "Register" button in front of a seat we can't actually deliver).
+ */
+const GOETHE_REGISTRATION_URL = "https://www.goethe.de/ins/ng/en/m/spr/prf/anm.html";
 
 export default function MyExamsPanel() {
   const [upcoming, setUpcoming] = useState<MyExam[]>([]);
@@ -199,6 +207,24 @@ export default function MyExamsPanel() {
             ) : null}
           </button>
         ))}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl cinematic-card p-5">
+        <div className="min-w-0">
+          <h3 className="font-semibold">Prefer to sit Goethe instead?</h3>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Registration and fees for the Goethe-Zertifikat are handled entirely by the Goethe-Institut, not EasyWay —
+            this takes you straight to their official booking page.
+          </p>
+        </div>
+        <a
+          href={GOETHE_REGISTRATION_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex shrink-0 items-center gap-2 rounded-full btn-glow px-5 py-2.5 text-sm font-semibold text-white"
+        >
+          Register on goethe.de <ExternalLinkIcon className="h-4 w-4" />
+        </a>
       </div>
 
       <section>
