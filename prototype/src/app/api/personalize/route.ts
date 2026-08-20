@@ -1,3 +1,4 @@
+import { getStudentMastery } from '@/lib/skill-mastery';
 import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -55,6 +56,7 @@ export async function GET(request: NextRequest) {
     const completedLessons = completions.map((c) => c.lessonId);
 
     const recentGrades = await prisma.grade.findMany({ where: { studentId: student.id }, orderBy: { createdAt: 'desc' }, take: 10 });
+      const skillMastery = await getStudentMastery(student.id);
     const averageScore = recentGrades.length ? Math.round(recentGrades.reduce((s, g) => s + (g.score || 0), 0) / recentGrades.length) : null;
 
     const profile = {
@@ -65,6 +67,7 @@ export async function GET(request: NextRequest) {
       completedLessons,
       recentPerformance: recentGrades.map((g) => ({ type: g.type, score: g.score, createdAt: g.createdAt })),
       averageScore,
+      skillMastery,
     };
 
     // Enrich candidate lessons with summary and simple tags

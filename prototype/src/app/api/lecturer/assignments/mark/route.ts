@@ -2,6 +2,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { notify, KIND } from "@/lib/notify";
+import { recordSkillOutcome } from "@/lib/skill-mastery";
 import {
   parseQuestions,
   finaliseScore,
@@ -162,6 +163,7 @@ export async function POST(req: NextRequest) {
           feedback: updated.feedback,
         },
       });
+      void recordSkillOutcome({ studentId: submission.studentId, skill: "grammar", score: final.score });
     } catch (error) {
       console.warn("Could not record marked quiz grade:", error);
     }

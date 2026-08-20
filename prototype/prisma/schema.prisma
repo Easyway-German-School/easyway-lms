@@ -249,6 +249,7 @@ model Tenant {
   tutorMessages           TutorMessage[]
   sessionNotes            SessionNote[]
   studentAiUsage          StudentAiUsage[]
+  skillMasteries          StudentSkillMastery[]
   gameMatches             GameMatch[]
   gameTurns               GameTurn[]
   constraintDecks         ConstraintDeck[]
@@ -541,6 +542,7 @@ model Student {
   grades                Grade[]
   completions           Completion[]
   personalizedPlan      PersonalizedPlan?
+  skillMasteries        StudentSkillMastery[]
   examRegistrations     ExamRegistration[]
   attendances           Attendance[]
   notifications         Notification[]
@@ -576,6 +578,24 @@ model Student {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
+}
+
+model StudentSkillMastery {
+  id            String   @id @default(cuid())
+  studentId     String
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  skill         String
+  mastery       Float    @default(50)
+  attempts      Int      @default(0)
+  lastScore     Int?
+  lastActivityAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  tenantId      String?
+  tenant        Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, skill])
+  @@index([tenantId, skill, mastery])
 }
 
 /**

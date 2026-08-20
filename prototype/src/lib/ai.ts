@@ -737,6 +737,10 @@ export async function generatePersonalizedPlan(studentProfile: any, candidateLes
     const studentLevelRank = mapLevelToRank(studentProfile.level || 'A2');
     const lessonLevelRank = mapLevelToRank(lesson.level || lesson.courseLevel || 'A2');
     const targetRank = getTargetDifficultyRank();
+  const mastery = Array.isArray(studentProfile.skillMastery) ? studentProfile.skillMastery : [];
+  const weakest = mastery[0];
+  const lessonText = `${lesson.title || ''} ${lesson.description || ''} ${lesson.type || ''}`.toLowerCase();
+  if (weakest && lessonText.includes(String(weakest.skill).toLowerCase())) score += Math.max(0, 18 - Number(weakest.mastery || 50) / 5);
 
     score += 20 - Math.abs(studentLevelRank - lessonLevelRank) * 4;
     score += Math.max(0, 10 - (lesson.order || 0));
@@ -775,6 +779,7 @@ export async function generatePersonalizedPlan(studentProfile: any, candidateLes
     completedLessonsCount: Array.isArray(studentProfile.completedLessons) ? studentProfile.completedLessons.length : 0,
     averageScore: Number(studentProfile.averageScore || 0),
     recentPerformance: studentProfile.recentPerformance || [],
+      skillMastery: studentProfile.skillMastery || [],
     preferences: {
       dailyMinutes: options.minutesPerDay || 30,
       goal: 'improve exam readiness and complete pathway milestones',

@@ -4,6 +4,7 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { analyzePronunciation } from "@/lib/ai";
 import { requireAuthSession } from "@/lib/auth";
 import { reserveStudentAiRequest } from "@/lib/ai-limits";
+import { recordSkillOutcome } from "@/lib/skill-mastery";
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,6 +30,8 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await analyzePronunciation(phrase);
+    const student = await prismaStudentForSession(session.user.id);
+    if (student) void recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
 
     return NextResponse.json(result);
   } catch (error) {
@@ -38,4 +41,9 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+async function prismaStudentForSession(userId: string) {
+  const { prisma } = await import("@/lib/prisma");
+  return prisma.student.findUnique({ where: { userId }, select: { id: true } });
 }
