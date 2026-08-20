@@ -643,6 +643,17 @@ export default function WelcomeTour() {
                 walking={walking}
                 className="h-full w-full drop-shadow-2xl"
               />
+              {index === 0 && profile ? (
+                <motion.div
+                  initial={reduceMotion ? false : { opacity: 0, y: 8, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={reduceMotion ? { duration: 0 } : { delay: 0.25, duration: 0.35 }}
+                  className="absolute -right-8 -top-5 z-10 w-56 rounded-2xl border border-[var(--accent)]/25 bg-[var(--surface)] px-4 py-3 text-center text-sm font-semibold leading-snug text-[var(--foreground)] shadow-xl sm:-right-20 sm:-top-8"
+                >
+                  <span className="absolute -bottom-2 left-8 h-4 w-4 rotate-45 border-b border-r border-[var(--accent)]/25 bg-[var(--surface)]" />
+                  Hi, {profile.firstName || "there"}! I&apos;m Becca. Nice to meet you.
+                </motion.div>
+              ) : null}
             </motion.div>
           )}
 
