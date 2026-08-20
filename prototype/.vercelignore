@@ -1,0 +1,17 @@
+# Local build and dependency output
+.next
+node_modules
+prototype
+.vercel
+
+# Temporary research, logs, and generated diagnostics
+tmp
+*.log
+*.txt
+auth_search_results.txt
+build-output.txt
+
+# Local environment files
+.env
+.env.*
+!.env.example
