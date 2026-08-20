@@ -13,6 +13,7 @@ interface Student {
   email: string;
   branch: string;
   present: boolean;
+  status?: 'present' | 'late' | 'absent';
 }
 
 interface AttendanceSession {
@@ -96,7 +97,9 @@ export default function LecturerAttendance() {
   function toggleAttendance(studentId: string) {
     setStudents(
       students.map((s) =>
-        s.id === studentId ? { ...s, present: !s.present } : s
+        s.id === studentId
+          ? { ...s, present: s.status === 'absent', status: s.status === 'present' ? 'late' : s.status === 'late' ? 'absent' : 'present' }
+          : s
       )
     );
   }
@@ -113,6 +116,7 @@ export default function LecturerAttendance() {
           attendance: students.map((s) => ({
             studentId: s.id,
             present: s.present,
+            status: s.status,
           })),
         }),
       });
@@ -246,7 +250,7 @@ export default function LecturerAttendance() {
                 </label>
                 <div className="px-4 py-2 bg-[var(--surface-alt)] rounded-lg">
                   <p className="text-sm text-[var(--foreground)]">
-                    <strong>{students.filter((s) => s.present).length}</strong> / {students.length} Present
+                    <strong>{students.filter((s) => s.status === 'present').length}</strong> present · {students.filter((s) => s.status === 'late').length} late · {students.filter((s) => s.status === 'absent').length} absent
                   </p>
                 </div>
               </div>
@@ -302,12 +306,14 @@ export default function LecturerAttendance() {
                           <button
                             onClick={() => toggleAttendance(student.id)}
                             className={`inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-sm font-semibold transition-colors ${
-                              student.present
+                              student.status === 'present'
                                 ? 'bg-green-100 text-green-700'
-                                : 'bg-red-100 text-red-700'
+                                : student.status === 'late'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-red-100 text-red-700'
                             }`}
                           >
-                            {student.present ? <><CheckIcon className="h-3.5 w-3.5" /> Present</> : <><CrossIcon className="h-3.5 w-3.5" /> Absent</>}
+                            {student.status === 'present' ? <><CheckIcon className="h-3.5 w-3.5" /> Present</> : student.status === 'late' ? 'Late' : <><CrossIcon className="h-3.5 w-3.5" /> Absent</>}
                           </button>
                         </td>
                       </tr>

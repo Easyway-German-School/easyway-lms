@@ -132,15 +132,16 @@ export async function POST(req: NextRequest) {
 
     let saved = 0;
     for (const entry of rows) {
-      const present = Boolean(entry.present);
+      const status = entry.status === 'late' ? 'late' : entry.present ? 'present' : 'absent';
+      const present = status === 'present' || status === 'late';
       await prisma.attendance.upsert({
         where: { studentId_date: { studentId: entry.studentId, date: day } },
-        update: { present, status: present ? 'present' : 'absent', classId: cls?.id ?? undefined },
+        update: { present, status, classId: cls?.id ?? undefined },
         create: {
           studentId: entry.studentId,
           date: day,
           present,
-          status: present ? 'present' : 'absent',
+          status,
           classId: cls?.id ?? null,
         },
       });

@@ -32,7 +32,7 @@ export async function GET() {
     // Calculate stats
     const stats = {
       total: student.attendances.length,
-      present: student.attendances.filter((a) => a.status === "present").length,
+      present: student.attendances.filter((a) => a.status === "present" || a.status === "late").length,
       absent: student.attendances.filter((a) => a.status === "absent").length,
       late: student.attendances.filter((a) => a.status === "late").length,
       excused: student.attendances.filter((a) => a.status === "excused").length,
