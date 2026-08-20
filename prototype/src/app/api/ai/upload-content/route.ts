@@ -16,7 +16,6 @@ const MAX_PARSED_TEXT_LENGTH = 12000;
 const MAX_DEEP_PARSED_TEXT_LENGTH = 48000;
 const MAX_SUMMARY_CHUNK_CHARS = 3800;
 const MAX_SUMMARY_CHUNKS = 6;
-const MAX_RESPONSE_PREVIEW_LENGTH = 500;
 
 /**
  * POST /api/ai/upload-content
@@ -175,7 +174,7 @@ export async function POST(request: NextRequest) {
       success: true,
       parsed: {
         ...parsed,
-        rawText: extractedText.slice(0, 500), // Return first 500 chars for preview
+        rawText: extractedText,
         fileName,
       },
     });

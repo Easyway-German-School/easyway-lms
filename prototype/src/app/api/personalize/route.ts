@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { NextResponse, NextRequest } from "next/server";
 import { generatePersonalizedPlan } from "@/lib/ai";
 import { mayAutoCreateStudent } from "@/lib/candidates";
+import { KIND, notify } from "@/lib/notify";
 
 export async function GET(request: NextRequest) {
   const session = await requireAuthSession();
@@ -63,6 +64,8 @@ export async function GET(request: NextRequest) {
       id: student.id,
       level: student.level,
       pathway: student.pathway,
+      germanyGoal: student.germanyGoal,
+      germanyGoalNote: student.germanyGoalNote,
       examReadiness: student.examReadiness,
       completedLessons,
       recentPerformance: recentGrades.map((g) => ({ type: g.type, score: g.score, createdAt: g.createdAt })),
@@ -117,6 +120,21 @@ export async function GET(request: NextRequest) {
     } catch (err) {
       console.error('Failed to cache personalized plan', err);
     }
+
+    const firstLesson = Array.isArray(primaryPlan.lessons) ? primaryPlan.lessons[0] : null;
+    void notify({
+      to: { studentIds: [student.id] },
+      kind: KIND.general,
+      severity: "info",
+      title: "Your learning plan is ready",
+      message: firstLesson?.title
+        ? `Your next recommended step is ${String(firstLesson.title).slice(0, 100)}.`
+        : "Your personalized learning plan has been refreshed.",
+      link: "/lesson",
+      dedupeKey: `personalized-plan:${student.id}:${new Date().toISOString().slice(0, 10)}`,
+      push: false,
+      email: false,
+    }).catch((error) => console.error("Personalized plan notification failed", error));
 
     return NextResponse.json({ plan: primaryPlan, source: 'regenerated', comparison, strategy: requestedStrategy, compare: compareStrategies });
   } catch (error) {

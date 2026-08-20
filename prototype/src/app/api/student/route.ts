@@ -118,6 +118,8 @@ export async function GET() {
       tutorSpecialization: student.tutor?.specialization ?? null,
       tutorBio: student.tutor?.bio ?? null,
       pathway: student.pathway,
+      germanyGoal: student.germanyGoal,
+      germanyGoalNote: student.germanyGoalNote,
       nextLive: student.nextLive,
       examReadiness: student.examReadiness,
       averageGrade,

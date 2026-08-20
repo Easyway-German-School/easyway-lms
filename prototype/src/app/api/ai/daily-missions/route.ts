@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateDailyMissions } from "@/lib/ai";
 import { requireAiUser } from "@/lib/ai-guard";
+import { goalFor } from "@/lib/germany-goals";
 
 type Profile = {
   level?: string;
@@ -8,6 +9,8 @@ type Profile = {
   pathway?: string;
   streak?: number;
   completedLessons?: number;
+  germanyGoal?: string | null;
+  germanyGoalNote?: string | null;
 };
 
 function buildAdaptiveMissions(profile: Profile, aiMissions: Array<any>) {
@@ -16,6 +19,7 @@ function buildAdaptiveMissions(profile: Profile, aiMissions: Array<any>) {
   const streak = Number(profile.streak ?? 0);
   const completedLessons = Number(profile.completedLessons ?? 0);
   const pathway = profile.pathway || "Language training";
+  const goal = goalFor(profile.germanyGoal).label;
 
   const base = (Array.isArray(aiMissions) ? aiMissions : []).map((mission, index) => ({
     id: mission.id || `mission-${index}`,
@@ -73,6 +77,17 @@ function buildAdaptiveMissions(profile: Profile, aiMissions: Array<any>) {
     });
   }
 
+  if (profile.germanyGoal) {
+    adaptive.push({
+      id: "adaptive-goal-practice",
+      title: `${goal} language practice`,
+      description: `Use today's German practice in a situation connected to your goal: ${goal.toLowerCase()}.`,
+      reward: "+30 XP",
+      category: "Goal",
+      target: profile.germanyGoalNote || `Apply German to ${goal.toLowerCase()}`,
+    });
+  }
+
   const merged = [...adaptive, ...base];
   return merged.slice(0, 4).map((mission, index) => ({ ...mission, id: mission.id || `daily-${index}` }));
 }
@@ -107,7 +122,11 @@ export async function POST(req: Request) {
         })
       : await generateDailyMissions(profile);
 
-    const missions = buildAdaptiveMissions(profile, aiMissions);
+    const day = new Date().toISOString().slice(0, 10);
+    const missions = buildAdaptiveMissions(profile, aiMissions).map((mission, index) => ({
+      ...mission,
+      id: `daily-${day}-${index}-${String(mission.id || "mission").replace(/[^a-z0-9-]/gi, "-")}`,
+    }));
     return NextResponse.json({ missions });
   } catch (error) {
     console.error("daily-missions error", error);

@@ -42,6 +42,8 @@ type Student = {
   tutorSpecialization?: string | null;
   tutorBio?: string | null;
   pathway?: string;
+  germanyGoal?: string | null;
+  germanyGoalNote?: string | null;
   examReadiness?: number;
   /** Used to make the notification ask concrete: "your next class is …". */
   nextLive?: string | null;
@@ -287,50 +289,56 @@ function DashboardContent() {
 
   const loadDailyMissions = useCallback(async () => {
     if (!student) return;
-    const readiness = student?.examReadiness ?? 0;
-
-    const missionList: Mission[] = [
-      {
-        id: "quest-lesson",
-        title: "Complete one lesson",
-        description: "Finish a lesson and earn a quick streak bonus.",
-        reward: "+45 XP",
-        done: insights.completedLessons > 0,
-      },
-      {
-        id: "quest-streak",
-        title: "Keep the streak alive",
-        description: "Practice for 15 minutes to maintain your learning streak.",
-        reward: "+20 XP",
-        done: insights.streak >= 2,
-      },
-      {
-        id: "quest-speaking",
-        title: "Finish a speaking drill",
-        description: "Record a short speaking task to boost pronunciation confidence.",
-        reward: "+30 XP",
-        done: readiness >= 60,
-      },
-    ];
-
-    setDailyMissions(missionList);
+    try {
+      const response = await fetch("/api/ai/daily-missions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          profile: {
+            name: student.name,
+            level: student.level,
+            pathway: student.pathway,
+            germanyGoal: student.germanyGoal,
+            germanyGoalNote: student.germanyGoalNote,
+            examReadiness: student.examReadiness,
+            streak: insights.streak,
+            completedLessons: insights.completedLessons,
+          },
+        }),
+      });
+      if (!response.ok) throw new Error(`Daily missions failed with status ${response.status}`);
+      const data = await response.json();
+      setDailyMissions(Array.isArray(data.missions) ? data.missions : []);
+    } catch (error) {
+      console.error("Failed to load daily missions:", error);
+      setDailyMissions([]);
+    }
   }, [student, insights.completedLessons, insights.streak]);
 
   const loadMissionState = useCallback(() => {
     if (typeof window === "undefined") return;
-    const savedState = window.localStorage.getItem("dashboardMissionState");
-
-    if (savedState) {
-      try {
-        setCompletedMissionIds(JSON.parse(savedState));
-        return;
-      } catch {
-        // ignore invalid state
-      }
-    }
-
-    setCompletedMissionIds({});
+    void fetch("/api/student/missions", { credentials: "include", cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => setCompletedMissionIds(data?.missions || {}))
+      .catch(() => setCompletedMissionIds({}));
   }, []);
+
+  const toggleMission = async (missionId: string, done: boolean) => {
+    setCompletedMissionIds((current) => ({ ...current, [missionId]: done }));
+    try {
+      const response = await fetch("/api/student/missions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ missionId, done }),
+      });
+      if (!response.ok) throw new Error("Mission progress was not saved");
+    } catch (error) {
+      console.error("Failed to save mission progress:", error);
+    }
+  };
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -859,9 +867,12 @@ function DashboardContent() {
                   {displayMissions.slice(0, 3).map((quest) => {
                     const done = quest.id ? completedMissionIds[quest.id] : quest.done;
                     return (
-                      <div
+                      <button
                         key={quest.id || quest.title}
-                        className={`group flex items-start gap-4 rounded-[28px] border p-5 transition-all duration-200 ${
+                        type="button"
+                        onClick={() => quest.id && void toggleMission(quest.id, !done)}
+                        aria-pressed={done}
+                        className={`group flex w-full items-start gap-4 rounded-[28px] border p-5 text-left transition-all duration-200 ${
                           isPrivateStudent ? `${innerPanelClass} hover:border-[#D4AF37]/40` : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]"
                         }`}
                       >
@@ -887,7 +898,7 @@ function DashboardContent() {
                             {done ? 'Completed' : 'Pending'}
                           </span>
                         </div>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>

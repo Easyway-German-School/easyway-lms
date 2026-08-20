@@ -122,7 +122,7 @@ export async function missionsForCohort(
   return cached<Mission[]>(
     "cohort_missions",
     `${day}:${level}:${band}:${titles.join("|")}`,
-    async () => coerce(parseModelJson(await callModel(buildPrompt(level, band, titles), 700))),
+    async () => coerce(parseModelJson(await callModel(buildPrompt(level, band, titles), 700, "student"))),
     { model: activeModelName() },
   );
 }

@@ -318,6 +318,8 @@ export async function generateDailyMissions(
     `Level: ${profile.level || "A1"}`,
     `Exam readiness: ${profile.examReadiness ?? 0}%`,
     `Pathway: ${profile.pathway || "Language training"}`,
+    `Personal goal: ${profile.germanyGoal || "Not selected"}`,
+    `Goal in their own words: ${profile.germanyGoalNote || "Not provided"}`,
     `Current streak: ${profile.streak ?? 0} days`,
     `Lessons finished: ${profile.completedLessons ?? 0}`,
     "",
@@ -328,7 +330,7 @@ export async function generateDailyMissions(
     'Reply with ONLY a JSON array: [{"title":"…","description":"…","reward":"+20 XP"}]',
   ].join("\n");
 
-  const provider = getAIProvider();
+  const provider = getAIProvider("student");
 
   const raw =
     provider === "claude" || provider === "groq" || provider === "deepseek"
@@ -650,8 +652,8 @@ Return JSON: {"subject": "...", "blocks": [ ... ]}${JSON_ONLY}`;
     raw = await callLocalModel(getOllamaModel(), prompt, 0.4);
     used = getOllamaModel();
   } else {
-    raw = await callModel(prompt, 1200);
-    used = activeModelName();
+    raw = await callModel(prompt, 1200, "backoffice");
+    used = activeModelName("backoffice");
   }
 
   const parsed = parseJsonReply<{ subject?: unknown; blocks?: unknown }>(raw);
@@ -704,11 +706,12 @@ export async function summarizeText(text: string): Promise<string> {
 }
 
 export async function generatePersonalizedPlan(studentProfile: any, candidateLessons: any[], options: { maxLessons?: number; minutesPerDay?: number; strategy?: string } = {}) {
-  const provider = getAIProvider();
+  const provider = getAIProvider("student");
   const maxLessons = options.maxLessons || 10;
   const strategy = (options.strategy || process.env.PERSONALIZATION_PLANNER_STRATEGY || 'hybrid').toLowerCase();
   const useFewShot = strategy === 'fewshot' || strategy === 'hybrid';
   const shouldUseLocalModel = (provider === 'anythingllm' || provider === 'ollama') && strategy !== 'deterministic';
+  const shouldUseHostedModel = (provider === 'claude' || provider === 'groq' || provider === 'deepseek') && strategy !== 'deterministic';
 
   function mapLevelToRank(level: string | undefined) {
     const rank: Record<string, number> = { A1: 1, A2: 2, B1: 3, B2: 4, C1: 5, C2: 6 };
@@ -782,7 +785,8 @@ export async function generatePersonalizedPlan(studentProfile: any, candidateLes
       skillMastery: studentProfile.skillMastery || [],
     preferences: {
       dailyMinutes: options.minutesPerDay || 30,
-      goal: 'improve exam readiness and complete pathway milestones',
+      goal: studentProfile.germanyGoal || 'improve exam readiness and complete pathway milestones',
+      goalNote: studentProfile.germanyGoalNote || null,
     },
   };
 
@@ -863,6 +867,24 @@ Return valid JSON only in this structure:
       }
     } catch {
       // ignore and use fallback
+    }
+  }
+
+  if (shouldUseHostedModel) {
+    try {
+      const response = await callHostedText(localModelPrompt, 1400);
+      const parsed = parseModelJson<any>(response);
+      if (parsed?.lessons && Array.isArray(parsed.lessons)) {
+        return {
+          ...parsed,
+          strategy,
+          variant: 'llm',
+          targetDifficulty: getTargetDifficultyRank(),
+          adaptiveHint: 'Difficulty is tuned from recent performance and exam readiness.',
+        };
+      }
+    } catch {
+      // fall back to deterministic
     }
   }
 
@@ -1337,7 +1359,9 @@ export type AiWorkload =
   /** Somebody is watching a spinner. Speed wins. */
   | "interactive"
   /** Nobody is waiting. Privacy and cost win. */
-  | "backoffice";
+  | "backoffice"
+  /** A learner is waiting for a tailored plan or quest. */
+  | "student";
 
 type Provider = "claude" | "groq" | "ollama" | "deepseek" | "anythingllm" | "mock";
 
@@ -1404,7 +1428,16 @@ function getAIProvider(workload: AiWorkload = "interactive"): Provider {
   if (workload === "backoffice") {
     return localProvider() ?? (hasKey(process.env.GROQ_API_KEY) ? "groq" : null) ??
       (hasKey(process.env.DEEPSEEK_API_KEY) ? "deepseek" : null) ??
-      (hasKey(process.env.ANTHROPIC_API_KEY) ? "claude" : "mock");
+      "mock";
+  }
+
+  // Student-facing recommendations use Claude when configured. Local models
+  // remain reserved for staff and background authoring work.
+  if (workload === "student") {
+    return hasKey(process.env.ANTHROPIC_API_KEY)
+      ? "claude"
+      : (hasKey(process.env.GROQ_API_KEY) ? "groq" : null) ??
+          (hasKey(process.env.DEEPSEEK_API_KEY) ? "deepseek" : "mock");
   }
 
   /**
@@ -1456,8 +1489,8 @@ export function activeModelName(workload: AiWorkload = "interactive"): string {
  * background jobs the answer is always "leave it for the next run", never
  * "write a placeholder into the database as though it were real output".
  */
-export async function callModel(prompt: string, maxTokens = 800): Promise<string | null> {
-  const provider = getAIProvider();
+export async function callModel(prompt: string, maxTokens = 800, workload: AiWorkload = "interactive"): Promise<string | null> {
+  const provider = getAIProvider(workload);
 
   if (provider === "claude" || provider === "groq" || provider === "deepseek") {
     return callHostedText(prompt, maxTokens);

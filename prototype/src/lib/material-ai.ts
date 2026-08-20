@@ -147,7 +147,7 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
       "material_summary",
       `${level}:${text.slice(0, MAX_PROMPT_CHARS)}`,
       async () => {
-        const raw = await callModel(buildPrompt(material.title, level, text), 1200);
+        const raw = await callModel(buildPrompt(material.title, level, text), 1200, "backoffice");
         return coerceInsight(parseModelJson(raw));
       },
       { model: activeModelName() },
