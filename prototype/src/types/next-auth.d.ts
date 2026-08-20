@@ -15,5 +15,7 @@ declare module "next-auth/jwt" {
     id?: string;
     role?: string;
     tenantId?: string;
+    adminLocked?: boolean;
+    adminLocked?: boolean;
   }
 }

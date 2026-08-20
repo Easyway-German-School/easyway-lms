@@ -91,6 +91,8 @@ export async function GET() {
       adminBranchIds: true,
       createdAt: true,
       totpEnabledAt: true,
+      adminLockedAt: true,
+      adminLastSeenAt: true,
     },
   });
 
@@ -118,6 +120,9 @@ export async function GET() {
         createdAt: a.createdAt,
         // Possession of a secret is not enrolment; the confirmed date is.
         mfaEnabled: Boolean(a.totpEnabledAt),
+        locked: Boolean(a.adminLockedAt),
+        lastSeenAt: a.adminLastSeenAt,
+        online: Boolean(a.adminLastSeenAt && a.adminLastSeenAt.getTime() > Date.now() - 90_000),
         adminRole,
         label: ADMIN_ROLE_LABELS[adminRole],
         // What the preset gives them, what they actually have, and the diff
@@ -309,6 +314,7 @@ export async function PATCH(req: NextRequest) {
     const name = typeof body.name === "string" ? body.name.trim() : null;
     const email = body.email === undefined ? null : normaliseEmail(body.email);
     const password = typeof body.password === "string" ? body.password : null;
+    const lockProvided = typeof body.locked === "boolean";
     // Distinguished from "not sent" (leave alone) rather than folded into a
     // plain array check, because the way to LIFT a restriction is to send an
     // empty array, and that has to be tellable apart from the field being
@@ -328,6 +334,7 @@ export async function PATCH(req: NextRequest) {
       email === null &&
       password === null &&
       !branchIdsProvided
+      && !lockProvided
     ) {
       return NextResponse.json({ error: "Nothing to change" }, { status: 400 });
     }
@@ -341,6 +348,19 @@ export async function PATCH(req: NextRequest) {
     });
     if (!target || String(target.role).toLowerCase() !== "admin") {
       return NextResponse.json({ error: "That user is not an admin" }, { status: 404 });
+    }
+
+    if (lockProvided) {
+      if (userId === auth.admin?.userId) {
+        return NextResponse.json({ error: "You cannot lock your own admin account." }, { status: 409 });
+      }
+      await prisma.user.update({
+        where: { id: userId },
+        data: { adminLockedAt: body.locked ? new Date() : null },
+      });
+      if (body.locked) {
+        await prisma.session.deleteMany({ where: { userId } });
+      }
     }
 
     // Only branches that actually exist, in this tenant, make the cut — a

@@ -39,6 +39,9 @@ type Admin = {
   adminRole: string;
   label: string;
   mfaEnabled: boolean;
+  locked: boolean;
+  online: boolean;
+  lastSeenAt: string | null;
   presetCapabilities: string[];
   capabilities: string[];
   overrides: { grant: string[]; revoke: string[] };
@@ -118,6 +121,15 @@ export default function AdminStaffPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    const heartbeat = () => {
+      void fetch("/api/admin/staff/presence", { method: "POST" });
+    };
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   async function save(
     userId: string,
     patch: {
@@ -129,6 +141,7 @@ export default function AdminStaffPage() {
       // Sending [] clears the restriction (every branch); omit the field
       // entirely to leave it untouched.
       branchIds?: string[];
+      locked?: boolean;
     },
   ) {
     setSavingId(userId);
@@ -201,6 +214,12 @@ export default function AdminStaffPage() {
     } finally {
       setSavingId(null);
     }
+  }
+
+  async function toggleLock(admin: Admin) {
+    const action = admin.locked ? "unlock" : "lock out";
+    if (!window.confirm(`${action[0].toUpperCase()}${action.slice(1)} ${admin.name ?? admin.email}?`)) return;
+    await save(admin.id, { locked: !admin.locked });
   }
 
   async function changeMyPassword() {
@@ -497,6 +516,13 @@ export default function AdminStaffPage() {
           ))}
         </div>
 
+        <div className="mb-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+          <p className="text-sm font-bold">Admin presence</p>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            {admins.filter((admin) => admin.online && !admin.locked).length} online now · {admins.length} admin accounts · locked accounts cannot use existing sessions.
+          </p>
+        </div>
+
         {/* ---- The people ------------------------------------------------ */}
         {loading ? (
           <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
@@ -526,6 +552,9 @@ export default function AdminStaffPage() {
                             2FA on
                           </span>
                         )}
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${admin.locked ? "bg-red-500/10 text-red-700" : admin.online ? "bg-emerald-500/10 text-emerald-700" : "bg-slate-500/10 text-slate-600"}`}>
+                          {admin.locked ? "Locked" : admin.online ? "Online" : "Offline"}
+                        </span>
                         {saved === admin.id && (
                           <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-600">
                             <CheckIcon className="h-3 w-3" /> Saved
@@ -556,6 +585,14 @@ export default function AdminStaffPage() {
                           </option>
                         ))}
                       </select>
+
+                      <button
+                        onClick={() => void toggleLock(admin)}
+                        disabled={busy}
+                        className={`whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-semibold transition disabled:opacity-50 ${admin.locked ? "border-emerald-300 text-emerald-700 hover:bg-emerald-50" : "border-red-200 text-red-700 hover:bg-red-50"}`}
+                      >
+                        {admin.locked ? "Unlock" : "Lock out"}
+                      </button>
 
                       <button
                         onClick={() => (isEditing ? setEditing(null) : startEditing(admin))}

@@ -1,0 +1,4 @@
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "adminLockedAt" TIMESTAMP(3);
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "adminLastSeenAt" TIMESTAMP(3);
+
+CREATE INDEX IF NOT EXISTS "User_adminLastSeenAt_idx" ON "User"("adminLastSeenAt");

@@ -237,6 +237,7 @@ export const authOptions: AuthOptions = {
         // Sign-in time. Anything reset after this invalidates the token.
         token.issuedAt = Date.now();
         token.pwCheckedAt = Date.now();
+        token.adminLocked = false;
       }
 
       /**
@@ -279,6 +280,18 @@ export const authOptions: AuthOptions = {
         }
       }
 
+      if (token.id && normalizeRole(token.role) === "admin") {
+        try {
+          const admin = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { adminLockedAt: true },
+          });
+          token.adminLocked = Boolean(admin?.adminLockedAt);
+        } catch {
+          // Keep the last known state during a transient database failure.
+        }
+      }
+
       return token;
     },
     async session({ session, token }: { session: any; token: JWT }) {
@@ -299,9 +312,17 @@ export const authOptions: AuthOptions = {
           return session;
         }
 
+        if (token.adminLocked && normalizeRole(token.role) === "admin") {
+          session.user.id = token.id as string;
+          session.user.role = REVOKED_SESSION_ROLE;
+          session.user.adminLocked = true;
+          return session;
+        }
+
         session.user.id = token.id as string;
         session.user.role = normalizeRole(token.role || "STUDENT");
         session.user.tenantId = token.tenantId as string | undefined;
+        session.user.adminLocked = Boolean(token.adminLocked);
         if (!token.tenantId && token.id) {
           try {
             const u = await prisma.user.findUnique({

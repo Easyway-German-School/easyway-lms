@@ -59,6 +59,10 @@ model User {
    * still reaches the people on it.
    */
   adminCapabilities Json?
+  /** Set by a super admin to invalidate this admin's existing sessions. */
+  adminLockedAt     DateTime?
+  /** Last authenticated presence heartbeat from an admin browser. */
+  adminLastSeenAt   DateTime?
   /**
    * Restricts an admin to specific branches, as JSON: ["branchId1", "branchId2"].
    * Null (or an empty array) means unrestricted — every branch, exactly the
