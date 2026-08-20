@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -217,30 +216,6 @@ export default function ProgramsPage() {
               );
             })}
           </div>
-        </section>
-
-        <section className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
-          <h2 className="text-3xl font-semibold text-[var(--foreground)]">Why Easyway&rsquo;s portal is different</h2>
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
-            <div className="rounded-3xl border border-[var(--border)] p-6">
-              <h3 className="text-xl font-semibold">Outcome-first</h3>
-              <p className="mt-3 text-[var(--muted)]">Programs are organized around results: certification success, German nursing work, IT relocation, or apprenticeship admission.</p>
-            </div>
-            <div className="rounded-3xl border border-[var(--border)] p-6">
-              <h3 className="text-xl font-semibold">AI-assisted progress</h3>
-              <p className="mt-3 text-[var(--muted)]">Smart recommendations, mock grading, and pronunciation coaching keep every lesson on target.</p>
-            </div>
-            <div className="rounded-3xl border border-[var(--border)] p-6">
-              <h3 className="text-xl font-semibold">Live hybrid learning</h3>
-              <p className="mt-3 text-[var(--muted)]">Learners get a clear path plus live sessions, shared whiteboards, and voice roleplay support.</p>
-            </div>
-          </div>
-          <Link
-            href="/tandem"
-            className="mt-6 inline-flex rounded-full border border-[var(--border)] px-5 py-3 text-sm font-semibold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)]"
-          >
-            Practise a roleplay first
-          </Link>
         </section>
 
         {/* Was on the dashboard, which a student opens every day for things
