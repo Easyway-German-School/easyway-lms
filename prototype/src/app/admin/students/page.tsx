@@ -732,7 +732,7 @@ function StudentsRoster() {
                 >
                   <option value="">All types</option>
                   <option value="group">Group Class</option>
-                  <option value="private">Private Class</option>
+                  <option value="private">Private membership</option>
                 </select>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
@@ -1077,6 +1077,7 @@ function StudentsRoster() {
               ) : (
                 students.map((student) => {
                   const highlighted = isHighlighted(student.id);
+                  const isPrivateMember = student.classType === "private";
                   const money = (student as unknown as { _finance?: StudentFinanceRow })._finance;
                   return (
                   <tr
@@ -1101,6 +1102,15 @@ function StudentsRoster() {
                       >
                         {student.user.name}
                       </Link>
+                      {isPrivateMember ? (
+                        <span
+                          title="Private membership"
+                          className="ml-2 inline-flex items-center gap-1 rounded-full border border-[#D4AF37]/50 bg-[#D4AF37]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8A6914]"
+                        >
+                          <span aria-hidden="true">★</span>
+                          Private membership
+                        </span>
+                      ) : null}
                       {highlighted && money && (
                         <p className={`mt-0.5 text-xs font-bold ${tone.text}`}>
                           {money.daysEnrolled}d enrolled
