@@ -123,7 +123,7 @@ function timeAgo(iso: string): string {
 }
 
 export default function MaterialsPage() {
-  const [tab, setTab] = useState<"activity" | "library">("activity");
+  const [tab, setTab] = useState<"activity" | "library">("library");
 
   return (
     <AdminShell>
@@ -159,7 +159,7 @@ export default function MaterialsPage() {
           })}
         </div>
 
-        {tab === "activity" ? <ActivityTab /> : <LibraryTab />}
+        {tab === "activity" ? <ActivityTab /> : <VideoCatalogTab />}
       </div>
     </AdminShell>
   );
@@ -500,6 +500,113 @@ function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string
 }
 
 /* ------------------------------------------------------------------- library */
+
+type CatalogVideo = {
+  id: string;
+  title: string;
+  description: string | null;
+  url: string;
+  sourceUrl: string | null;
+  provider: string;
+  category: "private" | "recording" | "external" | "course";
+  categoryLabel: string;
+  audience: string;
+  kind: string;
+  level: string | null;
+  courseTitle: string | null;
+  branch: string | null;
+  lecturer: string | null;
+  series: string | null;
+  episodeNumber: number | null;
+  durationSeconds: number | null;
+  fileSize: number;
+  recordingStatus: string | null;
+  recordingVariant: string | null;
+  keepForever: boolean;
+  recordedAt: string | null;
+  createdAt: string;
+};
+
+function VideoCatalogTab() {
+  const [videos, setVideos] = useState<CatalogVideo[]>([]);
+  const [filter, setFilter] = useState<"all" | CatalogVideo["category"]>("all");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/admin/materials/catalog", { cache: "no-store" });
+      const text = await response.text();
+      let data: { error?: string; videos?: CatalogVideo[] } = {};
+      try { data = text ? JSON.parse(text) : {}; } catch { throw new Error(`Catalog returned an invalid response (${response.status}).`); }
+      if (!response.ok) throw new Error(data.error || "Could not load the video catalog.");
+      setVideos(data.videos ?? []);
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load the video catalog.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const visible = filter === "all" ? videos : videos.filter((video) => video.category === filter);
+  const groups = [
+    { key: "all" as const, label: "All videos" },
+    { key: "recording" as const, label: "Live recordings" },
+    { key: "private" as const, label: "Private classes" },
+    { key: "external" as const, label: "External embeds" },
+    { key: "course" as const, label: "Course library" },
+  ];
+
+  if (loading) return <BrandLoader fill size="lg" message="Opening the video catalog." />;
+
+  return (
+    <div className="space-y-5">
+      {error ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        {groups.map((group) => (
+          <button key={group.key} type="button" onClick={() => setFilter(group.key)} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === group.key ? "bg-slate-900 text-white" : "bg-[var(--surface)] text-[var(--muted)] ring-1 ring-[var(--border)]"}`}>
+            {group.label} <span className="ml-1 opacity-70">{group.key === "all" ? videos.length : videos.filter((video) => video.category === group.key).length}</span>
+          </button>
+        ))}
+        <button type="button" onClick={load} aria-label="Refresh catalog" className="rounded-full bg-[var(--surface)] p-2 text-[var(--muted)] ring-1 ring-[var(--border)]"><RefreshIcon className="h-4 w-4" /></button>
+      </div>
+
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <h2 className="text-lg font-semibold">Library catalogue</h2>
+        <p className="mt-1 text-sm text-[var(--muted)]">Recordings, private-class material, hosted course videos, and YouTube/Vimeo/Drive/Loom embeds. Documents remain in the upload library below.</p>
+      </div>
+
+      {visible.length === 0 ? (
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center text-sm text-[var(--muted)]">No videos in this shelf yet.</div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {visible.map((video) => (
+            <article key={video.id} className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
+              <div className={`flex h-28 items-center justify-center ${video.category === "recording" ? "bg-orange-100 text-orange-700" : video.category === "private" ? "bg-violet-100 text-violet-700" : video.category === "external" ? "bg-sky-100 text-sky-700" : "bg-teal-100 text-teal-700"}`}>
+                <FilmIcon className="h-10 w-10" />
+              </div>
+              <div className="space-y-3 p-4">
+                <div className="flex items-start justify-between gap-3"><h3 className="font-semibold">{video.title}</h3><span className="shrink-0 rounded-full bg-[var(--surface-alt)] px-2 py-1 text-[10px] font-bold uppercase text-[var(--muted)]">{video.provider}</span></div>
+                <p className="text-xs font-semibold text-[var(--accent)]">{video.categoryLabel}</p>
+                <p className="text-xs text-[var(--muted)]">{[video.audience, video.level, video.courseTitle, video.branch, video.lecturer].filter(Boolean).join(" · ")}</p>
+                {video.recordingStatus ? <p className="text-xs text-[var(--muted)]">Recording: {video.recordingStatus}{video.recordingVariant ? ` · ${video.recordingVariant}` : ""}{video.keepForever ? " · kept" : ""}</p> : null}
+                <div className="flex items-center justify-between gap-2 text-xs text-[var(--muted)]"><span>{new Date(video.recordedAt || video.createdAt).toLocaleDateString()}</span><a href={video.sourceUrl || video.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-[var(--accent)] hover:underline">Open video</a></div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm text-[var(--muted)]">
+        <strong className="text-[var(--foreground)]">Upload documents and course files</strong> remain available in the existing course library. The catalog above deliberately shows playable video items only, so PDFs and worksheets do not get mixed into the video shelves.
+      </div>
+    </div>
+  );
+}
 
 /**
  * The page as it was, restyled to match the rest of the admin area and no
