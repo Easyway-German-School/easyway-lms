@@ -284,7 +284,7 @@ export async function POST(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const body = await request.json().catch(() => ({}));
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const phone = typeof body.phone === "string" ? body.phone.trim() : "";
@@ -362,7 +362,9 @@ export async function POST(request: Request) {
     });
 
     const student = await prisma.student.findUnique({ where: { userId: user.id }, select: { id: true } });
-    const studentCode = student ? await assignStudentCode(student.id, { level, branch: branchRow }) : null;
+    const studentCode = student
+      ? await assignStudentCode(student.id, { level, branch: branchRow, classType })
+      : null;
 
     return NextResponse.json(
       {
@@ -528,26 +530,43 @@ export async function DELETE(request: Request) {
   if (!gate.ok) return gate.response;
 
   const body = await request.json().catch(() => ({}));
-  const studentId = typeof body.studentId === "string" ? body.studentId : "";
-  if (!studentId) {
-    return NextResponse.json({ error: "Student ID is required" }, { status: 400 });
+  const studentIds: string[] = [];
+  if (Array.isArray(body.studentIds)) {
+    for (const id of body.studentIds as unknown[]) {
+      if (typeof id === "string" && id.trim().length > 0) studentIds.push(id.trim());
+    }
+  } else if (typeof body.studentId === "string" && body.studentId.trim().length > 0) {
+    studentIds.push(body.studentId.trim());
+  }
+  if (body.confirmation !== "DELETE STUDENTS") {
+    return NextResponse.json({ error: "Confirmation phrase DELETE STUDENTS is required" }, { status: 400 });
+  }
+  if (studentIds.length === 0) {
+    return NextResponse.json({ error: "At least one student ID is required" }, { status: 400 });
+  }
+  if (studentIds.length > 500) {
+    return NextResponse.json({ error: "Delete at most 500 students at a time" }, { status: 400 });
   }
 
   try {
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-      select: { userId: true, branch: { select: { tenantId: true } } },
+    const students = await prisma.student.findMany({
+      where: { id: { in: studentIds } },
+      select: { id: true, userId: true, branch: { select: { tenantId: true } } },
     });
-    if (!student) {
+    if (students.length !== studentIds.length) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    if (gate.session.user.tenantId && student.branch?.tenantId !== gate.session.user.tenantId) {
+    if (gate.session.user.tenantId && students.some((student) => student.branch?.tenantId !== gate.session.user.tenantId)) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    await prisma.user.delete({ where: { id: student.userId } });
-    return NextResponse.json({ success: true });
+    for (const student of students) {
+      await prisma.session.deleteMany({ where: { userId: student.userId } });
+      await prisma.student.delete({ where: { id: student.id } });
+      await prisma.user.delete({ where: { id: student.userId } });
+    }
+    return NextResponse.json({ success: true, deleted: students.length });
   } catch (error) {
     return NextResponse.json({ error: "Unable to delete student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
   }

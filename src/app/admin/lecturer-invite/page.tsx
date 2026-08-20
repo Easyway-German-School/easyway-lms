@@ -458,6 +458,7 @@ export default function AdminTutorsPage() {
   const [uploadingEditPhoto, setUploadingEditPhoto] = useState(false);
   const [editAssignment, setEditAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [selectedTutorIds, setSelectedTutorIds] = useState<Set<string>>(new Set());
 
   /**
    * Defaults to the people who currently teach. Somebody who left two years
@@ -502,6 +503,27 @@ export default function AdminTutorsPage() {
     for (const tutor of tutors) counts[tutor.status] = (counts[tutor.status] ?? 0) + 1;
     return counts;
   }, [tutors]);
+
+  async function deleteTutors(ids: string[]) {
+    if (!ids.length) return;
+    const label = ids.length === 1 ? "this tutor" : `${ids.length} tutors`;
+    if (!confirm(`Are you sure you want to delete ${label}? This action is not reversible from the portal and will log them out everywhere.`)) return;
+    setError("");
+    const res = await fetch("/api/admin/lecturers", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lecturerIds: ids, confirmation: "DELETE TUTORS" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(data.error || "Could not delete tutors");
+      return;
+    }
+    setSelectedTutorIds(new Set());
+    setEditingId("");
+    setSuccess(`${data.deleted ?? ids.length} tutor account${ids.length === 1 ? "" : "s"} deleted.`);
+    await load();
+  }
 
   async function uploadTutorPhoto(file: File | null, target: "create" | "edit") {
     if (!file) return null;
@@ -684,6 +706,14 @@ export default function AdminTutorsPage() {
           </div>
 
           <div className="mt-5 space-y-3">
+            {selectedTutorIds.size > 0 ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm">
+                <span>{selectedTutorIds.size} tutor{selectedTutorIds.size === 1 ? "" : "s"} selected</span>
+                <button type="button" onClick={() => deleteTutors([...selectedTutorIds])} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">
+                  Delete selected
+                </button>
+              </div>
+            ) : null}
             {!loading && tutors.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-[var(--border)] p-5 text-sm text-[var(--muted)]">
                 No tutor accounts yet. Create one below.
@@ -701,6 +731,7 @@ export default function AdminTutorsPage() {
               return (
                 <div key={tutor.id} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
                   <div className="flex flex-wrap items-start gap-4">
+                    <input type="checkbox" aria-label={`Select ${tutor.user.name || tutor.user.email}`} checked={selectedTutorIds.has(tutor.id)} onChange={(event) => setSelectedTutorIds((current) => { const next = new Set(current); if (event.target.checked) next.add(tutor.id); else next.delete(tutor.id); return next; })} className="mt-2 h-4 w-4" />
                     {tutor.photoUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={tutor.photoUrl} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
@@ -749,6 +780,13 @@ export default function AdminTutorsPage() {
                         className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold text-[var(--foreground)]"
                       >
                         {isEditing ? "Close" : "Edit tutor"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteTutors([tutor.id])}
+                        className="rounded-lg border border-red-500 px-4 py-2 text-xs font-semibold text-red-600"
+                      >
+                        Delete tutor
                       </button>
                     </div>
                   </div>

@@ -641,6 +641,7 @@ export default function AdminTutorsPage() {
    * of a status is that the record survives.
    */
   const [statusFilter, setStatusFilter] = useState<LecturerStatus | "all" | "current">("current");
+  const [selectedTutorIds, setSelectedTutorIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -677,6 +678,24 @@ export default function AdminTutorsPage() {
     for (const tutor of tutors) counts[tutor.status] = (counts[tutor.status] ?? 0) + 1;
     return counts;
   }, [tutors]);
+
+  async function deleteSelectedTutors() {
+    const ids = [...selectedTutorIds];
+    if (!ids.length) return;
+    if (!confirm(`Are you sure you want to delete ${ids.length} tutors? This action is not reversible from the portal and will log them out everywhere.`)) return;
+    const res = await fetch("/api/admin/lecturers", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lecturerIds: ids, confirmation: "DELETE TUTORS" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(data.error || "Could not delete selected tutors");
+      return;
+    }
+    setSelectedTutorIds(new Set());
+    await load();
+  }
 
   async function uploadTutorPhoto(file: File | null, target: "create" | "edit") {
     if (!file) return null;
@@ -869,6 +888,12 @@ export default function AdminTutorsPage() {
           </div>
 
           <div className="mt-5 space-y-3">
+            {selectedTutorIds.size > 0 ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+                <span>{selectedTutorIds.size} tutor{selectedTutorIds.size === 1 ? "" : "s"} selected</span>
+                <button type="button" onClick={deleteSelectedTutors} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">Delete selected</button>
+              </div>
+            ) : null}
             {!loading && tutors.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-[var(--border)] p-5 text-sm text-[var(--muted)]">
                 No tutor accounts yet. Create one below.
@@ -886,6 +911,7 @@ export default function AdminTutorsPage() {
               return (
                 <div key={tutor.id} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
                   <div className="flex flex-wrap items-start gap-4">
+                    <input type="checkbox" aria-label={`Select ${tutor.user.name || tutor.user.email}`} checked={selectedTutorIds.has(tutor.id)} onChange={(event) => setSelectedTutorIds((current) => { const next = new Set(current); if (event.target.checked) next.add(tutor.id); else next.delete(tutor.id); return next; })} className="mt-2 h-4 w-4" />
                     {tutor.photoUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={tutor.photoUrl} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />

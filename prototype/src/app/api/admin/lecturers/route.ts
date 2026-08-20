@@ -422,4 +422,38 @@ export async function PATCH(request: NextRequest) {
   return NextResponse.json({ success: true });
 }
 
+export async function DELETE(request: NextRequest) {
+  const gate = await requireCapability("staff");
+  if (!gate.ok) return gate.response;
+
+  const body = await request.json().catch(() => ({}));
+  const lecturerIds: string[] = [];
+  if (Array.isArray(body.lecturerIds)) {
+    for (const id of body.lecturerIds) {
+      if (typeof id === "string" && id.trim().length > 0) lecturerIds.push(id.trim());
+    }
+  } else if (typeof body.lecturerId === "string" && body.lecturerId.trim().length > 0) {
+    lecturerIds.push(body.lecturerId.trim());
+  }
+  if (body.confirmation !== "DELETE TUTORS") {
+    return NextResponse.json({ error: "Confirmation phrase DELETE TUTORS is required" }, { status: 400 });
+  }
+  if (lecturerIds.length === 0) return NextResponse.json({ error: "At least one tutor ID is required" }, { status: 400 });
+  if (lecturerIds.length > 500) return NextResponse.json({ error: "Delete at most 500 tutors at a time" }, { status: 400 });
+
+  const lecturers = await prisma.lecturer.findMany({
+    where: { id: { in: lecturerIds } },
+    select: { id: true, userId: true },
+  });
+  if (lecturers.length !== lecturerIds.length) return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
+
+  for (const lecturer of lecturers) {
+    await prisma.session.deleteMany({ where: { userId: lecturer.userId } });
+    await prisma.student.updateMany({ where: { tutorId: lecturer.id }, data: { tutorId: null } });
+    await prisma.lecturer.delete({ where: { id: lecturer.id } });
+    await prisma.user.delete({ where: { id: lecturer.userId } });
+  }
+  return NextResponse.json({ success: true, deleted: lecturers.length });
+}
+
 export const dynamic = "force-dynamic";

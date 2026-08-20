@@ -269,23 +269,36 @@ export async function DELETE(request: Request) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const studentId = typeof body.studentId === "string" ? body.studentId : "";
-  if (!studentId) {
-    return NextResponse.json({ error: "Student ID is required" }, { status: 400 });
+  const studentIds: string[] = Array.isArray(body.studentIds)
+    ? body.studentIds.filter((id: unknown): id is string => typeof id === "string" && id.trim().length > 0).map((id: string) => id.trim())
+    : typeof body.studentId === "string" && body.studentId.trim().length > 0
+      ? [body.studentId.trim()]
+      : [];
+  if (body.confirmation !== "DELETE STUDENTS") {
+    return NextResponse.json({ error: "Confirmation phrase DELETE STUDENTS is required" }, { status: 400 });
   }
+  if (studentIds.length === 0) return NextResponse.json({ error: "At least one student ID is required" }, { status: 400 });
+  if (studentIds.length > 500) return NextResponse.json({ error: "Delete at most 500 students at a time" }, { status: 400 });
 
   try {
-    const student = await prisma.student.findUnique({ where: { id: studentId }, include: { user: true } });
-    if (!student) {
+    const students = await prisma.student.findMany({
+      where: { id: { in: studentIds } },
+      select: { id: true, userId: true, user: { select: { tenantId: true } } },
+    });
+    if (students.length !== studentIds.length) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    if (auth.tenantId && student.user.tenantId !== auth.tenantId) {
+    if (auth.tenantId && students.some((student) => student.user.tenantId !== auth.tenantId)) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    await prisma.user.delete({ where: { id: student.userId } });
-    return NextResponse.json({ success: true });
+    for (const student of students) {
+      await prisma.session.deleteMany({ where: { userId: student.userId } });
+      await prisma.student.delete({ where: { id: student.id } });
+      await prisma.user.delete({ where: { id: student.userId } });
+    }
+    return NextResponse.json({ success: true, deleted: students.length });
   } catch (error) {
     return NextResponse.json({ error: "Unable to delete student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
   }

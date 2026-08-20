@@ -84,6 +84,7 @@ export default function AdminStudentsPage() {
   const [studentError, setStudentError] = useState("");
   const [selectedAdmission, setSelectedAdmission] = useState<AdmissionData>(null);
   const [selectedStudentName, setSelectedStudentName] = useState("");
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
 
   async function loadBranches() {
     const [branchesRes, lecturersRes] = await Promise.all([
@@ -393,14 +394,14 @@ export default function AdminStudentsPage() {
   }
 
   async function handleDeleteStudent(studentId: string) {
-    if (!confirm("Delete this student? This will remove the student record permanently.")) {
+    if (!confirm("Are you sure you want to delete this student? This action is not reversible from the portal and will log them out everywhere.")) {
       return;
     }
 
     const res = await fetch("/api/admin/students", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ studentId }),
+      body: JSON.stringify({ studentId, confirmation: "DELETE STUDENTS" }),
     });
 
     if (!res.ok) {
@@ -413,6 +414,24 @@ export default function AdminStudentsPage() {
       cancelEditingStudent();
     }
 
+    await loadStudents();
+  }
+
+  async function handleDeleteSelectedStudents() {
+    const ids = [...selectedStudentIds];
+    if (!ids.length) return;
+    if (!confirm(`Are you sure you want to delete ${ids.length} students? This action is not reversible from the portal and will log them out everywhere.`)) return;
+    const res = await fetch("/api/admin/students", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ studentIds: ids, confirmation: "DELETE STUDENTS" }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setStudentError(data?.error || "Unable to delete selected students.");
+      return;
+    }
+    setSelectedStudentIds(new Set());
     await loadStudents();
   }
 
@@ -676,11 +695,20 @@ export default function AdminStudentsPage() {
           </div>
         ) : null}
 
+        {selectedStudentIds.size > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm">
+            <span>{selectedStudentIds.size} student{selectedStudentIds.size === 1 ? "" : "s"} selected</span>
+            <button type="button" onClick={handleDeleteSelectedStudents} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">
+              Delete selected
+            </button>
+          </div>
+        ) : null}
         <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] shadow-sm">
           <div className="w-full overflow-x-auto">
             <table className="min-w-full divide-y divide-[var(--border)]">
             <thead className="bg-[var(--surface)] text-left text-sm uppercase tracking-[0.16em] text-[var(--muted)]">
               <tr>
+                <th className="px-6 py-4"><input type="checkbox" aria-label="Select all visible students" checked={students.length > 0 && students.every((student) => selectedStudentIds.has(student.id))} onChange={(event) => setSelectedStudentIds(event.target.checked ? new Set(students.map((student) => student.id)) : new Set())} /></th>
                 <th className="px-6 py-4">Name</th>
                 <th className="px-6 py-4">Email</th>
                 <th className="px-6 py-4">Branch</th>
@@ -701,15 +729,16 @@ export default function AdminStudentsPage() {
             <tbody className="divide-y divide-[var(--border)] bg-[var(--background)]">
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="px-6 py-10 text-center text-sm text-[var(--muted)]">Loading students…</td>
+                  <td colSpan={11} className="px-6 py-10 text-center text-sm text-[var(--muted)]">Loading students…</td>
                 </tr>
               ) : students.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No students found yet.</td>
+                  <td colSpan={11} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No students found yet.</td>
                 </tr>
               ) : (
                 students.map((student) => (
                   <tr key={student.id}>
+                    <td className="px-6 py-4"><input type="checkbox" aria-label={`Select ${student.user.name || student.user.email}`} checked={selectedStudentIds.has(student.id)} onChange={(event) => setSelectedStudentIds((current) => { const next = new Set(current); if (event.target.checked) next.add(student.id); else next.delete(student.id); return next; })} /></td>
                     <td className="px-6 py-4">{student.user.name}</td>
                     <td className="px-6 py-4">{student.user.email}</td>
                     <td className="px-6 py-4">{student.branch?.name || "—"}</td>
