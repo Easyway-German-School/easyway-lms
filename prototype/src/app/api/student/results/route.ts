@@ -34,7 +34,7 @@ export async function GET() {
     }
 
     const grades = await prisma.grade.findMany({
-      where: { studentId: student.id },
+      where: { studentId: student.id, OR: [{ examId: null }, { exam: { resultsReleased: true } }] },
       orderBy: { createdAt: "desc" },
       include: {
         exam: {

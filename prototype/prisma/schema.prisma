@@ -1761,6 +1761,7 @@ model Exam {
    * Only published sittings are bookable by candidates.
    */
   published Boolean @default(false)
+  resultsReleased Boolean @default(true)
 
   /**
    * Per-skill minimum (0-100) to pass this sitting. A candidate passes only

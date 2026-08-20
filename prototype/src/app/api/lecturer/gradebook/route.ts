@@ -93,7 +93,7 @@ export async function GET() {
         feedback: true,
         createdAt: true,
         examId: true,
-        exam: { select: { name: true, examDate: true, examBody: true } },
+        exam: { select: { id: true, name: true, examDate: true, examBody: true, resultsReleased: true } },
       },
     }),
     prisma.attendance.findMany({
@@ -108,18 +108,20 @@ export async function GET() {
   const history = new Map<string, Array<{ score: number; at: number }>>();
   const examRows = new Map<
     string,
-    Array<{ name: string; score: number; letter: string; at: string; body: string }>
+    Array<{ id: string; name: string; score: number; letter: string; at: string; body: string; resultsReleased: boolean }>
   >();
 
   for (const grade of grades) {
     if (grade.examId && grade.exam) {
       const list = examRows.get(grade.studentId) ?? [];
       list.push({
+        id: grade.exam.id,
         name: grade.exam.name,
         score: grade.score,
         letter: letterFor(grade.score),
         at: grade.exam.examDate.toISOString(),
         body: grade.exam.examBody,
+        resultsReleased: grade.exam.resultsReleased,
       });
       examRows.set(grade.studentId, list);
       continue;

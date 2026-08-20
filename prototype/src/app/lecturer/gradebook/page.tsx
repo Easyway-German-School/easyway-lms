@@ -54,7 +54,7 @@ type Student = {
   trend: number | null;
   sparkline: number[];
   attendance: { held: number; present: number; late: number; percent: number } | null;
-  exams: Array<{ name: string; score: number; letter: string; at: string; body: string }>;
+  exams: Array<{ id: string; name: string; score: number; letter: string; at: string; body: string; resultsReleased: boolean }>;
 };
 
 type Column = {
@@ -292,6 +292,17 @@ export default function GradebookPage() {
     // Averages, trends and the class figures all move when one cell does, so
     // the whole book is refetched rather than patched by hand in the browser —
     // half-updated totals are worse than a moment's wait.
+    await load();
+  }
+
+  async function toggleRelease(examId: string) {
+    const response = await fetch("/api/lecturer/results/release", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ examId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Could not update result release");
     await load();
   }
 
@@ -717,11 +728,9 @@ export default function GradebookPage() {
                               Exam sittings
                             </p>
                             {student.exams.map((exam) => (
-                              <p key={`${exam.name}-${exam.at}`} className="mt-1 flex justify-between gap-3 text-xs">
+                              <p key={`${exam.name}-${exam.at}`} className="mt-1 flex items-center justify-between gap-3 text-xs">
                                 <span className="min-w-0 truncate text-[var(--foreground)]">{exam.name}</span>
-                                <span className="shrink-0 font-bold tabular-nums">
-                                  {exam.score} {exam.letter}
-                                </span>
+                                <span className="flex shrink-0 items-center gap-2"><span className="font-bold tabular-nums">{exam.score} {exam.letter}</span><button type="button" onClick={() => toggleRelease(exam.id).catch((error) => setError(error.message))} className="rounded-full border border-[var(--border)] px-2 py-1 text-[10px] font-semibold">{exam.resultsReleased ? "Hide" : "Release"}</button></span>
                               </p>
                             ))}
                           </div>

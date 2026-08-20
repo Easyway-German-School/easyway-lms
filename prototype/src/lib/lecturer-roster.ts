@@ -55,26 +55,33 @@ export const UNASSIGNED_MESSAGE =
  * Free text would make the book unsortable, so this is the whole vocabulary.
  */
 export const ASSESSMENT_TYPES = [
-  "classwork",
-  "speaking",
   "writing",
+  "reading",
+  "speaking",
   "listening",
+] as const;
+export const OPTIONAL_ASSESSMENT_TYPES = [
+  "classwork",
   "quiz",
   "mock exam",
 ] as const;
-export type AssessmentType = (typeof ASSESSMENT_TYPES)[number];
+export type AssessmentType = (typeof ASSESSMENT_TYPES | typeof OPTIONAL_ASSESSMENT_TYPES)[number];
 
-export const ASSESSMENT_WEIGHTS: Record<AssessmentType, number> = {
-  classwork: 1,
-  speaking: 1.25,
-  writing: 1.25,
+export const ASSESSMENT_WEIGHTS: Record<(typeof ASSESSMENT_TYPES)[number], number> = {
+  writing: 1,
+  reading: 1,
+  speaking: 1,
   listening: 1,
+};
+
+export const OPTIONAL_ASSESSMENT_WEIGHTS: Record<(typeof OPTIONAL_ASSESSMENT_TYPES)[number], number> = {
+  classwork: 1,
   quiz: 0.75,
   "mock exam": 1.75,
 };
 
 export function isAssessmentType(value: unknown): value is AssessmentType {
-  return typeof value === "string" && (ASSESSMENT_TYPES as readonly string[]).includes(value);
+  return typeof value === "string" && [...ASSESSMENT_TYPES, ...OPTIONAL_ASSESSMENT_TYPES].includes(value as never);
 }
 
 export async function resolveRoster(userId: string): Promise<Roster> {

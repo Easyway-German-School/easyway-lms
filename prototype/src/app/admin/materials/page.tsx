@@ -561,6 +561,21 @@ function VideoCatalogTab() {
     { key: "course" as const, label: "Course library" },
   ];
 
+  async function deleteVideo(video: CatalogVideo) {
+    if (!window.confirm(`Delete “${video.title}” from every library?`)) return;
+    const response = await fetch("/api/admin/materials", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: video.id }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setError(payload.error || "Could not delete this video.");
+      return;
+    }
+    setVideos((current) => current.filter((item) => item.id !== video.id));
+  }
+
   if (loading) return <BrandLoader fill size="lg" message="Opening the video catalog." />;
 
   return (
@@ -594,7 +609,7 @@ function VideoCatalogTab() {
                 <p className="text-xs font-semibold text-[var(--accent)]">{video.categoryLabel}</p>
                 <p className="text-xs text-[var(--muted)]">{[video.audience, video.level, video.courseTitle, video.branch, video.lecturer].filter(Boolean).join(" · ")}</p>
                 {video.recordingStatus ? <p className="text-xs text-[var(--muted)]">Recording: {video.recordingStatus}{video.recordingVariant ? ` · ${video.recordingVariant}` : ""}{video.keepForever ? " · kept" : ""}</p> : null}
-                <div className="flex items-center justify-between gap-2 text-xs text-[var(--muted)]"><span>{new Date(video.recordedAt || video.createdAt).toLocaleDateString()}</span><a href={video.sourceUrl || video.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-[var(--accent)] hover:underline">Open video</a></div>
+                <div className="flex items-center justify-between gap-2 text-xs text-[var(--muted)]"><span>{new Date(video.recordedAt || video.createdAt).toLocaleDateString()}</span><span className="flex items-center gap-3"><a href={video.sourceUrl || video.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-[var(--accent)] hover:underline">Open video</a><button type="button" onClick={() => deleteVideo(video)} aria-label={`Delete ${video.title}`} className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-rose-50 hover:text-rose-600"><TrashIcon className="h-4 w-4" /></button></span></div>
               </div>
             </article>
           ))}
