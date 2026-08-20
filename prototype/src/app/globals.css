@@ -208,6 +208,53 @@ body {
   overflow-x: hidden;
 }
 
+/* Native selects inherit the browser's white popup in several Chromium
+   themes. Keep the control and its options tied to the LMS theme so labels do
+   not disappear when an admin or tutor switches to dark/custom mode. */
+select,
+select option,
+select optgroup {
+  color: var(--foreground);
+  background-color: var(--surface);
+}
+
+select:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent-strong) 65%, transparent);
+  outline-offset: 2px;
+}
+
+/* EasyWay track: teal rail, orange thumb, subtle enough for dense tables. */
+html {
+  scrollbar-color: var(--accent-strong) color-mix(in srgb, var(--surface-alt) 82%, transparent);
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--surface-alt) 82%, transparent);
+}
+
+::-webkit-scrollbar-thumb {
+  min-height: 42px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-strong)) padding-box;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--accent-ink), var(--accent-strong)) padding-box;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: var(--surface-alt);
+}
+
 body::before {
   content: "";
   position: fixed;

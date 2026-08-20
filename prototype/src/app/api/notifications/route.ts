@@ -28,6 +28,7 @@ type Viewer = {
   studentId: string | null;
   branchId: string | null;
   level: string | null;
+  createdAt: Date;
 };
 
 async function resolveViewer(): Promise<Viewer | null> {
@@ -44,6 +45,7 @@ async function resolveViewer(): Promise<Viewer | null> {
       id: true,
       role: true,
       student: { select: { id: true, branchId: true, level: true } },
+      createdAt: true,
     },
   });
   if (!user) return null;
@@ -54,6 +56,7 @@ async function resolveViewer(): Promise<Viewer | null> {
     studentId: user.student?.id ?? null,
     branchId: user.student?.branchId ?? null,
     level: user.student?.level ?? null,
+    createdAt: user.createdAt,
   };
 }
 
@@ -77,11 +80,11 @@ function audienceFilter(viewer: Viewer): Prisma.NotificationWhereInput {
 
   if (viewer.studentId) {
     reach.push({ studentId: viewer.studentId });
-    if (viewer.branchId) reach.push({ userId: null, branchId: viewer.branchId });
-    if (viewer.level) reach.push({ userId: null, level: viewer.level });
+    if (viewer.branchId) reach.push({ userId: null, branchId: viewer.branchId, createdAt: { gte: viewer.createdAt } });
+    if (viewer.level) reach.push({ userId: null, level: viewer.level, createdAt: { gte: viewer.createdAt } });
     // The truly unaddressed row: nobody in particular, which in practice is a
     // notice to the whole school.
-    reach.push({ userId: null, studentId: null, branchId: null, level: null, audience: null });
+    reach.push({ userId: null, studentId: null, branchId: null, level: null, audience: null, createdAt: { gte: viewer.createdAt } });
   }
 
   return { channel: { not: "email" }, OR: reach };

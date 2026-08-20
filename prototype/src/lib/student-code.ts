@@ -10,16 +10,12 @@ import { isOnlineBranch } from "@/lib/online-branch";
  *   yyyy        year the student enrolled
  *   LEVEL       the class they entered at (A1…C2)
  *   BATCHMONTH  three-letter month of their batch, e.g. JAN
- *   B           branch letter — see `branchLetter` below
+ *   B           branch/private letter — see `branchLetter` below
  *   NNN         enrolment number within that branch, that year
  *
  * THE LETTER IS THE BRANCH, not a scale block: L for Lagos, A for Abuja, P
- * for Port Harcourt, N for the online branch. A student's code says which
- * campus they walked into before a single digit is read — an office fielding
- * a phone call, or an admin scanning a printed list, gets that for free. An
- * earlier version of this scheme let the letter mark growth instead (block A
- * fills, block B opens, …); dropped because "which of two hundred students is
- * this" mattered less here than "which of four campuses is this."
+ * for Port Harcourt, N for the online branch, and V for a private/VIP student.
+ * A student's code says where they belong before a single digit is read.
  *
  * The number is a straight per-branch, per-year sequence — L001 is Lagos's
  * first admission of the year, A001 is Abuja's, and both exist at once. It is
@@ -52,7 +48,8 @@ type BranchLike = { name?: string | null; mode?: string | null } | null | undefi
  * A campus opened later that matches none of these falls back to its own
  * first letter rather than guessing — legible, and never silently wrong.
  */
-export function branchLetter(branch: BranchLike): string {
+export function branchLetter(branch: BranchLike, classType?: string | null): string {
+  if (classType === "private") return "V";
   if (isOnlineBranch(branch ?? undefined)) return "N";
   const name = String(branch?.name ?? "").trim().toLowerCase();
   if (name.includes("lagos")) return "L";
@@ -103,12 +100,13 @@ export async function generateStudentCode(input: {
   level: string;
   batch?: unknown;
   branch?: BranchLike;
+  classType?: string | null;
   now?: Date;
 }): Promise<string> {
   const now = input.now ?? new Date();
   const year = now.getFullYear();
   const batchMonth = toBatchMonth(input.batch, now);
-  const letter = branchLetter(input.branch);
+  const letter = branchLetter(input.branch, input.classType);
 
   // Counted per branch letter rather than across the whole school, so filtered
   // in JS off the year's codes instead of a SQL `contains` — a `contains: "/A"`
@@ -139,6 +137,7 @@ export async function assignStudentCode(studentId: string, input: {
   level: string;
   batch?: unknown;
   branch?: BranchLike;
+  classType?: string | null;
   now?: Date;
 }): Promise<string | null> {
   for (let attempt = 0; attempt < 5; attempt++) {

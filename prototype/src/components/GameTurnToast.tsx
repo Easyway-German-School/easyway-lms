@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useMoment } from "@/lib/moment-queue";
+import { useStudentAccess } from "@/lib/useStudentAccess";
 import { ChainIcon } from "@/components/icons";
 
 /**
@@ -58,7 +59,8 @@ export default function GameTurnToast() {
   const { status } = useSession();
   const [waitingCount, setWaitingCount] = useState(0);
   const [snoozed, setSnoozed] = useState(true); // starts true so SSR/first paint never flashes it before the localStorage check below runs
-  const due = waitingCount > 0 && !snoozed;
+  const { access, hasAccess } = useStudentAccess();
+  const due = waitingCount > 0 && hasAccess && access?.classType !== "private" && !snoozed;
   const { open, close } = useMoment("game-turn", due);
 
   useEffect(() => {
@@ -66,7 +68,7 @@ export default function GameTurnToast() {
   }, []);
 
   useEffect(() => {
-    if (status !== "authenticated") return;
+    if (status !== "authenticated" || !hasAccess || access?.classType === "private") return;
     let cancelled = false;
 
     async function check() {
@@ -93,7 +95,7 @@ export default function GameTurnToast() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [status]);
+  }, [status, hasAccess, access?.classType]);
 
   if (!open) return null;
 

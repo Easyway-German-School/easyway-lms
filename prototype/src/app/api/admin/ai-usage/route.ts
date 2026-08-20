@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
-import { AI_DAILY_LIMITS } from "@/lib/ai-limits";
+import { AI_DAILY_LIMITS, PRIVATE_AI_DAILY_LIMITS } from "@/lib/ai-limits";
 import { activeModelName, localModelAvailable } from "@/lib/ai";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +57,10 @@ export async function GET() {
       localAvailable: localModelAvailable(),
       groqConfigured: Boolean(process.env.GROQ_API_KEY),
       claudeConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
+    },
+    limits: {
+      standard: AI_DAILY_LIMITS,
+      private: PRIVATE_AI_DAILY_LIMITS,
     },
     today,
     tokensLast7Days: tokens._sum.quantity ?? 0,

@@ -37,6 +37,20 @@ function str(row: ImportRow, ...keys: string[]): string {
   return "";
 }
 
+function normalizedKey(key: string): string {
+  return key.replace(/^\uFEFF/, "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+function rowValue(row: ImportRow, aliases: string[]): string {
+  const normalized = new Map(Object.entries(row).map(([key, value]) => [normalizedKey(key), value]));
+  for (const alias of aliases) {
+    const value = normalized.get(normalizedKey(alias));
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number") return String(value);
+  }
+  return "";
+}
+
 function money(value: string): number {
   // Offices type "150,000", "₦150000" and "150000.00". All mean the same thing.
   const digits = value.replace(/[^0-9.]/g, "");
@@ -94,8 +108,13 @@ export async function POST(request: NextRequest) {
 
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
-      const name = str(row, "name", "full_name", "fullname", "student_name");
-      const email = str(row, "email", "email_address").toLowerCase();
+      const name = rowValue(row, [
+        "name", "names", "student", "student name", "student names", "student full name",
+        "full name", "fullname", "name of student", "name of students", "learner name",
+      ]);
+      const email = rowValue(row, [
+        "email", "email address", "email id", "email address of student", "mail", "e-mail",
+      ]).toLowerCase();
       /**
        * SPELLING IS NOT DATA ENTRY'S JOB.
        *
@@ -163,8 +182,14 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+      const existing = await prisma.user.findUnique({ where: { email }, select: { id: true, tenantId: true } });
       if (existing) {
+        if (!dryRun && !existing.tenantId && gate.session.user.tenantId) {
+          await prisma.user.update({
+            where: { id: existing.id },
+            data: { tenantId: gate.session.user.tenantId },
+          });
+        }
         results.push({ ...base, status: "skipped", note: "Already has an account — left untouched" });
         continue;
       }
@@ -189,6 +214,7 @@ export async function POST(request: NextRequest) {
             name,
             password: await bcryptjs.hash(password, 10),
             role: "STUDENT",
+            tenantId: gate.session.user.tenantId ?? null,
             student: {
               create: {
                 level,
@@ -207,7 +233,12 @@ export async function POST(request: NextRequest) {
         const student = await prisma.student.findUnique({ where: { userId: user.id }, select: { id: true } });
         let studentCode: string | null = null;
         if (student) {
-          studentCode = await assignStudentCode(student.id, { level, batch, branch });
+          studentCode = await assignStudentCode(student.id, {
+            level,
+            batch,
+            branch,
+            classType: str(row, "classType") === "private" ? "private" : "group",
+          });
 
           // Money already collected, recorded so the paywall does not lock a
           // student out of a class they have paid for.

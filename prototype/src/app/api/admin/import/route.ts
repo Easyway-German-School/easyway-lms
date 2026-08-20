@@ -43,6 +43,12 @@ export async function POST(request: NextRequest) {
 
         const existing = await prisma.user.findUnique({ where: { email } });
         if (existing) {
+          if (!existing.tenantId && gate.session.user.tenantId) {
+            await prisma.user.update({
+              where: { id: existing.id },
+              data: { tenantId: gate.session.user.tenantId },
+            });
+          }
           const student = await prisma.student.findUnique({ where: { userId: existing.id } });
           if (!student) {
             await prisma.student.create({ data: { userId: existing.id, level, pathway } });
@@ -52,7 +58,15 @@ export async function POST(request: NextRequest) {
 
         const password = Math.random().toString(36).slice(-10);
         const hashed = await bcryptjs.hash(password, 10);
-        const user = await prisma.user.create({ data: { email, name, password: hashed, role: "STUDENT" } });
+        const user = await prisma.user.create({
+          data: {
+            email,
+            name,
+            password: hashed,
+            role: "STUDENT",
+            tenantId: gate.session.user.tenantId ?? null,
+          },
+        });
         await prisma.student.create({ data: { userId: user.id, level, pathway } });
         created += 1;
       }

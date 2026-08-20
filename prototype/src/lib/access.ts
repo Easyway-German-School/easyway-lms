@@ -18,17 +18,6 @@ export const TUITION_FREE_ROUTES = [
   // The tuition checkout itself — locking this would make the paywall a
   // dead end, since every "Pay tuition" call to action lands here.
   "/programs",
-  /**
-   * The live quiz game, and the one exception worth stating out loud.
-   *
-   * It is a delivered service by the letter of the rule above, so the
-   * allowlist should not have it. But it is played in a room the student is
-   * already sitting in, on the one screen the whole class is looking at
-   * together. A padlock there does not collect a fee; it announces to thirty
-   * classmates which of them has not paid. The office chases the bill by
-   * every other means it has, all of which are private.
-   */
-  "/play",
 ] as const;
 
 export function isTuitionFreeRoute(pathname: string): boolean {
@@ -37,7 +26,6 @@ export function isTuitionFreeRoute(pathname: string): boolean {
   );
 }
 
-/** The inverse, for readability at call sites that gate rather than allow. */
 export function isTuitionGatedRoute(pathname: string): boolean {
   return !isTuitionFreeRoute(pathname);
 }

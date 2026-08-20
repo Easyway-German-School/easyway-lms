@@ -403,6 +403,7 @@ export async function POST(request: NextRequest) {
             level: normalizedLevel,
             batch: (normalizedAdmission as any)?.batch,
             branch: branchRow,
+            classType: normalizedClassType,
           });
           // Close the enquiry this signup came from, so the office stops
           // chasing someone who has already enrolled.

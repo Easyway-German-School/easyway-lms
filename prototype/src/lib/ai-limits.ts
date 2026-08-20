@@ -7,13 +7,25 @@ export const AI_DAILY_LIMITS = {
   missionPractice: 10,
 } as const;
 
+export const PRIVATE_AI_DAILY_LIMITS = {
+  essay: 8,
+  pronunciation: 30,
+  missionPractice: 30,
+} as const;
+
 export type StudentAiKind = keyof typeof AI_DAILY_LIMITS;
 
 export async function reserveStudentAiRequest(
   userId: string,
   kind: StudentAiKind,
 ): Promise<{ allowed: true; remaining: number } | { allowed: false; remaining: 0 }> {
-  const limit = AI_DAILY_LIMITS[kind];
+  const student = await prisma.student.findUnique({
+    where: { userId },
+    select: { classType: true },
+  });
+  const limit = student?.classType === "private"
+    ? PRIVATE_AI_DAILY_LIMITS[kind]
+    : AI_DAILY_LIMITS[kind];
   const tenantId = currentTenantId();
   const now = new Date();
   const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));

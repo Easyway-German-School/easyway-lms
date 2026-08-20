@@ -20,6 +20,7 @@ function naira(amount: number) {
 
 type PaymentRecord = {
   id: string;
+  studentId?: string;
   amount: number;
   currency: string;
   status: string;
@@ -129,6 +130,12 @@ function PaymentsLedger() {
     }
   }
 
+  function openPaymentForm(student: StudentOption) {
+    setStudents((current) => current.some((item) => item.id === student.id) ? current : [student, ...current]);
+    setStudentId(student.id);
+    setShowForm(true);
+  }
+
   async function handleCreatePayment() {
     setFormError("");
 
@@ -215,6 +222,7 @@ function PaymentsLedger() {
               <option value="completed">Completed</option>
               <option value="pending">Pending</option>
               <option value="failed">Failed</option>
+              <option value="not_paid">Not paid</option>
             </select>
           </div>
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
@@ -375,7 +383,15 @@ function PaymentsLedger() {
                       <td className="px-4 py-3">{payment.description ?? "—"}</td>
                       <td className="px-4 py-3">{new Date(payment.createdAt).toLocaleDateString()}</td>
                       <td className="px-4 py-3 flex flex-wrap gap-2">
-                        {payment.status !== "completed" && (
+                        {payment.status === "not_paid" && payment.studentId ? (
+                          <button
+                            className="rounded-lg border border-[var(--accent)] text-[var(--accent)] px-2 py-1 text-xs"
+                            onClick={() => openPaymentForm({ id: payment.studentId!, user: payment.student.user })}
+                          >
+                            Record payment
+                          </button>
+                        ) : null}
+                        {payment.status !== "completed" && payment.status !== "not_paid" && (
                           <button
                             className="rounded-lg border border-green-500 text-green-600 px-2 py-1 text-xs"
                             onClick={() => handleStatusUpdate(payment.id, "completed")}

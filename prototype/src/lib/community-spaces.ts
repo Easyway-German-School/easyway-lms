@@ -238,8 +238,27 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
 
   const student = await prisma.student.findUnique({
     where: { userId: viewer.userId },
-    select: { branchId: true, level: true, sessionSlot: true, branch: { select: { name: true } } },
+    select: {
+      branchId: true,
+      level: true,
+      sessionSlot: true,
+      classType: true,
+      branch: { select: { name: true } },
+    },
   });
+
+  // Private students have a named tutor and a one-to-one classroom. They are
+  // not members of a cohort story, so never create or resolve a group-game
+  // space for them and never surface a turn prompt on their dashboard.
+  if (student?.classType === "private") {
+    return {
+      spaceIds: [],
+      isStaff: false,
+      branchId: student.branchId ?? null,
+      level: student.level ?? null,
+      sessionSlot: student.sessionSlot ?? null,
+    };
+  }
 
   if (!student?.branchId || !student.level) {
     return {

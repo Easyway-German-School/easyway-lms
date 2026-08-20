@@ -77,7 +77,27 @@ function parseCsv(text: string): Record<string, string>[] {
 
   const [header, ...body] = rows.filter((entry) => entry.some((cell) => cell.trim()));
   if (!header) return [];
-  const keys = header.map((cell) => cell.trim().toLowerCase().replace(/\s+/g, "_"));
+  const aliases: Record<string, string> = {
+    name: "name",
+    names: "name",
+    student: "name",
+    student_name: "name",
+    student_names: "name",
+    full_name: "name",
+    fullname: "name",
+    name_of_student: "name",
+    name_of_students: "name",
+    email: "email",
+    email_address: "email",
+    email_id: "email",
+    email_address_of_student: "email",
+    mail: "email",
+    e_mail: "email",
+  };
+  const keys = header.map((cell) => {
+    const normalized = cell.replace(/^\uFEFF/, "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    return aliases[normalized] ?? normalized;
+  });
   return body.map((cells) =>
     Object.fromEntries(keys.map((key, index) => [key, (cells[index] ?? "").trim()])),
   );
@@ -101,6 +121,10 @@ export default function ImportStudentsPage() {
   const [sendState, setSendState] = useState<"idle" | "sending" | "done">("idle");
 
   const rows = useMemo(() => parseCsv(csv), [csv]);
+
+  const importHeaderWarning = csv.trim() && rows.length > 0 && rows.every((row) => !row.name || !row.email)
+    ? "We could not confidently identify both a student-name and email column. Rename the headers to Name and Email, or use the supported aliases below."
+    : "";
 
   async function run(dryRun: boolean) {
     setBusy(true);
@@ -239,9 +263,10 @@ export default function ImportStudentsPage() {
           </div>
 
           <p className="mt-2 text-xs text-[var(--muted)]">
-            Columns: <code>{TEMPLATE_HEADERS.join(", ")}</code>. Only name and email are required; everything else
-            improves what the account can do. An .xlsx file is read from its first sheet and shown below as text, so
-            you can check it before anything is written.
+            Columns: <code>{TEMPLATE_HEADERS.join(", ")}</code>. The importer also understands common headers such as
+            <code> Name of Students</code>, <code>Student Name</code>, <code>Full Name</code>, and <code>Email Address</code>.
+            Only name and email are required; everything else improves what the account can do. An .xlsx file is read
+            from its first sheet and shown below as text, so you can check it before anything is written.
           </p>
 
           <textarea
@@ -254,6 +279,8 @@ export default function ImportStudentsPage() {
             placeholder={SAMPLE}
             className="mt-4 min-h-[180px] w-full rounded-lg border border-[var(--border)] bg-[var(--background)] p-4 font-mono text-xs text-[var(--foreground)] placeholder-[var(--muted)]"
           />
+
+          {importHeaderWarning ? <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">{importHeaderWarning}</p> : null}
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button

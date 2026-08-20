@@ -29,6 +29,7 @@ const BENEFITS = [
   { title: "Personalised learning plan", blurb: "Built around your goal, not a class average." },
   { title: "Flexible class times", blurb: "Agreed directly with your tutor, not a fixed sitting." },
   { title: "Direct tutor access", blurb: "One tutor who knows your progress, every session." },
+  { title: "Advanced private AI studio", blurb: "Expanded essay, pronunciation, and mission practice limits between sessions." },
   { title: "Faster progress", blurb: "No pace-matching a room of twenty other students." },
 ];
 
@@ -123,6 +124,9 @@ export default function PremiumPrivateClasses({ student }: { student: StudentInf
           <p className="mt-2 max-w-lg text-sm leading-6 text-white/60">
             Trade the group timetable for a dedicated tutor who plans every session around you — your pace, your
             schedule, your goal.
+          </p>
+          <p className="mt-3 max-w-lg text-sm font-semibold leading-6 text-[#F4E3B2]">
+            Includes an advanced AI practice studio: 8 writing reviews, 30 speaking drills, and 30 mission practices each day.
           </p>
 
           <ul className="mt-7 grid gap-4 sm:grid-cols-2">

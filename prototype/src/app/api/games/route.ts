@@ -4,8 +4,30 @@ import { prisma } from "@/lib/prisma";
 import { resolveSpaceScope } from "@/lib/community-spaces";
 import { createMatch, turnsAwaiting } from "@/lib/satzkette-server";
 import { parseConstraint, type Constraint } from "@/lib/satzkette";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 export const dynamic = "force-dynamic";
+
+async function canUseStudentGames(userId: string) {
+  const student = await prisma.student.findUnique({
+    where: { userId },
+    select: {
+      classType: true,
+      level: true,
+      branch: { select: { name: true } },
+      payments: { where: { status: "completed" }, select: { amount: true } },
+    },
+  });
+  if (!student) return false;
+  if (student.classType === "private") return false;
+  const lookup = { level: student.level, branch: student.branch?.name, classType: student.classType };
+  const payment = derivePaymentStatus({
+    totalPaid: student.payments.reduce((sum, payment) => sum + payment.amount, 0),
+    tuitionFee: tuitionFeeFor(lookup),
+    requiredDeposit: requiredDepositFor(lookup),
+  });
+  return payment.depositPaid;
+}
 
 /**
  * The Games tab: what is being written, and what is waiting on you.
@@ -22,6 +44,10 @@ export async function GET() {
 
   const userId = session.user.id as string;
   const role = (session.user as { role?: string }).role ?? "STUDENT";
+
+  if (String(role).toUpperCase() === "STUDENT" && !(await canUseStudentGames(userId))) {
+    return NextResponse.json({ waiting: [], matches: [], canStart: false, spaceIds: [], locked: true });
+  }
 
   const scope = await resolveSpaceScope({ userId, role });
   if (scope.spaceIds.length === 0) {
@@ -89,6 +115,10 @@ export async function POST(request: NextRequest) {
   }
 
   const role = (session.user as { role?: string }).role ?? "STUDENT";
+
+  if (String(role).toUpperCase() === "STUDENT" && !(await canUseStudentGames(session.user.id as string))) {
+    return NextResponse.json({ error: "Pay your tuition deposit to unlock class games.", locked: true }, { status: 402 });
+  }
 
   const body = await request.json().catch(() => ({}));
   const spaceId = String(body?.spaceId ?? "");

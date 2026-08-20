@@ -35,6 +35,7 @@ type Student = {
   branchName?: string | null;
   /** group | private — drives whether the private-class upsell shows. */
   classType?: string;
+  deliveryMode?: string;
   tutorId?: string | null;
   tutorName?: string | null;
   tutorPhotoUrl?: string | null;
@@ -85,6 +86,8 @@ import TutorMessagesCard from "@/components/TutorMessagesCard";
 import SessionNotesCard from "@/components/SessionNotesCard";
 import JourneyMapPoster from "@/components/JourneyMapPoster";
 import GermanyJourney from "@/components/journey/GermanyJourney";
+import DeliveryExperiencePanel from "@/components/DeliveryExperiencePanel";
+import PremiumProgressPanel from "@/components/PremiumProgressPanel";
 
 export default function DashboardPage() {
   return (
@@ -348,7 +351,7 @@ function DashboardContent() {
       window.removeEventListener("focus", refreshOnFocus);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [status]);
+  }, [status, syncPendingPayment]);
 
   // Initial load: fetch student and courses in parallel.
   useEffect(() => {
@@ -380,8 +383,8 @@ function DashboardContent() {
 
   useEffect(() => {
     if (!student) return;
-    loadMissionState();
-  }, [student]);
+    void Promise.resolve().then(loadMissionState);
+  }, [student, loadMissionState]);
 
 
 
@@ -575,6 +578,14 @@ function DashboardContent() {
           <div className="mb-6">
             <PrivateUpgradeNudge classType={resolvedStudent?.classType} fullPaid={paymentFullyPaid} />
           </div>
+          <DeliveryExperiencePanel
+            classType={resolvedStudent?.classType}
+            deliveryMode={resolvedStudent?.deliveryMode}
+          />
+          <PremiumProgressPanel
+            classType={resolvedStudent?.classType}
+            deliveryMode={resolvedStudent?.deliveryMode}
+          />
           {/* Sits above the hero for the same reason the nudge does: a student
               whose level has just ended needs to meet that before their
               streak. Fires ONLY when a super admin has signed the level off —

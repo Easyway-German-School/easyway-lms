@@ -69,7 +69,12 @@ export async function GET(request: Request) {
   if (status) whereClause.status = status;
 
   if (gate.session.user.tenantId) {
-    whereClause.branch = { tenantId: gate.session.user.tenantId };
+    // Imported students may not have a branch yet. Their user tenant is still
+    // authoritative, so they must remain available for billing and activation.
+    whereClause.OR = [
+      { branch: { tenantId: gate.session.user.tenantId } },
+      { user: { tenantId: gate.session.user.tenantId } },
+    ];
   }
 
   /**

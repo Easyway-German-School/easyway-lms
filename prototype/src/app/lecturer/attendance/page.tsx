@@ -25,10 +25,18 @@ interface AttendanceSession {
   presentStudents: number;
 }
 
+interface AttendanceHistory {
+  date: string;
+  totalStudents: number;
+  presentStudents: number;
+  lateStudents: number;
+}
+
 export default function LecturerAttendance() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
+  const [history, setHistory] = useState<AttendanceHistory[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedCourse, setSelectedCourse] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
@@ -67,6 +75,7 @@ export default function LecturerAttendance() {
       
       const data = await res.json();
       setSessions(data.sessions);
+      setHistory(data.history ?? []);
       // The register no longer depends on a Class row existing. A tutor with
       // no course template still has students — they are found from the
       // branch + level the office assigned — so this loads either way.
@@ -185,6 +194,43 @@ export default function LecturerAttendance() {
             <h2 className="text-lg font-bold text-[var(--foreground)] mb-4">My class register</h2>
             <LecturerStudentRoster />
           </div>
+
+          {history.length > 0 && (
+            <div className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+              <div className="border-b border-[var(--border)] px-6 py-4">
+                <h2 className="text-lg font-bold text-[var(--foreground)]">Attendance history</h2>
+                <p className="mt-1 text-sm text-[var(--muted)]">Saved registers for your assigned students.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[620px]">
+                  <thead className="bg-[var(--surface-alt)]">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-[var(--foreground)]">Date</th>
+                      <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Marked</th>
+                      <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Present</th>
+                      <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Late</th>
+                      <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Absent</th>
+                      <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((record) => (
+                      <tr key={record.date} className="border-t border-[var(--border)]">
+                        <td className="px-6 py-3 text-sm text-[var(--foreground)]">{record.date}</td>
+                        <td className="px-6 py-3 text-center text-sm text-[var(--foreground)]">{record.totalStudents}</td>
+                        <td className="px-6 py-3 text-center text-sm text-emerald-700">{record.presentStudents - record.lateStudents}</td>
+                        <td className="px-6 py-3 text-center text-sm text-amber-700">{record.lateStudents}</td>
+                        <td className="px-6 py-3 text-center text-sm text-rose-700">{record.totalStudents - record.presentStudents}</td>
+                        <td className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">
+                          {Math.round((record.presentStudents / record.totalStudents) * 100)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Filters */}
           <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">

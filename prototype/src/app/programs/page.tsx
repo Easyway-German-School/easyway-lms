@@ -81,6 +81,10 @@ function PrivateUpsellPopup({ onExplore, onDismiss }: { onExplore: () => void; o
           A tutor to yourself, times you choose, and a faster route to fluency — see the private tuition package
           below before you settle on the group track.
         </p>
+        <div className="mt-4 rounded-2xl border border-[#c8a24a]/25 bg-[#c8a24a]/10 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#c8a24a]">Included private AI studio</p>
+          <p className="mt-2 text-sm text-[var(--foreground)]">More daily essay grading, pronunciation practice, and mission coaching, shaped around your private tutor&apos;s plan.</p>
+        </div>
         <div className="mt-5 flex flex-col gap-2 sm:flex-row">
           <button
             type="button"

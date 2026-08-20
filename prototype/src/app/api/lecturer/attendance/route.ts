@@ -3,7 +3,11 @@ import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { dayKey } from '@/lib/class-sessions';
-import { readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
+import {
+  belongsToLecturer,
+  readAssignment,
+  studentWhereForLecturer,
+} from '@/lib/lecturer-assignment';
 import { KIND, notifyInBackground } from '@/lib/notify';
 
 export async function GET(req: NextRequest) {
@@ -19,7 +23,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
     }
 
-    // Get lecturer's classes with attendance sessions
+    // Keep class options for narrowing the register, even when attendance was
+    // recorded without a legacy Class row.
     const classes = await prisma.class.findMany({
       where: { lecturerId },
       include: {
@@ -53,7 +58,44 @@ export async function GET(req: NextRequest) {
       })
     );
 
-    return NextResponse.json({ sessions });
+    const lecturer = await prisma.lecturer.findUnique({ where: { id: lecturerId } });
+    const assignment = readAssignment(lecturer);
+    const where = studentWhereForLecturer(assignment, lecturerId);
+    const assignedStudents = where
+      ? await prisma.student.findMany({
+          where: { ...(where as Record<string, unknown>), status: 'active' } as any,
+          select: { id: true, tutorId: true, admission: true },
+        })
+      : [];
+    const roster = assignedStudents.filter((student) =>
+      belongsToLecturer(assignment, lecturerId, student),
+    );
+    const records = roster.length
+      ? await prisma.attendance.findMany({
+          where: { studentId: { in: roster.map((student) => student.id) } },
+          select: { date: true, present: true, status: true },
+          orderBy: { date: 'desc' },
+        })
+      : [];
+    const historyByDate = new Map<string, { date: string; totalStudents: number; presentStudents: number; lateStudents: number }>();
+    for (const record of records) {
+      const date = record.date.toISOString().slice(0, 10);
+      const entry = historyByDate.get(date) ?? {
+        date,
+        totalStudents: 0,
+        presentStudents: 0,
+        lateStudents: 0,
+      };
+      entry.totalStudents += 1;
+      if (record.present) entry.presentStudents += 1;
+      if (record.status === 'late') entry.lateStudents += 1;
+      historyByDate.set(date, entry);
+    }
+
+    return NextResponse.json({
+      sessions,
+      history: [...historyByDate.values()].slice(0, 60),
+    });
   } catch (error) {
     console.error('Attendance GET error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -110,13 +152,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const assignedStudents = await prisma.student.findMany({
+      where: { ...(where as Record<string, unknown>), status: 'active' } as any,
+      select: { id: true, tutorId: true, admission: true },
+    });
     const permitted = new Set(
-      (
-        await prisma.student.findMany({
-          where: where as any,
-          select: { id: true },
-        })
-      ).map((student) => student.id),
+      assignedStudents
+        .filter((student) => belongsToLecturer(readAssignment(lecturer), lecturerId, student))
+        .map((student) => student.id),
     );
 
       const rows = attendance.filter((entry) =>
