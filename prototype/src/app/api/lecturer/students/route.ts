@@ -26,9 +26,9 @@ export const dynamic = "force-dynamic";
  * attendance, grading and announcements all use. A student appears here the
  * moment they register for a matching branch and level. Nobody adds them.
  *
- * Payment status is included because a tutor is usually the first person a
- * student talks to about their balance, and sending them to the office blind
- * helps nobody. Amounts are visible; card details do not exist here at all.
+ * Payment status is included only as a non-sensitive tag. Exact fees, paid
+ * totals, and outstanding balances belong to the office and never cross this
+ * tutor API boundary.
  */
 export async function GET() {
   try {
@@ -130,9 +130,7 @@ export async function GET() {
           country: typeof admission.country === "string" ? admission.country : null,
           batch: typeof admission.batch === "string" ? admission.batch : null,
           photoUrl: typeof admission.photoUrl === "string" ? admission.photoUrl : null,
-          totalPaid,
-          tuitionFee: access.tuitionFee,
-          outstanding: Math.max(0, access.tuitionFee - totalPaid),
+          paymentStatus: access.hasAccess ? "Paid" : totalPaid > 0 ? "Owing" : "Pending",
           hasAccess: access.hasAccess,
           attendanceRate,
           sessionsRecorded: student.attendances.length,
