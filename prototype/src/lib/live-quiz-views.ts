@@ -84,6 +84,9 @@ export async function resolvePlayer(): Promise<PlayerIdentity | null> {
   const session = await requireAuthSession();
   if (!session?.user?.id) return null;
 
+  const role = String((session.user as { role?: string }).role ?? "").toLowerCase();
+  if (role === "lecturer" || role === "admin") return null;
+
   const student = await prisma.student.findUnique({
     where: { userId: session.user.id },
     select: { id: true, user: { select: { name: true } } },

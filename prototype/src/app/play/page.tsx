@@ -21,7 +21,7 @@ import { AlertIcon, QuizIcon } from "@/components/icons";
 type Offer = { id: string; title: string; phase: string; joined: boolean };
 
 export default function PlayPage() {
-  const { status } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
 
   const [pin, setPin] = useState("");
@@ -91,7 +91,11 @@ export default function PlayPage() {
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/auth/signin");
-  }, [status, router]);
+    if (status === "authenticated") {
+      const role = String((session?.user as { role?: string } | undefined)?.role ?? "").toLowerCase();
+      if (role === "lecturer" || role === "admin") router.replace("/lecturer/live-quiz");
+    }
+  }, [status, session, router]);
 
   useEffect(() => {
     if (!gameId) inputRef.current?.focus();
