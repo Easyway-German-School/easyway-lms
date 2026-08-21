@@ -39,6 +39,7 @@ export const KIND = {
   resultPublished: "result.published",
   certificateIssued: "certificate.issued",
   classStarting: "class.starting",
+  privateClassUpdated: "private_class.updated",
   attendanceMarked: "attendance.marked",
   lecturerMessage: "lecturer.message",
   leadCaptured: "lead.captured",

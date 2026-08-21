@@ -32,6 +32,7 @@ type PrivateClass = {
   status: string;
   notes: string | null;
   lecturerName: string | null;
+  materialId: string | null;
   materialTitle: string | null;
 };
 
@@ -84,6 +85,7 @@ export default function LecturerPrivateClassesPage() {
   const [topic, setTopic] = useState("");
   const [lecturerId, setLecturerId] = useState("");
   const [materialId, setMaterialId] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<TutorMessage[]>([]);
   const [draftMessage, setDraftMessage] = useState("");
@@ -194,10 +196,10 @@ export default function LecturerPrivateClassesPage() {
     setBusy(true);
     try {
       const res = await fetch("/api/lecturer/private-classes", {
-        method: "POST",
+        method: editingId ? "PUT" : "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          studentId,
+          ...(editingId ? { id: editingId } : { studentId }),
           scheduledAt: new Date(when).toISOString(),
           durationMinutes: duration,
           topic,
@@ -208,10 +210,35 @@ export default function LecturerPrivateClassesPage() {
       if (!res.ok) throw new Error((await res.json()).error ?? "Could not book");
 
       setTopic("");
+      setEditingId(null);
       setError("");
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not book");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function editClass(item: PrivateClass) {
+    setEditingId(item.id);
+    setWhen(toLocalInput(new Date(item.scheduledAt)));
+    setDuration(item.durationMinutes);
+    setTopic(item.topic ?? "");
+    setMaterialId(item.materialId ?? "");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function removeClass(id: string) {
+    if (!window.confirm("Remove this booking? The student will be notified.")) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/lecturer/private-classes?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Could not remove");
+      if (editingId === id) setEditingId(null);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove");
     } finally {
       setBusy(false);
     }
@@ -285,7 +312,7 @@ export default function LecturerPrivateClassesPage() {
             </div>
 
             <div className="mb-8 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-              <h2 className="font-semibold">Book a class</h2>
+              <h2 className="font-semibold">{editingId ? "Edit booked class" : "Book a class"}</h2>
               <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <label>
                   <span className="text-xs font-medium text-[var(--foreground-soft)]">Date and time</span>
@@ -344,7 +371,7 @@ export default function LecturerPrivateClassesPage() {
                 disabled={busy || !when}
                 className="mt-4 rounded-lg bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
               >
-                {busy ? "Saving…" : "Book class"}
+                {busy ? "Saving…" : editingId ? "Save changes" : "Book class"}
               </button>
             </div>
 
@@ -408,6 +435,22 @@ export default function LecturerPrivateClassesPage() {
                         <option value="postponed">Postponed</option>
                         <option value="cancelled">Cancelled</option>
                       </select>
+                      <button
+                        type="button"
+                        onClick={() => editClass(c)}
+                        disabled={busy}
+                        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] disabled:opacity-50"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void removeClass(c.id)}
+                        disabled={busy}
+                        className="rounded-lg border border-rose-500/30 px-3 py-1.5 text-sm font-semibold text-rose-600 hover:bg-rose-500/10 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
                       </div>
                     </div>
                   );

@@ -26,7 +26,8 @@ function clockTime(date: Date): string {
 
 /** Maps a private-class status onto the states the calendar already renders. */
 function displayStatus(status: string): string {
-  if (status === "cancelled" || status === "postponed") return "postponed";
+  if (status === "cancelled") return "cancelled";
+  if (status === "postponed") return "postponed";
   if (status === "completed") return "held";
   return "scheduled";
 }

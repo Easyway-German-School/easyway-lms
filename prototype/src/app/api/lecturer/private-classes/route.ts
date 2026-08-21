@@ -2,6 +2,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { lecturerCan } from "@/lib/lecturer-features";
+import { KIND, notify } from "@/lib/notify";
 
 /**
  * Booking and editing one-to-one classes.
@@ -63,14 +64,21 @@ export async function GET(req: NextRequest) {
     const studentId = req.nextUrl.searchParams.get("studentId");
 
     const students = await prisma.student.findMany({
-      where: { classType: "private", status: "active" },
+      where: {
+        classType: "private",
+        status: "active",
+        ...(auth.role === "lecturer" && auth.lecturerId ? { tutorId: auth.lecturerId } : {}),
+      },
       include: { user: { select: { name: true, email: true } }, branch: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
     });
 
     const classes = studentId
       ? await prisma.privateClass.findMany({
-          where: { studentId },
+          where: {
+            studentId,
+            ...(auth.role === "lecturer" && auth.lecturerId ? { lecturerId: auth.lecturerId } : {}),
+          },
           include: {
             lecturer: { select: { user: { select: { name: true } } } },
             material: { select: { id: true, title: true } },
@@ -138,7 +146,7 @@ export async function POST(req: NextRequest) {
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: { id: true, classType: true },
+      select: { id: true, classType: true, tutorId: true, userId: true, user: { select: { name: true } } },
     });
     if (!student) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
@@ -148,6 +156,9 @@ export async function POST(req: NextRequest) {
         { error: "That student is on a group class. Switch them to private first." },
         { status: 400 },
       );
+    }
+    if (auth.role === "lecturer" && student.tutorId !== auth.lecturerId) {
+      return NextResponse.json({ error: "That student is not assigned to you" }, { status: 403 });
     }
 
     const duration = Number(durationMinutes);
@@ -160,9 +171,21 @@ export async function POST(req: NextRequest) {
         topic: typeof topic === "string" ? topic.trim() || null : null,
         notes: typeof notes === "string" ? notes.trim() || null : null,
         // Fall back to the signed-in tutor when none was picked.
-        lecturerId: typeof lecturerId === "string" && lecturerId ? lecturerId : auth.lecturerId,
+        lecturerId: auth.role === "lecturer"
+          ? auth.lecturerId
+          : typeof lecturerId === "string" && lecturerId ? lecturerId : auth.lecturerId,
         materialId: typeof materialId === "string" && materialId ? materialId : null,
       },
+    });
+
+    await notify({
+      to: { userIds: [student.userId] },
+      kind: KIND.privateClassUpdated,
+      severity: "info",
+      title: "Private class booked",
+      message: `${created.scheduledAt.toLocaleString()}${created.topic ? ` · ${created.topic}` : ""}`,
+      link: "/calendar",
+      dedupeKey: `private-class:${created.id}:booked`,
     });
 
     return NextResponse.json({ class: created }, { status: 201 });
@@ -196,6 +219,15 @@ export async function PUT(req: NextRequest) {
       }
     }
 
+    const existing = await prisma.privateClass.findUnique({
+      where: { id: String(id) },
+      include: { student: { select: { userId: true, tutorId: true } } },
+    });
+    if (!existing) return NextResponse.json({ error: "Class not found" }, { status: 404 });
+    if (auth.role === "lecturer" && existing.lecturerId !== auth.lecturerId && existing.student.tutorId !== auth.lecturerId) {
+      return NextResponse.json({ error: "That class is not assigned to you" }, { status: 403 });
+    }
+
     const duration = Number(durationMinutes);
 
     const updated = await prisma.privateClass.update({
@@ -211,9 +243,63 @@ export async function PUT(req: NextRequest) {
       },
     });
 
+    const event = status === "cancelled"
+      ? "Private class cancelled"
+      : status === "postponed"
+        ? "Private class postponed"
+        : scheduledAt
+          ? "Private class rescheduled"
+          : "Private class updated";
+    await notify({
+      to: { userIds: [existing.student.userId] },
+      kind: KIND.privateClassUpdated,
+      severity: status === "cancelled" ? "warning" : "info",
+      title: event,
+      message: status === "cancelled"
+        ? "This booking is no longer scheduled. Open your calendar for the latest details."
+        : `${updated.scheduledAt.toLocaleString()}${updated.topic ? ` · ${updated.topic}` : ""}`,
+      link: "/calendar",
+      dedupeKey: `private-class:${updated.id}:${updated.updatedAt.toISOString()}`,
+    });
+
     return NextResponse.json({ class: updated });
   } catch (error) {
     console.error("Private classes PUT failed:", error);
     return NextResponse.json({ error: "Unable to update this class" }, { status: 500 });
+  }
+}
+
+/** DELETE — remove a booking before it starts and notify the student. */
+export async function DELETE(req: NextRequest) {
+  const auth = await requireStaff();
+  if ("error" in auth) return auth.error;
+
+  try {
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
+
+    const existing = await prisma.privateClass.findUnique({
+      where: { id },
+      include: { student: { select: { userId: true, tutorId: true } } },
+    });
+    if (!existing) return NextResponse.json({ error: "Class not found" }, { status: 404 });
+    if (auth.role === "lecturer" && existing.lecturerId !== auth.lecturerId && existing.student.tutorId !== auth.lecturerId) {
+      return NextResponse.json({ error: "That class is not assigned to you" }, { status: 403 });
+    }
+
+    await prisma.privateClass.delete({ where: { id } });
+    await notify({
+      to: { userIds: [existing.student.userId] },
+      kind: KIND.privateClassUpdated,
+      severity: "warning",
+      title: "Private class removed",
+      message: "A private class booking was removed from your calendar.",
+      link: "/calendar",
+      dedupeKey: `private-class:${id}:removed:${existing.updatedAt.toISOString()}`,
+    });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("Private classes DELETE failed:", error);
+    return NextResponse.json({ error: "Unable to remove this class" }, { status: 500 });
   }
 }

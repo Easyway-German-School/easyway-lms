@@ -230,6 +230,7 @@ function NotLiveScreen({ message, title }: { message: string; title: string | nu
 function LiveClassroomPageInner() {
   const searchParams = useSearchParams();
   const code = searchParams.get("code");
+  const privateClassId = searchParams.get("privateClassId");
 
   const [session, setSession] = useState<LiveSession | null>(null);
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
@@ -284,7 +285,10 @@ function LiveClassroomPageInner() {
       setLoading(true);
 
       try {
-        const query = code ? `?code=${encodeURIComponent(code)}` : "";
+        const params = new URLSearchParams();
+        if (code) params.set("code", code);
+        if (privateClassId) params.set("privateClassId", privateClassId);
+        const query = params.toString() ? `?${params.toString()}` : "";
         const res = await fetch(`/api/live/session${query}`, { cache: "no-store" });
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;

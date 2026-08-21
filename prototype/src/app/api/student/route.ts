@@ -78,6 +78,17 @@ export async function GET() {
       return NextResponse.json({ error: "Unable to load student profile" }, { status: 500 });
     }
 
+    const nextPrivateClass = student.classType === "private"
+      ? await prisma.privateClass.findFirst({
+          where: { studentId: student.id, status: { in: ["scheduled", "postponed"] }, scheduledAt: { gte: new Date() } },
+          orderBy: { scheduledAt: "asc" },
+          select: { scheduledAt: true, topic: true },
+        })
+      : null;
+    const nextLive = nextPrivateClass
+      ? `${nextPrivateClass.scheduledAt.toLocaleString()}${nextPrivateClass.topic ? ` · ${nextPrivateClass.topic}` : ""}`
+      : student.nextLive;
+
     const grades = await prisma.grade.findMany({
       where: { studentId: student.id },
       orderBy: { createdAt: "desc" },
@@ -120,7 +131,7 @@ export async function GET() {
       pathway: student.pathway,
       germanyGoal: student.germanyGoal,
       germanyGoalNote: student.germanyGoalNote,
-      nextLive: student.nextLive,
+      nextLive,
       examReadiness: student.examReadiness,
       averageGrade,
       gradeCount,
