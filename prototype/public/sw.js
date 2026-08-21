@@ -28,8 +28,17 @@ self.addEventListener("install", (event) => {
       // installability do not depend on it, and a service worker stuck in
       // "installing" is worse than one with a cold cache.
       .catch(() => undefined)
-      .then(() => self.skipWaiting()),
+      // The first install should control the page immediately. On updates,
+      // keep the new worker waiting so the user can choose when to reload.
+      .then(() => {
+        if (!self.registration.active) return self.skipWaiting();
+        return undefined;
+      }),
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
