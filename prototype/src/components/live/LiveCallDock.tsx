@@ -105,24 +105,26 @@ export default function LiveCallDock() {
 
   if (!activeCall || !activeCall.session.url || !activeCall.session.token) return null;
 
+  const classroom = (
+    <LiveKitClassroom
+      key={activeCall.session.roomName}
+      url={activeCall.session.url}
+      token={activeCall.session.token}
+      roomName={activeCall.session.roomName}
+      displayName={activeCall.session.displayName}
+      role={activeCall.session.role}
+      initialQuality={activeCall.mode}
+      liveSessionId={activeCall.session.liveSessionId}
+      minimized={dockState === "minimized"}
+      onExpand={onExpand}
+      onMinimize={onMinimize}
+      onDragHandlePointerDown={onDragPointerDown}
+      onLeave={reportLeave}
+    />
+  );
+
   if (dockState === "full") {
-    return (
-      <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950 p-3 sm:p-4">
-        <LiveKitClassroom
-          key={activeCall.session.roomName}
-          url={activeCall.session.url}
-          token={activeCall.session.token}
-          roomName={activeCall.session.roomName}
-          displayName={activeCall.session.displayName}
-          role={activeCall.session.role}
-          initialQuality={activeCall.mode}
-          liveSessionId={activeCall.session.liveSessionId}
-          minimized={false}
-          onMinimize={onMinimize}
-          onLeave={reportLeave}
-        />
-      </div>
-    );
+    return <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950 p-3 sm:p-4">{classroom}</div>;
   }
 
   return (
@@ -131,20 +133,7 @@ export default function LiveCallDock() {
       style={{ left: posRef.current.x, top: posRef.current.y, width: CARD_WIDTH, height: CARD_HEIGHT }}
       className="fixed z-[70] shadow-2xl"
     >
-      <LiveKitClassroom
-        key={activeCall.session.roomName}
-        url={activeCall.session.url}
-        token={activeCall.session.token}
-        roomName={activeCall.session.roomName}
-        displayName={activeCall.session.displayName}
-        role={activeCall.session.role}
-        initialQuality={activeCall.mode}
-        liveSessionId={activeCall.session.liveSessionId}
-        minimized
-        onExpand={onExpand}
-        onDragHandlePointerDown={onDragPointerDown}
-        onLeave={reportLeave}
-      />
+      {classroom}
     </div>
   );
 }

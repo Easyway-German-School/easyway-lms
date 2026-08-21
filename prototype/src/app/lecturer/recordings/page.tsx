@@ -36,7 +36,7 @@ export default function LecturerRecordingsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       try {
         const res = await fetch("/api/lecturer/videos", { cache: "no-store" });
         const body = await res.json().catch(() => ({}));
@@ -51,9 +51,12 @@ export default function LecturerRecordingsPage() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 10_000);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, []);
 

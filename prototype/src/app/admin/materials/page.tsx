@@ -208,6 +208,8 @@ function ActivityTab() {
 
   useEffect(() => {
     load();
+    const timer = window.setInterval(() => void load(), 10_000);
+    return () => window.clearInterval(timer);
   }, [load]);
 
   if (loading && !data) return <BrandLoader fill size="lg" message="Counting what happened." />;

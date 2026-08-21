@@ -42,6 +42,7 @@ export default function MaterialsPage() {
   // The paywall itself is the shell's job. This only survives so a 403 from
   // either API still says something useful instead of an empty page.
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     async function load() {
@@ -86,7 +87,12 @@ export default function MaterialsPage() {
       }
     }
 
-    load();
+    void load();
+  }, [refreshTick]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setRefreshTick((value) => value + 1), 10_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   // Videos have their own tab, so they are not repeated in the document list.

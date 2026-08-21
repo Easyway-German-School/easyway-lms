@@ -92,8 +92,9 @@ export default function SessionEndScreen({
   useEffect(() => {
     if (!liveSessionId) return;
     let cancelled = false;
+    let timer: number | undefined;
 
-    (async () => {
+    const loadRecap = async () => {
       try {
         const res = await fetch(`/api/live/recap?sessionId=${encodeURIComponent(liveSessionId)}`, {
           cache: "no-store",
@@ -107,10 +108,18 @@ export default function SessionEndScreen({
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+
+    void loadRecap();
+    // Egress encoding/upload finishes after the room closes. Keep the end
+    // screen honest and useful while the recording is being filed.
+    timer = window.setInterval(() => {
+      if (!cancelled) void loadRecap();
+    }, 5_000);
 
     return () => {
       cancelled = true;
+      if (timer) window.clearInterval(timer);
     };
   }, [liveSessionId]);
 
@@ -187,6 +196,13 @@ export default function SessionEndScreen({
         </p>
         <p className="mt-4 max-w-2xl text-sm leading-6 text-white/85">{subline}</p>
       </div>
+
+      {recording?.ready ? (
+        <div className="flex items-center gap-3 rounded-3xl border border-emerald-300/40 bg-emerald-500/10 p-4 text-sm text-[var(--foreground)]">
+          <img src="/mascot/becca-celebrating.png" alt="Becca celebrating" className="h-14 w-14 object-contain" />
+          <p><strong>Becca saved it to your library.</strong> Watch the class again whenever you are ready.</p>
+        </div>
+      ) : null}
 
       {/*
         Numbers, and only the ones each person can act on. A student is not
