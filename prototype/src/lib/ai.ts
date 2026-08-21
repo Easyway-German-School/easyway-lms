@@ -478,7 +478,7 @@ export async function generateCourseOutline(courseInfo: any): Promise<{ modules:
 }
 
 export async function generateLessonPackage(lessonData: any): Promise<{ summary: string; objectives: string[]; grammarFocus: string[]; vocabulary: string[]; quizQuestions?: Array<{ question: string; type: string; options?: string[]; answer: string }>; modules: Array<{ title: string; description: string; lessons: Array<{ title: string; description: string; type: string; duration: number }> }>; missions: Array<{ title: string; description: string; reward: string }> }> {
-  const provider = getAIProvider("backoffice");
+  const provider = getAIProvider("learning-content");
   // Either local runner: callLocalModel tries AnythingLLM before Ollama.
   if (provider === "ollama" || provider === "anythingllm") {
     return generateLessonPackageWithOllama(lessonData);
@@ -498,7 +498,7 @@ export async function parseUploadedContent(content: string): Promise<{
   keyTopics: string[];
   suggestedLevel: string;
 }> {
-  const provider = getAIProvider("backoffice");
+  const provider = getAIProvider("learning-content");
   // Either local runner: callLocalModel tries AnythingLLM before Ollama.
   if (provider === "ollama" || provider === "anythingllm") {
     return parseUploadedContentWithOllama(content);
@@ -690,7 +690,7 @@ Return JSON: {"subject": "...", "blocks": [ ... ]}${JSON_ONLY}`;
 }
 
 export async function summarizeText(text: string): Promise<string> {
-  const provider = getAIProvider("backoffice");
+  const provider = getAIProvider("learning-content");
   // Either local runner: callLocalModel tries AnythingLLM before Ollama.
   if (provider === "ollama" || provider === "anythingllm") {
     return summarizeTextWithOllama(text);
@@ -1361,7 +1361,9 @@ export type AiWorkload =
   /** Nobody is waiting. Privacy and cost win. */
   | "backoffice"
   /** A learner is waiting for a tailored plan or quest. */
-  | "student";
+  | "student"
+  /** Tutor material becomes learner-facing lessons, summaries, and quests. */
+  | "learning-content";
 
 type Provider = "claude" | "groq" | "ollama" | "deepseek" | "anythingllm" | "mock";
 
@@ -1418,26 +1420,26 @@ function localProvider(): Provider | null {
 }
 
 function getAIProvider(workload: AiWorkload = "interactive"): Provider {
-  const forced = String(process.env.AI_PROVIDER ?? "").toLowerCase();
-  if (forced === "claude" || forced === "groq" || forced === "ollama" || forced === "deepseek" || forced === "anythingllm" || forced === "mock") {
-    return forced;
-  }
-
   // Admin authoring uses the office Ollama runtime when available, then Groq
-  // on Vercel, keeping Claude reserved for student learning.
+  // on Vercel. Claude is deliberately not a backoffice fallback.
   if (workload === "backoffice") {
     return localProvider() ?? (hasKey(process.env.GROQ_API_KEY) ? "groq" : null) ??
       (hasKey(process.env.DEEPSEEK_API_KEY) ? "deepseek" : null) ??
       "mock";
   }
 
-  // Student-facing recommendations use Claude when configured. Local models
-  // remain reserved for staff and background authoring work.
-  if (workload === "student") {
+  // Claude powers the learner-facing intelligence: personalized plans,
+  // daily missions, and the transformation of tutor material into learning.
+  if (workload === "student" || workload === "learning-content") {
     return hasKey(process.env.ANTHROPIC_API_KEY)
       ? "claude"
       : (hasKey(process.env.GROQ_API_KEY) ? "groq" : null) ??
           (hasKey(process.env.DEEPSEEK_API_KEY) ? "deepseek" : "mock");
+  }
+
+  const forced = String(process.env.AI_PROVIDER ?? "").toLowerCase();
+  if (forced === "claude" || forced === "groq" || forced === "ollama" || forced === "deepseek" || forced === "anythingllm" || forced === "mock") {
+    return forced;
   }
 
   /**
