@@ -28,12 +28,9 @@ self.addEventListener("install", (event) => {
       // installability do not depend on it, and a service worker stuck in
       // "installing" is worse than one with a cold cache.
       .catch(() => undefined)
-      // The first install should control the page immediately. On updates,
-      // keep the new worker waiting so the user can choose when to reload.
-      .then(() => {
-        if (!self.registration.active) return self.skipWaiting();
-        return undefined;
-      }),
+      // Activate new deployments immediately. The app listens for
+      // controllerchange and reloads once onto the new build.
+      .then(() => self.skipWaiting()),
   );
 });
 

@@ -43,8 +43,6 @@ export default function InstallPrompt() {
   const [deferred, setDeferred] = useState<InstallPromptEvent | null>(null);
   const [showIosHint, setShowIosHint] = useState(false);
   const [dismissed, setDismissed] = useState(true);
-  const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
-  const [updating, setUpdating] = useState(false);
 
   // Register the worker. Separate effect from the prompt logic: this must run
   // even for a browser that will never offer an install.
@@ -52,42 +50,27 @@ export default function InstallPrompt() {
     if (!("serviceWorker" in navigator)) return;
     // Registration rejects on an insecure origin, which is the normal case for
     // http://<lan-ip>:3000 during development. Nothing to report.
-    let registration: ServiceWorkerRegistration | null = null;
-    let disposed = false;
-
-    const showWaitingWorker = (worker: ServiceWorker | null) => {
-      if (!disposed && worker) setWaitingWorker(worker);
-    };
-
-    const watchRegistration = async () => {
+    let reloadedForController = false;
+    const registerWorker = async () => {
       try {
-        registration = await navigator.serviceWorker.register("/sw.js");
-        showWaitingWorker(registration.waiting);
-        registration.addEventListener("updatefound", () => {
-          const installing = registration?.installing;
-          if (!installing) return;
-          installing.addEventListener("statechange", () => {
-            if (installing.state === "installed" && navigator.serviceWorker.controller) {
-              showWaitingWorker(registration?.waiting || installing);
-            }
-          });
-        });
+        await navigator.serviceWorker.register("/sw.js");
       } catch {
         // Service workers are unavailable on some development origins.
       }
     };
 
     const onControllerChange = () => {
-      if (updating) window.location.reload();
+      if (reloadedForController) return;
+      reloadedForController = true;
+      window.location.reload();
     };
 
-    void watchRegistration();
+    void registerWorker();
     navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
     return () => {
-      disposed = true;
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
     };
-  }, [updating]);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -154,35 +137,6 @@ export default function InstallPrompt() {
   };
 
   const onAuthRoute = pathname?.startsWith("/auth") ?? false;
-  const applyUpdate = () => {
-    if (!waitingWorker) return;
-    setUpdating(true);
-    waitingWorker.postMessage({ type: "SKIP_WAITING" });
-  };
-
-  if (waitingWorker && !onAuthRoute) {
-    return (
-      <div className="fixed inset-x-3 top-3 z-[70] mx-auto max-w-md sm:inset-x-auto sm:right-5 sm:top-5">
-        <div className="rounded-2xl border border-[var(--accent)]/30 bg-[var(--surface)] p-4 shadow-[0_24px_60px_-20px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-          <div className="flex items-start gap-3">
-            <img src="/icon-192.png" alt="" className="h-10 w-10 flex-none rounded-xl" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-[var(--foreground)]">EasyWay has an update</p>
-              <p className="mt-1 text-xs leading-5 text-[var(--muted)]">Refresh now to use the latest lessons, fixes, and features.</p>
-            </div>
-            <button type="button" onClick={() => setWaitingWorker(null)} aria-label="Later" className="-mr-1 -mt-1 rounded-lg px-2 py-1 text-lg leading-none text-[var(--muted)] hover:bg-[var(--surface-alt)]">×</button>
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <button type="button" onClick={applyUpdate} disabled={updating} className="flex-1 rounded-full bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60">
-              {updating ? "Updating…" : "Update now"}
-            </button>
-            <button type="button" onClick={() => setWaitingWorker(null)} disabled={updating} className="rounded-full px-4 py-2.5 text-sm font-medium text-[var(--muted)] hover:bg-[var(--surface-alt)]">Later</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const hasSomethingToSay = deferred !== null || showIosHint;
   if (dismissed || onAuthRoute || !hasSomethingToSay) return null;
 
