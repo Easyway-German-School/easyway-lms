@@ -185,7 +185,7 @@ export default function LecturerAssignmentsPage() {
             {/* Targeting applies to written work as much as to quizzes — a
                 make-up essay for two students is the same idea. */}
             <div className="mt-6">
-              <StudentPicker level={level} selected={studentIds} onChange={setStudentIds} />
+              <StudentPicker level={level} sessionSlot={sessionSlot || null} selected={studentIds} onChange={setStudentIds} />
             </div>
 
             <button

@@ -244,6 +244,81 @@ export function studentWhereForLecturer(
 }
 
 /**
+ * Narrow the tutor's roster further to a single level and sitting when the UI or
+ * assignment screen asks for it.
+ *
+ * This is intentionally stricter than the broad assignment view: a tutor can see
+ * the whole cohort in their dashboard, but an assignment picker must only offer
+ * the students for the exact level/session they are creating for. A tutor who
+ * teaches morning and afternoon A1 classes must never see an afternoon student
+ * when they pick the morning-only filter.
+ */
+export function studentWhereForLecturerScope(
+  assignment: LecturerAssignment,
+  lecturerId?: string | null,
+  options?: { level?: string | null; sessionSlot?: string | null; branchId?: string | null },
+): Record<string, unknown> | null {
+  const level = options?.level ? String(options.level).trim().toUpperCase() : null;
+  const sessionSlot = options?.sessionSlot ? String(options.sessionSlot).trim().toLowerCase() : null;
+  const branchId = options?.branchId ? String(options.branchId) : null;
+
+  const named: Record<string, unknown> = lecturerId ? { tutorId: lecturerId } : {};
+  if (level) named.level = level;
+  if (sessionSlot) named.sessionSlot = sessionSlot;
+  if (branchId) named.branchId = branchId;
+
+  const cohortWhere = studentWhereForAssignment(assignment);
+  if (!cohortWhere) return Object.keys(named).length ? named : null;
+
+  const narrowed: Record<string, unknown> = { ...cohortWhere };
+
+  if (level) {
+    if (Array.isArray((cohortWhere as { OR?: unknown[] }).OR)) {
+      narrowed.OR = (cohortWhere as { OR: Record<string, unknown>[] }).OR.map((clause) => ({
+        ...(clause as Record<string, unknown>),
+        level,
+        ...(branchId ? { branchId } : {}),
+        ...(sessionSlot ? { sessionSlot } : {}),
+      }));
+    } else {
+      narrowed.level = level;
+      if (branchId) narrowed.branchId = branchId;
+      if (sessionSlot) narrowed.sessionSlot = sessionSlot;
+    }
+  }
+
+  if (!level && sessionSlot) {
+    if (Array.isArray((cohortWhere as { OR?: unknown[] }).OR)) {
+      narrowed.OR = (cohortWhere as { OR: Record<string, unknown>[] }).OR.map((clause) => ({
+        ...(clause as Record<string, unknown>),
+        ...(branchId ? { branchId } : {}),
+        sessionSlot,
+      }));
+    } else {
+      narrowed.sessionSlot = sessionSlot;
+      if (branchId) narrowed.branchId = branchId;
+    }
+  }
+
+  if (!level && !sessionSlot && branchId) {
+    if (Array.isArray((cohortWhere as { OR?: unknown[] }).OR)) {
+      narrowed.OR = (cohortWhere as { OR: Record<string, unknown>[] }).OR.map((clause) => ({
+        ...(clause as Record<string, unknown>),
+        branchId,
+      }));
+    } else {
+      narrowed.branchId = branchId;
+    }
+  }
+
+  if (Object.keys(named).length) {
+    return { OR: [narrowed, named] };
+  }
+
+  return narrowed;
+}
+
+/**
  * The in-memory half of the same question, applied after the rows come back.
  *
  * Batch cannot be filtered in SQL (it lives in the admission JSON), so it runs

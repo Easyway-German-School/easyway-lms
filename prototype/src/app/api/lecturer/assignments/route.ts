@@ -2,6 +2,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { parseQuestions, totalPoints, type Question } from "@/lib/assignments";
+import { readAssignment, studentWhereForLecturerScope } from "@/lib/lecturer-assignment";
 
 /** Tutors create and review assignments for a level (optionally one branch). */
 
@@ -108,16 +109,49 @@ function questionProblem(questions: Question[]): string | null {
 }
 
 /** Narrow a list of student ids to the ones that really exist at this level. */
-async function resolveTargets(studentIds: unknown, level: string): Promise<string[]> {
+async function resolveTargets(
+  studentIds: unknown,
+  level: string,
+  sessionSlot?: string | null,
+  branchId?: string | null,
+  lecturerId?: string | null,
+): Promise<string[]> {
   if (!Array.isArray(studentIds) || studentIds.length === 0) return [];
 
   const ids = studentIds.map((id) => String(id)).filter(Boolean);
   if (ids.length === 0) return [];
 
-  // Filtered by level as well as id: a tutor should not be able to set an A1
-  // paper for a B2 student by posting an id the picker never offered.
+  // Filtered by level and scope as well as id: a tutor should not be able to
+  // set morning work for afternoon students by posting an id the picker never
+  // offered. Match the actual taught cohort instead of letting a broad level
+  // query leak the whole database.
+  const lecturer = lecturerId
+    ? await prisma.lecturer.findUnique({
+        where: { id: lecturerId },
+        select: {
+          id: true,
+          branchId: true,
+          level: true,
+          sessionSlot: true,
+          branchIds: true,
+          levels: true,
+          sessionSlots: true,
+          assignmentGroups: true,
+          classTypes: true,
+          batches: true,
+        },
+      })
+    : null;
+  const scope = lecturer
+    ? studentWhereForLecturerScope(readAssignment(lecturer), lecturer.id, { level, sessionSlot, branchId })
+    : { level, ...(sessionSlot ? { sessionSlot } : {}), ...(branchId ? { branchId } : {}) };
+
   const students = await prisma.student.findMany({
-    where: { id: { in: ids }, level },
+    where: {
+      id: { in: ids },
+      ...(scope ?? {}),
+      status: "active",
+    } as any,
     select: { id: true },
   });
 
@@ -145,7 +179,13 @@ export async function POST(req: NextRequest) {
       if (problem) return NextResponse.json({ error: problem }, { status: 400 });
     }
 
-    const targetIds = await resolveTargets(studentIds, normalizedLevel);
+    const targetIds = await resolveTargets(
+      studentIds,
+      normalizedLevel,
+      sessionSlot ? String(sessionSlot).toLowerCase() : null,
+      branchId || null,
+      auth.lecturerId,
+    );
 
     const created = await prisma.assignment.create({
       data: {
@@ -197,7 +237,14 @@ export async function PATCH(req: NextRequest) {
 
     const existing = await prisma.assignment.findUnique({
       where: { id: String(id) },
-      select: { id: true, type: true, level: true, _count: { select: { submissions: true } } },
+      select: {
+        id: true,
+        type: true,
+        level: true,
+        branchId: true,
+        sessionSlot: true,
+        _count: { select: { submissions: true } },
+      },
     });
     if (!existing) return NextResponse.json({ error: "Assignment not found" }, { status: 404 });
 
@@ -240,7 +287,13 @@ export async function PATCH(req: NextRequest) {
     // Targets are replaced wholesale rather than diffed: the builder always
     // sends the full list, and a diff would need a delete path anyway.
     if (studentIds !== undefined) {
-      const targetIds = await resolveTargets(studentIds, existing.level);
+      const targetIds = await resolveTargets(
+        studentIds,
+        existing.level,
+        existing.sessionSlot ?? null,
+        existing.branchId ?? null,
+        auth.lecturerId,
+      );
       await prisma.assignmentTarget.deleteMany({ where: { assignmentId: existing.id } });
       if (targetIds.length) {
         await prisma.assignmentTarget.createMany({
