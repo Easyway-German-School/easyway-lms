@@ -369,7 +369,9 @@ html.theme-custom ::selection {
   position: relative;
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
+  min-width: 0;
+  overflow-x: clip;
+  overflow-y: hidden;
 }
 
 .dashboard-shell::before {
