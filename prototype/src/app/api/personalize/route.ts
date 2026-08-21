@@ -47,9 +47,13 @@ export async function GET(request: NextRequest) {
       return lessons;
     };
 
+    const uploadedCoursesForLevel = lecturerPathway?.courses.filter((course) => {
+      const courseLevel = String(course.level || "").toUpperCase();
+      return !courseLevel || courseLevel === String(student.level || "").toUpperCase() || courseLevel === "A1-C2";
+    }) || [];
     const candidateLessons = [
       ...flattenLessons(pathway?.courses || []),
-      ...flattenLessons(lecturerPathway?.courses || []),
+      ...flattenLessons(uploadedCoursesForLevel),
     ];
 
     // Build a richer student profile: completions, recent grades, performance
@@ -87,7 +91,8 @@ export async function GET(request: NextRequest) {
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
     const cachedPlan = await prisma.personalizedPlan.findUnique({ where: { studentId: student.id } });
 
-    if (cachedPlan && cachedPlan.updatedAt > oneHourAgo) {
+    const newestCourse = await prisma.course.findFirst({ orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+    if (cachedPlan && cachedPlan.updatedAt > oneHourAgo && (!newestCourse || cachedPlan.updatedAt >= newestCourse.createdAt)) {
       try {
         const plan = JSON.parse(cachedPlan.plan);
         return NextResponse.json({ plan, source: 'cache' });

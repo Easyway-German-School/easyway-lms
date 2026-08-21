@@ -57,7 +57,19 @@ export default function AICoachPanel() {
     const utterance = new SpeechSynthesisUtterance(phrase);
     utterance.lang = "de-DE";
     utterance.rate = 0.82;
-    window.speechSynthesis.speak(utterance);
+    const speak = () => {
+      const germanVoice = window.speechSynthesis.getVoices().find((voice) => voice.lang.toLowerCase().startsWith("de"));
+      if (germanVoice) utterance.voice = germanVoice;
+      window.speechSynthesis.resume();
+      window.speechSynthesis.speak(utterance);
+    };
+    // Android Chrome often loads voices asynchronously; speaking before the
+    // voices list exists produces a silent click with no error.
+    if (window.speechSynthesis.getVoices().length) speak();
+    else {
+      window.speechSynthesis.addEventListener("voiceschanged", speak, { once: true });
+      window.setTimeout(speak, 700);
+    }
   }
 
   async function toggleRecording() {

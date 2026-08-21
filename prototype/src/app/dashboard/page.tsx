@@ -305,6 +305,7 @@ function DashboardContent() {
             examReadiness: student.examReadiness,
             streak: insights.streak,
             completedLessons: insights.completedLessons,
+            contentTopics: courses.slice(0, 3).flatMap((course) => [course.title, course.description].filter(Boolean)).slice(0, 4),
           },
         }),
       });
@@ -315,7 +316,7 @@ function DashboardContent() {
       console.error("Failed to load daily missions:", error);
       setDailyMissions([]);
     }
-  }, [student, insights.completedLessons, insights.streak]);
+  }, [student, courses, insights.completedLessons, insights.streak]);
 
   const loadMissionState = useCallback(() => {
     if (typeof window === "undefined") return;

@@ -11,6 +11,7 @@ type Profile = {
   completedLessons?: number;
   germanyGoal?: string | null;
   germanyGoalNote?: string | null;
+  contentTopics?: string[];
 };
 
 function buildAdaptiveMissions(profile: Profile, aiMissions: Array<any>) {
@@ -20,6 +21,7 @@ function buildAdaptiveMissions(profile: Profile, aiMissions: Array<any>) {
   const completedLessons = Number(profile.completedLessons ?? 0);
   const pathway = profile.pathway || "Language training";
   const goal = goalFor(profile.germanyGoal).label;
+  const contentTopic = profile.contentTopics?.find(Boolean);
 
   const base = (Array.isArray(aiMissions) ? aiMissions : []).map((mission, index) => ({
     id: mission.id || `mission-${index}`,
@@ -85,6 +87,17 @@ function buildAdaptiveMissions(profile: Profile, aiMissions: Array<any>) {
       reward: "+30 XP",
       category: "Goal",
       target: profile.germanyGoalNote || `Apply German to ${goal.toLowerCase()}`,
+    });
+  }
+
+  if (contentTopic) {
+    adaptive.push({
+      id: "uploaded-content-focus",
+      title: `Practice: ${contentTopic}`,
+      description: `Complete one short activity from your new lesson content about ${contentTopic}.`,
+      reward: "+35 XP",
+      category: "Lesson focus",
+      target: `Use ${contentTopic} in three German examples`,
     });
   }
 
