@@ -326,7 +326,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         dragging the whole layout sideways.
       */}
       <main
-        className={`min-w-0 flex-1 overflow-x-clip transition-all duration-300 ${
+        className={`min-w-0 w-0 flex-1 max-w-[100vw] overflow-x-clip transition-all duration-300 ${
           collapsed ? "lg:ml-20" : "lg:ml-72"
         }`}
       >

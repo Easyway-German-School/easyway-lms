@@ -331,12 +331,10 @@ export default function HostGame({ gameId, onClose }: { gameId: string; onClose:
     switch (view.game.phase) {
       case "lobby":
         return void act("start");
-      // Stops the clock rather than jumping to the answer. The auto-reveal
-      // above then fires on the same path every question takes, so a tutor
-      // cutting a question short and a question running out of time land the
-      // room in exactly the same place.
+      // Auto mode stops the clock and lets the timed reveal follow. Manual mode
+      // reveals directly so the tutor always has a reliable next-step control.
       case "question":
-        return void act("lock");
+        return void act(view.game.autoAdvance ? "lock" : "reveal");
       case "reveal":
         return void act("standings");
       case "standings":
@@ -462,7 +460,7 @@ function nextLabel(view: HostView | null): string {
     case "lobby":
       return view.playerCount > 0 ? `Start with ${view.playerCount}` : "Start";
     case "question":
-      return "Stop the clock";
+      return view.game.autoAdvance ? "Stop the clock" : "Reveal answer";
     case "reveal":
       return "Show standings";
     case "standings":
