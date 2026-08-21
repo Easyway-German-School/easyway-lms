@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
@@ -173,7 +173,7 @@ function StudentsRoster() {
   const [selectedStudentName, setSelectedStudentName] = useState("");
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
 
-  async function loadBranches() {
+  const loadBranches = useCallback(async () => {
     const [branchesRes, lecturersRes] = await Promise.all([
       fetch("/api/admin/branches"),
       fetch("/api/admin/lecturers"),
@@ -188,9 +188,9 @@ function StudentsRoster() {
       const data = await lecturersRes.json();
       setLecturers(data.lecturers || []);
     }
-  }
+  }, []);
 
-  async function loadStudents() {
+  const loadStudents = useCallback(async () => {
     setLoading(true);
     const url = new URL("/api/admin/students", window.location.origin);
     if (filterBranchId) url.searchParams.set("branchId", filterBranchId);
@@ -219,7 +219,7 @@ function StudentsRoster() {
       setCanSeeMoney(data.canSeeMoney !== false);
     }
     setLoading(false);
-  }
+  }, [agingBucket, filterBatch, filterBranchId, filterClassType, filterLevel, filterPaymentStatus, filterSessionSlot, filterStatus, filterTutorId, focus, focusIds, page, pageSize, search]);
 
   function clearFocus() {
     setFocus("");
@@ -233,16 +233,12 @@ function StudentsRoster() {
   }
 
   useEffect(() => {
-    loadBranches();
-  }, []);
+    void loadBranches();
+  }, [loadBranches]);
 
   useEffect(() => {
-    loadStudents();
-  }, [filterBranchId, filterTutorId, filterLevel, filterBatch, filterClassType, filterSessionSlot, filterStatus, filterPaymentStatus, search, focus, agingBucket, focusIds, page, pageSize]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [filterBranchId, filterTutorId, filterLevel, filterClassType, filterSessionSlot, filterStatus, filterPaymentStatus, search, focus, agingBucket, pageSize]);
+    void loadStudents();
+  }, [loadStudents]);
 
   async function handleSaveStudent() {
     setStudentError("");
@@ -662,7 +658,10 @@ function StudentsRoster() {
                   id="search"
                   placeholder="Name or email"
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 />
               </div>
@@ -671,7 +670,10 @@ function StudentsRoster() {
                 <select
                   id="branchFilter"
                   value={filterBranchId}
-                  onChange={(event) => setFilterBranchId(event.target.value)}
+                  onChange={(event) => {
+                    setFilterBranchId(event.target.value);
+                    setPage(1);
+                  }}
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">All branches</option>
@@ -685,7 +687,10 @@ function StudentsRoster() {
                 <select
                   id="tutorFilter"
                   value={filterTutorId}
-                  onChange={(event) => setFilterTutorId(event.target.value)}
+                  onChange={(event) => {
+                    setFilterTutorId(event.target.value);
+                    setPage(1);
+                  }}
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">All tutors</option>
@@ -699,7 +704,10 @@ function StudentsRoster() {
                 <select
                   id="levelFilter"
                   value={filterLevel}
-                  onChange={(event) => setFilterLevel(event.target.value)}
+                  onChange={(event) => {
+                    setFilterLevel(event.target.value);
+                    setPage(1);
+                  }}
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">All levels</option>
@@ -713,7 +721,10 @@ function StudentsRoster() {
                 <select
                   id="batchFilter"
                   value={filterBatch}
-                  onChange={(event) => setFilterBatch(event.target.value)}
+                  onChange={(event) => {
+                    setFilterBatch(event.target.value);
+                    setPage(1);
+                  }}
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">All batches</option>
@@ -727,7 +738,10 @@ function StudentsRoster() {
                 <select
                   id="classTypeFilter"
                   value={filterClassType}
-                  onChange={(event) => setFilterClassType(event.target.value)}
+                  onChange={(event) => {
+                    setFilterClassType(event.target.value);
+                    setPage(1);
+                  }}
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">All memberships</option>
@@ -740,7 +754,10 @@ function StudentsRoster() {
                 <select
                   id="sessionSlotFilter"
                   value={filterSessionSlot}
-                  onChange={(event) => setFilterSessionSlot(event.target.value)}
+                  onChange={(event) => {
+                    setFilterSessionSlot(event.target.value);
+                    setPage(1);
+                  }}
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">All sittings</option>
@@ -754,7 +771,10 @@ function StudentsRoster() {
                 <select
                   id="statusFilter"
                   value={filterStatus}
-                  onChange={(event) => setFilterStatus(event.target.value)}
+                  onChange={(event) => {
+                    setFilterStatus(event.target.value);
+                    setPage(1);
+                  }}
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">All statuses</option>
@@ -768,7 +788,10 @@ function StudentsRoster() {
                 <select
                   id="paymentStatusFilter"
                   value={filterPaymentStatus}
-                  onChange={(event) => setFilterPaymentStatus(event.target.value)}
+                  onChange={(event) => {
+                    setFilterPaymentStatus(event.target.value);
+                    setPage(1);
+                  }}
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">All payments</option>

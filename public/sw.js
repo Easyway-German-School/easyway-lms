@@ -28,8 +28,14 @@ self.addEventListener("install", (event) => {
       // installability do not depend on it, and a service worker stuck in
       // "installing" is worse than one with a cold cache.
       .catch(() => undefined)
+      // Activate new deployments immediately. The app listens for
+      // controllerchange and reloads once onto the new build.
       .then(() => self.skipWaiting()),
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {

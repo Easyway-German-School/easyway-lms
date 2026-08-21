@@ -213,10 +213,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings', 'Platform'];
 
   useEffect(() => {
-    setDrawerOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
     if (status === 'unauthenticated' || (status === 'authenticated' && session?.user?.role?.toLowerCase() !== 'admin')) {
       router.replace('/auth/admin');
     }
@@ -342,7 +338,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                     return (
                       <button
                         key={item.href}
-                        onClick={() => router.push(item.href)}
+                        onClick={() => {
+                          setDrawerOpen(false);
+                          router.push(item.href);
+                        }}
                         title={collapsed ? item.label : ''}
                         className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition-all duration-200 ${
                           active
