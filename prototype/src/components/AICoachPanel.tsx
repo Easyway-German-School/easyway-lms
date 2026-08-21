@@ -14,7 +14,7 @@
  * somewhere that has to stay quiet the rest of the time.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function AICoachPanel() {
   const [aiTab, setAiTab] = useState<"pronunciation" | "plan">("pronunciation");
@@ -22,10 +22,74 @@ export default function AICoachPanel() {
   const [phrase, setPhrase] = useState("Ich möchte ein Visum beantragen.");
   const [feedback, setFeedback] = useState<string[]>(["Type a phrase and press Analyze."]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [voiceSupported, setVoiceSupported] = useState(true);
+  const [attemptScore, setAttemptScore] = useState<number | null>(null);
+  const [attempts, setAttempts] = useState(0);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  const recordingTimerRef = useRef<number | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [personalizedPlan, setPersonalizedPlan] = useState<any>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planLoaded, setPlanLoaded] = useState(false);
+
+  useEffect(() => {
+    const supported = typeof window !== "undefined" && Boolean(window.MediaRecorder) && Boolean((window as typeof window & { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }).SpeechRecognition || (window as typeof window & { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
+    setVoiceSupported(supported);
+    return () => {
+      recorderRef.current?.stop();
+      recognitionRef.current?.stop();
+      if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+    };
+  }, []);
+
+  function speakModel() {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(phrase);
+    utterance.lang = "de-DE";
+    utterance.rate = 0.82;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function toggleRecording() {
+    if (isRecording) {
+      recorderRef.current?.stop();
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+      return;
+    }
+    if (!voiceSupported) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recorderRef.current = recorder;
+      recorder.ondataavailable = () => undefined;
+      recorder.onstop = () => stream.getTracks().forEach((track) => track.stop());
+      const SpeechRecognition = (window as typeof window & { SpeechRecognition?: new () => { lang: string; interimResults: boolean; continuous: boolean; onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void }; webkitSpeechRecognition?: new () => { lang: string; interimResults: boolean; continuous: boolean; onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void } }).SpeechRecognition || (window as typeof window & { webkitSpeechRecognition?: new () => { lang: string; interimResults: boolean; continuous: boolean; onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void } }).webkitSpeechRecognition;
+      if (!SpeechRecognition) return;
+      const recognition = new SpeechRecognition();
+      recognition.lang = "de-DE";
+      recognition.interimResults = false;
+      recognition.continuous = true;
+      recognition.onresult = (event) => {
+        const words = Array.from({ length: event.results.length }, (_, index) => event.results[index][0].transcript).join(" ");
+        setPhrase(words.trim());
+      };
+      recognition.onerror = () => setFeedback(["I could not hear that clearly. Try again, a little closer to the microphone."]);
+      recognitionRef.current = recognition;
+      recorder.start();
+      recognition.start();
+      setRecordingSeconds(0);
+      setIsRecording(true);
+      recordingTimerRef.current = window.setInterval(() => setRecordingSeconds((seconds) => Math.min(60, seconds + 1)), 1000);
+    } catch {
+      setFeedback(["Microphone access was not available. Check your browser permission and try again."]);
+    }
+  }
 
   async function handleAnalyze() {
     if (!phrase.trim()) return;
@@ -44,6 +108,8 @@ export default function AICoachPanel() {
         ...(data.corrections?.map((correction: string) => `Correction: ${correction}`) || []),
       ];
       setFeedback(feedbackArray.length > 0 ? feedbackArray : ["No feedback available"]);
+      setAttemptScore(Math.max(0, Math.min(100, Number(data.confidence) || 0)));
+      setAttempts((count) => count + 1);
     } catch (error) {
       console.error("Analyze error:", error);
       setFeedback(["Unable to analyze pronunciation"]);
@@ -92,7 +158,7 @@ export default function AICoachPanel() {
         <div>
           <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">AI study tools</p>
           <h2 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">
-            {aiTab === "pronunciation" ? "Pronunciation practice" : "Personalized learning path"}
+            {aiTab === "pronunciation" ? "Voice Coach" : "Personalized learning path"}
           </h2>
         </div>
       </div>
@@ -118,21 +184,33 @@ export default function AICoachPanel() {
 
       {aiTab === "pronunciation" ? (
         <>
-          <p className="mt-4 text-sm text-[var(--muted)]">Type your German phrase and get instant AI feedback.</p>
+          <p className="mt-4 text-sm text-[var(--muted)]">Speak a German phrase, hear the model, and get coached on your real attempt. Your microphone audio is used to create the transcript and is not saved.</p>
+          <div className="mt-5 rounded-3xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">Your challenge</p><p className="mt-1 font-semibold text-[var(--foreground)]">{phrase}</p></div>
+              <button type="button" onClick={speakModel} className="rounded-full border border-[var(--accent)] px-4 py-2 text-xs font-bold text-[var(--accent)]">Listen to model</button>
+            </div>
+          </div>
+          <button type="button" onClick={() => void toggleRecording()} disabled={!voiceSupported} className={`mt-4 flex w-full items-center justify-center gap-3 rounded-3xl px-4 py-4 text-sm font-bold text-white transition ${isRecording ? "bg-red-600" : "bg-[var(--accent)]"} disabled:cursor-not-allowed disabled:opacity-50`}>
+            <span className={`h-3 w-3 rounded-full bg-white ${isRecording ? "animate-pulse" : ""}`} />
+            {isRecording ? `Stop recording · 0:${String(recordingSeconds).padStart(2, "0")}` : "Hold your thought, then tap to speak"}
+          </button>
+          {!voiceSupported ? <p className="mt-2 text-xs text-[var(--muted)]">Voice capture needs a modern browser with microphone access.</p> : null}
           <textarea
             value={phrase}
             onChange={(e) => setPhrase(e.target.value)}
             rows={4}
             className="mt-4 w-full rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-sm text-[var(--foreground)] focus:outline-none"
-            placeholder="Ich möchte ein Visum beantragen."
+            placeholder="Your transcript appears here after you speak…"
           />
           <button
             onClick={handleAnalyze}
             disabled={isAnalyzing}
             className="mt-4 inline-flex w-full items-center justify-center rounded-3xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60"
           >
-            {isAnalyzing ? "Analyzing..." : "Analyze pronunciation"}
+            {isAnalyzing ? "Coaching your attempt…" : "Get my AI coaching"}
           </button>
+          {attemptScore !== null ? <div className="mt-5 flex items-center justify-between rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Attempt {attempts}</p><p className="mt-1 text-sm text-[var(--muted)]">Keep going. One more round can sharpen it.</p></div><p className="text-4xl font-black text-[var(--accent)]">{attemptScore}<span className="text-base">/100</span></p></div> : null}
           <div className="mt-4 space-y-2 text-sm text-[var(--muted)]">
             {feedback.map((item, index) => (
               <p key={`${item}-${index}`}>• {item}</p>
