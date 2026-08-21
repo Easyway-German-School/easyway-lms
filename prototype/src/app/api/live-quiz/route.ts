@@ -159,6 +159,7 @@ export async function POST(request: NextRequest) {
   const shuffled = body?.shuffle === true;
   const speedBonus = body?.speedBonus !== false;
   const teamMode = body?.teamMode === true;
+  const autoAdvance = body?.autoAdvance === true;
 
   const snapshot = snapshotQuestions(quiz.questions, { shuffle: shuffled });
   if (snapshot.questions.length === 0) {
@@ -261,6 +262,7 @@ export async function POST(request: NextRequest) {
       speedBonus,
       shuffled,
       teamMode,
+      autoAdvance,
       phase: "lobby",
       currentIndex: -1,
     },

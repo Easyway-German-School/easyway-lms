@@ -3698,6 +3698,9 @@ model QuizGame {
    */
   speedBonus Boolean @default(true)
 
+  /// When enabled, the host advances after the reveal/standings pause.
+  autoAdvance Boolean @default(false)
+
   /**
    * Shuffle the order so a class that played yesterday cannot chant the answers.
    */

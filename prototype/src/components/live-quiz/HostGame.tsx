@@ -91,6 +91,7 @@ type HostView = {
     questionCount: number;
     secondsPerQuestion: number;
     speedBonus: boolean;
+    autoAdvance: boolean;
     teamMode: boolean;
   };
   endsAt: number | null;
@@ -314,6 +315,13 @@ export default function HostGame({ gameId, onClose }: { gameId: string; onClose:
     return () => window.clearTimeout(timer);
   }, [view, remainingMs, busy, act]);
 
+  useEffect(() => {
+    if (!view?.game.autoAdvance || busy) return;
+    if (view.game.phase !== "reveal" && view.game.phase !== "standings") return;
+    const timer = window.setTimeout(() => act(view.game.phase === "reveal" ? "standings" : "next"), 3500);
+    return () => window.clearTimeout(timer);
+  }, [view, busy, act]);
+
   /** What the one big button does, given where we are. */
   const advance = useCallback(() => {
     if (!view || busy) return;
@@ -422,7 +430,7 @@ export default function HostGame({ gameId, onClose }: { gameId: string; onClose:
 
       <footer className="lq-foot">
         <span className="lq-hint">
-          Space or your clicker advances · Esc leaves
+          {view?.game.autoAdvance ? "Auto-advance is on · " : "Manual mode · "}Space or clicker advances · Esc leaves
         </span>
         <div className="lq-foot-actions">
           {view && view.game.phase !== "ended" ? (

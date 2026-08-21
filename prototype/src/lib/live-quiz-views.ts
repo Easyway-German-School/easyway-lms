@@ -224,6 +224,7 @@ export type HostView = {
     secondsPerQuestion: number;
     speedBonus: boolean;
     teamMode: boolean;
+    autoAdvance: boolean;
     startedAt: string | null;
     endedAt: string | null;
   };
@@ -271,6 +272,7 @@ export async function hostView(gameId: string): Promise<HostView | null> {
       secondsPerQuestion: true,
       speedBonus: true,
       teamMode: true,
+      autoAdvance: true,
       startedAt: true,
       endedAt: true,
     },
@@ -332,6 +334,7 @@ export async function hostView(gameId: string): Promise<HostView | null> {
       secondsPerQuestion: game.secondsPerQuestion,
       speedBonus: game.speedBonus,
       teamMode: game.teamMode,
+      autoAdvance: game.autoAdvance,
       startedAt: game.startedAt?.toISOString() ?? null,
       endedAt: game.endedAt?.toISOString() ?? null,
     },

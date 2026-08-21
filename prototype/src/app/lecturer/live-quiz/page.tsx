@@ -55,6 +55,7 @@ function LiveQuizContent() {
   const [speedBonus, setSpeedBonus] = useState(true);
   const [shuffle, setShuffle] = useState(true);
   const [teamMode, setTeamMode] = useState(false);
+  const [autoAdvance, setAutoAdvance] = useState(false);
   const [starting, setStarting] = useState(false);
 
   /** Non-null while the projector view owns the screen. */
@@ -99,6 +100,7 @@ function LiveQuizContent() {
           speedBonus,
           shuffle,
           teamMode,
+          autoAdvance,
           liveSessionId,
         }),
       });
@@ -325,6 +327,14 @@ function LiveQuizContent() {
                       for a group who are still translating in their heads — otherwise the
                       same three students win every time.
                     </span>
+                  </span>
+                </label>
+
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-3">
+                  <input type="checkbox" checked={autoAdvance} onChange={(event) => setAutoAdvance(event.target.checked)} className="mt-1 accent-[var(--accent)]" />
+                  <span>
+                    <span className="text-sm font-semibold text-[var(--foreground)]">Automatically move to the next question</span>
+                    <span className="mt-0.5 block text-xs text-[var(--muted)]">After the answer reveal and standings pause, the next question starts automatically. Leave this off to control every step manually.</span>
                   </span>
                 </label>
 
