@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { parseQuestions } from "@/lib/assignments";
 import { resolveHost } from "@/lib/live-quiz-views";
 import { liveWhere } from "@/lib/live-presence";
+import { KIND, notify } from "@/lib/notify";
 import {
   DEFAULT_SECONDS_PER_QUESTION,
   MAX_SECONDS_PER_QUESTION,
@@ -142,9 +143,14 @@ export async function POST(request: NextRequest) {
       branchId: true,
       sessionSlot: true,
       lecturerId: true,
+      targets: { select: { studentId: true } },
     },
   });
   if (!quiz) return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
+  if (!host.isAdmin && quiz.lecturerId !== host.lecturerId) {
+    return NextResponse.json({ error: "You can only host quizzes you created." }, { status: 403 });
+  }
+  const selectedQuiz = quiz;
 
   const seconds = Math.max(
     MIN_SECONDS_PER_QUESTION,
@@ -242,15 +248,15 @@ export async function POST(request: NextRequest) {
   const game = await prisma.quizGame.create({
     data: {
       pin: await uniquePin(),
-      assignmentId: quiz.id,
+      assignmentId: selectedQuiz.id,
       questions: snapshot.questions as unknown as object,
       lecturerId: lecturer?.id ?? null,
       hostUserId: host.userId,
-      branchId: lecturer?.branchId ?? quiz.branchId ?? null,
-      level: lecturer?.level ?? quiz.level ?? null,
-      sessionSlot: lecturer?.sessionSlot ?? quiz.sessionSlot ?? null,
+      branchId: lecturer?.branchId ?? selectedQuiz.branchId ?? null,
+      level: lecturer?.level ?? selectedQuiz.level ?? null,
+      sessionSlot: lecturer?.sessionSlot ?? selectedQuiz.sessionSlot ?? null,
       liveSessionId,
-      title: quiz.title,
+      title: selectedQuiz.title,
       secondsPerQuestion: seconds,
       speedBonus,
       shuffled,
@@ -260,6 +266,43 @@ export async function POST(request: NextRequest) {
     },
     select: { id: true, pin: true, title: true },
   });
+
+  // Starting the game is the moment the PIN becomes useful. Send it through
+  // the existing notification fan-out so students see it in their portal and
+  // on supported devices, while the game remains joinable by PIN as a backup.
+  let recipientStudentIds = selectedQuiz.targets.map((target) => target.studentId);
+  if (liveSessionId) {
+    const invites = await prisma.liveClassInvite.findMany({
+      where: { sessionId: liveSessionId, status: { in: ["invited", "joined"] } },
+      select: { studentId: true },
+    });
+    recipientStudentIds = invites.map((invite) => invite.studentId);
+  }
+  if (recipientStudentIds.length === 0) {
+    const students = await prisma.student.findMany({
+      where: {
+        branchId: lecturer?.branchId ?? selectedQuiz.branchId ?? undefined,
+        level: lecturer?.level ?? selectedQuiz.level ?? undefined,
+        sessionSlot: lecturer?.sessionSlot ?? selectedQuiz.sessionSlot ?? undefined,
+        status: "active",
+      },
+      select: { id: true },
+    });
+    recipientStudentIds = students.map((student) => student.id);
+  }
+  if (recipientStudentIds.length > 0) {
+    await notify({
+      to: { studentIds: [...new Set(recipientStudentIds)] },
+      kind: KIND.general,
+      severity: "info",
+      title: `Quiz started: ${selectedQuiz.title}`,
+      message: `Join now with game PIN ${game.pin}. Open Quiz game in your portal.`,
+      link: "/play",
+      dedupeKey: `live-quiz:${game.id}`,
+      push: true,
+      email: false,
+    });
+  }
 
   return NextResponse.json({
     game,
