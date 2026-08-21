@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import StudentShell from "@/components/StudentShell";
 import VideoLibrary from "@/components/video/VideoLibrary";
 import { isPlayableVideo, type LibraryVideo } from "@/lib/video-library";
@@ -22,6 +23,7 @@ type Material = {
 };
 
 type Tab = "watch" | "documents";
+type VideoRecommendation = { videoId: string; reason: string; priority: number };
 
 const DOCUMENT_FILTERS = [
   { value: "all", label: "All documents", icon: null },
@@ -43,15 +45,17 @@ export default function MaterialsPage() {
   // either API still says something useful instead of an empty page.
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [recommendations, setRecommendations] = useState<VideoRecommendation[]>([]);
 
   useEffect(() => {
     async function load() {
       try {
         // Both in flight together: the two tabs are one page, and a student on
         // a slow link should not pay two round trips to switch between them.
-        const [materialsRes, videosRes] = await Promise.all([
+        const [materialsRes, videosRes, recommendationsRes] = await Promise.all([
           fetch("/api/student/materials", { cache: "no-store" }),
           fetch("/api/student/videos", { cache: "no-store" }),
+          fetch("/api/student/video-recommendations", { cache: "no-store" }),
         ]);
 
         if (materialsRes.status === 401) {
@@ -79,6 +83,11 @@ export default function MaterialsPage() {
           // Land on whichever tab actually has something in it. A brand-new
           // level has no recordings yet, and an empty hero is a bad first look.
           if ((data.videos || []).length === 0) setTab("documents");
+        }
+
+        if (recommendationsRes.ok) {
+          const data = await recommendationsRes.json();
+          setRecommendations(Array.isArray(data.recommendations) ? data.recommendations : []);
         }
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Failed to load materials");
@@ -172,7 +181,34 @@ export default function MaterialsPage() {
               <p className="text-[var(--muted)]">Loading your materials…</p>
             </div>
           ) : tab === "watch" ? (
-            <VideoLibrary videos={videos} level={level} />
+            <div className="space-y-5">
+              {recommendations.length > 0 ? (
+                <section className="rounded-3xl border border-[var(--accent)]/30 bg-[var(--surface)] p-5 shadow-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--accent)]">Recommended for you</p>
+                      <h2 className="mt-2 text-xl font-bold text-[var(--foreground)]">Your next watch</h2>
+                      <p className="mt-1 text-sm text-[var(--muted)]">Chosen from your progress, level, pathway, and learning goal.</p>
+                    </div>
+                    <img src="/mascot/becca-pointing-right-bust.png" alt="Becca" className="hidden h-16 w-16 object-contain sm:block" />
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    {recommendations.map((recommendation) => {
+                      const video = videos.find((item) => item.id === recommendation.videoId);
+                      if (!video) return null;
+                      return (
+                        <Link key={recommendation.videoId} href={`/materials/watch/${video.id}`} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-3 transition hover:border-[var(--accent)]/50">
+                          <p className="truncate text-sm font-semibold text-[var(--foreground)]">{video.title}</p>
+                          <p className="mt-2 line-clamp-2 text-xs leading-5 text-[var(--muted)]">{recommendation.reason}</p>
+                          <span className="mt-3 inline-flex items-center text-xs font-bold text-[var(--accent)]">Watch next →</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+              <VideoLibrary videos={videos} level={level} />
+            </div>
           ) : (
             <div className="space-y-6">
               <div className="flex flex-wrap gap-3">
