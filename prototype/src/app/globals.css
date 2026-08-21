@@ -745,6 +745,22 @@ html.theme-custom ::selection {
   --cine-yellow: #fde047;
 }
 
+/* Fallback for iOS Safari and embedded browsers without element fullscreen. */
+.cine-player-css-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 9999 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  border-radius: 0 !important;
+}
+
+.cine-player-css-fullscreen > video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+}
+
 .cine-slider {
   -webkit-appearance: none;
   appearance: none;

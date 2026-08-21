@@ -76,6 +76,7 @@ const CinemaPlayer = forwardRef<HTMLVideoElement, CinemaPlayerProps>(function Ci
   const [muted, setMuted] = useState(false);
   const [speed, setSpeed] = useState<number>(1);
   const [fullscreen, setFullscreen] = useState(false);
+  const [cssFullscreen, setCssFullscreen] = useState(false);
   const [pipActive, setPipActive] = useState(false);
   const [pipSupported, setPipSupported] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -131,10 +132,25 @@ const CinemaPlayer = forwardRef<HTMLVideoElement, CinemaPlayerProps>(function Ci
 
   const toggleFullscreen = useCallback(() => {
     const container = containerRef.current;
+    const video = videoRef.current;
     if (!container) return;
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-    else void container.requestFullscreen?.().catch(() => {});
-  }, []);
+    if (document.fullscreenElement === container) {
+      void document.exitFullscreen().catch(() => {});
+      return;
+    }
+    if (cssFullscreen) {
+      setCssFullscreen(false);
+      return;
+    }
+
+    if (typeof container.requestFullscreen === "function") {
+      void container.requestFullscreen().catch(() => setCssFullscreen(true));
+    } else if (video && typeof (video as HTMLVideoElement & { webkitEnterFullscreen?: () => void }).webkitEnterFullscreen === "function") {
+      (video as HTMLVideoElement & { webkitEnterFullscreen: () => void }).webkitEnterFullscreen();
+    } else {
+      setCssFullscreen(true);
+    }
+  }, [cssFullscreen]);
 
   const handleVideoDoubleClick = useCallback(() => {
     if (clickTimerRef.current) {
@@ -228,10 +244,23 @@ const CinemaPlayer = forwardRef<HTMLVideoElement, CinemaPlayerProps>(function Ci
   }, []);
 
   useEffect(() => {
-    const onFullscreenChange = () => setFullscreen(document.fullscreenElement === containerRef.current);
+    const onFullscreenChange = () => {
+      const isNative = document.fullscreenElement === containerRef.current;
+      setFullscreen(isNative);
+      if (isNative) setCssFullscreen(false);
+    };
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
   }, []);
+
+  useEffect(() => {
+    if (!cssFullscreen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCssFullscreen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [cssFullscreen]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -333,7 +362,7 @@ const CinemaPlayer = forwardRef<HTMLVideoElement, CinemaPlayerProps>(function Ci
       onMouseLeave={() => {
         if (videoRef.current && !videoRef.current.paused) setShowControls(false);
       }}
-      className={`cine-player relative overflow-hidden bg-black outline-none ${className}`}
+      className={`cine-player relative overflow-hidden bg-black outline-none ${cssFullscreen ? "cine-player-css-fullscreen" : ""} ${className}`}
     >
       <video
         ref={videoRef}
