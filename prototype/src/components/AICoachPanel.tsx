@@ -27,6 +27,10 @@ export default function AICoachPanel() {
   const [voiceSupported, setVoiceSupported] = useState(true);
   const [attemptScore, setAttemptScore] = useState<number | null>(null);
   const [attempts, setAttempts] = useState(0);
+  const [bestScore, setBestScore] = useState(0);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [audioAnalyzed, setAudioAnalyzed] = useState(false);
+  const audioChunksRef = useRef<Blob[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const recordingTimerRef = useRef<number | null>(null);
@@ -38,6 +42,8 @@ export default function AICoachPanel() {
   useEffect(() => {
     const supported = typeof window !== "undefined" && Boolean(window.MediaRecorder) && Boolean((window as typeof window & { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }).SpeechRecognition || (window as typeof window & { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
     setVoiceSupported(supported);
+    const savedBest = Number(window.localStorage.getItem("easyway-voice-best") || 0);
+    setBestScore(Number.isFinite(savedBest) ? savedBest : 0);
     return () => {
       recorderRef.current?.stop();
       recognitionRef.current?.stop();
@@ -67,8 +73,13 @@ export default function AICoachPanel() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       recorderRef.current = recorder;
-      recorder.ondataavailable = () => undefined;
-      recorder.onstop = () => stream.getTracks().forEach((track) => track.stop());
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) audioChunksRef.current.push(event.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        setRecordingUrl(URL.createObjectURL(blob));
+      };
       const SpeechRecognition = (window as typeof window & { SpeechRecognition?: new () => { lang: string; interimResults: boolean; continuous: boolean; onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void }; webkitSpeechRecognition?: new () => { lang: string; interimResults: boolean; continuous: boolean; onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void } }).SpeechRecognition || (window as typeof window & { webkitSpeechRecognition?: new () => { lang: string; interimResults: boolean; continuous: boolean; onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void } }).webkitSpeechRecognition;
       if (!SpeechRecognition) return;
       const recognition = new SpeechRecognition();
@@ -95,12 +106,13 @@ export default function AICoachPanel() {
     if (!phrase.trim()) return;
     setIsAnalyzing(true);
     try {
-      const res = await fetch("/api/ai/analyze-pronunciation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phrase }),
-      });
+      const recordedBlob = audioChunksRef.current.length ? new Blob(audioChunksRef.current, { type: recorderRef.current?.mimeType || "audio/webm" }) : null;
+      const res = recordedBlob
+        ? await fetch("/api/ai/analyze-pronunciation-audio", { method: "POST", body: (() => { const form = new FormData(); form.append("audio", recordedBlob, "voice-coach.webm"); return form; })() })
+        : await fetch("/api/ai/analyze-pronunciation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phrase }) });
       const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Unable to coach this attempt");
+      setAudioAnalyzed(Boolean(data.audioAnalyzed));
       const feedbackArray = [
         `Transcription: ${data.transcription}`,
         `Confidence: ${data.confidence}%`,
@@ -109,6 +121,12 @@ export default function AICoachPanel() {
       ];
       setFeedback(feedbackArray.length > 0 ? feedbackArray : ["No feedback available"]);
       setAttemptScore(Math.max(0, Math.min(100, Number(data.confidence) || 0)));
+      const score = Math.max(0, Math.min(100, Number(data.confidence) || 0));
+      setBestScore((best) => {
+        const next = Math.max(best, score);
+        window.localStorage.setItem("easyway-voice-best", String(next));
+        return next;
+      });
       setAttempts((count) => count + 1);
     } catch (error) {
       console.error("Analyze error:", error);
@@ -191,9 +209,10 @@ export default function AICoachPanel() {
               <button type="button" onClick={speakModel} className="rounded-full border border-[var(--accent)] px-4 py-2 text-xs font-bold text-[var(--accent)]">Listen to model</button>
             </div>
           </div>
+          {recordingUrl ? <audio controls src={recordingUrl} className="mt-3 w-full" aria-label="Replay your recording" /> : null}
           <button type="button" onClick={() => void toggleRecording()} disabled={!voiceSupported} className={`mt-4 flex w-full items-center justify-center gap-3 rounded-3xl px-4 py-4 text-sm font-bold text-white transition ${isRecording ? "bg-red-600" : "bg-[var(--accent)]"} disabled:cursor-not-allowed disabled:opacity-50`}>
             <span className={`h-3 w-3 rounded-full bg-white ${isRecording ? "animate-pulse" : ""}`} />
-            {isRecording ? `Stop recording · 0:${String(recordingSeconds).padStart(2, "0")}` : "Hold your thought, then tap to speak"}
+            {isRecording ? `Stop recording · 0:${String(recordingSeconds).padStart(2, "0")}` : "Start speaking"}
           </button>
           {!voiceSupported ? <p className="mt-2 text-xs text-[var(--muted)]">Voice capture needs a modern browser with microphone access.</p> : null}
           <textarea
@@ -210,7 +229,7 @@ export default function AICoachPanel() {
           >
             {isAnalyzing ? "Coaching your attempt…" : "Get my AI coaching"}
           </button>
-          {attemptScore !== null ? <div className="mt-5 flex items-center justify-between rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Attempt {attempts}</p><p className="mt-1 text-sm text-[var(--muted)]">Keep going. One more round can sharpen it.</p></div><p className="text-4xl font-black text-[var(--accent)]">{attemptScore}<span className="text-base">/100</span></p></div> : null}
+          {attemptScore !== null ? <div className="mt-5 flex items-center justify-between rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Attempt {attempts}</p><p className="mt-1 text-sm text-[var(--muted)]">{audioAnalyzed ? "Audio transcript analyzed by the voice service." : "Browser transcript analyzed. Add an audio provider for deeper voice scoring."}</p><p className="mt-2 text-xs font-bold text-[var(--accent)]">Personal best: {bestScore}/100 · +{Math.round(attemptScore / 10)} XP</p></div><p className="text-4xl font-black text-[var(--accent)]">{attemptScore}<span className="text-base">/100</span></p></div> : null}
           <div className="mt-4 space-y-2 text-sm text-[var(--muted)]">
             {feedback.map((item, index) => (
               <p key={`${item}-${index}`}>• {item}</p>
