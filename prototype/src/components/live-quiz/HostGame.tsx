@@ -313,14 +313,14 @@ export default function HostGame({ gameId, onClose }: { gameId: string; onClose:
     // looking up together is most of what the format is for.
     const timer = window.setTimeout(() => act("reveal"), everyoneIn ? 700 : 250);
     return () => window.clearTimeout(timer);
-  }, [view, remainingMs, busy, act]);
+  }, [view?.game.phase, view?.game.currentIndex, view?.playerCount, view?.answeredCount, remainingMs, busy, act]);
 
   useEffect(() => {
     if (!view?.game.autoAdvance || busy) return;
     if (view.game.phase !== "reveal" && view.game.phase !== "standings") return;
     const timer = window.setTimeout(() => act(view.game.phase === "reveal" ? "standings" : "next"), 3500);
     return () => window.clearTimeout(timer);
-  }, [view, busy, act]);
+  }, [view?.game.autoAdvance, view?.game.phase, view?.game.currentIndex, busy, act]);
 
   /** What the one big button does, given where we are. */
   const advance = useCallback(() => {

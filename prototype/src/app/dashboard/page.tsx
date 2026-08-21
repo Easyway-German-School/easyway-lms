@@ -558,7 +558,7 @@ function DashboardContent() {
         transition={{ duration: 0.55, ease: 'easeOut' }}
         className="dashboard-shell min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(10,124,255,0.08),_transparent_25%),linear-gradient(135deg,_#f8fbff_0%,_#f2f6ff_100%)] text-[var(--foreground)]"
       >
-        <div className="mx-auto max-w-7xl px-6 py-10">
+        <div className="mx-auto min-w-0 max-w-7xl px-3 py-6 sm:px-6 sm:py-10">
           {/* Shows once per account, on the very first visit, then never again. */}
           <WelcomeTour />
           {/* Ranks BELOW the tour in the moment queue, so a new student meets
