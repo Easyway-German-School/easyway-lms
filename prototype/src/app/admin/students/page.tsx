@@ -723,15 +723,15 @@ function StudentsRoster() {
                 </select>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-                <label htmlFor="classTypeFilter" className="block text-sm font-semibold text-[var(--muted)]">Student Type</label>
+                <label htmlFor="classTypeFilter" className="block text-sm font-semibold text-[var(--muted)]">Membership</label>
                 <select
                   id="classTypeFilter"
                   value={filterClassType}
                   onChange={(event) => setFilterClassType(event.target.value)}
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="">All types</option>
-                  <option value="group">Group Class</option>
+                  <option value="">All memberships</option>
+                  <option value="group">Group class</option>
                   <option value="private">Private membership</option>
                 </select>
               </div>

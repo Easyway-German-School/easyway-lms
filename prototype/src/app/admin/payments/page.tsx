@@ -26,7 +26,7 @@ type PaymentRecord = {
   status: string;
   method: string;
   description?: string | null;
-  student: { user: { name?: string | null; email: string } };
+  student: { classType?: string; user: { name?: string | null; email: string } };
   invoice?: { id: string } | null;
   createdAt: string;
 };
@@ -54,6 +54,7 @@ function PaymentsLedger() {
   // and failed transactions, and to one payment method at a time.
   const [filterStatus, setFilterStatus] = useState<string>(params.get("status") ?? "");
   const [filterMethod, setFilterMethod] = useState<string>(params.get("method") ?? "");
+  const [filterClassType, setFilterClassType] = useState<string>(params.get("classType") ?? "");
   const [search, setSearch] = useState<string>(params.get("search") ?? "");
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(20);
@@ -65,6 +66,7 @@ function PaymentsLedger() {
       const url = new URL("/api/admin/payments-list", window.location.origin);
       if (filterStatus) url.searchParams.set("status", filterStatus);
       if (filterMethod) url.searchParams.set("method", filterMethod);
+      if (filterClassType) url.searchParams.set("classType", filterClassType);
       if (search) url.searchParams.set("search", search);
       if (page) url.searchParams.set("page", String(page));
       if (pageSize) url.searchParams.set("pageSize", String(pageSize));
@@ -108,11 +110,11 @@ function PaymentsLedger() {
   useEffect(() => {
     loadPaymentsList();
     loadStudents();
-  }, [filterStatus, filterMethod, search, page, pageSize]);
+  }, [filterStatus, filterMethod, filterClassType, search, page, pageSize]);
 
   useEffect(() => {
     setPage(1);
-  }, [filterStatus, filterMethod, search, pageSize]);
+  }, [filterStatus, filterMethod, filterClassType, search, pageSize]);
 
   async function handleStatusUpdate(paymentId: string, newStatus: string) {
     formError && setFormError("");
@@ -223,6 +225,19 @@ function PaymentsLedger() {
               <option value="pending">Pending</option>
               <option value="failed">Failed</option>
               <option value="not_paid">Not paid</option>
+            </select>
+          </div>
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+            <label htmlFor="classTypeFilter" className="block text-sm font-semibold text-[var(--muted)]">Membership</label>
+            <select
+              id="classTypeFilter"
+              value={filterClassType}
+              onChange={(event) => setFilterClassType(event.target.value)}
+              className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+            >
+              <option value="">All memberships</option>
+              <option value="private">Private membership</option>
+              <option value="group">Group class</option>
             </select>
           </div>
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
@@ -367,7 +382,14 @@ function PaymentsLedger() {
                   payments.map((payment) => (
                     <tr key={payment.id}>
                       <td className="px-4 py-3">
-                        {payment.student.user.name || payment.student.user.email}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span>{payment.student.user.name || payment.student.user.email}</span>
+                          {payment.student.classType === "private" ? (
+                            <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800" title="Private membership">
+                              Private membership
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-4 py-3 font-semibold">{naira(payment.amount)}</td>
                       <td className="px-4 py-3 capitalize">{payment.method}</td>

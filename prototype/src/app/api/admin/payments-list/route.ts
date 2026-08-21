@@ -9,6 +9,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const status = url.searchParams.get("status");
   const method = url.searchParams.get("method");
+  const classType = url.searchParams.get("classType");
   const search = url.searchParams.get("search") || undefined;
   const page = parseInt(url.searchParams.get("page") || "1", 10) || 1;
   const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get("pageSize") || "20", 10)));
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
   const where: any = {};
   if (status && status !== "not_paid") where.status = status;
   if (method) where.method = method;
+  if (classType === "private" || classType === "group") where.student = { classType };
   if (search) {
     // No `mode: "insensitive"`: SQLite does not support it and Prisma rejects
     // the whole query, so every payment search returned a 500. SQLite's LIKE is
@@ -58,6 +60,7 @@ export async function GET(request: Request) {
             { user: { email: { contains: search, mode: "insensitive" as const } } },
           ],
         },
+        ...(classType === "private" || classType === "group" ? [{ classType }] : []),
         { payments: { none: {} } },
       ],
     };
