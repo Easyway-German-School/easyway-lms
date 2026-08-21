@@ -73,6 +73,11 @@ function mayEdit(staff: Staff, branchId: string, level: string, slot: string): b
   if (staff.role === "admin") return true;
   const assignment = staff.assignment;
   if (!assignment || !isAssigned(assignment)) return false;
+  if (assignment.groups.length) {
+    return assignment.groups.some(
+      (group) => group.branchId === branchId && group.level.toUpperCase() === level.toUpperCase() && group.sessionSlot === slot,
+    );
+  }
   if (!assignment.branchIds.includes(branchId)) return false;
   if (!assignment.levels.some((item) => item.toUpperCase() === level.toUpperCase())) return false;
   if (assignment.sessionSlots.length && !assignment.sessionSlots.includes(slot)) return false;

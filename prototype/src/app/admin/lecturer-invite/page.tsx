@@ -85,6 +85,7 @@ const EMPTY_ASSIGNMENT: LecturerAssignment = {
   branchIds: [],
   levels: [],
   sessionSlots: [],
+  groups: [],
   classTypes: [],
   batches: [],
 };
@@ -111,6 +112,14 @@ function AssignmentFields({
 }) {
   const set = <K extends keyof LecturerAssignment>(key: K, next: string[]) =>
     onChange({ ...value, [key]: next });
+  const [groupBranch, setGroupBranch] = useState(value.branchIds[0] ?? "");
+  const [groupLevel, setGroupLevel] = useState(value.levels[0] ?? "A1");
+  const [groupSlot, setGroupSlot] = useState(value.sessionSlots[0] ?? "morning");
+
+  function addGroup() {
+    if (!groupBranch || value.groups.some((group) => group.branchId === groupBranch && group.level === groupLevel && group.sessionSlot === groupSlot)) return;
+    onChange({ ...value, groups: [...value.groups, { branchId: groupBranch, level: groupLevel, sessionSlot: groupSlot }], branchIds: [...new Set([...value.branchIds, groupBranch])], levels: [...new Set([...value.levels, groupLevel])], sessionSlots: [...new Set([...value.sessionSlots, groupSlot])] });
+  }
 
   return (
     <div className="space-y-5">
@@ -126,25 +135,17 @@ function AssignmentFields({
         emptyMeans="No branch selected — this tutor will have no students until one is."
       />
 
-      <AssignmentPicker
-        label="Assign a level"
-        required
-        options={COURSE_LEVELS.map((level) => ({ value: level, label: level }))}
-        selected={value.levels}
-        onChange={(next) => set("levels", next)}
-        emptyMeans="No level selected — this tutor will have no students until one is."
-      />
-
-      <AssignmentPicker
-        label="Assign a class session"
-        options={SESSION_SLOTS.map((slot) => ({
-          value: slot,
-          label: slot.charAt(0).toUpperCase() + slot.slice(1),
-        }))}
-        selected={value.sessionSlots}
-        onChange={(next) => set("sessionSlots", next)}
-        emptyMeans="Nothing selected — this tutor takes every sitting of the levels above."
-      />
+      <div className="rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4">
+        <p className="text-sm font-bold text-[var(--foreground)]">Teaching groups</p>
+        <p className="mt-1 text-xs text-[var(--muted)]">Pair each level with its own sitting. A tutor can teach A1 in the morning and B2 in the afternoon.</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_0.7fr_1fr_auto]">
+          <select value={groupBranch} onChange={(event) => setGroupBranch(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"><option value="">Choose branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
+          <select value={groupLevel} onChange={(event) => setGroupLevel(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">{COURSE_LEVELS.map((level) => <option key={level}>{level}</option>)}</select>
+          <select value={groupSlot} onChange={(event) => setGroupSlot(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">{SESSION_SLOTS.map((slot) => <option key={slot} value={slot}>{slot.charAt(0).toUpperCase() + slot.slice(1)}</option>)}</select>
+          <button type="button" onClick={addGroup} className="rounded-xl bg-[var(--accent-strong)] px-4 py-2 text-sm font-bold text-white">Add</button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">{value.groups.map((group) => <button key={`${group.branchId}-${group.level}-${group.sessionSlot}`} type="button" onClick={() => onChange({ ...value, groups: value.groups.filter((item) => item !== group) })} className="rounded-full border border-[var(--accent)]/40 bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)]">{branches.find((branch) => branch.id === group.branchId)?.name ?? "Branch"} · {group.level} · {group.sessionSlot} ×</button>)}</div>
+      </div>
 
       <AssignmentPicker
         label="Assign a class type"
@@ -748,6 +749,7 @@ export default function AdminTutorsPage() {
         body: JSON.stringify({
           ...form,
           ...newAssignment,
+          assignmentGroups: newAssignment.groups,
           features: newFeatures,
           photoUrl: uploadedPhotoUrl ?? undefined,
         }),
@@ -799,6 +801,7 @@ export default function AdminTutorsPage() {
         body: JSON.stringify({
           lecturerId: editingId,
           ...editAssignment,
+          assignmentGroups: editAssignment.groups,
           features: editFeatures,
           photoUrl: uploadedPhotoUrl ?? undefined,
         }),

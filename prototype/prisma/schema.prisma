@@ -1650,6 +1650,9 @@ model Lecturer {
   branchIds    Json? // Branch ids
   levels       Json? // ["A1", "A2"]
   sessionSlots Json? // ["morning", "evening"]
+  /// Explicit branch + level + sitting groups. When present, these prevent
+  /// unrelated levels and sittings from being combined accidentally.
+  assignmentGroups Json? // [{ branchId, level, sessionSlot }]
   classTypes   Json? // ["physical", "online", "private"]
   batches      Json? // ["January", … "December"]
 

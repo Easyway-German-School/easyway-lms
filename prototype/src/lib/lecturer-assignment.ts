@@ -52,6 +52,7 @@ export type LecturerAssignment = {
   branchIds: string[];
   levels: string[];
   sessionSlots: string[];
+  groups: Array<{ branchId: string; level: string; sessionSlot: string }>;
   classTypes: string[];
   batches: string[];
 };
@@ -64,6 +65,7 @@ export type AssignmentSource = {
   branchIds?: unknown;
   levels?: unknown;
   sessionSlots?: unknown;
+  assignmentGroups?: unknown;
   classTypes?: unknown;
   batches?: unknown;
 };
@@ -110,12 +112,22 @@ function readList(raw: unknown, allowed?: readonly string[]): string[] {
  */
 export function readAssignment(source: AssignmentSource | null | undefined): LecturerAssignment {
   if (!source) {
-    return { branchIds: [], levels: [], sessionSlots: [], classTypes: [], batches: [] };
+    return { branchIds: [], levels: [], sessionSlots: [], groups: [], classTypes: [], batches: [] };
   }
 
   const branchIds = readList(source.branchIds);
   const levels = readList(source.levels, COURSE_LEVELS);
   const sessionSlots = readList(source.sessionSlots, SESSION_SLOTS);
+  const groups = Array.isArray(source.assignmentGroups)
+    ? source.assignmentGroups.flatMap((group) => {
+        if (!group || typeof group !== "object") return [];
+        const value = group as Record<string, unknown>;
+        const branchId = typeof value.branchId === "string" ? value.branchId.trim() : "";
+        const level = readList([value.level], COURSE_LEVELS)[0];
+        const sessionSlot = readList([value.sessionSlot], SESSION_SLOTS)[0];
+        return branchId && level && sessionSlot ? [{ branchId, level, sessionSlot }] : [];
+      })
+    : [];
 
   return {
     branchIds: branchIds.length ? branchIds : source.branchId ? [source.branchId] : [],
@@ -125,6 +137,7 @@ export function readAssignment(source: AssignmentSource | null | undefined): Lec
       : source.sessionSlot
         ? readList([source.sessionSlot], SESSION_SLOTS)
         : [],
+      groups,
     classTypes: readList(source.classTypes, CLASS_TYPES),
     batches: readList(source.batches, BATCHES),
   };
@@ -150,12 +163,11 @@ export function isAssigned(assignment: LecturerAssignment): boolean {
 export function studentWhereForAssignment(assignment: LecturerAssignment): Record<string, unknown> | null {
   if (!isAssigned(assignment)) return null;
 
-  const where: Record<string, unknown> = {
-    branchId: { in: assignment.branchIds },
-    level: { in: assignment.levels },
-  };
+  const where: Record<string, unknown> = assignment.groups.length
+    ? { OR: assignment.groups.map((group) => ({ branchId: group.branchId, level: group.level, sessionSlot: group.sessionSlot })) }
+    : { branchId: { in: assignment.branchIds }, level: { in: assignment.levels } };
 
-  if (assignment.sessionSlots.length) {
+  if (!assignment.groups.length && assignment.sessionSlots.length) {
     where.sessionSlot = { in: assignment.sessionSlots };
   }
 
@@ -186,12 +198,11 @@ export function studentWhereForAssignment(assignment: LecturerAssignment): Recor
 export function spaceWhereForAssignment(assignment: LecturerAssignment): Record<string, unknown> | null {
   if (!isAssigned(assignment)) return null;
 
-  const where: Record<string, unknown> = {
-    branchId: { in: assignment.branchIds },
-    level: { in: assignment.levels },
-  };
+  const where: Record<string, unknown> = assignment.groups.length
+    ? { OR: assignment.groups.map((group) => ({ branchId: group.branchId, level: group.level, sessionSlot: group.sessionSlot })) }
+    : { branchId: { in: assignment.branchIds }, level: { in: assignment.levels } };
 
-  if (assignment.sessionSlots.length) {
+  if (!assignment.groups.length && assignment.sessionSlots.length) {
     where.sessionSlot = { in: assignment.sessionSlots };
   }
 
@@ -269,12 +280,23 @@ export function assignmentToData(input: {
   branchIds?: unknown;
   levels?: unknown;
   sessionSlots?: unknown;
+  assignmentGroups?: unknown;
   classTypes?: unknown;
   batches?: unknown;
 }) {
   const branchIds = readList(input.branchIds);
   const levels = readList(input.levels, COURSE_LEVELS);
   const sessionSlots = readList(input.sessionSlots, SESSION_SLOTS);
+  const assignmentGroups = Array.isArray(input.assignmentGroups)
+    ? input.assignmentGroups.flatMap((group) => {
+        if (!group || typeof group !== "object") return [];
+        const value = group as Record<string, unknown>;
+        const branchId = typeof value.branchId === "string" ? value.branchId.trim() : "";
+        const level = readList([value.level], COURSE_LEVELS)[0];
+        const sessionSlot = readList([value.sessionSlot], SESSION_SLOTS)[0];
+        return branchId && level && sessionSlot ? [{ branchId, level, sessionSlot }] : [];
+      })
+    : [];
   const classTypes = readList(input.classTypes, CLASS_TYPES);
   const batches = readList(input.batches, BATCHES);
 
@@ -282,6 +304,7 @@ export function assignmentToData(input: {
     branchIds,
     levels,
     sessionSlots,
+    assignmentGroups,
     classTypes,
     batches,
     branchId: branchIds[0] ?? null,
