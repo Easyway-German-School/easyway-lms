@@ -304,16 +304,19 @@ export default function HostGame({ gameId, onClose }: { gameId: string; onClose:
     if (revealedRef.current === view.game.currentIndex) return;
 
     const everyoneIn = view.playerCount > 0 && view.answeredCount >= view.playerCount;
-    const timeUp = remainingMs <= 0;
-    if (!everyoneIn && !timeUp) return;
+    const delay = everyoneIn
+      ? 700
+      : Math.max(0, (view.endsAt ?? Date.now()) - (Date.now() + offsetRef.current)) + 250;
 
-    revealedRef.current = view.game.currentIndex;
     // A held beat before the answer. Landing on the reveal the instant the last
     // student taps gives the room no moment to look up, and the moment of
     // looking up together is most of what the format is for.
-    const timer = window.setTimeout(() => act("reveal"), everyoneIn ? 700 : 250);
+    const timer = window.setTimeout(() => {
+      revealedRef.current = view.game.currentIndex;
+      void act("reveal");
+    }, delay);
     return () => window.clearTimeout(timer);
-  }, [view?.game.phase, view?.game.currentIndex, view?.playerCount, view?.answeredCount, remainingMs, busy, act]);
+  }, [view?.game.phase, view?.game.currentIndex, view?.playerCount, view?.answeredCount, view?.endsAt, busy, act]);
 
   useEffect(() => {
     if (!view?.game.autoAdvance || busy) return;
