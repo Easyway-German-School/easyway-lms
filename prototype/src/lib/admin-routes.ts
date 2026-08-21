@@ -59,6 +59,7 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   { prefix: "/admin/reports", capability: "reports" },
   { prefix: "/admin/personalization", capability: "reports" },
   { prefix: "/admin/ai-usage", capability: "reports" },
+  { prefix: "/admin/beta", capability: "reports" },
 
   { prefix: "/admin/emails", capability: "emails" },
   { prefix: "/admin/notifications", capability: "emails" },

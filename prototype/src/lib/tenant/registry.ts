@@ -100,6 +100,8 @@ export const TENANT_OWNED_MODELS = [
    */
   "SupportTicket",
   "SupportTicketMessage",
+  "BetaFeedback",
+  "LearnerUsageEvent",
   /**
    * The live quiz game. A game carries a PIN that admits somebody to it, a
    * frozen copy of one school's question paper, and a leaderboard of one

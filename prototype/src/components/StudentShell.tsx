@@ -10,6 +10,8 @@ import BrandLogo from "@/components/BrandLogo";
 import LiveClassCall from "@/components/live/LiveClassCall";
 import MomentDock from "@/components/MomentDock";
 import GameTurnToast from "@/components/GameTurnToast";
+import BetaFeedbackPrompt from "@/components/BetaFeedbackPrompt";
+import StudentUsageTracker from "@/components/StudentUsageTracker";
 import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
@@ -408,6 +410,8 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       {/* Outranks all of the above, and knows it. A class that has started is
           the only thing in this portal that expires while you look at it. */}
       <LiveClassCall />
+      <BetaFeedbackPrompt />
+      <StudentUsageTracker />
     </div>
     </MomentQueueProvider>
   );

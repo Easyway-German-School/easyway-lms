@@ -216,10 +216,40 @@ export default function ProfilePage() {
   const [photoBroken, setPhotoBroken] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   const [formState, setFormState] = useState(EMPTY_FORM);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { game } = useGamification();
   const queryClient = useQueryClient();
+
+  async function changePassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPasswordMessage("");
+    setPasswordError("");
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError("The new passwords do not match.");
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      const response = await fetch("/api/student/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(passwordForm),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || "Unable to change your password.");
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setPasswordMessage(data.message || "Your password has been changed.");
+    } catch (passwordChangeError) {
+      setPasswordError(passwordChangeError instanceof Error ? passwordChangeError.message : "Unable to change your password.");
+    } finally {
+      setPasswordSaving(false);
+    }
+  }
 
   useEffect(() => {
     setPhotoBroken(false);
@@ -719,6 +749,39 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+
+      <section className="mx-auto mt-6 w-full max-w-5xl rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7">
+        <div className="max-w-2xl">
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--accent)]">Account security</p>
+          <h2 className="mt-2 text-2xl font-black text-[var(--foreground)]">Change your password</h2>
+          <p className="mt-2 text-sm text-[var(--muted)]">Use your current password to choose a new one. Your password is stored securely and is never visible to school staff.</p>
+        </div>
+        <form onSubmit={changePassword} className="mt-5 grid max-w-2xl gap-4 sm:grid-cols-3">
+          {[
+            ["Current password", "currentPassword"],
+            ["New password", "newPassword"],
+            ["Confirm new password", "confirmPassword"],
+          ].map(([label, key]) => (
+            <label key={key}>
+              <span className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--muted)]">{label}</span>
+              <input
+                type="password"
+                autoComplete={key === "currentPassword" ? "current-password" : "new-password"}
+                value={passwordForm[key as keyof typeof passwordForm]}
+                onChange={(event) => setPasswordForm((previous) => ({ ...previous, [key]: event.target.value }))}
+                className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
+              />
+            </label>
+          ))}
+          <div className="sm:col-span-3">
+            <button type="submit" disabled={passwordSaving} className="rounded-full bg-[var(--accent-strong)] px-6 py-3 text-sm font-bold text-white disabled:opacity-60">
+              {passwordSaving ? "Changing password…" : "Change password"}
+            </button>
+            {passwordMessage && <p className="mt-3 text-sm font-semibold text-emerald-600">{passwordMessage}</p>}
+            {passwordError && <p className="mt-3 text-sm font-semibold text-red-600">{passwordError}</p>}
+          </div>
+        </form>
+      </section>
 
       {/* ---------- Edit sheet ---------- */}
       <AnimatePresence>
