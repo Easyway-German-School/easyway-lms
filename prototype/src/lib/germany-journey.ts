@@ -498,6 +498,14 @@ export type JourneyInput = {
   /** Their own words, when they picked "Something else". */
   goalNote?: string | null;
 
+  /**
+   * A one-to-one student's tutor knows exactly what this week is about — a
+   * group student's road cannot say that because there is no single tutor to
+   * ask. Optional, and only ever adds a sentence to the CURRENT level stage's
+   * teaser; it never replaces the crafted copy in LEVEL_VOICE.
+   */
+  privateFocus?: { topic: string | null; nextSessionAt: string | null } | null;
+
   now?: Date;
 };
 
@@ -565,7 +573,7 @@ export function buildJourney(input: JourneyInput): Journey {
 
   // Which level nodes to draw. Never fewer than the one they are sitting in,
   // never more than their goal — see targetLevelFor.
-  const fromIndex = 0;
+  const fromIndex = Math.max(0, levels.indexOf(currentLevel));
   const toIndex = Math.max(levels.indexOf(currentLevel), levels.indexOf(targetLevel));
   const levelNodes = levels.slice(fromIndex, toIndex + 1);
 
@@ -580,6 +588,11 @@ export function buildJourney(input: JourneyInput): Journey {
   // ---- The ladder -------------------------------------------------------
   for (const level of levelNodes) {
     const copy = LEVEL_VOICE[level];
+    // A private student's current level gets one extra sentence naming what
+    // their tutor actually booked them for this week, so "premium" is a fact
+    // about the map rather than only a word in its header.
+    const isCurrentLevel = level === currentLevel && !completed.has(level);
+    const focusTopic = isCurrentLevel ? input.privateFocus?.topic?.trim() || null : null;
     raw.push({
       id: `level:${level}`,
       kind: "level",
@@ -587,7 +600,7 @@ export function buildJourney(input: JourneyInput): Journey {
       voice: copy.voice,
       label: level,
       echo: copy.echo,
-      teaser: copy.teaser,
+      teaser: focusTopic ? `${copy.teaser} This week with your tutor: ${focusTopic}.` : copy.teaser,
       tribe: level === targetLevel ? "The Finishers" : null,
       clearedAt: completed.has(level) ? (input.claimedStages[`level:${level}`]?.at ?? null) : null,
     });

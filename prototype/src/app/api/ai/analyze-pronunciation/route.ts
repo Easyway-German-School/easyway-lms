@@ -5,7 +5,7 @@ import { analyzePronunciation } from "@/lib/ai";
 import { requireAuthSession } from "@/lib/auth";
 import { reserveStudentAiRequest } from "@/lib/ai-limits";
 import { recordSkillOutcome } from "@/lib/skill-mastery";
-import { saveVoiceCoachMemory } from "@/lib/voice-coach-memory";
+import { getCoachingMemorySummary, saveVoiceCoachMemory } from "@/lib/voice-coach-memory";
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,8 +30,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Daily pronunciation limit reached. Try again tomorrow." }, { status: 429 });
     }
 
-    const result = await analyzePronunciation(phrase, typeof expectedPhrase === "string" ? expectedPhrase : phrase);
     const student = await prismaStudentForSession(session.user.id);
+    const coachingMemory = student ? await getCoachingMemorySummary(student.id) : null;
+    const result = await analyzePronunciation(phrase, typeof expectedPhrase === "string" ? expectedPhrase : phrase, null, null, coachingMemory);
     if (student) {
       void recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
       await saveVoiceCoachMemory(student.id, typeof expectedPhrase === "string" ? expectedPhrase : phrase, result);

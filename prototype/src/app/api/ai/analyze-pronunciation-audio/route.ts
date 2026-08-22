@@ -3,7 +3,9 @@ import { requireAuthSession } from "@/lib/auth";
 import { analyzePronunciation } from "@/lib/ai";
 import { reserveStudentAiRequest } from "@/lib/ai-limits";
 import { recordSkillOutcome } from "@/lib/skill-mastery";
-import { saveVoiceCoachMemory } from "@/lib/voice-coach-memory";
+import { getCoachingMemorySummary, saveVoiceCoachMemory } from "@/lib/voice-coach-memory";
+import { assessPronunciationWithAzure, azurePronunciationAvailable } from "@/lib/azure-pronunciation";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
@@ -17,6 +19,10 @@ export async function POST(request: NextRequest) {
 
   const form = await request.formData();
   const audio = form.get("audio");
+  // 16kHz mono PCM WAV, built client-side from the same decoded buffer used
+  // for the acoustic measurements — see encodeWav16kMono in AICoachPanel.tsx.
+  // Optional: older clients or a decode failure simply mean no Azure evidence.
+  const audioWav = form.get("audioWav");
   const expectedPhrase = String(form.get("expectedPhrase") ?? "").trim();
   const acousticFeatures = (() => {
     try {
@@ -38,11 +44,24 @@ export async function POST(request: NextRequest) {
   upload.append("language", "de");
   upload.append("response_format", "json");
 
-  const transcriptionResponse = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: upload,
-  });
+  const student = await prisma.student.findUnique({ where: { userId: session.user.id }, select: { id: true } });
+
+  // Whisper transcription, the Azure phoneme assessment, and this student's
+  // coaching history all run concurrently — none of them depend on each
+  // other, and a student waiting on a spinner should not pay for them
+  // sequentially.
+  const [transcriptionResponse, azureAssessment, coachingMemory] = await Promise.all([
+    fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: upload,
+    }),
+    audioWav instanceof File && azurePronunciationAvailable() && expectedPhrase
+      ? assessPronunciationWithAzure(await audioWav.arrayBuffer(), expectedPhrase, "de-DE")
+      : Promise.resolve(null),
+    student ? getCoachingMemorySummary(student.id) : Promise.resolve(null),
+  ]);
+
   if (!transcriptionResponse.ok) {
     console.error("Audio transcription failed", transcriptionResponse.status);
     return NextResponse.json({ error: "The audio could not be transcribed. Try once more." }, { status: 502 });
@@ -51,13 +70,12 @@ export async function POST(request: NextRequest) {
   const transcription = String(((await transcriptionResponse.json()) as { text?: string }).text ?? "").trim();
   if (transcription.length < 2) return NextResponse.json({ error: "I could not hear enough German to coach. Try speaking closer to the microphone." }, { status: 422 });
 
-  const result = await analyzePronunciation(transcription, expectedPhrase || transcription, acousticFeatures);
-  const student = await import("@/lib/prisma").then(({ prisma }) => prisma.student.findUnique({ where: { userId: session.user.id }, select: { id: true } }));
+  const result = await analyzePronunciation(transcription, expectedPhrase || transcription, acousticFeatures, azureAssessment, coachingMemory);
   if (student) {
     void recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
-    await saveVoiceCoachMemory(student.id, expectedPhrase || transcription, result, acousticFeatures);
+    await saveVoiceCoachMemory(student.id, expectedPhrase || transcription, result, acousticFeatures, azureAssessment);
   }
 
-  return NextResponse.json({ ...result, audioAnalyzed: true, analysisMode: "speech-transcript", transcription });
+  return NextResponse.json({ ...result, audioAnalyzed: true, analysisMode: "speech-transcript", transcription, phonemeAssessed: Boolean(azureAssessment) });
 }
 

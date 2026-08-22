@@ -212,6 +212,8 @@ export async function loadJourney(
     goalId: student.germanyGoal,
   });
 
+  const privateFocus = student.classType === "private" ? await loadPrivateFocus(student.id, now) : null;
+
   const journey = buildJourney({
     studentName: student.user?.name ?? "",
     branchName,
@@ -225,6 +227,7 @@ export async function loadJourney(
     claimedStages,
     goalId: student.germanyGoal,
     goalNote: student.germanyGoalNote,
+    privateFocus,
     now,
   });
 
@@ -252,6 +255,44 @@ export async function loadJourney(
     tribeStanding,
     stamps,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* A private student's next booked topic                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a one-to-one tutor booked this student in for.
+ *
+ * The next scheduled session's topic wins, because "this is what's coming"
+ * is more useful on a road map than "this is what already happened". A
+ * student with nothing booked yet still sees their last session's topic
+ * rather than nothing — a stale-but-real fact beats a blank line.
+ */
+async function loadPrivateFocus(
+  studentId: string,
+  now: Date,
+): Promise<{ topic: string | null; nextSessionAt: string | null } | null> {
+  try {
+    const upcoming = await prisma.privateClass.findFirst({
+      where: { studentId, status: "scheduled", scheduledAt: { gte: now }, topic: { not: null } },
+      orderBy: { scheduledAt: "asc" },
+      select: { topic: true, scheduledAt: true },
+    });
+    if (upcoming?.topic) {
+      return { topic: upcoming.topic, nextSessionAt: upcoming.scheduledAt.toISOString() };
+    }
+
+    const recent = await prisma.privateClass.findFirst({
+      where: { studentId, status: "completed", topic: { not: null } },
+      orderBy: { scheduledAt: "desc" },
+      select: { topic: true },
+    });
+    return recent?.topic ? { topic: recent.topic, nextSessionAt: null } : null;
+  } catch {
+    // A missing topic is not worth failing the whole map over.
+    return null;
+  }
 }
 
 /* -------------------------------------------------------------------------- */

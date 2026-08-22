@@ -1,4 +1,6 @@
 import { parseModelJson } from "@/lib/safe-json";
+import type { AzurePronunciationAssessment } from "@/lib/azure-pronunciation";
+import type { CoachingMemorySummary } from "@/lib/voice-coach-memory";
 
 /**
  * AI Service - Supports Claude API, Ollama (local), or mock responses
@@ -249,6 +251,26 @@ function parseJsonReply<T>(raw: string | null): T | null {
 /** Appended to every prompt that wants JSON back. Cheap, and it works. */
 const JSON_ONLY = "\n\nReturn only the JSON object. No prose, no code fences, no XML tags.";
 
+const GERMAN_ACOUSTIC_COACHING_CONTEXT = `
+Acoustic coaching context for German:
+- There is no single frequency that identifies German, and these measurements do not
+  prove a phoneme, accent, or native-speaker identity. Treat them as speaker-relative
+  evidence, not universal thresholds.
+- Use estimated pitch and its confidence for intonation, prominence, and question-like
+  movement only when the recording is long and voiced enough. Do not equate pitch with
+  correctness.
+- Use duration and RMS for pacing, pauses, and loudness consistency. Do not infer effort
+  or confidence from loudness alone.
+- Use zero-crossing rate, spectral centroid, and the low/mid/high band ratios as broad
+  proxies for frication, aspiration, and spectral brightness. They can be strongly
+  affected by the microphone, room, compression, and background noise.
+- German-relevant patterns to discuss cautiously include vowel length contrasts, clear
+  final consonants, /ç/ versus /x/ in ich/machen contexts, /ʁ/ variation, and lexical
+  stress. These acoustic summaries cannot locate those sounds in time or replace forced
+  alignment; only mention them when the transcript and the measurements jointly support
+  a useful drill.
+`;
+
 export async function gradeEssay(essay: string): Promise<{
   score: number;
   feedback: Array<{ category: string; comment: string; score: number }>;
@@ -265,7 +287,13 @@ export async function gradeEssay(essay: string): Promise<{
   }
 }
 
-export async function analyzePronunciation(phrase: string, expectedPhrase = phrase, acousticFeatures: Record<string, number> | null = null): Promise<{
+export async function analyzePronunciation(
+  phrase: string,
+  expectedPhrase = phrase,
+  acousticFeatures: Record<string, number> | null = null,
+  azureAssessment: AzurePronunciationAssessment | null = null,
+  coachingMemory: CoachingMemorySummary | null = null,
+): Promise<{
   transcription: string;
   issues: string[];
   corrections: string[];
@@ -275,12 +303,20 @@ export async function analyzePronunciation(phrase: string, expectedPhrase = phra
   wordAccuracy?: number;
   missingWords?: string[];
   extraWords?: string[];
+  pronunciationScore?: number | null;
+  weakWords?: Array<{ word: string; accuracyScore: number; errorType: string }>;
 }> {
   const wordComparison = comparePronunciationWords(phrase, expectedPhrase);
-  const provider = getAIProvider();
+  // "student" workload, not the default "interactive" one: this feature is a
+  // funded Claude call the school specifically wants powering it, and
+  // "interactive" prefers a local Ollama runtime when one happens to be
+  // reachable (see getAIProvider) — which would quietly hand a premium
+  // feature to whatever is running on a dev machine instead. "student"
+  // checks ANTHROPIC_API_KEY first, unconditionally.
+  const provider = getAIProvider("student");
 
   if (provider === "claude" || provider === "groq" || provider === "deepseek") {
-    return analyzePronunciationWithClaude(phrase, expectedPhrase, wordComparison, acousticFeatures);
+    return analyzePronunciationWithClaude(phrase, expectedPhrase, wordComparison, acousticFeatures, azureAssessment, coachingMemory);
   } else if (provider === "ollama") {
     return analyzePronunciationWithOllama(phrase, expectedPhrase, wordComparison);
   } else {
@@ -1828,11 +1864,39 @@ ${essay}${JSON_ONLY}`,
   };
 }
 
-async function analyzePronunciationWithClaude(phrase: string, expectedPhrase: string, comparison: PronunciationWordComparison, acousticFeatures: Record<string, number> | null) {
+async function analyzePronunciationWithClaude(
+  phrase: string,
+  expectedPhrase: string,
+  comparison: PronunciationWordComparison,
+  acousticFeatures: Record<string, number> | null,
+  azureAssessment: AzurePronunciationAssessment | null,
+  coachingMemory: CoachingMemorySummary | null,
+) {
+  // Azure's per-word accuracy scores are the closest thing to ground truth this
+  // pipeline has — a forced alignment against the reference text, not a text
+  // model's guess. Naming the actual weak words up front (rather than leaving
+  // Claude to rediscover them from a JSON blob) is what makes the coaching
+  // concrete instead of generic.
+  const weakWordsFromAzure = (azureAssessment?.words ?? [])
+    .filter((word) => word.accuracyScore < 75 || word.errorType !== "None")
+    .slice(0, 6);
+
+  const memorySection = coachingMemory && coachingMemory.attemptCount > 1
+    ? `This student's coaching history (last ${Math.min(10, coachingMemory.attemptCount)} attempts):
+${JSON.stringify(coachingMemory)}
+If a recurring issue or missing word shows up again in THIS attempt, say so directly — "this is the Nth time" is more useful to them than rediscovering the same note. If the trend is "improving", say that too; a student who is improving and never hears it stops trusting the feedback.`
+    : "This is this student's first tracked attempt — no history yet, so coach only what is in front of you.";
+
+  const azureSection = azureAssessment
+    ? `Real phoneme-level pronunciation assessment from Azure Speech (forced alignment against the target sentence — this is measured, not estimated):
+${JSON.stringify({ ...azureAssessment, words: weakWordsFromAzure.length ? weakWordsFromAzure : azureAssessment.words.slice(0, 8) })}
+This is your most reliable evidence for word- and phoneme-level pronunciation. When it disagrees with the transcript-only word comparison, trust this. Name specific weak words or phonemes from it when they exist.`
+    : "No phoneme-level assessment is available for this attempt — coach only from the transcript comparison and the waveform measurements below, and do not claim word- or phoneme-level precision you do not have.";
+
   const raw = await callHostedText(
-    `You are a precise German pronunciation coach. Compare the target sentence with
+    `You are a precise, encouraging German pronunciation coach for a Nigerian adult learner. Compare the target sentence with
   the speech-recognition transcript. Do not invent problems that are not supported by
-  the transcript. Return JSON:
+  the evidence given. Return JSON:
 {
   "transcription": "correct spelling/transcription",
   "issues": ["issue1", "issue2"],
@@ -1843,9 +1907,12 @@ async function analyzePronunciationWithClaude(phrase: string, expectedPhrase: st
 Target sentence: ${expectedPhrase}
 Spoken transcript: ${phrase}
 Word comparison from the app: ${JSON.stringify(comparison)}
+${azureSection}
 Acoustic measurements from the recorded waveform: ${JSON.stringify(acousticFeatures || {})}
-Use the word comparison and acoustic measurements as evidence. Do not claim exact phoneme or accent errors unless the evidence supports it.${JSON_ONLY}`,
-    512,
+${GERMAN_ACOUSTIC_COACHING_CONTEXT}
+${memorySection}
+Use the word comparison, the phoneme assessment (when present), the acoustic measurements, and the coaching history together as evidence. Do not claim exact phoneme or accent errors unless the evidence supports it. Keep the JSON concise.${JSON_ONLY}`,
+    650,
   );
 
   const parsed = parseJsonReply<{
@@ -1857,6 +1924,12 @@ Use the word comparison and acoustic measurements as evidence. Do not claim exac
   }>(raw);
   if (!parsed) return analyzePronunciationMock(phrase, comparison);
 
+  // The word-match accuracy stays the grounded floor for `confidence` and
+  // `wordAccuracy` — recordSkillOutcome and the student's personal-best score
+  // already depend on that meaning "did you say the right words", and
+  // changing it retroactively changes what every past skill-mastery point
+  // meant. Azure's PronScore is real evidence the old pipeline never had, so
+  // it is surfaced ADDITIVELY as `pronunciationScore` rather than folded in.
   return {
     transcription: parsed.transcription || phrase,
     issues: parsed.issues || [],
@@ -1867,7 +1940,35 @@ Use the word comparison and acoustic measurements as evidence. Do not claim exac
     wordAccuracy: comparison.accuracy,
     missingWords: comparison.missingWords,
     extraWords: comparison.extraWords,
+    pronunciationScore: azureAssessment?.pronScore ?? null,
+    weakWords: weakWordsFromAzure.map((word) => ({ word: word.word, accuracyScore: word.accuracyScore, errorType: word.errorType })),
   };
+}
+
+/**
+ * The once-a-week "here's how you're actually doing" paragraph.
+ *
+ * Called from voice-coach-memory.ts, at most once every 7 days per student,
+ * only on a save (never on a page load) — see maybeRefreshWeeklySummary
+ * there for why. Returns null on any failure; the caller keeps whatever
+ * digest it already had rather than showing nothing.
+ */
+export async function generateWeeklyCoachingSummary(summary: CoachingMemorySummary): Promise<string | null> {
+  const raw = await callHostedText(
+    `You are Becca, a warm but precise German pronunciation coach, writing a short weekly progress note for a
+student at a Nigerian language school. Base it ONLY on the data below — never invent a detail it does not support.
+
+Attempt history summary: ${JSON.stringify(summary)}
+
+Write 2-3 sentences, second person ("you"), for the student to read. Name the one clearest trend and the one
+thing worth practising next. If weakPhonemes or recurringIssueThemes is empty, do not invent a weak sound — praise
+consistency instead. No greeting, no sign-off — this drops straight into a card in the app.
+Return JSON: {"summary": "..."}${JSON_ONLY}`,
+    250,
+  );
+  const parsed = parseJsonReply<{ summary?: string }>(raw);
+  const text = parsed?.summary?.trim();
+  return text ? text.slice(0, 600) : null;
 }
 
 function generatePronunciationNextPractice(issues: string[], phrase: string): string {

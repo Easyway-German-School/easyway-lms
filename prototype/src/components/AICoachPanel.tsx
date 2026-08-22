@@ -16,6 +16,9 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import Mascot from "@/components/Mascot";
+import type { CoachingMemorySummary } from "@/lib/voice-coach-memory";
+
+type WeakWord = { word: string; accuracyScore: number; errorType: string };
 
 export default function AICoachPanel() {
   const [aiTab, setAiTab] = useState<"pronunciation" | "plan">("pronunciation");
@@ -38,6 +41,10 @@ export default function AICoachPanel() {
   const [missingWords, setMissingWords] = useState<string[]>([]);
   const [extraWords, setExtraWords] = useState<string[]>([]);
   const [showCoachDialog, setShowCoachDialog] = useState(false);
+  const [memorySummary, setMemorySummary] = useState<CoachingMemorySummary | null>(null);
+  const [weeklySummary, setWeeklySummary] = useState<string | null>(null);
+  const [pronunciationScore, setPronunciationScore] = useState<number | null>(null);
+  const [weakWords, setWeakWords] = useState<WeakWord[]>([]);
   const audioChunksRef = useRef<Blob[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
@@ -81,6 +88,55 @@ export default function AICoachPanel() {
     }
   }
 
+  /**
+   * Linear resample to 16 kHz mono — the one sample rate Azure's pronunciation
+   * assessment REST API reliably accepts for WAV (see azure-pronunciation.ts).
+   * Good enough for phoneme scoring; not meant to be broadcast-quality.
+   */
+  function downsampleTo16kMono(samples: Float32Array, inputRate: number): Float32Array {
+    if (inputRate === 16000) return samples;
+    const ratio = inputRate / 16000;
+    const outLength = Math.max(1, Math.round(samples.length / ratio));
+    const result = new Float32Array(outLength);
+    for (let index = 0; index < outLength; index += 1) {
+      const sourceIndex = index * ratio;
+      const lower = Math.floor(sourceIndex);
+      const upper = Math.min(samples.length - 1, lower + 1);
+      const weight = sourceIndex - lower;
+      result[index] = samples[lower] * (1 - weight) + samples[upper] * weight;
+    }
+    return result;
+  }
+
+  /** 16-bit PCM mono WAV, built by hand — no codec library needed for this. */
+  function encodeWav16kMono(samples: Float32Array): Blob {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+    const writeString = (offset: number, text: string) => {
+      for (let index = 0; index < text.length; index += 1) view.setUint8(offset + index, text.charCodeAt(index));
+    };
+    writeString(0, "RIFF");
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeString(8, "WAVE");
+    writeString(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, 1, true); // mono
+    view.setUint32(24, 16000, true);
+    view.setUint32(28, 16000 * 2, true); // byte rate = sampleRate * blockAlign
+    view.setUint16(32, 2, true); // block align
+    view.setUint16(34, 16, true); // bits per sample
+    writeString(36, "data");
+    view.setUint32(40, samples.length * 2, true);
+    let offset = 44;
+    for (let index = 0; index < samples.length; index += 1) {
+      const clamped = Math.max(-1, Math.min(1, samples[index]));
+      view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+      offset += 2;
+    }
+    return new Blob([buffer], { type: "audio/wav" });
+  }
+
   async function measureRecording(blob: Blob) {
     try {
       const context = new AudioContext();
@@ -107,8 +163,48 @@ export default function AICoachPanel() {
         const correlation = product / Math.sqrt((leftEnergy * rightEnergy) || 1);
         if (correlation > bestCorrelation) { bestCorrelation = correlation; bestLag = lag; }
       }
+      const bands = { low: 0, lowMid: 0, mid: 0, highMid: 0, high: 0 };
+      let spectralWeight = 0;
+      let spectralEnergy = 0;
+      const spectrumSize = Math.min(2048, samples.length);
+      for (let bin = 0; bin < spectrumSize / 2; bin += 1) {
+        let real = 0;
+        let imaginary = 0;
+        for (let index = 0; index < spectrumSize; index += 1) {
+          const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / (spectrumSize - 1));
+          const angle = 2 * Math.PI * bin * index / spectrumSize;
+          real += samples[index] * window * Math.cos(angle);
+          imaginary -= samples[index] * window * Math.sin(angle);
+        }
+        const frequency = bin * buffer.sampleRate / spectrumSize;
+        const amplitude = Math.sqrt(real * real + imaginary * imaginary);
+        spectralWeight += frequency * amplitude;
+        spectralEnergy += amplitude;
+        if (frequency < 300) bands.low += amplitude;
+        else if (frequency < 1000) bands.lowMid += amplitude;
+        else if (frequency < 3000) bands.mid += amplitude;
+        else if (frequency < 8000) bands.highMid += amplitude;
+        else bands.high += amplitude;
+      }
+      const wavBlob = encodeWav16kMono(downsampleTo16kMono(samples, buffer.sampleRate));
       await context.close();
-      return { durationSeconds: buffer.duration, rms: Math.sqrt(energy / samples.length), zeroCrossingRate: crossings / samples.length, estimatedPitchHz: bestLag ? Math.round(buffer.sampleRate / bestLag) : 0, pitchConfidence: Math.round(Math.max(0, bestCorrelation) * 100) / 100, sampleRate: buffer.sampleRate };
+      return {
+        features: {
+          durationSeconds: buffer.duration,
+          rms: Math.sqrt(energy / samples.length),
+          zeroCrossingRate: crossings / samples.length,
+          estimatedPitchHz: bestLag ? Math.round(buffer.sampleRate / bestLag) : 0,
+          pitchConfidence: Math.round(Math.max(0, bestCorrelation) * 100) / 100,
+          spectralCentroidHz: spectralEnergy ? Math.round(spectralWeight / spectralEnergy) : 0,
+          lowBandRatio: spectralEnergy ? Math.round((bands.low / spectralEnergy) * 1000) / 1000 : 0,
+          lowMidBandRatio: spectralEnergy ? Math.round((bands.lowMid / spectralEnergy) * 1000) / 1000 : 0,
+          midBandRatio: spectralEnergy ? Math.round((bands.mid / spectralEnergy) * 1000) / 1000 : 0,
+          highMidBandRatio: spectralEnergy ? Math.round((bands.highMid / spectralEnergy) * 1000) / 1000 : 0,
+          highBandRatio: spectralEnergy ? Math.round((bands.high / spectralEnergy) * 1000) / 1000 : 0,
+          sampleRate: buffer.sampleRate,
+        },
+        wavBlob,
+      };
     } catch {
       return null;
     }
@@ -126,6 +222,8 @@ export default function AICoachPanel() {
           setTargetPhrase(data.targetPhrase);
           setPhrase(data.targetPhrase);
         }
+        if (data?.summary) setMemorySummary(data.summary);
+        if (typeof data?.weeklySummary?.text === "string") setWeeklySummary(data.weeklySummary.text);
       })
       .catch(() => undefined);
     return () => {
@@ -251,9 +349,10 @@ export default function AICoachPanel() {
     setIsAnalyzing(true);
     try {
       const recordedBlob = audioChunksRef.current.length ? new Blob(audioChunksRef.current, { type: recorderRef.current?.mimeType || "audio/webm" }) : null;
-      const acousticFeatures = recordedBlob ? await measureRecording(recordedBlob) : null;
+      const measured = recordedBlob ? await measureRecording(recordedBlob) : null;
+      const acousticFeatures = measured?.features ?? null;
       const res = recordedBlob
-        ? await fetch("/api/ai/analyze-pronunciation-audio", { method: "POST", body: (() => { const form = new FormData(); form.append("audio", recordedBlob, "voice-coach.webm"); form.append("expectedPhrase", targetPhrase); form.append("acousticFeatures", JSON.stringify(acousticFeatures)); return form; })() })
+        ? await fetch("/api/ai/analyze-pronunciation-audio", { method: "POST", body: (() => { const form = new FormData(); form.append("audio", recordedBlob, "voice-coach.webm"); if (measured?.wavBlob) form.append("audioWav", measured.wavBlob, "voice-coach-16k.wav"); form.append("expectedPhrase", targetPhrase); form.append("acousticFeatures", JSON.stringify(acousticFeatures)); return form; })() })
         : await fetch("/api/ai/analyze-pronunciation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phrase, expectedPhrase: targetPhrase }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Unable to coach this attempt");
@@ -263,10 +362,13 @@ export default function AICoachPanel() {
       setWordAccuracy(typeof data.wordAccuracy === "number" ? data.wordAccuracy : null);
       setMissingWords(Array.isArray(data.missingWords) ? data.missingWords : []);
       setExtraWords(Array.isArray(data.extraWords) ? data.extraWords : []);
+      setPronunciationScore(typeof data.pronunciationScore === "number" ? data.pronunciationScore : null);
+      setWeakWords(Array.isArray(data.weakWords) ? data.weakWords : []);
       const feedbackArray = [
         `Transcription: ${data.transcription}`,
         `Word match: ${data.wordAccuracy ?? data.confidence}%${data.missingWords?.length ? ` · Missing: ${data.missingWords.join(", ")}` : ""}${data.extraWords?.length ? ` · Extra: ${data.extraWords.join(", ")}` : ""}`,
         `Confidence: ${data.confidence}%`,
+        ...(typeof data.pronunciationScore === "number" ? [`Pronunciation accuracy (phoneme-level): ${data.pronunciationScore}%`] : []),
         ...(data.issues?.map((issue: string) => `Issue: ${issue}`) || []),
         ...(data.corrections?.map((correction: string) => `Correction: ${correction}`) || []),
         ...(data.nextPractice ? [`Next practice: ${data.nextPractice}`] : []),
@@ -360,6 +462,25 @@ export default function AICoachPanel() {
       {aiTab === "pronunciation" ? (
         <>
           <p className="mt-4 text-sm text-[var(--muted)]">Speak a German phrase, hear the model, and get coached on your real attempt. Your microphone audio is used to create the transcript and is not saved.</p>
+          {weeklySummary || (memorySummary && memorySummary.attemptCount > 1) ? (
+            <div className="mt-4 flex items-start gap-3 rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+              <Mascot mood="cheerful" className="h-12 w-10 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">Becca remembers</p>
+                <p className="mt-1 text-sm text-[var(--foreground)]">
+                  {weeklySummary
+                    ? weeklySummary
+                    : memorySummary?.trend === "improving"
+                      ? `You're trending up over your last ${memorySummary.recentWordAccuracy.length} attempts.${memorySummary.recurringIssueThemes.length ? ` Still worth drilling: ${memorySummary.recurringIssueThemes[0]}.` : ""}`
+                      : memorySummary?.recurringIssueThemes.length
+                        ? `This keeps coming up across your attempts: ${memorySummary.recurringIssueThemes.join(", ")}.`
+                        : memorySummary?.recurringMissingWords.length
+                          ? `You've missed "${memorySummary.recurringMissingWords[0]}" a few times now — let's fix that today.`
+                          : `${memorySummary?.attemptCount ?? 0} attempts so far. Keep going and I'll start spotting patterns.`}
+                </p>
+              </div>
+            </div>
+          ) : null}
           {(isSpeaking || isRecording) ? (
             <div className={`voice-stage mt-5 ${isRecording ? "voice-stage-recording" : "voice-stage-speaking"}`} role="status" aria-live="polite">
               <div className="voice-stage-grid" />
@@ -455,9 +576,18 @@ export default function AICoachPanel() {
           <div className="relative w-full max-w-lg overflow-hidden rounded-[28px] border border-[var(--accent)]/40 bg-[var(--surface)] p-6 shadow-2xl">
             <button type="button" onClick={() => setShowCoachDialog(false)} aria-label="Close coaching result" className="absolute right-4 top-4 rounded-full px-3 py-1 text-xl text-[var(--muted)] hover:text-[var(--foreground)]">×</button>
             <div className="flex items-center gap-4"><Mascot mood={attemptScore >= 80 ? "cheerful" : "thinking"} className="h-24 w-20 shrink-0" /><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--accent)]">Becca&apos;s voice review</p><h3 id="voice-coach-result" className="mt-1 text-2xl font-bold text-[var(--foreground)]">{attemptScore >= 80 ? "Strong attempt" : "Good start, let&apos;s sharpen it"}</h3><p className="mt-1 text-sm text-[var(--muted)]">Measured from the words your recording produced.</p></div></div>
-            <div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-[var(--surface-alt)] p-4"><p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Word match</p><p className="mt-1 text-3xl font-black text-[var(--accent)]">{wordAccuracy ?? attemptScore}%</p></div><div className="rounded-2xl bg-[var(--surface-alt)] p-4"><p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Attempt</p><p className="mt-1 text-3xl font-black text-[var(--foreground)]">{attempts}</p></div></div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-400">What you did well</p><p className="mt-1 text-sm text-[var(--foreground)]">{wordAccuracy === 100 ? "You said every target word the recognizer expected." : "You kept part of the target sentence in the right order."}</p></div><div className="rounded-2xl border border-rose-400/20 bg-rose-400/5 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-rose-300">What to sharpen</p><p className="mt-1 text-sm text-[var(--foreground)]">{missingWords.length ? `Missing: ${missingWords.join(", ")}` : extraWords.length ? `Extra: ${extraWords.join(", ")}` : "No missing or extra words were detected."}</p></div></div>
-            <div className="mt-4 space-y-2 text-sm text-[var(--foreground)]">{feedback.filter((item) => /Missing:|Extra:|Issue:|Correction:/i.test(item)).slice(0, 5).map((item, index) => <p key={`${item}-${index}`} className="rounded-xl border border-[var(--border)] px-3 py-2">{item}</p>)}</div>
+            <div className={`mt-5 grid gap-3 ${pronunciationScore !== null ? "grid-cols-3" : "grid-cols-2"}`}><div className="rounded-2xl bg-[var(--surface-alt)] p-4"><p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Word match</p><p className="mt-1 text-3xl font-black text-[var(--accent)]">{wordAccuracy ?? attemptScore}%</p></div>{pronunciationScore !== null ? <div className="rounded-2xl bg-[var(--surface-alt)] p-4"><p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Pronunciation</p><p className="mt-1 text-3xl font-black text-[var(--accent)]">{pronunciationScore}%</p></div> : null}<div className="rounded-2xl bg-[var(--surface-alt)] p-4"><p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Attempt</p><p className="mt-1 text-3xl font-black text-[var(--foreground)]">{attempts}</p></div></div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-400">What you did well</p><p className="mt-1 text-sm text-[var(--foreground)]">{wordAccuracy === 100 ? "You said every target word the recognizer expected." : "You kept part of the target sentence in the right order."}</p></div><div className="rounded-2xl border border-rose-400/20 bg-rose-400/5 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-rose-300">What to sharpen</p><p className="mt-1 text-sm text-[var(--foreground)]">{weakWords.length ? `Weak on: ${weakWords.map((word) => word.word).join(", ")}` : missingWords.length ? `Missing: ${missingWords.join(", ")}` : extraWords.length ? `Extra: ${extraWords.join(", ")}` : "No missing or extra words were detected."}</p></div></div>
+            {weakWords.length ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {weakWords.map((word) => (
+                  <span key={word.word} className="rounded-full border border-rose-400/30 bg-rose-400/5 px-3 py-1 text-xs font-semibold text-rose-300">
+                    {word.word} · {word.accuracyScore}%
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <div className="mt-4 space-y-2 text-sm text-[var(--foreground)]">{feedback.filter((item) => /Missing:|Extra:|Issue:|Correction:|Pronunciation accuracy/i.test(item)).slice(0, 5).map((item, index) => <p key={`${item}-${index}`} className="rounded-xl border border-[var(--border)] px-3 py-2">{item}</p>)}</div>
             {nextPractice ? <div className="mt-4 rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--accent)]">Your next practice</p><p className="mt-1 text-sm text-[var(--foreground)]">{nextPractice}</p><p className="mt-2 text-sm font-semibold text-[var(--accent)]">{practicePhrase}</p><button type="button" onClick={() => void speakModel(practicePhrase)} className="mt-3 rounded-full bg-[var(--accent)] px-4 py-2 text-xs font-bold text-white">Listen to Becca&apos;s drill</button></div> : null}
           </div>
         </div>
