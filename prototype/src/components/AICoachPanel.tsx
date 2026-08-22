@@ -14,12 +14,13 @@
  * somewhere that has to stay quiet the rest of the time.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 export default function AICoachPanel() {
   const [aiTab, setAiTab] = useState<"pronunciation" | "plan">("pronunciation");
   const [plannerStrategy, setPlannerStrategy] = useState("hybrid");
-  const [phrase, setPhrase] = useState("Ich möchte ein Visum beantragen.");
+  const [targetPhrase] = useState("Ich möchte ein Visum beantragen.");
+  const [phrase, setPhrase] = useState(targetPhrase);
   const [feedback, setFeedback] = useState<string[]>(["Type a phrase and press Analyze."]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -38,6 +39,40 @@ export default function AICoachPanel() {
   const [personalizedPlan, setPersonalizedPlan] = useState<any>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planLoaded, setPlanLoaded] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voiceLevel, setVoiceLevel] = useState(0.45);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const voiceBars = Array.from({ length: 32 }, (_, index) => index);
+
+  function stopVoiceMeter() {
+    if (animationFrameRef.current) window.cancelAnimationFrame(animationFrameRef.current);
+    animationFrameRef.current = null;
+    analyserRef.current?.disconnect();
+    analyserRef.current = null;
+    setVoiceLevel(0.45);
+  }
+
+  function startVoiceMeter(stream: MediaStream) {
+    try {
+      const context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 64;
+      context.createMediaStreamSource(stream).connect(analyser);
+      analyserRef.current = analyser;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        analyser.getByteFrequencyData(data);
+        const average = data.reduce((sum, value) => sum + value, 0) / data.length / 255;
+        setVoiceLevel(Math.max(0.16, Math.min(1, average * 2.8)));
+        animationFrameRef.current = window.requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {
+      setVoiceLevel(0.55);
+    }
+  }
 
   useEffect(() => {
     const supported = typeof window !== "undefined" && Boolean(window.MediaRecorder) && Boolean((window as typeof window & { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }).SpeechRecognition || (window as typeof window & { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
@@ -47,16 +82,20 @@ export default function AICoachPanel() {
     return () => {
       recorderRef.current?.stop();
       recognitionRef.current?.stop();
+      audioRef.current?.pause();
+      stopVoiceMeter();
       if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
     };
   }, []);
 
-  function speakModel() {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
+  function speakInBrowser() {
+    if (typeof window === "undefined" || !window.speechSynthesis) return false;
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(phrase);
+    const utterance = new SpeechSynthesisUtterance(targetPhrase);
     utterance.lang = "de-DE";
     utterance.rate = 0.82;
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
     const speak = () => {
       const germanVoice = window.speechSynthesis.getVoices().find((voice) => voice.lang.toLowerCase().startsWith("de"));
       if (germanVoice) utterance.voice = germanVoice;
@@ -70,6 +109,35 @@ export default function AICoachPanel() {
       window.speechSynthesis.addEventListener("voiceschanged", speak, { once: true });
       window.setTimeout(speak, 700);
     }
+    return true;
+  }
+
+  async function speakModel() {
+    if (!phrase.trim()) return;
+    setIsSpeaking(true);
+    try {
+      const response = await fetch("/api/ai/voice-coach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: phrase }),
+      });
+      if (!response.ok) throw new Error("Open-source voice provider unavailable");
+      const audioUrl = URL.createObjectURL(await response.blob());
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        audioRef.current = null;
+        setIsSpeaking(false);
+        stopVoiceMeter();
+      };
+      await audio.play();
+    } catch {
+      if (!speakInBrowser()) {
+        setIsSpeaking(false);
+        stopVoiceMeter();
+      }
+    }
   }
 
   async function toggleRecording() {
@@ -77,6 +145,7 @@ export default function AICoachPanel() {
       recorderRef.current?.stop();
       recognitionRef.current?.stop();
       setIsRecording(false);
+      stopVoiceMeter();
       if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
       return;
     }
@@ -89,6 +158,7 @@ export default function AICoachPanel() {
       recorder.ondataavailable = (event) => { if (event.data.size) audioChunksRef.current.push(event.data); };
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
+        stopVoiceMeter();
         const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
         setRecordingUrl(URL.createObjectURL(blob));
       };
@@ -106,6 +176,7 @@ export default function AICoachPanel() {
       recognitionRef.current = recognition;
       recorder.start();
       recognition.start();
+      startVoiceMeter(stream);
       setRecordingSeconds(0);
       setIsRecording(true);
       recordingTimerRef.current = window.setInterval(() => setRecordingSeconds((seconds) => Math.min(60, seconds + 1)), 1000);
@@ -120,16 +191,18 @@ export default function AICoachPanel() {
     try {
       const recordedBlob = audioChunksRef.current.length ? new Blob(audioChunksRef.current, { type: recorderRef.current?.mimeType || "audio/webm" }) : null;
       const res = recordedBlob
-        ? await fetch("/api/ai/analyze-pronunciation-audio", { method: "POST", body: (() => { const form = new FormData(); form.append("audio", recordedBlob, "voice-coach.webm"); return form; })() })
-        : await fetch("/api/ai/analyze-pronunciation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phrase }) });
+        ? await fetch("/api/ai/analyze-pronunciation-audio", { method: "POST", body: (() => { const form = new FormData(); form.append("audio", recordedBlob, "voice-coach.webm"); form.append("expectedPhrase", targetPhrase); return form; })() })
+        : await fetch("/api/ai/analyze-pronunciation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phrase, expectedPhrase: targetPhrase }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Unable to coach this attempt");
       setAudioAnalyzed(Boolean(data.audioAnalyzed));
       const feedbackArray = [
         `Transcription: ${data.transcription}`,
+        `Word match: ${data.wordAccuracy ?? data.confidence}%${data.missingWords?.length ? ` · Missing: ${data.missingWords.join(", ")}` : ""}${data.extraWords?.length ? ` · Extra: ${data.extraWords.join(", ")}` : ""}`,
         `Confidence: ${data.confidence}%`,
         ...(data.issues?.map((issue: string) => `Issue: ${issue}`) || []),
         ...(data.corrections?.map((correction: string) => `Correction: ${correction}`) || []),
+        ...(data.nextPractice ? [`Next practice: ${data.nextPractice}`] : []),
       ];
       setFeedback(feedbackArray.length > 0 ? feedbackArray : ["No feedback available"]);
       setAttemptScore(Math.max(0, Math.min(100, Number(data.confidence) || 0)));
@@ -215,10 +288,22 @@ export default function AICoachPanel() {
       {aiTab === "pronunciation" ? (
         <>
           <p className="mt-4 text-sm text-[var(--muted)]">Speak a German phrase, hear the model, and get coached on your real attempt. Your microphone audio is used to create the transcript and is not saved.</p>
+          {(isSpeaking || isRecording) ? (
+            <div className={`voice-stage mt-5 ${isRecording ? "voice-stage-recording" : "voice-stage-speaking"}`} role="status" aria-live="polite">
+              <div className="voice-stage-grid" />
+              <div className="voice-orbit voice-orbit-one" />
+              <div className="voice-orbit voice-orbit-two" />
+              <div className="voice-core"><span>{isRecording ? "REC" : "AI"}</span></div>
+              <div className="voice-wave" style={{ "--voice-level": voiceLevel } as CSSProperties}>
+                {voiceBars.map((bar) => <span key={bar} style={{ "--bar-delay": `${bar * 32}ms`, "--bar-height": `${22 + Math.sin(bar * 0.8) * 15 + (bar % 5) * 6}px` } as CSSProperties} />)}
+              </div>
+              <div className="voice-stage-label"><strong>{isRecording ? "I’m listening" : "Model pronunciation"}</strong><small>{isRecording ? `Speak naturally · 0:${String(recordingSeconds).padStart(2, "0")}` : "Listen for the rhythm, then make it yours"}</small></div>
+            </div>
+          ) : null}
           <div className="mt-5 rounded-3xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">Your challenge</p><p className="mt-1 font-semibold text-[var(--foreground)]">{phrase}</p></div>
-              <button type="button" onClick={speakModel} className="rounded-full border border-[var(--accent)] px-4 py-2 text-xs font-bold text-[var(--accent)]">Listen to model</button>
+              <button type="button" onClick={() => void speakModel()} disabled={isSpeaking} className="rounded-full border border-[var(--accent)] px-4 py-2 text-xs font-bold text-[var(--accent)] disabled:cursor-wait disabled:opacity-60">{isSpeaking ? "Preparing voice…" : "Listen to model"}</button>
             </div>
           </div>
           {recordingUrl ? <audio controls src={recordingUrl} className="mt-3 w-full" aria-label="Replay your recording" /> : null}
@@ -241,7 +326,7 @@ export default function AICoachPanel() {
           >
             {isAnalyzing ? "Coaching your attempt…" : "Get my AI coaching"}
           </button>
-          {attemptScore !== null ? <div className="mt-5 flex items-center justify-between rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Attempt {attempts}</p><p className="mt-1 text-sm text-[var(--muted)]">{audioAnalyzed ? "Audio transcript analyzed by the voice service." : "Browser transcript analyzed. Add an audio provider for deeper voice scoring."}</p><p className="mt-2 text-xs font-bold text-[var(--accent)]">Personal best: {bestScore}/100 · +{Math.round(attemptScore / 10)} XP</p></div><p className="text-4xl font-black text-[var(--accent)]">{attemptScore}<span className="text-base">/100</span></p></div> : null}
+          {attemptScore !== null ? <div className="mt-5 flex items-center justify-between rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Attempt {attempts}</p><p className="mt-1 text-sm text-[var(--muted)]">{audioAnalyzed ? "Recording transcribed, then coached against the target sentence." : "Transcript coached against the target sentence."}</p><p className="mt-2 text-xs font-bold text-[var(--accent)]">Personal best: {bestScore}/100 · +{Math.round(attemptScore / 10)} XP</p></div><p className="text-4xl font-black text-[var(--accent)]">{attemptScore}<span className="text-base">/100</span></p></div> : null}
           <div className="mt-4 space-y-2 text-sm text-[var(--muted)]">
             {feedback.map((item, index) => (
               <p key={`${item}-${index}`}>• {item}</p>

@@ -19,7 +19,7 @@ import { parseModelJson } from "@/lib/safe-json";
  * One constant now, so the next model change is one line and cannot go
  * half-applied.
  */
-const CLAUDE_MODEL = "claude-opus-5";
+const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
 /**
  * One Claude call, shared by the four features that make one.
@@ -175,7 +175,7 @@ async function callClaude(prompt: string, maxTokens: number): Promise<string | n
         model: CLAUDE_MODEL,
         max_tokens: maxTokens,
         thinking: { type: "disabled" },
-        output_config: { effort: "low" },
+        temperature: 0.2,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -265,21 +265,70 @@ export async function gradeEssay(essay: string): Promise<{
   }
 }
 
-export async function analyzePronunciation(phrase: string): Promise<{
+export async function analyzePronunciation(phrase: string, expectedPhrase = phrase): Promise<{
   transcription: string;
   issues: string[];
   corrections: string[];
   confidence: number;
+  nextPractice?: string;
+  wordAccuracy?: number;
+  missingWords?: string[];
+  extraWords?: string[];
 }> {
+  const wordComparison = comparePronunciationWords(phrase, expectedPhrase);
   const provider = getAIProvider();
 
   if (provider === "claude" || provider === "groq" || provider === "deepseek") {
-    return analyzePronunciationWithClaude(phrase);
+    return analyzePronunciationWithClaude(phrase, expectedPhrase, wordComparison);
   } else if (provider === "ollama") {
-    return analyzePronunciationWithOllama(phrase);
+    return analyzePronunciationWithOllama(phrase, expectedPhrase, wordComparison);
   } else {
-    return analyzePronunciationMock(phrase);
+    return analyzePronunciationMock(phrase, wordComparison);
   }
+}
+
+type PronunciationWordComparison = {
+  accuracy: number;
+  missingWords: string[];
+  extraWords: string[];
+};
+
+function comparePronunciationWords(spoken: string, target: string): PronunciationWordComparison {
+  const clean = (value: string) => value.toLocaleLowerCase().normalize("NFKD").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const targetWords = clean(target).split(/\s+/).filter(Boolean);
+  const spokenWords = clean(spoken).split(/\s+/).filter(Boolean);
+  const rows = Array.from({ length: targetWords.length + 1 }, () => Array<number>(spokenWords.length + 1).fill(0));
+
+  for (let targetIndex = 1; targetIndex <= targetWords.length; targetIndex += 1) {
+    for (let spokenIndex = 1; spokenIndex <= spokenWords.length; spokenIndex += 1) {
+      rows[targetIndex][spokenIndex] = targetWords[targetIndex - 1] === spokenWords[spokenIndex - 1]
+        ? rows[targetIndex - 1][spokenIndex - 1] + 1
+        : Math.max(rows[targetIndex - 1][spokenIndex], rows[targetIndex][spokenIndex - 1]);
+    }
+  }
+
+  const missingWords: string[] = [];
+  const extraWords: string[] = [];
+  let targetIndex = targetWords.length;
+  let spokenIndex = spokenWords.length;
+  while (targetIndex > 0 || spokenIndex > 0) {
+    if (targetIndex > 0 && spokenIndex > 0 && targetWords[targetIndex - 1] === spokenWords[spokenIndex - 1]) {
+      targetIndex -= 1;
+      spokenIndex -= 1;
+    } else if (targetIndex > 0 && (spokenIndex === 0 || rows[targetIndex - 1][spokenIndex] >= rows[targetIndex][spokenIndex - 1])) {
+      missingWords.unshift(targetWords[targetIndex - 1]);
+      targetIndex -= 1;
+    } else {
+      extraWords.unshift(spokenWords[spokenIndex - 1]);
+      spokenIndex -= 1;
+    }
+  }
+
+  return {
+    accuracy: targetWords.length ? Math.round((rows[targetWords.length][spokenWords.length] / targetWords.length) * 100) : 0,
+    missingWords,
+    extraWords,
+  };
 }
 
 export async function generateEssayNextSteps(score: number, feedback: Array<{ category: string; comment: string; score: number }>, essay: string): Promise<string> {
@@ -387,7 +436,6 @@ async function generateMissionPracticeFeedbackWithClaude(input: {
     `You are an expert German tutor. A student submitted the following mission response.\n\nMission: ${input.title}\nDescription: ${input.description}\nResponse: ${input.response}\n\nGive output as JSON with fields: prompt, feedback, score, suggestion.${JSON_ONLY}`,
     512,
   );
-
   const parsed = parseJsonReply<{
     prompt?: string;
     feedback?: string;
@@ -1779,17 +1827,22 @@ ${essay}${JSON_ONLY}`,
   };
 }
 
-async function analyzePronunciationWithClaude(phrase: string) {
+async function analyzePronunciationWithClaude(phrase: string, expectedPhrase: string, comparison: PronunciationWordComparison) {
   const raw = await callHostedText(
-    `Analyze this German phrase for pronunciation coaching. Return JSON:
+    `You are a precise German pronunciation coach. Compare the target sentence with
+  the speech-recognition transcript. Do not invent problems that are not supported by
+  the transcript. Return JSON:
 {
   "transcription": "correct spelling/transcription",
   "issues": ["issue1", "issue2"],
   "corrections": ["correction1", "correction2"],
-  "confidence": (0-100)
+  "confidence": (0-100),
+  "nextPractice": "one short, targeted drill for the clearest weakness"
 }
-
-Phrase: ${phrase}${JSON_ONLY}`,
+Target sentence: ${expectedPhrase}
+Spoken transcript: ${phrase}
+Word comparison from the app: ${JSON.stringify(comparison)}
+Use this comparison. Treat missing or extra words as delivery problems, but do not claim to hear an accent from text alone.${JSON_ONLY}`,
     512,
   );
 
@@ -1798,15 +1851,34 @@ Phrase: ${phrase}${JSON_ONLY}`,
     issues?: string[];
     corrections?: string[];
     confidence?: number;
+    nextPractice?: string;
   }>(raw);
-  if (!parsed) return analyzePronunciationMock(phrase);
+  if (!parsed) return analyzePronunciationMock(phrase, comparison);
 
   return {
     transcription: parsed.transcription || phrase,
     issues: parsed.issues || [],
     corrections: parsed.corrections || [],
     confidence: parsed.confidence || 85,
+    nextPractice: parsed.nextPractice || generatePronunciationNextPractice(parsed.issues || [], expectedPhrase),
+    wordAccuracy: comparison.accuracy,
+    missingWords: comparison.missingWords,
+    extraWords: comparison.extraWords,
   };
+}
+
+function generatePronunciationNextPractice(issues: string[], phrase: string): string {
+  const text = issues.join(" ").toLowerCase();
+  if (text.includes("vowel") || text.includes("visum") || text.includes("um")) {
+    return "Repeat: 'Visum' and 'Ich möchte ein Visum beantragen' while keeping the vowels short and the final 'um' crisp.";
+  }
+  if (text.includes("consonant") || text.includes("ch") || text.includes("ich")) {
+    return "Practice the 'ch' sound with 5 slow repetitions of 'ich', 'machen', and 'nicht' before redoing the full sentence.";
+  }
+  if (text.includes("stress") || text.includes("rhythm") || text.includes("intonation")) {
+    return "Say the sentence in three rhythm blocks: 'Ich möchte', 'ein Visum', 'beantragen' — then join them smoothly.";
+  }
+  return `Practice the phrase again in 3 short chunks: ${phrase.split(/\s+/).slice(0, 4).join(" ")}… then finish the sentence with a clearer ending.`;
 }
 
 // Ollama Implementation (local)
@@ -1849,7 +1921,7 @@ ${essay}`,
   }
 }
 
-async function analyzePronunciationWithOllama(phrase: string) {
+async function analyzePronunciationWithOllama(phrase: string, expectedPhrase: string, comparison: PronunciationWordComparison) {
   const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 
   try {
@@ -1858,13 +1930,13 @@ async function analyzePronunciationWithOllama(phrase: string) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: getOllamaModel(),
-        prompt: `Analyze German pronunciation for: ${phrase}. Return only valid JSON with fields transcription, issues, corrections, and confidence. Example output:\n{"transcription":"...","issues":["..."],"corrections":["..."],"confidence":85}`,
+        prompt: `Compare target German sentence: ${expectedPhrase} with spoken transcript: ${phrase}. Word comparison: ${JSON.stringify(comparison)}. Coach only supported mismatches. Return only valid JSON with fields transcription, issues, corrections, confidence, and nextPractice.`,
         stream: false,
         temperature: 0.1,
       }),
     });
 
-    if (!response.ok) return analyzePronunciationMock(phrase);
+    if (!response.ok) return analyzePronunciationMock(phrase, comparison);
 
     const data = await response.json() as any;
     const text = data.response || "{}";
@@ -1877,12 +1949,16 @@ async function analyzePronunciationWithOllama(phrase: string) {
         issues: parsed.issues || [],
         corrections: parsed.corrections || [],
         confidence: parsed.confidence || 80,
+        nextPractice: parsed.nextPractice || generatePronunciationNextPractice(parsed.issues || [], expectedPhrase),
+        wordAccuracy: comparison.accuracy,
+        missingWords: comparison.missingWords,
+        extraWords: comparison.extraWords,
       };
     } catch {
-      return analyzePronunciationMock(phrase);
+      return analyzePronunciationMock(phrase, comparison);
     }
   } catch {
-    return analyzePronunciationMock(phrase);
+    return analyzePronunciationMock(phrase, comparison);
   }
 }
 
@@ -1920,17 +1996,25 @@ function gradeEssayMock(essay: string) {
   };
 }
 
-function analyzePronunciationMock(phrase: string) {
+function analyzePronunciationMock(phrase: string, comparison: PronunciationWordComparison) {
+  const issues = [
+    ...(comparison.missingWords.length ? [`Missing words: ${comparison.missingWords.join(", ")}`] : []),
+    ...(comparison.extraWords.length ? [`Extra words heard: ${comparison.extraWords.join(", ")}`] : []),
+  ];
   return {
     transcription: phrase,
-    issues: [
-      "Slight vowel elongation in 'Visum'",
-      "Initial consonant could be crisper",
-    ],
-    corrections: [
-      "Pronounce 'Visum' with shorter vowels: VIZ-um",
-      'Start with clear "Ich" - clear "ich" sound',
-    ],
-    confidence: 78,
+    issues: issues.length ? issues : ["All target words were detected. Keep working on clear German sounds and steady rhythm."],
+    corrections: comparison.missingWords.length
+      ? [`Repeat the missing words slowly, then insert them back into the full sentence: ${comparison.missingWords.join(", ")}.`]
+      : comparison.extraWords.length
+        ? [`Remove the extra words and repeat the target sentence in short chunks.`]
+        : ["Repeat the sentence once more at normal speed while keeping each word distinct."],
+    confidence: comparison.accuracy,
+    nextPractice: comparison.missingWords.length
+      ? `Practise this chunk five times: ${comparison.missingWords.join(" ")}, then repeat the full target sentence.`
+      : "Repeat the full target sentence three times, keeping the same clear rhythm.",
+    wordAccuracy: comparison.accuracy,
+    missingWords: comparison.missingWords,
+    extraWords: comparison.extraWords,
   };
 }

@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { phrase } = body;
+    const { phrase, expectedPhrase } = body;
 
     if (!phrase || phrase.trim().length < 3) {
       return NextResponse.json(
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Daily pronunciation limit reached. Try again tomorrow." }, { status: 429 });
     }
 
-    const result = await analyzePronunciation(phrase);
+    const result = await analyzePronunciation(phrase, typeof expectedPhrase === "string" ? expectedPhrase : phrase);
     const student = await prismaStudentForSession(session.user.id);
     if (student) void recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
 
