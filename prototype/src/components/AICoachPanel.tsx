@@ -109,19 +109,31 @@ export default function AICoachPanel() {
       window.speechSynthesis.addEventListener("voiceschanged", speak, { once: true });
       window.setTimeout(speak, 700);
     }
+    window.setTimeout(() => {
+      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) return;
+      setIsSpeaking(false);
+      stopVoiceMeter();
+    }, 3500);
     return true;
   }
 
   async function speakModel() {
-    if (!phrase.trim()) return;
+    if (!targetPhrase.trim()) return;
     setIsSpeaking(true);
+    // Start synchronously inside the click gesture. A voice fetched after an
+    // await can be blocked by mobile autoplay rules, so browser speech is the
+    // immediate fallback while the higher-quality Piper audio is requested.
+    const browserStarted = speakInBrowser();
     try {
       const response = await fetch("/api/ai/voice-coach", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: phrase }),
+        body: JSON.stringify({ text: targetPhrase }),
+        signal: AbortSignal.timeout(4500),
       });
       if (!response.ok) throw new Error("Open-source voice provider unavailable");
+      if (browserStarted && typeof window !== "undefined") window.speechSynthesis.cancel();
+      setIsSpeaking(true);
       const audioUrl = URL.createObjectURL(await response.blob());
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
@@ -133,7 +145,7 @@ export default function AICoachPanel() {
       };
       await audio.play();
     } catch {
-      if (!speakInBrowser()) {
+      if (!browserStarted && !speakInBrowser()) {
         setIsSpeaking(false);
         stopVoiceMeter();
       }
