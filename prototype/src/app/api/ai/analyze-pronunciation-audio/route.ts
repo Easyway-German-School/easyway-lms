@@ -3,6 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { analyzePronunciation } from "@/lib/ai";
 import { reserveStudentAiRequest } from "@/lib/ai-limits";
 import { recordSkillOutcome } from "@/lib/skill-mastery";
+import { saveVoiceCoachMemory } from "@/lib/voice-coach-memory";
 
 export const dynamic = "force-dynamic";
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
@@ -17,6 +18,14 @@ export async function POST(request: NextRequest) {
   const form = await request.formData();
   const audio = form.get("audio");
   const expectedPhrase = String(form.get("expectedPhrase") ?? "").trim();
+  const acousticFeatures = (() => {
+    try {
+      const value = JSON.parse(String(form.get("acousticFeatures") ?? "null"));
+      return value && typeof value === "object" ? value as Record<string, number> : null;
+    } catch {
+      return null;
+    }
+  })();
   if (!(audio instanceof File) || audio.size === 0) return NextResponse.json({ error: "A voice recording is required." }, { status: 400 });
   if (audio.size > MAX_AUDIO_BYTES) return NextResponse.json({ error: "That recording is too large. Keep it under one minute." }, { status: 400 });
 
@@ -42,9 +51,13 @@ export async function POST(request: NextRequest) {
   const transcription = String(((await transcriptionResponse.json()) as { text?: string }).text ?? "").trim();
   if (transcription.length < 2) return NextResponse.json({ error: "I could not hear enough German to coach. Try speaking closer to the microphone." }, { status: 422 });
 
-  const result = await analyzePronunciation(transcription, expectedPhrase || transcription);
+  const result = await analyzePronunciation(transcription, expectedPhrase || transcription, acousticFeatures);
   const student = await import("@/lib/prisma").then(({ prisma }) => prisma.student.findUnique({ where: { userId: session.user.id }, select: { id: true } }));
-  if (student) void recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
+  if (student) {
+    void recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
+    void saveVoiceCoachMemory(student.id, expectedPhrase || transcription, result);
+  }
 
   return NextResponse.json({ ...result, audioAnalyzed: true, analysisMode: "speech-transcript", transcription });
 }
+

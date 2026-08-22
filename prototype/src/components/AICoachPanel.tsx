@@ -20,7 +20,7 @@ import Mascot from "@/components/Mascot";
 export default function AICoachPanel() {
   const [aiTab, setAiTab] = useState<"pronunciation" | "plan">("pronunciation");
   const [plannerStrategy, setPlannerStrategy] = useState("hybrid");
-  const [targetPhrase] = useState("Ich möchte ein Visum beantragen.");
+  const [targetPhrase, setTargetPhrase] = useState("Ich möchte ein Visum beantragen.");
   const [phrase, setPhrase] = useState(targetPhrase);
   const [feedback, setFeedback] = useState<string[]>(["Type a phrase and press Analyze."]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -81,11 +81,38 @@ export default function AICoachPanel() {
     }
   }
 
+  async function measureRecording(blob: Blob) {
+    try {
+      const context = new AudioContext();
+      const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+      const samples = buffer.getChannelData(0);
+      let energy = 0;
+      let crossings = 0;
+      for (let index = 0; index < samples.length; index += 1) {
+        energy += samples[index] * samples[index];
+        if (index > 0 && (samples[index - 1] < 0) !== (samples[index] < 0)) crossings += 1;
+      }
+      await context.close();
+      return { durationSeconds: buffer.duration, rms: Math.sqrt(energy / samples.length), zeroCrossingRate: crossings / samples.length, sampleRate: buffer.sampleRate };
+    } catch {
+      return null;
+    }
+  }
+
   useEffect(() => {
     const supported = typeof window !== "undefined" && Boolean(window.MediaRecorder) && Boolean((window as typeof window & { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }).SpeechRecognition || (window as typeof window & { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
     setVoiceSupported(supported);
     const savedBest = Number(window.localStorage.getItem("easyway-voice-best") || 0);
     setBestScore(Number.isFinite(savedBest) ? savedBest : 0);
+    void fetch("/api/ai/voice-coach-memory", { credentials: "include", cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (typeof data?.targetPhrase === "string" && data.targetPhrase.trim()) {
+          setTargetPhrase(data.targetPhrase);
+          setPhrase(data.targetPhrase);
+        }
+      })
+      .catch(() => undefined);
     return () => {
       recorderRef.current?.stop();
       recognitionRef.current?.stop();
@@ -209,8 +236,9 @@ export default function AICoachPanel() {
     setIsAnalyzing(true);
     try {
       const recordedBlob = audioChunksRef.current.length ? new Blob(audioChunksRef.current, { type: recorderRef.current?.mimeType || "audio/webm" }) : null;
+      const acousticFeatures = recordedBlob ? await measureRecording(recordedBlob) : null;
       const res = recordedBlob
-        ? await fetch("/api/ai/analyze-pronunciation-audio", { method: "POST", body: (() => { const form = new FormData(); form.append("audio", recordedBlob, "voice-coach.webm"); form.append("expectedPhrase", targetPhrase); return form; })() })
+        ? await fetch("/api/ai/analyze-pronunciation-audio", { method: "POST", body: (() => { const form = new FormData(); form.append("audio", recordedBlob, "voice-coach.webm"); form.append("expectedPhrase", targetPhrase); form.append("acousticFeatures", JSON.stringify(acousticFeatures)); return form; })() })
         : await fetch("/api/ai/analyze-pronunciation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phrase, expectedPhrase: targetPhrase }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Unable to coach this attempt");
@@ -238,6 +266,10 @@ export default function AICoachPanel() {
       });
       setAttempts((count) => count + 1);
       setShowCoachDialog(true);
+      if (typeof data.practicePhrase === "string" && data.practicePhrase.trim()) {
+        setTargetPhrase(data.practicePhrase);
+        setPhrase(data.practicePhrase);
+      }
     } catch (error) {
       console.error("Analyze error:", error);
       setFeedback(["Unable to analyze pronunciation"]);

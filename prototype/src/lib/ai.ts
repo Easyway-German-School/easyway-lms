@@ -265,7 +265,7 @@ export async function gradeEssay(essay: string): Promise<{
   }
 }
 
-export async function analyzePronunciation(phrase: string, expectedPhrase = phrase): Promise<{
+export async function analyzePronunciation(phrase: string, expectedPhrase = phrase, acousticFeatures: Record<string, number> | null = null): Promise<{
   transcription: string;
   issues: string[];
   corrections: string[];
@@ -280,7 +280,7 @@ export async function analyzePronunciation(phrase: string, expectedPhrase = phra
   const provider = getAIProvider();
 
   if (provider === "claude" || provider === "groq" || provider === "deepseek") {
-    return analyzePronunciationWithClaude(phrase, expectedPhrase, wordComparison);
+    return analyzePronunciationWithClaude(phrase, expectedPhrase, wordComparison, acousticFeatures);
   } else if (provider === "ollama") {
     return analyzePronunciationWithOllama(phrase, expectedPhrase, wordComparison);
   } else {
@@ -1828,7 +1828,7 @@ ${essay}${JSON_ONLY}`,
   };
 }
 
-async function analyzePronunciationWithClaude(phrase: string, expectedPhrase: string, comparison: PronunciationWordComparison) {
+async function analyzePronunciationWithClaude(phrase: string, expectedPhrase: string, comparison: PronunciationWordComparison, acousticFeatures: Record<string, number> | null) {
   const raw = await callHostedText(
     `You are a precise German pronunciation coach. Compare the target sentence with
   the speech-recognition transcript. Do not invent problems that are not supported by
@@ -1843,7 +1843,8 @@ async function analyzePronunciationWithClaude(phrase: string, expectedPhrase: st
 Target sentence: ${expectedPhrase}
 Spoken transcript: ${phrase}
 Word comparison from the app: ${JSON.stringify(comparison)}
-Use this comparison. Treat missing or extra words as delivery problems, but do not claim to hear an accent from text alone.${JSON_ONLY}`,
+Acoustic measurements from the recorded waveform: ${JSON.stringify(acousticFeatures || {})}
+Use the word comparison and acoustic measurements as evidence. Do not claim exact phoneme or accent errors unless the evidence supports it.${JSON_ONLY}`,
     512,
   );
 
