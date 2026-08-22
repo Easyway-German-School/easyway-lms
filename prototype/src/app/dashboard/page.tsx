@@ -58,6 +58,7 @@ type Student = {
     registrationPaid: boolean;
     depositPaid: boolean;
     fullPaid: boolean;
+    fullPaidAt: string | null;
     accessLevel: string;
     paymentProgressPercent: number;
   };
@@ -105,6 +106,7 @@ function DashboardContent() {
   const { live } = useLiveClass();
   const [student, setStudent] = useState<Student | null>(null);
   const [paymentSummary, setPaymentSummary] = useState<Student["paymentSummary"] | null>(null);
+  const [fullPaymentExpired, setFullPaymentExpired] = useState(false);
   const [courses, setCourses] = useState<Course[]>([]);
   const [paymentUnlock, setPaymentUnlock] = useState<{ requiredDeposit: number; totalPaid: number; tuitionFee: number } | null>(null);
   const [pathway, setPathway] = useState("Language training");
@@ -150,6 +152,11 @@ function DashboardContent() {
       const data = await res.json();
       setStudent(data);
       setPaymentSummary(data.paymentSummary ?? null);
+      setFullPaymentExpired(Boolean(
+        data.paymentSummary?.fullPaid &&
+        data.paymentSummary.fullPaidAt &&
+        new Date(data.paymentSummary.fullPaidAt).getTime() + 24 * 60 * 60 * 1000 <= Date.now(),
+      ));
       if (data?.pathway) setPathway(data.pathway);
       setDashboardError(null);
 
@@ -183,12 +190,14 @@ function DashboardContent() {
           registrationPaid: true,
           depositPaid: false,
           fullPaid: false,
+          fullPaidAt: null,
           accessLevel: "registered",
           paymentProgressPercent: 0,
         },
       };
       setStudent(fallbackStudent);
       setPaymentSummary(fallbackStudent.paymentSummary ?? null);
+      setFullPaymentExpired(false);
       setPathway(fallbackStudent.pathway || "Language training");
       setDashboardError(null);
     }
@@ -395,6 +404,18 @@ function DashboardContent() {
     void Promise.resolve().then(loadMissionState);
   }, [student, loadMissionState]);
 
+  useEffect(() => {
+    const fullPaidAt = paymentSummary?.fullPaidAt;
+    if (!paymentSummary?.fullPaid || !fullPaidAt) return;
+
+    const expiry = new Date(fullPaidAt).getTime() + 24 * 60 * 60 * 1000;
+    const remaining = expiry - Date.now();
+    if (remaining <= 0) return;
+
+    const timer = window.setTimeout(() => setFullPaymentExpired(true), remaining);
+    return () => window.clearTimeout(timer);
+  }, [paymentSummary]);
+
 
 
   const fallbackStudent: Student = {
@@ -413,6 +434,7 @@ function DashboardContent() {
       registrationPaid: true,
       depositPaid: false,
       fullPaid: false,
+      fullPaidAt: null,
       accessLevel: "registered",
       paymentProgressPercent: 0,
     },
@@ -514,9 +536,12 @@ function DashboardContent() {
   );
   const paymentFullyPaid = Boolean(
     paymentSummary
-      ? paymentSummary.fullPaid
+      ? paymentSummary.fullPaid && !fullPaymentExpired
       : tuitionFee > 0 && effectiveTotalPaid >= tuitionFee
   );
+  const showPaymentProgress = paymentSummary
+    ? !paymentSummary.fullPaid || !fullPaymentExpired
+    : true;
   const effectivePayment = paymentSummary ?? (paymentUnlock
     ? {
         totalPaid: paymentUnlock.totalPaid,
@@ -524,6 +549,7 @@ function DashboardContent() {
         tuitionFee: paymentUnlock.tuitionFee,
         depositPaid: paymentUnlock.totalPaid >= paymentUnlock.requiredDeposit,
         fullPaid: false,
+        fullPaidAt: null,
         accessLevel: paymentUnlock.totalPaid >= paymentUnlock.requiredDeposit ? "partial" : "registered",
         paymentProgressPercent,
       }
@@ -810,7 +836,7 @@ function DashboardContent() {
 
           <section className="mt-8 grid gap-6 xl:grid-cols-[1.4fr_0.9fr]">
             <div className="space-y-6">
-              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} whileHover={{ y: -3, scale: 1.005 }} className={cardClass}>
+              {showPaymentProgress && <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} whileHover={{ y: -3, scale: 1.005 }} className={cardClass}>
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <p className={`text-sm uppercase tracking-[0.3em] ${eyebrowClass}`}>{isPrivateStudent ? "Private coaching" : "Path progress"}</p>
@@ -848,7 +874,7 @@ function DashboardContent() {
                   </div>
                   <p className={`mt-3 text-sm ${mutedClass}`}>{paymentProgressPercent}% complete</p>
                 </div>
-              </motion.div>
+              </motion.div>}
 
               <div className={cardClass}>
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
