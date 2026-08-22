@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   const student = await import("@/lib/prisma").then(({ prisma }) => prisma.student.findUnique({ where: { userId: session.user.id }, select: { id: true } }));
   if (student) {
     void recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
-    void saveVoiceCoachMemory(student.id, expectedPhrase || transcription, result);
+    await saveVoiceCoachMemory(student.id, expectedPhrase || transcription, result, acousticFeatures);
   }
 
   return NextResponse.json({ ...result, audioAnalyzed: true, analysisMode: "speech-transcript", transcription });

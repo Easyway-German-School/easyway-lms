@@ -6,9 +6,12 @@ type VoiceResult = {
   corrections: string[];
   nextPractice?: string;
   practicePhrase?: string;
+  wordAccuracy?: number;
+  missingWords?: string[];
+  extraWords?: string[];
 };
 
-export async function saveVoiceCoachMemory(studentId: string, targetPhrase: string, result: VoiceResult) {
+export async function saveVoiceCoachMemory(studentId: string, targetPhrase: string, result: VoiceResult, acousticFeatures: Record<string, number> | null = null) {
   const existing = await prisma.personalizedPlan.findUnique({ where: { studentId }, select: { plan: true } });
   let plan: Record<string, unknown> = {};
   try { plan = existing ? JSON.parse(existing.plan) as Record<string, unknown> : {}; } catch { plan = {}; }
@@ -17,7 +20,18 @@ export async function saveVoiceCoachMemory(studentId: string, targetPhrase: stri
   plan.voiceCoach = {
     ...previous,
     targetPhrase: result.practicePhrase || targetPhrase,
-    memory: [...memory, { targetPhrase, score: result.confidence, issues: result.issues, corrections: result.corrections, nextPractice: result.nextPractice, completedAt: new Date().toISOString() }].slice(-20),
+    memory: [...memory, {
+      targetPhrase,
+      score: result.confidence,
+      wordAccuracy: result.wordAccuracy ?? result.confidence,
+      missingWords: result.missingWords ?? [],
+      extraWords: result.extraWords ?? [],
+      issues: result.issues,
+      corrections: result.corrections,
+      nextPractice: result.nextPractice,
+      acousticFeatures,
+      completedAt: new Date().toISOString(),
+    }].slice(-20),
   };
   await prisma.personalizedPlan.upsert({ where: { studentId }, update: { plan: JSON.stringify(plan) }, create: { studentId, plan: JSON.stringify(plan) } });
 }

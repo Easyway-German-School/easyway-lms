@@ -92,8 +92,23 @@ export default function AICoachPanel() {
         energy += samples[index] * samples[index];
         if (index > 0 && (samples[index - 1] < 0) !== (samples[index] < 0)) crossings += 1;
       }
+      const windowSize = Math.min(4096, samples.length);
+      let bestLag = 0;
+      let bestCorrelation = 0;
+      for (let lag = Math.floor(buffer.sampleRate / 350); lag <= Math.floor(buffer.sampleRate / 80); lag += 1) {
+        let product = 0;
+        let leftEnergy = 0;
+        let rightEnergy = 0;
+        for (let index = 0; index < windowSize - lag; index += 1) {
+          product += samples[index] * samples[index + lag];
+          leftEnergy += samples[index] * samples[index];
+          rightEnergy += samples[index + lag] * samples[index + lag];
+        }
+        const correlation = product / Math.sqrt((leftEnergy * rightEnergy) || 1);
+        if (correlation > bestCorrelation) { bestCorrelation = correlation; bestLag = lag; }
+      }
       await context.close();
-      return { durationSeconds: buffer.duration, rms: Math.sqrt(energy / samples.length), zeroCrossingRate: crossings / samples.length, sampleRate: buffer.sampleRate };
+      return { durationSeconds: buffer.duration, rms: Math.sqrt(energy / samples.length), zeroCrossingRate: crossings / samples.length, estimatedPitchHz: bestLag ? Math.round(buffer.sampleRate / bestLag) : 0, pitchConfidence: Math.round(Math.max(0, bestCorrelation) * 100) / 100, sampleRate: buffer.sampleRate };
     } catch {
       return null;
     }

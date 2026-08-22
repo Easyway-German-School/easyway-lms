@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     const student = await prismaStudentForSession(session.user.id);
     if (student) {
       void recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
-      void saveVoiceCoachMemory(student.id, typeof expectedPhrase === "string" ? expectedPhrase : phrase, result);
+      await saveVoiceCoachMemory(student.id, typeof expectedPhrase === "string" ? expectedPhrase : phrase, result);
     }
 
     return NextResponse.json(result);
