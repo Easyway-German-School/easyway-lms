@@ -271,6 +271,7 @@ export async function analyzePronunciation(phrase: string, expectedPhrase = phra
   corrections: string[];
   confidence: number;
   nextPractice?: string;
+  practicePhrase?: string;
   wordAccuracy?: number;
   missingWords?: string[];
   extraWords?: string[];
@@ -1859,8 +1860,9 @@ Use this comparison. Treat missing or extra words as delivery problems, but do n
     transcription: parsed.transcription || phrase,
     issues: parsed.issues || [],
     corrections: parsed.corrections || [],
-    confidence: parsed.confidence || 85,
+    confidence: comparison.accuracy,
     nextPractice: parsed.nextPractice || generatePronunciationNextPractice(parsed.issues || [], expectedPhrase),
+    practicePhrase: comparison.missingWords.length ? comparison.missingWords.join(" ") : expectedPhrase,
     wordAccuracy: comparison.accuracy,
     missingWords: comparison.missingWords,
     extraWords: comparison.extraWords,
@@ -1948,8 +1950,9 @@ async function analyzePronunciationWithOllama(phrase: string, expectedPhrase: st
         transcription: parsed.transcription || phrase,
         issues: parsed.issues || [],
         corrections: parsed.corrections || [],
-        confidence: parsed.confidence || 80,
+        confidence: comparison.accuracy,
         nextPractice: parsed.nextPractice || generatePronunciationNextPractice(parsed.issues || [], expectedPhrase),
+        practicePhrase: comparison.missingWords.length ? comparison.missingWords.join(" ") : expectedPhrase,
         wordAccuracy: comparison.accuracy,
         missingWords: comparison.missingWords,
         extraWords: comparison.extraWords,
@@ -2013,6 +2016,7 @@ function analyzePronunciationMock(phrase: string, comparison: PronunciationWordC
     nextPractice: comparison.missingWords.length
       ? `Practise this chunk five times: ${comparison.missingWords.join(" ")}, then repeat the full target sentence.`
       : "Repeat the full target sentence three times, keeping the same clear rhythm.",
+    practicePhrase: comparison.missingWords.length ? comparison.missingWords.join(" ") : phrase,
     wordAccuracy: comparison.accuracy,
     missingWords: comparison.missingWords,
     extraWords: comparison.extraWords,

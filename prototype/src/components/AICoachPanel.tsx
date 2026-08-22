@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import Mascot from "@/components/Mascot";
 
 export default function AICoachPanel() {
   const [aiTab, setAiTab] = useState<"pronunciation" | "plan">("pronunciation");
@@ -31,6 +32,12 @@ export default function AICoachPanel() {
   const [bestScore, setBestScore] = useState(0);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [audioAnalyzed, setAudioAnalyzed] = useState(false);
+  const [nextPractice, setNextPractice] = useState<string | null>(null);
+  const [practicePhrase, setPracticePhrase] = useState<string>(targetPhrase);
+  const [wordAccuracy, setWordAccuracy] = useState<number | null>(null);
+  const [missingWords, setMissingWords] = useState<string[]>([]);
+  const [extraWords, setExtraWords] = useState<string[]>([]);
+  const [showCoachDialog, setShowCoachDialog] = useState(false);
   const audioChunksRef = useRef<Blob[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
@@ -88,10 +95,10 @@ export default function AICoachPanel() {
     };
   }, []);
 
-  function speakInBrowser() {
+  function speakInBrowser(text = targetPhrase) {
     if (typeof window === "undefined" || !window.speechSynthesis) return false;
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(targetPhrase);
+    const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "de-DE";
     utterance.rate = 0.82;
     utterance.onend = () => setIsSpeaking(false);
@@ -117,18 +124,18 @@ export default function AICoachPanel() {
     return true;
   }
 
-  async function speakModel() {
-    if (!targetPhrase.trim()) return;
+  async function speakModel(text = targetPhrase) {
+    if (!text.trim()) return;
     setIsSpeaking(true);
     // Start synchronously inside the click gesture. A voice fetched after an
     // await can be blocked by mobile autoplay rules, so browser speech is the
     // immediate fallback while the higher-quality Piper audio is requested.
-    const browserStarted = speakInBrowser();
+    const browserStarted = speakInBrowser(text);
     try {
       const response = await fetch("/api/ai/voice-coach", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: targetPhrase }),
+        body: JSON.stringify({ text }),
         signal: AbortSignal.timeout(4500),
       });
       if (!response.ok) throw new Error("Open-source voice provider unavailable");
@@ -145,7 +152,7 @@ export default function AICoachPanel() {
       };
       await audio.play();
     } catch {
-      if (!browserStarted && !speakInBrowser()) {
+      if (!browserStarted && !speakInBrowser(text)) {
         setIsSpeaking(false);
         stopVoiceMeter();
       }
@@ -208,6 +215,11 @@ export default function AICoachPanel() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Unable to coach this attempt");
       setAudioAnalyzed(Boolean(data.audioAnalyzed));
+      setNextPractice(typeof data.nextPractice === "string" ? data.nextPractice : null);
+      setPracticePhrase(typeof data.practicePhrase === "string" ? data.practicePhrase : targetPhrase);
+      setWordAccuracy(typeof data.wordAccuracy === "number" ? data.wordAccuracy : null);
+      setMissingWords(Array.isArray(data.missingWords) ? data.missingWords : []);
+      setExtraWords(Array.isArray(data.extraWords) ? data.extraWords : []);
       const feedbackArray = [
         `Transcription: ${data.transcription}`,
         `Word match: ${data.wordAccuracy ?? data.confidence}%${data.missingWords?.length ? ` · Missing: ${data.missingWords.join(", ")}` : ""}${data.extraWords?.length ? ` · Extra: ${data.extraWords.join(", ")}` : ""}`,
@@ -217,14 +229,15 @@ export default function AICoachPanel() {
         ...(data.nextPractice ? [`Next practice: ${data.nextPractice}`] : []),
       ];
       setFeedback(feedbackArray.length > 0 ? feedbackArray : ["No feedback available"]);
-      setAttemptScore(Math.max(0, Math.min(100, Number(data.confidence) || 0)));
-      const score = Math.max(0, Math.min(100, Number(data.confidence) || 0));
+      const score = Math.max(0, Math.min(100, Number(data.wordAccuracy ?? data.confidence) || 0));
+      setAttemptScore(score);
       setBestScore((best) => {
         const next = Math.max(best, score);
         window.localStorage.setItem("easyway-voice-best", String(next));
         return next;
       });
       setAttempts((count) => count + 1);
+      setShowCoachDialog(true);
     } catch (error) {
       console.error("Analyze error:", error);
       setFeedback(["Unable to analyze pronunciation"]);
@@ -314,7 +327,7 @@ export default function AICoachPanel() {
           ) : null}
           <div className="mt-5 rounded-3xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">Your challenge</p><p className="mt-1 font-semibold text-[var(--foreground)]">{phrase}</p></div>
+              <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">Your challenge</p><p className="mt-1 font-semibold text-[var(--foreground)]">{targetPhrase}</p></div>
               <button type="button" onClick={() => void speakModel()} disabled={isSpeaking} className="rounded-full border border-[var(--accent)] px-4 py-2 text-xs font-bold text-[var(--accent)] disabled:cursor-wait disabled:opacity-60">{isSpeaking ? "Preparing voice…" : "Listen to model"}</button>
             </div>
           </div>
@@ -344,6 +357,13 @@ export default function AICoachPanel() {
               <p key={`${item}-${index}`}>• {item}</p>
             ))}
           </div>
+          {nextPractice ? (
+            <div className="mt-5 flex items-center gap-3 rounded-3xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4">
+              <Mascot mood="cheerful" className="h-16 w-14 shrink-0" />
+              <div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">Becca&apos;s next drill</p><p className="mt-1 text-sm text-[var(--foreground)]">{nextPractice}</p></div>
+              <button type="button" onClick={() => void speakModel(practicePhrase)} className="shrink-0 rounded-full bg-[var(--accent)] px-3 py-2 text-xs font-bold text-white">Hear it</button>
+            </div>
+          ) : null}
         </>
       ) : (
         <>
@@ -383,6 +403,18 @@ export default function AICoachPanel() {
           </div>
         </>
       )}
+      {showCoachDialog && attemptScore !== null ? (
+        <div className="fixed inset-0 z-[100] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="voice-coach-result">
+          <div className="relative w-full max-w-lg overflow-hidden rounded-[28px] border border-[var(--accent)]/40 bg-[var(--surface)] p-6 shadow-2xl">
+            <button type="button" onClick={() => setShowCoachDialog(false)} aria-label="Close coaching result" className="absolute right-4 top-4 rounded-full px-3 py-1 text-xl text-[var(--muted)] hover:text-[var(--foreground)]">×</button>
+            <div className="flex items-center gap-4"><Mascot mood={attemptScore >= 80 ? "cheerful" : "thinking"} className="h-24 w-20 shrink-0" /><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--accent)]">Becca&apos;s voice review</p><h3 id="voice-coach-result" className="mt-1 text-2xl font-bold text-[var(--foreground)]">{attemptScore >= 80 ? "Strong attempt" : "Good start, let&apos;s sharpen it"}</h3><p className="mt-1 text-sm text-[var(--muted)]">Measured from the words your recording produced.</p></div></div>
+            <div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-[var(--surface-alt)] p-4"><p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Word match</p><p className="mt-1 text-3xl font-black text-[var(--accent)]">{wordAccuracy ?? attemptScore}%</p></div><div className="rounded-2xl bg-[var(--surface-alt)] p-4"><p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Attempt</p><p className="mt-1 text-3xl font-black text-[var(--foreground)]">{attempts}</p></div></div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-400">What you did well</p><p className="mt-1 text-sm text-[var(--foreground)]">{wordAccuracy === 100 ? "You said every target word the recognizer expected." : "You kept part of the target sentence in the right order."}</p></div><div className="rounded-2xl border border-rose-400/20 bg-rose-400/5 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-rose-300">What to sharpen</p><p className="mt-1 text-sm text-[var(--foreground)]">{missingWords.length ? `Missing: ${missingWords.join(", ")}` : extraWords.length ? `Extra: ${extraWords.join(", ")}` : "No missing or extra words were detected."}</p></div></div>
+            <div className="mt-4 space-y-2 text-sm text-[var(--foreground)]">{feedback.filter((item) => /Missing:|Extra:|Issue:|Correction:/i.test(item)).slice(0, 5).map((item, index) => <p key={`${item}-${index}`} className="rounded-xl border border-[var(--border)] px-3 py-2">{item}</p>)}</div>
+            {nextPractice ? <div className="mt-4 rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--accent)]">Your next practice</p><p className="mt-1 text-sm text-[var(--foreground)]">{nextPractice}</p><p className="mt-2 text-sm font-semibold text-[var(--accent)]">{practicePhrase}</p><button type="button" onClick={() => void speakModel(practicePhrase)} className="mt-3 rounded-full bg-[var(--accent)] px-4 py-2 text-xs font-bold text-white">Listen to Becca&apos;s drill</button></div> : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
