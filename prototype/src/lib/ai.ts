@@ -21,7 +21,26 @@ import type { CoachingMemorySummary } from "@/lib/voice-coach-memory";
  * One constant now, so the next model change is one line and cannot go
  * half-applied.
  */
-const CLAUDE_MODEL = "claude-sonnet-4-20250514";
+const CLAUDE_MODEL = "claude-opus-5";
+
+/**
+ * Never send a budget so small the answer cannot fit.
+ *
+ * A ceiling, not a target — a grader asked for forty words still returns forty
+ * words and is billed for forty. This only stops a 256-token budget truncating
+ * a JSON reply mid-object, which surfaces as a parse failure and a silent fall
+ * back to the mock.
+ */
+const CLAUDE_MIN_TOKENS = 1024;
+
+/**
+ * Appended to every Claude prompt. Cheap insurance, and specifically the
+ * mitigation the API docs give for running with thinking switched off.
+ *
+ * Deliberately generic: naming the tags one does not want is documented to
+ * make the leak MORE likely, not less.
+ */
+const TAG_GUARD = "\n\nDo not include internal or system XML tags in your response.";
 
 /**
  * One Claude call, shared by the four features that make one.
@@ -173,12 +192,42 @@ async function callClaude(prompt: string, maxTokens: number): Promise<string | n
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
       },
+      /**
+       * THIS REQUEST SHAPE IS VERSION-SENSITIVE, AND IT HAS BITTEN TWICE.
+       *
+       * The note above CLAUDE_MODEL records the first time: a retired model id
+       * left every call 404ing into the mock grader, invisibly, because the
+       * mock is deliberately plausible. It happened AGAIN with the successor —
+       * `claude-sonnet-4-20250514` was equally retired, and every Claude
+       * feature in this app (essay marking, pronunciation, email drafting) was
+       * silently mocked until somebody read the server log.
+       *
+       * Two things changed on current models and both are hard failures:
+       *
+       *   `temperature` IS REJECTED. Not ignored — a 400. It was set to 0.2
+       *   here to keep graders consistent; consistency now comes from the
+       *   prompt and from `effort`.
+       *
+       *   THINKING IS NOW ON BY DEFAULT, and it is not free. Left on, essay
+       *   grading measured 43 SECONDS against roughly nine with it off — and
+       *   the note at the top of this function is a product requirement, not a
+       *   preference: a student is sitting on a page waiting for this. So it
+       *   stays off, at low effort, which the model accepts.
+       *
+       *   The documented cost of switching thinking off is that reasoning can
+       *   occasionally leak into the visible answer as XML-ish tags. For the
+       *   JSON callers `JSON_ONLY` already forbids exactly that; TAG_GUARD
+       *   below says the same thing to the prose callers, which had nothing.
+       *   The other documented failure — a tool call written as text instead
+       *   of a tool_use block — cannot arise here: not one caller in this file
+       *   sends tools.
+       */
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        max_tokens: maxTokens,
+        max_tokens: Math.max(maxTokens, CLAUDE_MIN_TOKENS),
         thinking: { type: "disabled" },
-        temperature: 0.2,
-        messages: [{ role: "user", content: prompt }],
+        output_config: { effort: "low" },
+        messages: [{ role: "user", content: `${prompt}${TAG_GUARD}` }],
       }),
     });
 
@@ -772,6 +821,72 @@ Return JSON: {"subject": "...", "blocks": [ ... ]}${JSON_ONLY}`;
 
   if (blocks.length === 0 || !subject) return null;
   return { subject, blocks, engine: used };
+}
+
+/**
+ * BECCA, WRITING UP A SCHEDULE RECOMMENDATION SHE DID NOT MAKE.
+ *
+ * The slots, their ranking and the stated-versus-observed mismatch are all
+ * computed in `private-schedule-advisor.ts` before this is called. This
+ * function is handed the finished answer and asked for the words. That
+ * boundary is the whole design: a model that picks the hour will eventually
+ * pick one the tutor is already teaching in, and no amount of prompting fixes
+ * a system nobody can audit.
+ *
+ * Returns null on any failure — no key, no credit, a timeout, an empty reply.
+ * The caller ships the deterministic prose instead, which is written to be
+ * good rather than to be a placeholder, so the feature degrades in tone and
+ * never in usefulness.
+ */
+export async function becomeBecca(input: {
+  studentName: string;
+  level: string;
+  advice: {
+    candidates: Array<{ day: string; start: string; score: number; reasons: string[]; tutorBusy: boolean }>;
+    mismatch: { note: string } | null;
+    evidence: { hasStated: boolean; observedTrusted: boolean; observedEvents: number };
+    fallbackMessage: string;
+  };
+}): Promise<string | null> {
+  const { studentName, level, advice } = input;
+  if (!advice.candidates.length) return null;
+
+  const slots = advice.candidates
+    .map(
+      (candidate, index) =>
+        `${index + 1}. ${candidate.day} at ${candidate.start} (confidence ${candidate.score}/100)` +
+        `${candidate.tutorBusy ? " — tutor already has something near this" : ""}` +
+        `\n   because: ${candidate.reasons.join("; ") || "it fits the days they marked"}`,
+    )
+    .join("\n");
+
+  const prompt = [
+    "You are Becca, the study companion inside a German language school's app.",
+    "You are speaking directly to one student about when to hold their one-to-one class.",
+    "",
+    `Student's first name: ${studentName}. Level: ${level}.`,
+    "",
+    "These slots have ALREADY been chosen by the scheduling system. Your job is only to explain them warmly.",
+    "Do not invent, reorder, merge or add slots. Do not change any day or time. Do not promise a booking.",
+    "",
+    slots,
+    "",
+    advice.mismatch
+      ? `IMPORTANT — raise this gently, it is the most useful thing you can tell them: ${advice.mismatch.note}`
+      : "",
+    advice.evidence.observedTrusted
+      ? "You may refer to when they usually use the app, because that is what the reasons above are based on. Be matter-of-fact about it, never surveillance-flavoured."
+      : "Do NOT claim to know when they usually study — there is not enough data yet. Base everything on what they told you.",
+    "",
+    "Write 2-3 short sentences. Warm, direct, British English, second person. No greeting, no sign-off, no bullet points, no markdown. Return only the sentences.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const raw = await callHostedText(prompt, 300);
+  const text = (raw || "").trim();
+  // A one-word reply is a failure wearing a success's clothes.
+  return text.length >= 40 ? text : null;
 }
 
 export async function summarizeText(text: string): Promise<string> {

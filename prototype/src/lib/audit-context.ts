@@ -37,21 +37,90 @@ export type AuditActor = {
   allowUnscopedWrites?: boolean;
 };
 
-const storage = new AsyncLocalStorage<AuditActor>();
+/**
+ * Pinned to globalThis, for the same reason the tenant store is.
+ *
+ * Next bundles a shared module more than once — a route handler and the Prisma
+ * client the guard is built from can each end up with their own copy of this
+ * file. A module-level `new AsyncLocalStorage()` then gives two stores: the
+ * route writes to one and the guard reads the other, and every audit entry
+ * comes out anonymous with nothing obviously wrong anywhere. See the same note
+ * in src/lib/tenant/context.ts, where it cost an afternoon to find.
+ */
+const globalForAudit = globalThis as unknown as {
+  __easywayAuditStore?: AsyncLocalStorage<AuditActor>;
+};
+
+const storage = globalForAudit.__easywayAuditStore ?? new AsyncLocalStorage<AuditActor>();
+globalForAudit.__easywayAuditStore = storage;
+
+/**
+ * Install an empty actor for this request. MUST be the first statement of a
+ * gate, before any `await`.
+ *
+ * WHY THIS EXISTS AT ALL — and it is the whole reason the audit trail was
+ * anonymous. `enterWith` only reaches the CALLER if it runs before the callee's
+ * first `await`; after that it attaches to the callee's own continuation and
+ * the caller never sees it. Every gate must await the session before it knows
+ * who the actor is, so `setAuditActor` was, without exception, running too late
+ * — it set a store that died with the gate. The trail recorded 717 actions and
+ * named an actor on 23 of them, all 23 from scripts using `runWithAuditActor`,
+ * which wraps a callback and therefore never had the problem.
+ *
+ * The fix is the one the tenant layer already uses, documented at length in
+ * src/lib/tenant/context.ts: install an empty MUTABLE holder synchronously —
+ * which does reach the caller — and fill it in by reference once the session
+ * lookup comes back. The caller holds the same object, so the identity appears
+ * in it.
+ *
+ * Per-request safe because each gate call installs its own holder in its own
+ * async context.
+ */
+export function beginAuditScope(): AuditActor {
+  const existing = storage.getStore();
+
+  /**
+   * A script's actor is left completely alone. `runWithAuditActor` wraps a
+   * whole job in `run`, and a gate called from inside one must not blank the
+   * name the job deliberately set.
+   *
+   * Otherwise JOIN rather than replace: the gates nest (requireCapability calls
+   * requireAuthSession), and if each installed a FRESH holder the innermost
+   * would be the one filled in while the route held the outermost. That exact
+   * mistake is why the tenant version carries the same note.
+   */
+  if (existing) {
+    if (existing.source === "script" || existing.source === "cron" || existing.allowUnscopedWrites) {
+      return existing;
+    }
+    for (const key of Object.keys(existing) as Array<keyof AuditActor>) delete existing[key];
+    existing.source = "app";
+    return existing;
+  }
+
+  const holder: AuditActor = { source: "app" };
+  storage.enterWith(holder);
+  return holder;
+}
 
 /**
  * Attach an actor to everything that happens after this point in the current
  * request.
  *
- * `enterWith` rather than `run` because the caller is a gate that returns —
- * `requireCapability()` checks the session and hands back a context, it does
- * not wrap the rest of the handler in a callback. Rewriting sixty route
- * handlers into callbacks to satisfy `run` would be a large diff whose only
- * effect is stylistic, and every route added afterwards would have to
- * remember the wrapper or silently log nothing.
+ * Fills the holder installed by `beginAuditScope` IN PLACE. Assigning a new
+ * object here, or calling `enterWith` again, would be invisible to the caller
+ * for the reason set out above.
  */
 export function setAuditActor(actor: AuditActor): void {
-  storage.enterWith({ source: "app", ...actor });
+  const holder = storage.getStore();
+  if (!holder) {
+    // No gate ran first — a script that forgot the wrapper, or a call from
+    // outside a request. Best effort; it at least covers anything this same
+    // async context goes on to do.
+    storage.enterWith({ source: "app", ...actor });
+    return;
+  }
+  Object.assign(holder, { source: holder.source ?? "app", ...actor });
 }
 
 /** For scripts and jobs, which have a clean top-level to wrap. */
@@ -60,7 +129,12 @@ export function runWithAuditActor<T>(actor: AuditActor, fn: () => T): T {
 }
 
 export function getAuditActor(): AuditActor | undefined {
-  return storage.getStore();
+  const actor = storage.getStore();
+  // An untouched holder is "a request happened", not "somebody did this".
+  // Returning it as though it were an actor would put source:"app" on entries
+  // with no identity and make the anonymous ones harder, not easier, to spot.
+  if (!actor || (!actor.userId && !actor.email && !actor.allowUnscopedWrites)) return undefined;
+  return actor;
 }
 
 /**

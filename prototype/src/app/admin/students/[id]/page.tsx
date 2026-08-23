@@ -13,6 +13,7 @@ import {
   CheckCircleIcon,
   ClockIcon,
   CrossCircleIcon,
+  EyeIcon,
   LockIcon,
   MailIcon,
   MapIcon,
@@ -592,6 +593,21 @@ export default function StudentDossierPage() {
             >
               Refresh
             </button>
+            {/*
+              LOOKING, NOT LOGGING IN. The office's standing need — "what is she
+              actually seeing on her phone?" — used to be met by resetting the
+              student's password and signing in as them, which locks a paying
+              student out mid-call and puts a login in the audit trail under
+              their name. This opens a read-only mirror instead. See
+              /admin/students/[id]/remote.
+            */}
+            <Link
+              href={`/admin/students/${id}/remote`}
+              className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-[var(--surface)]"
+            >
+              <EyeIcon className="h-3.5 w-3.5" />
+              Remote view
+            </Link>
             <button
               type="button"
               onClick={openEdit}

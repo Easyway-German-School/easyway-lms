@@ -4,7 +4,6 @@ import { LecturerIcon, PencilIcon, TrendingDownIcon, TrendingUpIcon, WalletIcon 
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
 import AdminShell from "@/components/AdminShell";
@@ -231,7 +230,6 @@ function RowLink({ href, children, className = "" }: { href?: string; children: 
 }
 
 export default function AdminHomePage() {
-  const router = useRouter();
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -315,13 +313,18 @@ export default function AdminHomePage() {
             >
               {loading ? "Refreshing…" : "Refresh"}
             </button>
-            <button
-              type="button"
-              onClick={() => router.push("/dashboard")}
-              className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-[var(--surface-alt)]"
-            >
-              View student portal
-            </button>
+            {/*
+              "View student portal" used to live here. It pushed the admin at
+              /dashboard, which is the STUDENT portal — and the student portal
+              does what it does for whoever opens it: it looks for a Student
+              record, and the paywall then judges the visitor on a tuition
+              balance no member of staff will ever have. An admin who clicked
+              it got a padlock and a student-shaped account they never asked
+              for. Seeing a student's portal is a real need, but the answer is
+              to look at ONE named student's, read-only, from their file —
+              /admin/students/[id] then "Remote view" — not to walk into the
+              student portal wearing your own account.
+            */}
           </div>
         </div>
 

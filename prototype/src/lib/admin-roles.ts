@@ -1,6 +1,7 @@
 import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { beginRequestScope } from "@/lib/tenant/context";
+import { beginAuditScope } from "@/lib/audit-context";
 
 /**
  * Admin sub-roles.
@@ -225,6 +226,43 @@ export async function adminHasCapability(userId: string, capability: Capability)
  * sub-roles decorative on every one of them: a Secretary with no `payments`
  * capability could still read the fee book straight off the API.
  */
+/**
+ * Name the actor for everything this request goes on to write.
+ *
+ * The admin gates are the single door every admin route passes through, so
+ * attaching identity here means the audit trail covers routes nobody
+ * remembered to instrument — including the ones written after this. Set
+ * before any capability check rather than after, so that a refused attempt is
+ * still attributable: somebody probing endpoints they cannot reach is exactly
+ * the pattern worth having on record.
+ *
+ * SHARED BY BOTH GATES, AND IT DID NOT USED TO BE. This lived inline in
+ * `requireCapability` only, so every route reached through `requireAdmin` —
+ * the ones that do their own `admin.can(...)` check — wrote audit entries with
+ * nobody's name on them. An audit line that cannot say who did the thing
+ * answers the one question an audit trail exists to answer with a shrug.
+ */
+async function nameAuditActor(admin: AdminContext | null): Promise<void> {
+  if (!admin) return;
+  const { setAuditActor, actorFromRequest } = await import("@/lib/audit-context");
+  const { headers } = await import("next/headers");
+  let request: { ip?: string; userAgent?: string; route?: string; requestId?: string } = {};
+  try {
+    const headerList = await headers();
+    request = actorFromRequest({ headers: headerList });
+  } catch {
+    // Called outside a request scope (a script, a build-time render). The
+    // actor is still worth recording without the network details.
+  }
+  setAuditActor({
+    userId: admin.userId,
+    email: admin.email,
+    role: `admin:${admin.adminRole}`,
+    source: "app",
+    ...request,
+  });
+}
+
 export async function requireCapability(
   capability: Capability,
 ): Promise<{ ok: true; admin: AdminContext; session: Session } | { ok: false; response: Response }> {
@@ -235,6 +273,9 @@ export async function requireCapability(
    * src/lib/tenant/context.ts for why the order is load-bearing.
    */
   beginRequestScope();
+  // Same rule, same reason: synchronously, before the first await, so the
+  // holder reaches the route handler. See beginAuditScope.
+  beginAuditScope();
 
   // Imported here rather than at the top: this module is pulled into client
   // bundles for its label maps, and next-auth's server entry must not follow.
@@ -250,41 +291,7 @@ export async function requireCapability(
   }
 
   const admin = await resolveAdmin(session.user.id);
-
-  /**
-   * Name the actor for everything this request goes on to write.
-   *
-   * This gate is the single door every admin route already passes through, so
-   * attaching identity here means the audit trail covers routes nobody
-   * remembered to instrument — including the ones written after this. Set
-   * before the capability check rather than after, so that a refused attempt
-   * is still attributable: somebody probing endpoints they cannot reach is
-   * exactly the pattern worth having on record.
-   */
-  if (admin) {
-    const { setAuditActor, actorFromRequest } = await import("@/lib/audit-context");
-    const { headers } = await import("next/headers");
-    let request: {
-      ip?: string;
-      userAgent?: string;
-      route?: string;
-      requestId?: string;
-    } = {};
-    try {
-      const headerList = await headers();
-      request = actorFromRequest({ headers: headerList });
-    } catch {
-      // Called outside a request scope (a script, a build-time render). The
-      // actor is still worth recording without the network details.
-    }
-    setAuditActor({
-      userId: admin.userId,
-      email: admin.email,
-      role: `admin:${admin.adminRole}`,
-      source: "app",
-      ...request,
-    });
-  }
+  await nameAuditActor(admin);
 
   if (!admin) {
     return {
@@ -311,6 +318,7 @@ export async function requireAdmin(): Promise<
   | { ok: false; response: Response }
 > {
   beginRequestScope();
+  beginAuditScope();
 
   const { requireAuthSession } = await import("@/lib/auth");
   const { NextResponse } = await import("next/server");
@@ -324,6 +332,8 @@ export async function requireAdmin(): Promise<
   }
 
   const admin = await resolveAdmin(session.user.id);
+  await nameAuditActor(admin);
+
   if (!admin) {
     return {
       ok: false,
