@@ -359,7 +359,10 @@ export async function gradeEssay(essay: string): Promise<{
   feedback: Array<{ category: string; comment: string; score: number }>;
   summary: string;
 }> {
-  const provider = getAIProvider();
+  // "student", not the default "interactive": a funded Claude key must not be
+  // shadowed by a local Ollama runtime that happens to be reachable — see the
+  // same note on analyzePronunciation.
+  const provider = getAIProvider("student");
 
   if (provider === "claude" || provider === "groq" || provider === "deepseek") {
     return gradeEssayWithClaude(essay);
@@ -452,7 +455,8 @@ function comparePronunciationWords(spoken: string, target: string): Pronunciatio
 }
 
 export async function generateEssayNextSteps(score: number, feedback: Array<{ category: string; comment: string; score: number }>, essay: string): Promise<string> {
-  const provider = getAIProvider();
+  // "student", not "interactive" — see gradeEssay above.
+  const provider = getAIProvider("student");
   if (provider === "claude" || provider === "groq") {
     return generateNextStepsWithClaude(score, feedback, essay);
   } else if (provider === "deepseek") {
@@ -534,7 +538,8 @@ export async function generateMissionPracticeFeedback(input: {
   description: string;
   response: string;
 }): Promise<{ prompt: string; feedback: string; score: number; suggestion?: string }> {
-  const provider = getAIProvider();
+  // "student", not "interactive" — see gradeEssay above.
+  const provider = getAIProvider("student");
 
   if (provider === "claude" || provider === "groq" || provider === "deepseek") {
     return generateMissionPracticeFeedbackWithClaude(input);
@@ -731,6 +736,57 @@ Return JSON: {"title": "...", "message": "..."}${JSON_ONLY}`;
   // The server rejects titles over 120 characters, so a long one is trimmed
   // here rather than being offered and then refused on send.
   return { title: title.slice(0, 120), message };
+}
+
+/**
+ * "Suggest times" for a private-class booking — fills the candidate chips a
+ * tutor or admin can click, never books anything itself. Same non-destructive
+ * shape as `draftClassAnnouncement`: the model proposes, a human still picks
+ * one and presses the real book button.
+ *
+ * The route re-checks every suggestion against the tutor's live bookings
+ * before showing it — a model can still propose a time it was told to avoid,
+ * and the actual conflict check belongs to the database, not the prompt.
+ */
+export async function suggestPrivateClassTimes(input: {
+  studentName?: string | null;
+  dayRanges: { day: string; ranges: { start: string; end: string }[] }[];
+  durationMinutes: number;
+  timezone?: string | null;
+  busyTimes: string[];
+  now: string;
+}): Promise<{ suggestions: { scheduledAt: string; reason: string }[] } | null> {
+  const prefText = input.dayRanges.length
+    ? input.dayRanges.map((d) => `${d.day}: ${d.ranges.map((r) => `${r.start}-${r.end}`).join(", ")}`).join("; ")
+    : "no preferences shared yet";
+  const busyText = input.busyTimes.length ? input.busyTimes.join(", ") : "none";
+
+  const prompt = `You are helping schedule a one-to-one German class for ${input.studentName ?? "a private student"}.
+
+Student's stated availability (day: time ranges, their own local time${input.timezone ? `, ${input.timezone}` : ""}):
+${prefText}
+
+Session length: ${input.durationMinutes} minutes.
+Right now (ISO, for reference): ${input.now}
+The tutor already has sessions booked at these times — do not suggest anything within 2 hours of any of these: ${busyText}
+
+Suggest exactly 3 candidate session start times over the next 14 days that fall inside the student's stated availability, avoid the tutor's existing bookings, and are spread across different days rather than clustered on one.
+
+Return JSON: {"suggestions": [{"scheduledAt": "<ISO 8601 datetime>", "reason": "<one short clause, e.g. \\"Matches their Tuesday evening slot\\">"}]}${JSON_ONLY}`;
+
+  const parsed = parseJsonReply<{ suggestions?: unknown }>(await callClaude(prompt, 500));
+  if (!parsed || !Array.isArray(parsed.suggestions)) return null;
+
+  const suggestions = parsed.suggestions
+    .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
+    .map((s) => ({
+      scheduledAt: typeof s.scheduledAt === "string" ? s.scheduledAt : "",
+      reason: typeof s.reason === "string" ? s.reason.trim().slice(0, 140) : "",
+    }))
+    .filter((s) => s.scheduledAt && !Number.isNaN(new Date(s.scheduledAt).getTime()))
+    .slice(0, 3);
+
+  return suggestions.length > 0 ? { suggestions } : null;
 }
 
 /**
@@ -2054,7 +2110,8 @@ This is your most reliable evidence for word- and phoneme-level pronunciation. W
   "issues": ["issue1", "issue2"],
   "corrections": ["correction1", "correction2"],
   "confidence": (0-100),
-  "nextPractice": "one short, targeted drill for the clearest weakness"
+  "nextPractice": "one short, targeted drill for the clearest weakness",
+  "practicePhraseNext": "a NEW short German phrase that specifically drills their weak sounds, e.g. if they miss final consonants, use words ending in -t, -ck, -ch, -ng"
 }
 Target sentence: ${expectedPhrase}
 Spoken transcript: ${phrase}
@@ -2063,8 +2120,8 @@ ${azureSection}
 Acoustic measurements from the recorded waveform: ${JSON.stringify(acousticFeatures || {})}
 ${GERMAN_ACOUSTIC_COACHING_CONTEXT}
 ${memorySection}
-Use the word comparison, the phoneme assessment (when present), the acoustic measurements, and the coaching history together as evidence. Do not claim exact phoneme or accent errors unless the evidence supports it. Keep the JSON concise.${JSON_ONLY}`,
-    650,
+Use the word comparison, the phoneme assessment (when present), the acoustic measurements, and the coaching history together as evidence. Do not claim exact phoneme or accent errors unless the evidence supports it. For practicePhraseNext: craft a phrase 6-12 words long that targets their specific weak area (from recurringIssueThemes if available, or from this attempt's issues). Make it a realistic German sentence, not a nonsense drill. Keep the JSON concise.${JSON_ONLY}`,
+    800,
   );
 
   const parsed = parseJsonReply<{
@@ -2073,6 +2130,7 @@ Use the word comparison, the phoneme assessment (when present), the acoustic mea
     corrections?: string[];
     confidence?: number;
     nextPractice?: string;
+    practicePhraseNext?: string;
   }>(raw);
   if (!parsed) return analyzePronunciationMock(phrase, comparison);
 
@@ -2088,7 +2146,7 @@ Use the word comparison, the phoneme assessment (when present), the acoustic mea
     corrections: parsed.corrections || [],
     confidence: comparison.accuracy,
     nextPractice: parsed.nextPractice || generatePronunciationNextPractice(parsed.issues || [], expectedPhrase),
-    practicePhrase: comparison.missingWords.length ? comparison.missingWords.join(" ") : expectedPhrase,
+    practicePhrase: parsed.practicePhraseNext || (comparison.missingWords.length ? comparison.missingWords.join(" ") : expectedPhrase),
     wordAccuracy: comparison.accuracy,
     missingWords: comparison.missingWords,
     extraWords: comparison.extraWords,
