@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
-import LecturerShell from "@/components/LecturerShell";
+import PortalShell from "@/components/PortalShell";
 import { AttachmentIcon, CalendarIcon } from "@/components/icons";
 
 /**
@@ -194,7 +194,7 @@ export default function LecturerTimetablePage() {
       : ["morning", "afternoon", "evening"];
 
   return (
-    <LecturerShell>
+    <PortalShell>
       <div className="h-screen overflow-y-auto">
         <div className="border-b border-[var(--border)] bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6">
           <div className="mx-auto max-w-5xl">
@@ -495,6 +495,6 @@ export default function LecturerTimetablePage() {
           )}
         </div>
       </div>
-    </LecturerShell>
+    </PortalShell>
   );
 }

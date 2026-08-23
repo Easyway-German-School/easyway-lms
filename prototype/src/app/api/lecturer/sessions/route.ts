@@ -93,9 +93,28 @@ export async function GET(req: NextRequest) {
   try {
     const assignment = staff.assignment;
 
+    // Everything the editor needs to populate its dropdowns. A tutor is offered
+    // only the branches and levels they were assigned; an admin gets the lot.
+    const [branches, materials] = await Promise.all([
+      prisma.branch.findMany({
+        where: staff.role === "admin" ? {} : { id: { in: assignment?.branchIds ?? [] } },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, mode: true },
+      }),
+      prisma.material.findMany({
+        orderBy: { title: "asc" },
+        select: { id: true, title: true, fileType: true, course: { select: { level: true } } },
+      }),
+    ]);
+
     // A tutor gets their own class by default rather than having to find it.
+    // An admin has no assignment to fall back on, so they get whatever branch
+    // sorts first — the dropdowns let them switch from there.
     const branchId =
-      req.nextUrl.searchParams.get("branchId") ?? assignment?.branchIds[0] ?? null;
+      req.nextUrl.searchParams.get("branchId") ??
+      assignment?.branchIds[0] ??
+      (staff.role === "admin" ? branches[0]?.id : null) ??
+      null;
     const level = req.nextUrl.searchParams.get("level") ?? assignment?.levels[0] ?? "A1";
     const batch = req.nextUrl.searchParams.get("batch");
     // Which sitting is being edited. A branch can run the same level morning
@@ -108,7 +127,7 @@ export async function GET(req: NextRequest) {
           error:
             staff.role === "lecturer"
               ? "You have not been assigned a class yet. The school office sets this."
-              : "branchId is required",
+              : "No branches have been set up yet.",
         },
         { status: 400 },
       );
@@ -126,20 +145,6 @@ export async function GET(req: NextRequest) {
       now: new Date(),
       months: 2,
     });
-
-    // Everything the editor needs to populate its dropdowns. A tutor is offered
-    // only the branches and levels they were assigned; an admin gets the lot.
-    const [branches, materials] = await Promise.all([
-      prisma.branch.findMany({
-        where: staff.role === "admin" ? {} : { id: { in: assignment?.branchIds ?? [] } },
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, mode: true },
-      }),
-      prisma.material.findMany({
-        orderBy: { title: "asc" },
-        select: { id: true, title: true, fileType: true, course: { select: { level: true } } },
-      }),
-    ]);
 
     return NextResponse.json({
       ...schedule,
