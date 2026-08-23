@@ -45,6 +45,9 @@ export default function AICoachPanel() {
   const [weeklySummary, setWeeklySummary] = useState<string | null>(null);
   const [pronunciationScore, setPronunciationScore] = useState<number | null>(null);
   const [weakWords, setWeakWords] = useState<WeakWord[]>([]);
+  const [achievementTitle, setAchievementTitle] = useState<string | null>(null);
+  const [speakingMasteryBefore, setSpeakingMasteryBefore] = useState<number | null>(null);
+  const [speakingMasteryAfter, setSpeakingMasteryAfter] = useState<number | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
@@ -364,6 +367,9 @@ export default function AICoachPanel() {
       setExtraWords(Array.isArray(data.extraWords) ? data.extraWords : []);
       setPronunciationScore(typeof data.pronunciationScore === "number" ? data.pronunciationScore : null);
       setWeakWords(Array.isArray(data.weakWords) ? data.weakWords : []);
+      setAchievementTitle(typeof data.achievementTitle === "string" ? data.achievementTitle : null);
+      setSpeakingMasteryBefore(typeof data.masteryBefore === "number" ? data.masteryBefore : null);
+      setSpeakingMasteryAfter(typeof data.masteryAfter === "number" ? data.masteryAfter : null);
       const feedbackArray = [
         `Transcription: ${data.transcription}`,
         `Word match: ${data.wordAccuracy ?? data.confidence}%${data.missingWords?.length ? ` · Missing: ${data.missingWords.join(", ")}` : ""}${data.extraWords?.length ? ` · Extra: ${data.extraWords.join(", ")}` : ""}`,
@@ -576,8 +582,23 @@ export default function AICoachPanel() {
           <div className="relative w-full max-w-lg overflow-hidden rounded-[28px] border border-[var(--accent)]/40 bg-[var(--surface)] p-6 shadow-2xl">
             <button type="button" onClick={() => setShowCoachDialog(false)} aria-label="Close coaching result" className="absolute right-4 top-4 rounded-full px-3 py-1 text-xl text-[var(--muted)] hover:text-[var(--foreground)]">×</button>
             <div className="flex items-center gap-4"><Mascot mood={attemptScore >= 80 ? "cheerful" : "thinking"} className="h-24 w-20 shrink-0" /><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--accent)]">Becca&apos;s voice review</p><h3 id="voice-coach-result" className="mt-1 text-2xl font-bold text-[var(--foreground)]">{attemptScore >= 80 ? "Strong attempt" : "Good start, let&apos;s sharpen it"}</h3><p className="mt-1 text-sm text-[var(--muted)]">Measured from the words your recording produced.</p></div></div>
+            {achievementTitle ? (
+              <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white shadow">
+                🏅 {achievementTitle}
+              </span>
+            ) : null}
             <div className={`mt-5 grid gap-3 ${pronunciationScore !== null ? "grid-cols-3" : "grid-cols-2"}`}><div className="rounded-2xl bg-[var(--surface-alt)] p-4"><p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Word match</p><p className="mt-1 text-3xl font-black text-[var(--accent)]">{wordAccuracy ?? attemptScore}%</p></div>{pronunciationScore !== null ? <div className="rounded-2xl bg-[var(--surface-alt)] p-4"><p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Pronunciation</p><p className="mt-1 text-3xl font-black text-[var(--accent)]">{pronunciationScore}%</p></div> : null}<div className="rounded-2xl bg-[var(--surface-alt)] p-4"><p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Attempt</p><p className="mt-1 text-3xl font-black text-[var(--foreground)]">{attempts}</p></div></div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-400">What you did well</p><p className="mt-1 text-sm text-[var(--foreground)]">{wordAccuracy === 100 ? "You said every target word the recognizer expected." : "You kept part of the target sentence in the right order."}</p></div><div className="rounded-2xl border border-rose-400/20 bg-rose-400/5 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-rose-300">What to sharpen</p><p className="mt-1 text-sm text-[var(--foreground)]">{weakWords.length ? `Weak on: ${weakWords.map((word) => word.word).join(", ")}` : missingWords.length ? `Missing: ${missingWords.join(", ")}` : extraWords.length ? `Extra: ${extraWords.join(", ")}` : "No missing or extra words were detected."}</p></div></div>
+            {speakingMasteryAfter !== null ? (
+              <div className="mt-4 rounded-2xl border border-sky-400/20 bg-sky-400/5 p-4 text-sm">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-sky-300">Speaking mastery</p>
+                <p className="mt-1 text-[var(--foreground)]">
+                  {speakingMasteryBefore !== null && speakingMasteryBefore !== speakingMasteryAfter
+                    ? <>Moved from <span className="font-semibold">{speakingMasteryBefore}%</span> to <span className="font-semibold text-[var(--accent)]">{speakingMasteryAfter}%</span> with this attempt.</>
+                    : <>Currently <span className="font-semibold text-[var(--accent)]">{speakingMasteryAfter}%</span> — every coached attempt moves this number.</>}
+                </p>
+              </div>
+            ) : null}
+            <div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-400">What you did well</p><p className="mt-1 text-sm text-[var(--foreground)]">{achievementTitle ? `${achievementTitle} — ${wordAccuracy === 100 ? "you said every target word the recognizer expected, a clean pass." : wordAccuracy !== null && wordAccuracy >= 80 ? `you captured ${wordAccuracy}% of the target words with the sentence largely intact.` : "keep going, the pattern is starting to show."}` : wordAccuracy === 100 ? "You said every target word the recognizer expected." : "You kept part of the target sentence in the right order."}</p></div><div className="rounded-2xl border border-rose-400/20 bg-rose-400/5 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-rose-300">What to sharpen</p><p className="mt-1 text-sm text-[var(--foreground)]">{weakWords.length ? `Weak on: ${weakWords.map((word) => word.word).join(", ")}` : missingWords.length ? `Missing: ${missingWords.join(", ")}` : extraWords.length ? `Extra: ${extraWords.join(", ")}` : "No missing or extra words were detected."}</p></div></div>
             {weakWords.length ? (
               <div className="mt-4 flex flex-wrap gap-2">
                 {weakWords.map((word) => (

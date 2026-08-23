@@ -395,6 +395,21 @@ async function claudeTurn(
 
     const message = await stream.finalMessage();
 
+    // Metered from the provider's own count, same reasoning as callClaude in
+    // ai.ts: this call bypasses that shared function (it needs streaming and
+    // tool_use turns callClaude does not support), so it must record usage
+    // itself or the admin assistant's Opus-tier spend goes untracked entirely.
+    const used = (message.usage?.input_tokens ?? 0) + (message.usage?.output_tokens ?? 0);
+    if (used > 0 && message.id) {
+      const { recordUsage } = await import("@/lib/usage/record");
+      void recordUsage({
+        meter: "ai.tokens",
+        quantity: used,
+        sourceId: `claude:${message.id}`,
+        metadata: { model: CLAUDE_MODEL, source: "assistant-brain" },
+      });
+    }
+
     /**
      * A refusal is a successful HTTP response with an empty or partial body,
      * so `content[0]` must never be read before this check.

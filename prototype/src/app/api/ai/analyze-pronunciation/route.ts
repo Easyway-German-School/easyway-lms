@@ -33,12 +33,28 @@ export async function POST(request: NextRequest) {
     const student = await prismaStudentForSession(session.user.id);
     const coachingMemory = student ? await getCoachingMemorySummary(student.id) : null;
     const result = await analyzePronunciation(phrase, typeof expectedPhrase === "string" ? expectedPhrase : phrase, null, null, coachingMemory);
+
+    let masteryBefore: number | null = null;
+    let masteryAfter: number | null = null;
     if (student) {
-      void recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
+      const { prisma } = await import("@/lib/prisma");
+      const before = await prisma.studentSkillMastery.findUnique({
+        where: { studentId_skill: { studentId: student.id, skill: "speaking" } },
+        select: { mastery: true },
+      });
+      masteryBefore = before?.mastery ?? null;
+
+      await recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
       await saveVoiceCoachMemory(student.id, typeof expectedPhrase === "string" ? expectedPhrase : phrase, result);
+
+      const after = await prisma.studentSkillMastery.findUnique({
+        where: { studentId_skill: { studentId: student.id, skill: "speaking" } },
+        select: { mastery: true },
+      });
+      masteryAfter = after?.mastery ?? null;
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, masteryBefore, masteryAfter });
   } catch (error) {
     console.error("Pronunciation analysis error:", error);
     return NextResponse.json(

@@ -199,6 +199,20 @@ async function callDeepSeekText(prompt: string, maxTokens: number): Promise<stri
     });
     if (!response.ok) return null;
     const data = (await response.json()) as any;
+
+    // DeepSeek is a real paid API (unlike Groq's free tier) — meter it the
+    // same way callClaude meters Anthropic, or its spend goes untracked.
+    const used = (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0);
+    if (used > 0 && data.id) {
+      const { recordUsage } = await import("@/lib/usage/record");
+      void recordUsage({
+        meter: "ai.tokens",
+        quantity: used,
+        sourceId: `deepseek:${data.id}`,
+        metadata: { model: "deepseek-chat" },
+      });
+    }
+
     return data.choices?.[0]?.message?.content?.trim() || null;
   } catch {
     return null;
@@ -394,6 +408,7 @@ export async function analyzePronunciation(
   extraWords?: string[];
   pronunciationScore?: number | null;
   weakWords?: Array<{ word: string; accuracyScore: number; errorType: string }>;
+  achievementTitle?: string | null;
 }> {
   const wordComparison = comparePronunciationWords(phrase, expectedPhrase);
   // "student" workload, not the default "interactive" one: this feature is a
@@ -2129,7 +2144,8 @@ This is your most reliable evidence for word- and phoneme-level pronunciation. W
   "corrections": ["correction1", "correction2"],
   "confidence": (0-100),
   "nextPractice": "one short, targeted drill for the clearest weakness",
-  "practicePhraseNext": "a NEW short German phrase that specifically drills their weak sounds, e.g. if they miss final consonants, use words ending in -t, -ck, -ch, -ng"
+  "practicePhraseNext": "a NEW short German phrase that specifically drills their weak sounds, e.g. if they miss final consonants, use words ending in -t, -ck, -ch, -ng",
+  "achievementTitle": "a short (2-4 word) badge-style title for what this attempt actually did WELL, e.g. 'Clear Consonants', 'Vowel Precision', 'Steady Rhythm', 'Word-Perfect Run' — ground it in the strongest real signal from the evidence below (a clean word-match, a strong phoneme score, good pacing); if nothing stands out yet, use something honest like 'Building Momentum' rather than inventing praise"
 }
 Target sentence: ${expectedPhrase}
 Spoken transcript: ${phrase}
@@ -2149,6 +2165,7 @@ Use the word comparison, the phoneme assessment (when present), the acoustic mea
     confidence?: number;
     nextPractice?: string;
     practicePhraseNext?: string;
+    achievementTitle?: string;
   }>(raw);
   if (!parsed) return analyzePronunciationMock(phrase, comparison);
 
@@ -2170,6 +2187,7 @@ Use the word comparison, the phoneme assessment (when present), the acoustic mea
     extraWords: comparison.extraWords,
     pronunciationScore: azureAssessment?.pronScore ?? null,
     weakWords: weakWordsFromAzure.map((word) => ({ word: word.word, accuracyScore: word.accuracyScore, errorType: word.errorType })),
+    achievementTitle: parsed.achievementTitle || null,
   };
 }
 
@@ -2289,6 +2307,10 @@ async function analyzePronunciationWithOllama(phrase: string, expectedPhrase: st
         wordAccuracy: comparison.accuracy,
         missingWords: comparison.missingWords,
         extraWords: comparison.extraWords,
+        // Computed from the measured word-match, not asked of the local model:
+        // a small model asked to invent a "you did well at X" badge fabricates
+        // one, same failure class documented on generateDailyMissions.
+        achievementTitle: comparison.accuracy >= 90 ? "Word-Perfect Run" : comparison.accuracy >= 70 ? "Building Momentum" : null,
       };
     } catch {
       return analyzePronunciationMock(phrase, comparison);
@@ -2360,5 +2382,6 @@ function analyzePronunciationMock(phrase: string, comparison: PronunciationWordC
     wordAccuracy: comparison.accuracy,
     missingWords: comparison.missingWords,
     extraWords: comparison.extraWords,
+    achievementTitle: comparison.accuracy >= 90 ? "Word-Perfect Run" : comparison.accuracy >= 70 ? "Building Momentum" : null,
   };
 }

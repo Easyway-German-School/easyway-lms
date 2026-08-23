@@ -71,11 +71,26 @@ export async function POST(request: NextRequest) {
   if (transcription.length < 2) return NextResponse.json({ error: "I could not hear enough German to coach. Try speaking closer to the microphone." }, { status: 422 });
 
   const result = await analyzePronunciation(transcription, expectedPhrase || transcription, acousticFeatures, azureAssessment, coachingMemory);
+
+  let masteryBefore: number | null = null;
+  let masteryAfter: number | null = null;
   if (student) {
-    void recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
+    const before = await prisma.studentSkillMastery.findUnique({
+      where: { studentId_skill: { studentId: student.id, skill: "speaking" } },
+      select: { mastery: true },
+    });
+    masteryBefore = before?.mastery ?? null;
+
+    await recordSkillOutcome({ studentId: student.id, skill: "speaking", score: result.confidence });
     await saveVoiceCoachMemory(student.id, expectedPhrase || transcription, result, acousticFeatures, azureAssessment);
+
+    const after = await prisma.studentSkillMastery.findUnique({
+      where: { studentId_skill: { studentId: student.id, skill: "speaking" } },
+      select: { mastery: true },
+    });
+    masteryAfter = after?.mastery ?? null;
   }
 
-  return NextResponse.json({ ...result, audioAnalyzed: true, analysisMode: "speech-transcript", transcription, phonemeAssessed: Boolean(azureAssessment) });
+  return NextResponse.json({ ...result, audioAnalyzed: true, analysisMode: "speech-transcript", transcription, phonemeAssessed: Boolean(azureAssessment), masteryBefore, masteryAfter });
 }
 
