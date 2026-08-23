@@ -22,12 +22,14 @@ export default function ImpersonationBanner() {
     try {
       const res = await fetch("/api/admin/impersonate/end", { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      // A hard navigation, not router.push: the session cookie just changed
-      // under this tab and next-auth's client cache has no way to know that
-      // on its own.
-      window.location.href = res.ok && data.redirectTo ? data.redirectTo : "/admin";
+      // Hard navigation, and replace() rather than href: the session cookie
+      // just changed under this tab, so next-auth's client cache has no way
+      // to know that on its own — and a push would leave the student
+      // dashboard sitting in this admin's history as something Back can
+      // land on later, after the session behind it has already moved on.
+      window.location.replace(res.ok && data.redirectTo ? data.redirectTo : "/admin");
     } catch {
-      window.location.href = "/admin";
+      window.location.replace("/admin");
     }
   }
 

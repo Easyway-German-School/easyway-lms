@@ -171,9 +171,14 @@ export default function RemoteViewPage() {
       const response = await fetch(`/api/admin/students/${studentId}/impersonate`, { method: "POST" });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Could not start");
-      // Hard navigation: the session cookie just changed under this tab, and
-      // the app's own client-side session cache has no way to know that.
-      window.location.href = body.redirectTo || "/dashboard";
+      // Hard navigation, and replace() rather than href: the session cookie
+      // just changed under this tab, so the app's client-side session cache
+      // has no way to know that — but a push would also leave this remote
+      // view page sitting in history as a back-button destination under a
+      // session it no longer belongs to. Replacing it means Back from the
+      // student dashboard goes straight to wherever this admin actually was
+      // before, not into a stale in-between state.
+      window.location.replace(body.redirectTo || "/dashboard");
     } catch (startError) {
       setActError(startError instanceof Error ? startError.message : "Could not start");
       setActing(false);

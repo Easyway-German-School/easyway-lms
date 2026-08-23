@@ -1,6 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from '@/components/BrandLogo';
@@ -295,7 +296,9 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             {/* The real logo, not an "AW" placeholder — the school has artwork
                 and every other portal was already using it. */}
             <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
-              <BrandLogo variant="wordmark" className="h-8" />
+              <Link href="/admin" aria-label="Go to dashboard">
+                <BrandLogo variant="wordmark" className="h-8" />
+              </Link>
               <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
                 Admin portal
               </p>
@@ -303,7 +306,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 <p className="text-[11px] font-medium text-[var(--accent)]">{adminRoleLabel}</p>
               )}
             </div>
-            {collapsed && <BrandLogo variant="mark" className="hidden h-10 w-10 lg:block" />}
+            {collapsed && (
+              <Link href="/admin" aria-label="Go to dashboard" className="hidden lg:block">
+                <BrandLogo variant="mark" className="h-10 w-10" />
+              </Link>
+            )}
 
             <button
               onClick={() => setCollapsed(!collapsed)}
@@ -416,7 +423,9 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           </button>
 
           <div className="min-w-0 flex-1 lg:hidden">
-            <BrandLogo variant="wordmark" className="h-7" />
+            <Link href="/admin" aria-label="Go to dashboard">
+              <BrandLogo variant="wordmark" className="h-7" />
+            </Link>
           </div>
 
           <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-[var(--foreground-soft)] lg:block">

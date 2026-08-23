@@ -1,6 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { homePathForRole } from '@/lib/portal';
@@ -223,9 +224,15 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
       >
         <div className="border-b border-[var(--border)] p-4">
           <div className="flex items-center justify-between gap-3">
-            {collapsed && <BrandLogo variant="mark" className="hidden h-10 w-10 lg:block" />}
+            {collapsed && (
+              <Link href="/lecturer/dashboard" aria-label="Go to dashboard" className="hidden lg:block">
+                <BrandLogo variant="mark" className="h-10 w-10" />
+              </Link>
+            )}
             <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
-              <BrandLogo variant="wordmark" className="h-9" />
+              <Link href="/lecturer/dashboard" aria-label="Go to dashboard">
+                <BrandLogo variant="wordmark" className="h-9" />
+              </Link>
               <h1 className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
                 Lecturer portal
               </h1>
@@ -303,7 +310,9 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
           </button>
 
           <div className="min-w-0 flex-1 lg:hidden">
-            <BrandLogo variant="wordmark" className="h-7" />
+            <Link href="/lecturer/dashboard" aria-label="Go to dashboard">
+              <BrandLogo variant="wordmark" className="h-7" />
+            </Link>
           </div>
 
           <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-[var(--foreground-soft)] lg:block">

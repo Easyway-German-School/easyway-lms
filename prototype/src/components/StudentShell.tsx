@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
@@ -215,10 +216,14 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
             {/* The wordmark already carries the school name, so it is not
                 repeated beside it — only which portal you are in. */}
             {collapsed ? (
-              <BrandLogo variant="mark" className="h-10 w-10 lg:block hidden" />
+              <Link href="/dashboard" aria-label="Go to dashboard" className="hidden lg:block">
+                <BrandLogo variant="mark" className="h-10 w-10" />
+              </Link>
             ) : null}
             <div className={`min-w-0 ${collapsed ? "lg:hidden" : ""}`}>
-              <BrandLogo variant="wordmark" className="h-9" />
+              <Link href="/dashboard" aria-label="Go to dashboard">
+                <BrandLogo variant="wordmark" className="h-9" />
+              </Link>
               <h1 className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
                 Student portal
               </h1>
@@ -345,7 +350,9 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           </button>
 
           <div className="min-w-0 flex-1 lg:hidden">
-            <BrandLogo variant="wordmark" className="h-7" />
+            <Link href="/dashboard" aria-label="Go to dashboard">
+              <BrandLogo variant="wordmark" className="h-7" />
+            </Link>
           </div>
 
           <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-[var(--foreground-soft)] lg:block">
