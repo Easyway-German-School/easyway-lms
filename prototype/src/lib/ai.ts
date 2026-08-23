@@ -21,7 +21,32 @@ import type { CoachingMemorySummary } from "@/lib/voice-coach-memory";
  * One constant now, so the next model change is one line and cannot go
  * half-applied.
  */
-const CLAUDE_MODEL = "claude-opus-5";
+/**
+ * TWO MODELS, CHOSEN BY WHETHER ANYBODY IS WAITING.
+ *
+ * Measured, not assumed: marking one short essay took ~50 SECONDS on the Opus
+ * tier against a 60-second function ceiling (see vercel.json). Ten seconds of
+ * headroom is not headroom — a longer essay times out, and because the timeout
+ * falls through to the mock grader it does so SILENTLY, which is precisely the
+ * failure this file has now suffered twice.
+ *
+ * So anything a learner sits and waits for goes to the Sonnet tier, which is
+ * roughly three times faster and is the tier this code was written against in
+ * the first place. Work nobody is watching — the admin email composer drafting
+ * a newsletter — keeps the Opus tier, because there the extra minute costs
+ * nothing and the quality is worth having.
+ */
+const CLAUDE_MODEL_FAST = "claude-sonnet-5";
+const CLAUDE_MODEL_DEEP = "claude-opus-5";
+
+/**
+ * Interactive is the DEFAULT, deliberately. A caller that forgets to say which
+ * it is, is far more likely to be one with a student in front of it, and the
+ * cost of guessing wrong that way is a slower answer rather than a timeout.
+ */
+function claudeModelFor(workload: AiWorkload = "interactive"): string {
+  return workload === "backoffice" ? CLAUDE_MODEL_DEEP : CLAUDE_MODEL_FAST;
+}
 
 /**
  * Never send a budget so small the answer cannot fit.
@@ -147,8 +172,12 @@ async function callGroq(prompt: string, maxTokens: number): Promise<string | nul
  * someone set GROQ_API_KEY instead of ANTHROPIC_API_KEY — this is what closes
  * that gap everywhere at once instead of at each call site separately.
  */
-async function callHostedText(prompt: string, maxTokens: number): Promise<string | null> {
-  if (hasKey(process.env.ANTHROPIC_API_KEY)) return callClaude(prompt, maxTokens);
+async function callHostedText(
+  prompt: string,
+  maxTokens: number,
+  workload: AiWorkload = "interactive",
+): Promise<string | null> {
+  if (hasKey(process.env.ANTHROPIC_API_KEY)) return callClaude(prompt, maxTokens, workload);
   if (hasKey(process.env.GROQ_API_KEY)) return callGroq(prompt, maxTokens);
   if (hasKey(process.env.DEEPSEEK_API_KEY)) return callDeepSeekText(prompt, maxTokens);
   return null;
@@ -176,7 +205,12 @@ async function callDeepSeekText(prompt: string, maxTokens: number): Promise<stri
   }
 }
 
-async function callClaude(prompt: string, maxTokens: number): Promise<string | null> {
+async function callClaude(
+  prompt: string,
+  maxTokens: number,
+  workload: AiWorkload = "interactive",
+): Promise<string | null> {
+  const model = claudeModelFor(workload);
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     lastClaudeFailure = "No ANTHROPIC_API_KEY is configured.";
@@ -195,7 +229,7 @@ async function callClaude(prompt: string, maxTokens: number): Promise<string | n
       /**
        * THIS REQUEST SHAPE IS VERSION-SENSITIVE, AND IT HAS BITTEN TWICE.
        *
-       * The note above CLAUDE_MODEL records the first time: a retired model id
+       * The note above CLAUDE_MODEL_FAST records the first time: a retired id
        * left every call 404ing into the mock grader, invisibly, because the
        * mock is deliberately plausible. It happened AGAIN with the successor —
        * `claude-sonnet-4-20250514` was equally retired, and every Claude
@@ -223,7 +257,7 @@ async function callClaude(prompt: string, maxTokens: number): Promise<string | n
        *   sends tools.
        */
       body: JSON.stringify({
-        model: CLAUDE_MODEL,
+        model,
         max_tokens: Math.max(maxTokens, CLAUDE_MIN_TOKENS),
         thinking: { type: "disabled" },
         output_config: { effort: "low" },
@@ -272,7 +306,7 @@ async function callClaude(prompt: string, maxTokens: number): Promise<string | n
         meter: "ai.tokens",
         quantity: used,
         sourceId: `claude:${data.id}`,
-        metadata: { model: CLAUDE_MODEL },
+        metadata: { model },
       });
     }
     // Take the first TEXT block by type rather than by position: a response can
@@ -731,7 +765,7 @@ export function emailDraftEngines(): Array<{ id: EmailDraftEngine; label: string
   const local = localModelAvailable();
   return [
     { id: "auto", label: "Automatic", available: claude || local, detail: local ? "Uses the local model first" : claude ? "Uses Claude" : "No engine reachable" },
-    { id: "claude", label: "Claude", available: claude, detail: claude ? `${CLAUDE_MODEL} — best prose, costs per send` : "No ANTHROPIC_API_KEY set" },
+    { id: "claude", label: "Claude", available: claude, detail: claude ? `${CLAUDE_MODEL_DEEP} — best prose, costs per send` : "No ANTHROPIC_API_KEY set" },
     { id: "local", label: "Local model", available: local, detail: local ? `${getOllamaModel()} — free, blunter writing` : "No local runtime reachable" },
   ];
 }
@@ -780,8 +814,11 @@ Return JSON: {"subject": "...", "blocks": [ ... ]}${JSON_ONLY}`;
   let used = "";
 
   if (engine === "claude") {
-    raw = await callClaude(prompt, 1200);
-    used = CLAUDE_MODEL;
+    // Back office: an admin drafts a newsletter and goes to make tea. The
+    // deeper model is worth the extra seconds here in a way it is not when a
+    // student is watching an essay being marked.
+    raw = await callClaude(prompt, 1200, "backoffice");
+    used = CLAUDE_MODEL_DEEP;
   } else if (engine === "local") {
     raw = await callLocalModel(getOllamaModel(), prompt, 0.4);
     used = getOllamaModel();
@@ -1674,7 +1711,7 @@ function getAIProvider(workload: AiWorkload = "interactive"): Provider {
  */
 export function activeModelName(workload: AiWorkload = "interactive"): string {
   const provider = getAIProvider(workload);
-  if (provider === "claude") return CLAUDE_MODEL;
+  if (provider === "claude") return claudeModelFor(workload);
   if (provider === "groq") return GROQ_MODEL;
   if (provider === "ollama" || provider === "anythingllm") return getOllamaModel();
   return provider;
