@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import AdminShell from "@/components/AdminShell";
+import { naira } from "@/lib/finance/receivables";
 import {
   AlertIcon,
   BellIcon,
@@ -102,10 +103,6 @@ type Remote = {
     at: string;
   }>;
 };
-
-function naira(value: number) {
-  return `₦${Math.round(value / 100).toLocaleString()}`;
-}
 
 function clock(iso: string) {
   return new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
