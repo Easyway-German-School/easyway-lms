@@ -37,6 +37,8 @@ export const TENANT_OWNED_MODELS = [
   "Class",
   "ClassSession",
   "PrivateClass",
+  "PrivateClassSeries",
+  "SchoolHoliday",
   "Course",
   "Module",
   "Lesson",
@@ -102,6 +104,7 @@ export const TENANT_OWNED_MODELS = [
   "SupportTicketMessage",
   "BetaFeedback",
   "LearnerUsageEvent",
+  "LearnerBehaviourProfile",
   /**
    * The live quiz game. A game carries a PIN that admits somebody to it, a
    * frozen copy of one school's question paper, and a leaderboard of one

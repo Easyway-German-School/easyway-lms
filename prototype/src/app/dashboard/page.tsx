@@ -91,6 +91,7 @@ import JourneyMapPoster from "@/components/JourneyMapPoster";
 import GermanyJourney from "@/components/journey/GermanyJourney";
 import DeliveryExperiencePanel from "@/components/DeliveryExperiencePanel";
 import PremiumProgressPanel from "@/components/PremiumProgressPanel";
+import PrivateScheduleSetup from "@/components/PrivateScheduleSetup";
 
 export default function DashboardPage() {
   return (
@@ -603,6 +604,7 @@ function DashboardContent() {
           <LiveClassBanner className="mb-6" />
           {/* Above the hero on purpose: a student with a balance should meet it
               before anything else, and it disappears entirely once settled. */}
+          <PrivateScheduleSetup classType={resolvedStudent?.classType} />
           <TuitionNudge className="mb-6" />
           {/* Same slot the balance band just vacated — a group student stops
               seeing TuitionNudge the moment they finish paying, and this is
@@ -631,13 +633,11 @@ function DashboardContent() {
               once-a-day moment. Above the hero deliberately — the streak and
               the XP are about this week, and this is about the reason they
               enrolled at all. */}
-          <GermanyJourney className="mb-8" />
+          <GermanyJourney className="mb-8" premium={isPrivateStudent} />
           {/* The printed poster for this student's level, if the artwork exists.
               A different thing from the map above: this is the picture the
               school prints, the same for everybody at that level. */}
-          <div className="mb-6">
-            <JourneyMapPoster level={resolvedStudent.level} />
-          </div>
+          {!isPrivateStudent && <div className="mb-6"><JourneyMapPoster level={resolvedStudent.level} /></div>}
           {/* The hero used to be a flat solid orange-to-orange fill — legible,
               but it read as "theme colours applied to a box" rather than an
               actual design, and it broke down in Nacht/Dämmerung because a

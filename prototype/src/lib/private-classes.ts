@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { MergedMonth, MergedSession } from "@/lib/class-sessions";
+import { topUpSeriesForStudent } from "@/lib/private-class-series";
 
 /**
  * Calendars for one-to-one students.
@@ -14,6 +15,51 @@ import type { MergedMonth, MergedSession } from "@/lib/class-sessions";
  * looking at.
  */
 
+/**
+ * Fills in `attendanceStatus` for a session that has already ended, the
+ * first time anyone reads it, so a tutor never has to remember to mark it by
+ * hand for an online class the room itself already has the answer for.
+ *
+ * Only derives for online/hybrid — a physical session has no
+ * `LiveClassInvite` row to read (nobody logs into a room that doesn't
+ * exist), so those stay null until a human marks them. Never overwrites an
+ * existing value: once anyone (the derivation or a manual edit) has set it,
+ * this is a no-op — that is what makes a manual correction stick.
+ */
+export async function ensureAttendanceComputed(privateClass: {
+  id: string;
+  studentId: string;
+  scheduledAt: Date;
+  durationMinutes: number;
+  status: string;
+  deliveryMode: string | null;
+  attendanceStatus: string | null;
+}, studentDeliveryMode: string): Promise<string | null> {
+  if (privateClass.attendanceStatus) return privateClass.attendanceStatus;
+  if (!["scheduled", "completed"].includes(privateClass.status)) return null;
+
+  const end = new Date(privateClass.scheduledAt.getTime() + privateClass.durationMinutes * 60_000);
+  if (end.getTime() > Date.now()) return null;
+
+  const mode = privateClass.deliveryMode ?? studentDeliveryMode;
+  if (mode === "physical") return null;
+
+  const session = await prisma.liveClassSession.findFirst({
+    where: { privateClassId: privateClass.id },
+    select: { id: true },
+  });
+  const invite = session
+    ? await prisma.liveClassInvite.findUnique({
+        where: { sessionId_studentId: { sessionId: session.id, studentId: privateClass.studentId } },
+        select: { status: true },
+      })
+    : null;
+  const computed = invite?.status === "joined" ? "present" : "no_show";
+
+  await prisma.privateClass.update({ where: { id: privateClass.id }, data: { attendanceStatus: computed } }).catch(() => {});
+  return computed;
+}
+
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -26,7 +72,7 @@ function clockTime(date: Date): string {
 
 /** Maps a private-class status onto the states the calendar already renders. */
 function displayStatus(status: string): string {
-  if (status === "cancelled") return "cancelled";
+  if (status === "cancelled" || status === "skipped") return "cancelled";
   if (status === "postponed") return "postponed";
   if (status === "completed") return "held";
   return "scheduled";
@@ -52,12 +98,19 @@ export async function getPrivateSchedule(args: {
   const now = args.now ?? new Date();
   const monthCount = args.months ?? 2;
 
+  // Tops up any recurring series to `WINDOW_WEEKS` ahead before reading —
+  // this is the "generate lazily on read" entry point for the student's own
+  // calendar. Cheap when there is nothing to top up (an early return per
+  // series once its window is already full).
+  await topUpSeriesForStudent(args.studentId, now);
+
   const windowStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const windowEnd = new Date(now.getFullYear(), now.getMonth() + monthCount, 1);
 
   const classes = await prisma.privateClass.findMany({
     where: {
       studentId: args.studentId,
+      status: { in: ["scheduled", "completed", "postponed", "skipped"] },
       scheduledAt: { gte: windowStart, lt: windowEnd },
     },
     include: {

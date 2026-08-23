@@ -75,6 +75,10 @@ export async function GET(req: NextRequest) {
         level: s.level,
         studentCode: s.studentCode,
         branchName: s.branch?.name ?? null,
+        privateSchedulePreferences:
+          s.admission && typeof s.admission === "object" && !Array.isArray(s.admission)
+            ? (s.admission as Record<string, unknown>).privateSchedulePreferences ?? null
+            : null,
       })),
       classes: classes.map((c) => ({
         id: c.id,

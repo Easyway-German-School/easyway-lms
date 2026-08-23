@@ -72,6 +72,7 @@ import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
 import JourneyMapPoster from "@/components/JourneyMapPoster";
 import GermanyJourney from "@/components/journey/GermanyJourney";
+import PrivateScheduleSetup from "@/components/PrivateScheduleSetup";
 
 export default function DashboardPage() {
   return (
@@ -587,6 +588,7 @@ function DashboardContent() {
           />
           {/* Above the hero on purpose: a student with a balance should meet it
               before anything else, and it disappears entirely once settled. */}
+          <PrivateScheduleSetup classType={resolvedStudent?.classType} />
           <TuitionNudge className="mb-6" />
           {/* Sits above the hero for the same reason the nudge does: a student
               whose level has just ended needs to meet that before their

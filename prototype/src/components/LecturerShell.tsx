@@ -1,8 +1,9 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { signOut } from 'next-auth/react';
+import { signOut, useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
+import { homePathForRole } from '@/lib/portal';
 import BrandLogo from "@/components/BrandLogo";
 import HelpLauncher from "@/components/HelpLauncher";
 import PortalUpdates from "@/components/PortalUpdates";
@@ -87,6 +88,7 @@ const navItems: NavItem[] = [
 export default function LecturerShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { data: session, status } = useSession();
   useHideFloatingThemeToggle();
   const [collapsed, setCollapsed] = useState(false);
   const [revoked, setRevoked] = useState(false);
@@ -104,6 +106,36 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
+
+  /**
+   * THE DOOR, same reasoning as AdminShell's: this shell had no session
+   * check at all, so a student or parent who followed a stray link or old
+   * bookmark into `/lecturer/*` got the full tutor console rendered for
+   * them rather than being turned away. Admin is deliberately let through —
+   * several lecturer pages (the group timetable editor, community, live
+   * classroom) are built to also serve admin — but private classes has its
+   * OWN admin page (`/admin/schedule/private/[studentId]`) precisely
+   * because admin has no lecturer identity to view this one with, so that
+   * one path still gets admin bounced to it below.
+   */
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.replace('/auth/lecturer/signin');
+      return;
+    }
+    if (status !== 'authenticated') return;
+    const role = (session?.user?.role ?? '').toLowerCase();
+    if (role !== 'lecturer' && role !== 'tutor' && role !== 'admin') {
+      router.replace(homePathForRole(role));
+    }
+  }, [router, session?.user?.role, status]);
+
+  useEffect(() => {
+    if (pathname !== '/lecturer/private-classes') return;
+    if ((session?.user?.role ?? '').toLowerCase() !== 'admin') return;
+    const studentId = new URLSearchParams(window.location.search).get('studentId');
+    router.replace(studentId ? `/admin/schedule/private/${encodeURIComponent(studentId)}` : '/admin/schedule');
+  }, [pathname, router, session?.user?.role]);
 
   /**
    * A tutor who was marked inactive while signed in loses the portal here.
@@ -142,6 +174,16 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
         </div>
       </div>
     );
+  }
+
+  if (status === 'loading') {
+    return <div className="app-canvas flex min-h-screen items-center justify-center text-[var(--foreground-soft)]">Loading lecturer portal...</div>;
+  }
+
+  const sessionRole = (session?.user?.role ?? '').toLowerCase();
+  const adminOnPrivateClasses = pathname === '/lecturer/private-classes' && sessionRole === 'admin';
+  if (status === 'unauthenticated' || (sessionRole !== 'lecturer' && sessionRole !== 'tutor' && sessionRole !== 'admin') || adminOnPrivateClasses) {
+    return <div className="app-canvas flex min-h-screen items-center justify-center text-[var(--foreground-soft)]">Redirecting...</div>;
   }
 
   /**

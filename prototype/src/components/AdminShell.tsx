@@ -14,10 +14,12 @@ import {
   SlidersIcon,
   BookOpenIcon,
   BranchIcon,
+  CalendarIcon,
   CertificateIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CommunityIcon,
+  CompassIcon,
   CrossIcon,
   DashboardIcon,
   ExamIcon,
@@ -91,7 +93,9 @@ const navItems: NavItem[] = [
   { label: 'Branches', href: '/admin/branches', icon: <BranchIcon />, group: 'Academics' },
   { label: 'Tutors', href: '/admin/lecturer-invite', icon: <LecturerIcon />, group: 'Academics' },
   { label: 'Attendance', href: '/admin/attendance', icon: <AttendanceIcon />, group: 'Academics' },
+  { label: 'All schedules', href: '/admin/schedule', icon: <CalendarIcon />, group: 'Academics' },
   { label: 'Live classes', href: '/admin/live', icon: <PulseIcon />, group: 'Academics' },
+  { label: 'Full timetable', href: '/lecturer/timetable', icon: <CalendarIcon />, group: 'Academics' },
   { label: 'Cohort sign-off', href: '/admin/journey', icon: <MapIcon />, group: 'Academics' },
   { label: 'Promotions', href: '/admin/promotions', icon: <LevelUpIcon />, group: 'Academics' },
   { label: 'Certificates', href: '/admin/certificates', icon: <CertificateIcon />, group: 'Academics' },
@@ -119,9 +123,16 @@ const navItems: NavItem[] = [
   // screen the person paying it could not find.
   { label: 'Platform usage', href: '/admin/billing', icon: <PulseIcon />, group: 'Billing' },
 
+  // What the school's students actually DO, read as patterns rather than as a
+  // list of page views. First in this group because it is the one screen here
+  // that answers a question about students rather than about the software.
+  { label: 'Learner patterns', href: '/admin/intelligence', icon: <CompassIcon />, group: 'Intelligence' },
   { label: 'Assistant', href: '/admin/assistant', icon: <RobotIcon />, group: 'Intelligence' },
   { label: 'AI usage', href: '/admin/ai-usage', icon: <PulseIcon />, group: 'Intelligence' },
   { label: 'Beta lab', href: '/admin/beta', icon: <PulseIcon />, group: 'Intelligence' },
+  // Sat under Settings, where nobody looking for analytics would ever find
+  // it, and titled with a word that told you nothing about what it showed.
+  { label: 'Study plan health', href: '/admin/personalization', icon: <PaletteIcon />, group: 'Intelligence' },
 
   { label: 'General settings', href: '/admin/settings', icon: <SlidersIcon />, group: 'Settings' },
   { label: 'Email centre', href: '/admin/emails', icon: <MailIcon />, group: 'Settings' },
@@ -135,7 +146,6 @@ const navItems: NavItem[] = [
   // until now. The office that needs to notice an endpoint has gone quiet is
   // not the office that will open a terminal to check.
   { label: 'Webhooks', href: '/admin/webhooks', icon: <LinkIcon />, group: 'Settings' },
-  { label: 'Personalization', href: '/admin/personalization', icon: <PaletteIcon />, group: 'Settings' },
 
   // Last, and its own group, because it is not part of running a school. This
   // is the console for the business that sells the software to schools.

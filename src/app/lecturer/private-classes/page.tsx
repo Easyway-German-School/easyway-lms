@@ -21,6 +21,15 @@ type Student = {
   level: string;
   studentCode: string | null;
   branchName: string | null;
+  privateSchedulePreferences: {
+    days?: string[];
+    windows?: string[];
+    examTimes?: string[];
+    preferredTimes?: string[];
+    frequency?: string;
+    timezone?: string;
+    notes?: string;
+  } | null;
 };
 
 type PrivateClass = {
@@ -183,6 +192,23 @@ export default function LecturerPrivateClassesPage() {
               </select>
               {selected?.studentCode && (
                 <p className="mt-1 font-mono text-xs text-slate-500">{selected.studentCode}</p>
+              )}
+            </div>
+
+            <div className="mb-8 rounded-xl border border-amber-200 bg-amber-50 p-5">
+              <h2 className="font-semibold text-amber-950">Student availability</h2>
+              {selected?.privateSchedulePreferences ? (
+                <div className="mt-3 grid gap-2 text-sm text-amber-950 sm:grid-cols-2">
+                  <p><span className="font-semibold">Days:</span> {selected.privateSchedulePreferences.days?.join(", ") || "Not specified"}</p>
+                  <p><span className="font-semibold">Times:</span> {selected.privateSchedulePreferences.windows?.join(", ") || "Not specified"}</p>
+                  <p><span className="font-semibold">Frequency:</span> {selected.privateSchedulePreferences.frequency || "Not specified"}</p>
+                  <p><span className="font-semibold">Timezone:</span> {selected.privateSchedulePreferences.timezone || "Not specified"}</p>
+                  {selected.privateSchedulePreferences.notes && <p className="sm:col-span-2"><span className="font-semibold">Notes:</span> {selected.privateSchedulePreferences.notes}</p>}
+                  {selected.privateSchedulePreferences.examTimes?.length ? <p className="sm:col-span-2"><span className="font-semibold">Exam times:</span> {selected.privateSchedulePreferences.examTimes.join(", ")}</p> : null}
+                  {selected.privateSchedulePreferences.preferredTimes?.length ? <p className="sm:col-span-2"><span className="font-semibold">Class times:</span> {selected.privateSchedulePreferences.preferredTimes.join(", ")}</p> : null}
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-amber-900">The student has not shared availability yet.</p>
               )}
             </div>
 

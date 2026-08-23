@@ -89,7 +89,7 @@ type Journey = {
 /* The banner at the top of the map                                           */
 /* -------------------------------------------------------------------------- */
 
-function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeGoal: () => void }) {
+function ProgressRibbon({ journey, onChangeGoal, premium }: { journey: Journey; onChangeGoal: () => void; premium?: boolean }) {
   return (
     <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] px-5 py-5 text-white sm:px-7 sm:py-6">
       <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-[var(--surface-alt)] blur-3xl" />
@@ -103,7 +103,7 @@ function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeG
       <div className="relative flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--surface-alt)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur">
           <MapIcon className="h-3.5 w-3.5" />
-          Your road to Germany
+          {premium ? `${journey.currentLevel} private coaching journey` : "Your road to Germany"}
         </span>
         {journey.tribe ? (
           <span className="rounded-full bg-[var(--surface-alt)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur">
@@ -210,6 +210,7 @@ function JourneyBody({
   onClaim,
   claimingStage,
   onChangeGoal,
+  premium,
 }: {
   journey: Journey;
   busy: boolean;
@@ -218,6 +219,7 @@ function JourneyBody({
   onClaim: (stage: JourneyStage, undo: boolean) => void;
   claimingStage: string | null;
   onChangeGoal: () => void;
+  premium?: boolean;
 }) {
   /**
    * The map, or the list.
@@ -232,7 +234,7 @@ function JourneyBody({
 
   return (
     <div className="space-y-4">
-      <ProgressRibbon journey={journey} onChangeGoal={onChangeGoal} />
+      <ProgressRibbon journey={journey} onChangeGoal={onChangeGoal} premium={premium} />
 
       {journey.previewOnly ? (
         <div className="rounded-[28px] border border-[var(--accent)]/40 bg-[var(--accent-soft)] p-5">
@@ -444,9 +446,11 @@ export default function GermanyJourney({
    *   pitch.
    */
   variant = "launcher",
+  premium = false,
 }: {
   className?: string;
   variant?: "launcher" | "inline";
+  premium?: boolean;
 }) {
   const [journey, setJourney] = useState<Journey | null>(null);
   const [busy, setBusy] = useState(false);
@@ -601,15 +605,19 @@ export default function GermanyJourney({
   if (!journey) return null;
 
   const body = (
-    <JourneyBody
-      journey={journey}
-      busy={busy}
-      reply={reply}
-      onAnswer={answer}
-      onClaim={claim}
-      claimingStage={claimingStage}
-      onChangeGoal={() => setChangingGoal(true)}
-    />
+    <div className={premium ? "rounded-[32px] border border-[#D4AF37]/40 bg-[#090909] p-3 shadow-2xl sm:p-5" : ""}>
+      {premium ? <div className="mb-4 flex items-center justify-between px-2"><span className="text-xs font-bold uppercase tracking-[0.28em] text-[#E8C766]">Private coaching atelier</span><span className="rounded-full border border-[#D4AF37]/50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#E8C766]">{journey.currentLevel} · 1:1</span></div> : null}
+      <JourneyBody
+        journey={journey}
+        busy={busy}
+        reply={reply}
+        onAnswer={answer}
+        onClaim={claim}
+        claimingStage={claimingStage}
+        onChangeGoal={() => setChangingGoal(true)}
+        premium={premium}
+      />
+    </div>
   );
 
   return (

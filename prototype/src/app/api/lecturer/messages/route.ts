@@ -152,7 +152,7 @@ export async function GET() {
   });
 }
 
-/** POST — send to the whole cohort, or to one student. */
+/** POST — send to the whole cohort, or to a chosen subset of it. */
 export async function POST(request: NextRequest) {
   const auth = await requireLecturer();
   if ("error" in auth) return auth.error;
@@ -162,7 +162,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const message = typeof body.message === "string" ? body.message.trim() : "";
-    const studentId = typeof body.studentId === "string" ? body.studentId.trim() : "";
+    // Back-compat with the old single-student payload alongside the new
+    // multi-select one, so nothing on the client has to change in lockstep.
+    const studentIds = Array.isArray(body.studentIds)
+      ? body.studentIds.filter((id: unknown): id is string => typeof id === "string" && id.trim().length > 0)
+      : typeof body.studentId === "string" && body.studentId.trim()
+        ? [body.studentId.trim()]
+        : [];
 
     if (!title || !message) {
       return NextResponse.json({ error: "A subject and a message are both required" }, { status: 400 });
@@ -176,11 +182,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Sending to one student is still restricted to the tutor's own cohort —
-    // a tutor should not be able to message the whole school by guessing ids.
-    const targets = studentId ? students.filter((student) => student.id === studentId) : students;
+    // Picking a subset is still restricted to the tutor's own cohort — a
+    // tutor should not be able to message the whole school by guessing ids.
+    // This is also what keeps a private student out of a message meant only
+    // for the group class: the tutor simply leaves them unchecked.
+    const targets = studentIds.length > 0 ? students.filter((student) => studentIds.includes(student.id)) : students;
     if (targets.length === 0) {
-      return NextResponse.json({ error: "That student is not in your class" }, { status: 403 });
+      return NextResponse.json({ error: "None of the selected students are in your class" }, { status: 403 });
     }
 
     const sentAt = new Date();

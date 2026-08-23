@@ -62,7 +62,8 @@ export default function LecturerMessagesPage() {
 
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [studentId, setStudentId] = useState("");
+  const [audience, setAudience] = useState<"cohort" | "student">("cohort");
+  const [studentIds, setStudentIds] = useState<string[]>([]);
 
   // The "Ask my tutor" side — students writing IN, not the tutor broadcasting
   // out. A separate inbox from `sent` because it is a different conversation
@@ -177,7 +178,7 @@ export default function LecturerMessagesPage() {
       const res = await fetch("/api/lecturer/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, message, studentId: studentId || undefined }),
+        body: JSON.stringify({ title, message, studentIds: audience === "student" ? studentIds : undefined }),
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(payload.error || "Could not send your message");
@@ -185,7 +186,8 @@ export default function LecturerMessagesPage() {
       setNotice(`Sent to ${payload.recipients} student${payload.recipients === 1 ? "" : "s"}.`);
       setTitle("");
       setMessage("");
-      setStudentId("");
+      setAudience("cohort");
+      setStudentIds([]);
       await load();
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Could not send your message");
@@ -240,18 +242,65 @@ export default function LecturerMessagesPage() {
               </div>
 
               <div>
-                <label htmlFor="to" className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Send to</label>
-                <select
-                  id="to"
-                  value={studentId}
-                  onChange={(event) => setStudentId(event.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-[var(--foreground)]"
-                >
-                  <option value="">Everyone in my class ({cohortSize})</option>
-                  {recipients.map((recipient) => (
-                    <option key={recipient.id} value={recipient.id}>{recipient.name}</option>
+                <label className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Send to</label>
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      { value: "cohort", label: `Everyone in my class (${cohortSize})` },
+                      { value: "student", label: "Pick students" },
+                    ] as const
+                  ).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setAudience(option.value)}
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                        audience === option.value
+                          ? "bg-[var(--accent)] text-white"
+                          : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
                   ))}
-                </select>
+                </div>
+
+                {/*
+                  A student picked to message here can also be a private-class
+                  student who happens to show up in this same cohort list — the
+                  problem this replaces was that "everyone" was the ONLY way to
+                  reach the group, so a private student always got swept in too.
+                  Checkboxes let a tutor leave them unchecked instead.
+                */}
+                {audience === "student" && (
+                  <div className="mt-3 max-h-56 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
+                    {recipients.length === 0 ? (
+                      <p className="p-3 text-sm text-[var(--muted)]">No students in your class yet.</p>
+                    ) : (
+                      recipients.map((recipient) => {
+                        const checked = studentIds.includes(recipient.id);
+                        return (
+                          <label
+                            key={recipient.id}
+                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition hover:bg-[var(--background)]"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                setStudentIds((current) =>
+                                  checked ? current.filter((id) => id !== recipient.id) : [...current, recipient.id],
+                                )
+                              }
+                              className="h-4 w-4 accent-[var(--accent)]"
+                            />
+                            <span className="flex-1 font-medium text-[var(--foreground)]">{recipient.name}</span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -281,10 +330,14 @@ export default function LecturerMessagesPage() {
 
               <button
                 type="submit"
-                disabled={sending || !title.trim() || !message.trim()}
+                disabled={sending || !title.trim() || !message.trim() || (audience === "student" && studentIds.length === 0)}
                 className="rounded-lg bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {sending ? "Sending…" : studentId ? "Send to this student" : `Send to all ${cohortSize}`}
+                {sending
+                  ? "Sending…"
+                  : audience === "student"
+                    ? `Send to ${studentIds.length} student${studentIds.length === 1 ? "" : "s"}`
+                    : `Send to all ${cohortSize}`}
               </button>
             </form>
           )}

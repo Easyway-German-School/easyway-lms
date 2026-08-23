@@ -31,6 +31,7 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   { prefix: "/admin/promotions", capability: "students" },
 
   { prefix: "/admin/attendance", capability: "attendance" },
+  { prefix: "/admin/schedule", capability: "classes" },
   // Who is live right now, in which class — coordinating classes in real
   // time is the same desk as coordinating them on the timetable.
   { prefix: "/admin/live", capability: "classes" },
@@ -58,6 +59,11 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   { prefix: "/admin/billing", capability: "payments" },
   { prefix: "/admin/reports", capability: "reports" },
   { prefix: "/admin/personalization", capability: "reports" },
+  // Behaviour patterns across the roster. Sits with reporting rather than
+  // with `students`: it is an aggregate reading of the school, and the one
+  // per-student view of it is reached from the student file, which is
+  // separately gated on `students` by its own route.
+  { prefix: "/admin/intelligence", capability: "reports" },
   { prefix: "/admin/ai-usage", capability: "reports" },
   { prefix: "/admin/beta", capability: "reports" },
 

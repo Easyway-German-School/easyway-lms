@@ -425,7 +425,11 @@ export default function NotificationCenter({
                 transition={{ type: "spring", stiffness: 400, damping: 30 }}
                 role="dialog"
                 aria-label="Notifications"
-                className={`fixed inset-x-3 top-16 z-50 flex max-h-[70vh] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.5rem)] sm:w-[400px] ${
+                // `top-16` alone assumes a 4rem header and no device notch/PWA
+                // status-bar inset — on a phone with either, the panel could
+                // render partly behind it. `max()` with `env(safe-area-inset-top)`
+                // pushes it below whichever is actually taller.
+                className={`fixed inset-x-3 top-[max(4rem,calc(env(safe-area-inset-top)+3.5rem))] z-50 flex max-h-[70vh] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.5rem)] sm:w-[400px] ${
                   align === "right" ? "sm:right-0" : "sm:left-0"
                 }`}
               >
@@ -519,7 +523,8 @@ export default function NotificationCenter({
         students use puts the same thing — and it means a notification never
         lands over the header, the bell, or whatever they were reading.
       */}
-      <div className="pointer-events-none fixed inset-x-4 bottom-4 z-[120] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:w-[22rem]">
+      {/* `env(safe-area-inset-bottom)` keeps this clear of a phone's home-indicator strip. */}
+      <div className="pointer-events-none fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[120] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:w-[22rem]">
         <AnimatePresence initial={false}>
           {toasts.map((toast) => {
             const tone = toneFor(toast.severity);
