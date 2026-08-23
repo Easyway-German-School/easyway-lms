@@ -323,6 +323,13 @@ export const authOptions: AuthOptions = {
         session.user.role = normalizeRole(token.role || "STUDENT");
         session.user.tenantId = token.tenantId as string | undefined;
         session.user.adminLocked = Boolean(token.adminLocked);
+        // Set only on a token minted by the act-as-student route — see
+        // src/lib/impersonation.ts. Read by ImpersonationBanner so the admin
+        // (never the student, who has their own untouched session) always
+        // knows they are inside someone else's account and can get back.
+        session.user.impersonatedBy = token.impersonatorId
+          ? { id: token.impersonatorId as string, email: token.impersonatorEmail as string | undefined }
+          : undefined;
         if (!token.tenantId && token.id) {
           try {
             const u = await prisma.user.findUnique({

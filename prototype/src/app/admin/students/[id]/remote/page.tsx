@@ -133,6 +133,19 @@ export default function RemoteViewPage() {
   const [data, setData] = useState<Remote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingAct, setConfirmingAct] = useState(false);
+  const [acting, setActing] = useState(false);
+  const [actError, setActError] = useState<string | null>(null);
+  // Client-side gate only, so the button is not offered to someone the server
+  // route will refuse anyway. The route re-checks this itself either way.
+  const [canActAs, setCanActAs] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/me", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((me) => setCanActAs(me?.adminRole === "super"))
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -153,6 +166,23 @@ export default function RemoteViewPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function startActingAs(studentId: string) {
+    setActing(true);
+    setActError(null);
+    try {
+      const response = await fetch(`/api/admin/students/${studentId}/impersonate`, { method: "POST" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not start");
+      // Hard navigation: the session cookie just changed under this tab, and
+      // the app's own client-side session cache has no way to know that.
+      window.location.href = body.redirectTo || "/dashboard";
+    } catch (startError) {
+      setActError(startError instanceof Error ? startError.message : "Could not start");
+      setActing(false);
+      setConfirmingAct(false);
+    }
+  }
 
   /**
    * Re-read every 30 seconds, and only while the tab is visible. This screen
@@ -242,8 +272,42 @@ export default function RemoteViewPage() {
               <RefreshIcon className="h-4 w-4" />
               Refresh
             </button>
+            {!canActAs ? null : !confirmingAct ? (
+              <button
+                type="button"
+                onClick={() => setConfirmingAct(true)}
+                className="inline-flex items-center gap-2 rounded-full border border-amber-500/50 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-500/20 dark:text-amber-300"
+              >
+                <EyeIcon className="h-4 w-4" />
+                Act as {identity.name.split(" ")[0]}
+              </button>
+            ) : (
+              <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
+                Sign in as {identity.name.split(" ")[0]}?
+                <button
+                  type="button"
+                  disabled={acting}
+                  onClick={() => void startActingAs(identity.id)}
+                  className="rounded-full bg-amber-600 px-3 py-1 text-xs font-bold text-white transition hover:bg-amber-700 disabled:opacity-60"
+                >
+                  {acting ? "Starting…" : "Yes"}
+                </button>
+                <button
+                  type="button"
+                  disabled={acting}
+                  onClick={() => setConfirmingAct(false)}
+                  className="rounded-full px-2 py-1 text-xs font-semibold text-amber-700/70 hover:text-amber-700 dark:text-amber-300/70"
+                >
+                  Cancel
+                </button>
+              </span>
+            )}
           </div>
         </div>
+
+        {actError ? (
+          <div className="rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">{actError}</div>
+        ) : null}
 
         {/* ---- The standing promise this screen makes ------------------- */}
         <div className="flex flex-wrap items-start gap-3 rounded-3xl border border-sky-400/40 bg-sky-500/10 p-5">
@@ -252,12 +316,13 @@ export default function RemoteViewPage() {
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-sky-900 dark:text-sky-200">
-              You are looking, not logging in.
+              Everything above this line is looking, not logging in.
             </p>
             <p className="mt-1 text-sm text-sky-900/80 dark:text-sky-200/80">
-              Nothing on this page can change {identity.name.split(" ")[0]}&apos;s account, mark anything as read, or
-              act as them. Their password is untouched and their session is unaffected — they will not be signed out.
-              Opening this page is recorded in the audit trail under your name.
+              Nothing on this page can change {identity.name.split(" ")[0]}&apos;s account or mark anything as read on
+              its own. Their password is untouched and their own session is unaffected either way — they are never
+              signed out. Opening this page is recorded under your name; so is &quot;Act as&quot;, every time it is
+              used, at the highest audit severity, because it is the one control here that genuinely becomes them.
             </p>
           </div>
         </div>

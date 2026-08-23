@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
+import ImpersonationBanner from "@/components/ImpersonationBanner";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
@@ -190,6 +191,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     // themselves when to open is how a first login came to mean five stacked
     // overlays — see lib/moment-queue.tsx.
     <MomentQueueProvider>
+    <ImpersonationBanner />
     {/* Was a hardcoded blue gradient, which is why the portal stayed daylight-
         blue whatever theme was chosen. The themed canvas is the page's job. */}
     <div className="app-canvas flex min-h-screen text-[var(--foreground)]">
