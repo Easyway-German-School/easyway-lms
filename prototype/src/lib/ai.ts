@@ -357,6 +357,9 @@ Acoustic coaching context for German:
 export async function gradeEssay(essay: string): Promise<{
   score: number;
   feedback: Array<{ category: string; comment: string; score: number }>;
+  strengths: string[];
+  growthAreas: string[];
+  achievementTitle: string | null;
   summary: string;
 }> {
   // "student", not the default "interactive": a funded Claude key must not be
@@ -2041,26 +2044,38 @@ function generateNextStepsMock(score: number, feedback: Array<{ category: string
 // Hosted implementation — Claude, Groq or DeepSeek, whichever `callHostedText` finds configured.
 async function gradeEssayWithClaude(essay: string) {
   const raw = await callHostedText(
-    `Grade this German essay at B2 exam standard. Return JSON with:
+    `Grade this German essay at B2 exam standard, like a sharp but encouraging tutor handing back marked work —
+not a form letter. Every comment must quote or closely paraphrase an actual word, phrase, or sentence FROM THIS
+ESSAY as evidence. A comment that could be pasted onto any other essay unchanged is not acceptable — rewrite it
+until it only fits this one. Return JSON:
 {
   "score": (0-100),
   "feedback": [
-    {"category": "Grammar", "comment": "...", "score": (0-100)},
-    {"category": "Vocabulary", "comment": "...", "score": (0-100)},
-    {"category": "Structure", "comment": "...", "score": (0-100)},
-    {"category": "Spelling", "comment": "...", "score": (0-100)}
+    {"category": "Grammar", "comment": "quote or reference something specific from THIS essay", "score": (0-100)},
+    {"category": "Vocabulary", "comment": "quote or reference something specific from THIS essay", "score": (0-100)},
+    {"category": "Structure", "comment": "quote or reference something specific from THIS essay", "score": (0-100)},
+    {"category": "Spelling", "comment": "quote or reference something specific from THIS essay", "score": (0-100)}
   ],
-  "summary": "Overall assessment..."
+  "strengths": ["one specific thing done well, quoting the essay", "a second, different one"],
+  "growthAreas": ["the single highest-impact fix, quoting the exact spot", "the second highest-impact fix"],
+  "achievementTitle": "a short (2-4 word) badge-style title reflecting their STRONGEST category this round, e.g. 'Vocabulary Virtuoso', 'Grammar Guardian', 'Structure Specialist' — pick whichever category actually scored highest, do not default to the same one every time",
+  "summary": "2-3 sentences, overall assessment, second person"
 }
+growthAreas must be ordered by impact — the fix that would raise the score the most comes first. Do not invent
+errors that are not in the text; if the essay is genuinely strong in a category, say so and leave that out of
+growthAreas.
 
 Essay to grade:
 ${essay}${JSON_ONLY}`,
-    1024,
+    1200,
   );
 
   const parsed = parseJsonReply<{
     score?: number;
     feedback?: Array<{ category: string; comment: string; score: number }>;
+    strengths?: string[];
+    growthAreas?: string[];
+    achievementTitle?: string;
     summary?: string;
   }>(raw);
   if (!parsed) return gradeEssayMock(essay);
@@ -2068,6 +2083,9 @@ ${essay}${JSON_ONLY}`,
   return {
     score: parsed.score || 75,
     feedback: parsed.feedback || [],
+    strengths: parsed.strengths || [],
+    growthAreas: parsed.growthAreas || [],
+    achievementTitle: parsed.achievementTitle || null,
     summary: parsed.summary || "Essay graded by Claude AI.",
   };
 }
@@ -2225,6 +2243,9 @@ ${essay}`,
       return {
         score: parsed.score || 75,
         feedback: parsed.feedback || [],
+        strengths: parsed.strengths || [],
+        growthAreas: parsed.growthAreas || [],
+        achievementTitle: parsed.achievementTitle || null,
         summary: parsed.summary || "Essay graded by Ollama.",
       };
     } catch {
@@ -2307,6 +2328,13 @@ function gradeEssayMock(essay: string) {
         score: score - 2,
       },
     ],
+    strengths: [
+      "Your subordinate clauses are consistently well-formed — that is a B2/C1 marker most learners at your stage still miss.",
+    ],
+    growthAreas: [
+      "Watch case agreement after accusative prepositions — that is the single fastest way to lift this score.",
+    ],
+    achievementTitle: hasGrammarErrors ? "Vocabulary Builder" : "Structure Specialist",
     summary: `Score: ${score}/100. Your essay demonstrates solid B2 competency with clear structure and appropriate vocabulary. Focus on varying sentence complexity and refining grammatical accuracy for C1-level writing.`,
   };
 }

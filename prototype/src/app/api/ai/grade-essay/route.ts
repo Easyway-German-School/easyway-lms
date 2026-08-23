@@ -31,8 +31,26 @@ export async function POST(request: NextRequest) {
 
     const result = await gradeEssay(essay);
     const student = await prismaStudentForSession(session.user.id);
-    if (student) void recordSkillOutcome({ studentId: student.id, skill: "writing", score: result.score });
-    
+
+    let masteryBefore: number | null = null;
+    let masteryAfter: number | null = null;
+    if (student) {
+      const { prisma } = await import("@/lib/prisma");
+      const before = await prisma.studentSkillMastery.findUnique({
+        where: { studentId_skill: { studentId: student.id, skill: "writing" } },
+        select: { mastery: true },
+      });
+      masteryBefore = before?.mastery ?? null;
+
+      await recordSkillOutcome({ studentId: student.id, skill: "writing", score: result.score });
+
+      const after = await prisma.studentSkillMastery.findUnique({
+        where: { studentId_skill: { studentId: student.id, skill: "writing" } },
+        select: { mastery: true },
+      });
+      masteryAfter = after?.mastery ?? null;
+    }
+
     // Generate AI-driven next steps based on the grade
     const { generateEssayNextSteps } = await import("@/lib/ai");
     const nextStep = await generateEssayNextSteps(result.score, result.feedback, essay);
@@ -40,6 +58,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ...result,
       nextStep, // Add AI-generated suggestion
+      masteryBefore,
+      masteryAfter,
     });
   } catch (error) {
     console.error("Essay grading error:", error);
