@@ -3,7 +3,7 @@ import { encode } from "next-auth/jwt";
 import { requireAdmin } from "@/lib/admin-roles";
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
-import { IMPERSONATION_MAX_AGE_SECONDS, sessionCookieName, sessionCookieOptions } from "@/lib/impersonation";
+import { IMPERSONATION_MAX_AGE_SECONDS, readSessionCookie, sessionCookieOptions } from "@/lib/impersonation";
 
 /**
  * START acting as a student. See src/lib/impersonation.ts for the mechanism.
@@ -40,13 +40,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "This account is not a student" }, { status: 400 });
   }
 
-  const cookieName = sessionCookieName();
   // The admin's own signed-in cookie, folded whole into the new token so
   // ending the session needs no lookup — see src/lib/impersonation.ts.
-  const adminRawToken = request.cookies.get(cookieName)?.value ?? null;
-  if (!adminRawToken) {
+  const ownCookie = readSessionCookie(request);
+  if (!ownCookie) {
     return NextResponse.json({ error: "Your own session could not be read" }, { status: 401 });
   }
+  const { name: cookieName, value: adminRawToken, secure } = ownCookie;
 
   const studentToken = {
     id: student.user.id,
@@ -78,6 +78,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   });
 
   const response = NextResponse.json({ ok: true, redirectTo: "/dashboard" });
-  response.cookies.set(cookieName, encoded, sessionCookieOptions(IMPERSONATION_MAX_AGE_SECONDS));
+  response.cookies.set(cookieName, encoded, sessionCookieOptions(secure, IMPERSONATION_MAX_AGE_SECONDS));
   return response;
 }

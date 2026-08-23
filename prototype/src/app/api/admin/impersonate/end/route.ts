@@ -4,7 +4,7 @@ import { beginRequestScope } from "@/lib/tenant/context";
 import { beginAuditScope, setAuditActor } from "@/lib/audit-context";
 import { unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
-import { sessionCookieName, sessionCookieOptions } from "@/lib/impersonation";
+import { readSessionCookie, sessionCookieOptions } from "@/lib/impersonation";
 
 /**
  * END an act-as session and hand the browser its admin cookie back.
@@ -20,11 +20,11 @@ export async function POST(request: NextRequest) {
   beginAuditScope();
 
   const secret = process.env.NEXTAUTH_SECRET;
-  const cookieName = sessionCookieName();
-  const raw = request.cookies.get(cookieName)?.value;
-  if (!secret || !raw) {
+  const ownCookie = readSessionCookie(request);
+  if (!secret || !ownCookie) {
     return NextResponse.json({ error: "No session" }, { status: 401 });
   }
+  const { name: cookieName, value: raw, secure } = ownCookie;
 
   const token = await decode({ token: raw, secret });
   const adminToken = token?.impersonatorToken as string | undefined;
@@ -52,6 +52,6 @@ export async function POST(request: NextRequest) {
     redirectTo: studentId ? `/admin/students/${studentId}` : "/admin",
   });
   // Restored verbatim — it is still the admin's original, unexpired token.
-  response.cookies.set(cookieName, adminToken, sessionCookieOptions(30 * 24 * 60 * 60));
+  response.cookies.set(cookieName, adminToken, sessionCookieOptions(secure, 30 * 24 * 60 * 60));
   return response;
 }

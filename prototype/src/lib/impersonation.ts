@@ -1,3 +1,5 @@
+import type { NextRequest } from "next/server";
+
 /**
  * Act-as-student sessions.
  *
@@ -29,21 +31,42 @@
 
 export const IMPERSONATION_MAX_AGE_SECONDS = 60 * 60 * 3; // 3 hours
 
-function secureCookieContext(): boolean {
-  return (process.env.NEXTAUTH_URL || "").startsWith("https://");
+const SECURE_COOKIE_NAME = "__Secure-next-auth.session-token";
+const PLAIN_COOKIE_NAME = "next-auth.session-token";
+
+/**
+ * Which of the two cookie names next-auth actually used for THIS request,
+ * found by asking the browser rather than by re-deriving next-auth's own
+ * `useSecureCookies` decision — that decision depends on how next-auth reads
+ * the deployment's base URL internally, which is not part of its public API
+ * and does not always agree with a simple `NEXTAUTH_URL.startsWith("https")`
+ * check. Reading whichever cookie the browser actually sent is exact by
+ * construction: it is the same cookie next-auth's own `getServerSession`
+ * would have read one line later in the same request.
+ *
+ * Returns null when neither cookie is present — an unauthenticated request.
+ */
+export function readSessionCookie(
+  request: NextRequest,
+): { name: string; value: string; secure: boolean } | null {
+  const secure = request.cookies.get(SECURE_COOKIE_NAME);
+  if (secure) return { name: SECURE_COOKIE_NAME, value: secure.value, secure: true };
+  const plain = request.cookies.get(PLAIN_COOKIE_NAME);
+  if (plain) return { name: PLAIN_COOKIE_NAME, value: plain.value, secure: false };
+  return null;
 }
 
-/** Matches next-auth's own default cookie name/prefix — see its src/core/lib/cookie.ts. */
-export function sessionCookieName(): string {
-  return secureCookieContext() ? "__Secure-next-auth.session-token" : "next-auth.session-token";
-}
-
-export function sessionCookieOptions(maxAgeSeconds: number) {
+/**
+ * Options for setting a session cookie back. `secure` must match whichever
+ * name is being written — pass the value `readSessionCookie` returned for
+ * the request this cookie belongs to, not a guess.
+ */
+export function sessionCookieOptions(secure: boolean, maxAgeSeconds: number) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
     path: "/",
-    secure: secureCookieContext(),
+    secure,
     maxAge: maxAgeSeconds,
   };
 }
