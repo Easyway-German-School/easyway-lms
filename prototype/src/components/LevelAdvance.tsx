@@ -109,7 +109,9 @@ function primaryAction(offer: LevelAdvanceOffer) {
   if (offer.atTopOfLadder) return { href: "/exam-centre", label: "Register for your exam" };
   if (offer.currentLevelOutstanding > 0) return { href: "/payments", label: `Clear ${naira(offer.currentLevelOutstanding)} first` };
   if (!offer.sellableOnline) return { href: "/notifications", label: `Ask the office about ${offer.nextLevel}` };
-  return { href: "/programs", label: `Continue to ${offer.nextLevel}` };
+  // Marks this checkout as the next-level purchase, not a top-up on the level
+  // just finished — see /api/paystack/initialize's forNextLevel handling.
+  return { href: "/programs?forNextLevel=1", label: `Continue to ${offer.nextLevel}` };
 }
 
 function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClose: () => void }) {

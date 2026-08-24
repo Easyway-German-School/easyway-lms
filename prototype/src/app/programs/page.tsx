@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 
 import TuitionCheckout from "@/components/TuitionCheckout";
+import NextLevelCheckout from "@/components/NextLevelCheckout";
 import PremiumPrivateClasses from "@/components/PremiumPrivateClasses";
 
 /**
@@ -108,9 +109,11 @@ function PrivateUpsellPopup({ onExplore, onDismiss }: { onExplore: () => void; o
 
 const UPSELL_SEEN_KEY = "easyway:private-upsell-seen";
 
-export default function ProgramsPage() {
+function ProgramsPageInner() {
   const { status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const forNextLevel = searchParams.get("forNextLevel") === "1";
   const [selected, setSelected] = useState(programs[0].pathwayName);
   const [student, setStudent] = useState<StudentInfo | null>(null);
   const [showUpsellPopup, setShowUpsellPopup] = useState(false);
@@ -164,63 +167,70 @@ export default function ProgramsPage() {
     <div className="min-h-screen bg-[var(--surface-alt)] py-10 text-[var(--foreground)]">
       <div className="mx-auto max-w-6xl space-y-8 px-6 md:px-10">
         <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
-          <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Tuition &amp; pathways</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight">Settle your tuition</h1>
+          <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">
+            {forNextLevel ? "Continuing your studies" : "Tuition & pathways"}
+          </p>
+          <h1 className="mt-3 text-4xl font-semibold tracking-tight">
+            {forNextLevel ? "Continue to your next level" : "Settle your tuition"}
+          </h1>
           <p className="mt-4 max-w-2xl text-[var(--muted)]">
-            Your tuition is set by your level and your branch — the pathway you pick decides what you study, not
-            what you pay. Choose a track, then complete payment below.
+            {forNextLevel
+              ? "You already have a pathway, a tutor and a class — this just pays for the level ahead."
+              : "Your tuition is set by your level and your branch — the pathway you pick decides what you study, not what you pay. Choose a track, then complete payment below."}
           </p>
         </header>
 
         {/* The checkout comes first: it is the reason students land on this page. */}
-        <TuitionCheckout pathwayName={selected} />
+        {forNextLevel ? <NextLevelCheckout /> : <TuitionCheckout pathwayName={selected} />}
 
-        <section className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
-          <h2 className="text-2xl font-semibold">Choose your pathway</h2>
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            All four cost the same at your level. This is about the outcome you are training for.
-          </p>
+        {!forNextLevel ? (
+          <section className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
+            <h2 className="text-2xl font-semibold">Choose your pathway</h2>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              All four cost the same at your level. This is about the outcome you are training for.
+            </p>
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-2">
-            {programs.map((program) => {
-              const active = selected === program.pathwayName;
-              return (
-                <button
-                  key={program.title}
-                  type="button"
-                  onClick={() => setSelected(program.pathwayName)}
-                  aria-pressed={active}
-                  className={`rounded-3xl bg-gradient-to-br ${program.color} p-8 text-left text-slate-50 shadow-xl transition ${
-                    active ? "ring-2 ring-[#c8a24a] ring-offset-2 ring-offset-white" : "opacity-80 hover:opacity-100"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Pathway</p>
-                      <h3 className="mt-3 text-2xl font-semibold">{program.title}</h3>
+            <div className="mt-6 grid gap-6 lg:grid-cols-2">
+              {programs.map((program) => {
+                const active = selected === program.pathwayName;
+                return (
+                  <button
+                    key={program.title}
+                    type="button"
+                    onClick={() => setSelected(program.pathwayName)}
+                    aria-pressed={active}
+                    className={`rounded-3xl bg-gradient-to-br ${program.color} p-8 text-left text-slate-50 shadow-xl transition ${
+                      active ? "ring-2 ring-[#c8a24a] ring-offset-2 ring-offset-white" : "opacity-80 hover:opacity-100"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Pathway</p>
+                        <h3 className="mt-3 text-2xl font-semibold">{program.title}</h3>
+                      </div>
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
+                          active ? "bg-[#c8a24a] text-[#1a1206]" : "bg-[var(--surface-alt)] text-white/80"
+                        }`}
+                      >
+                        {active ? "Selected" : "Select"}
+                      </span>
                     </div>
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
-                        active ? "bg-[#c8a24a] text-[#1a1206]" : "bg-[var(--surface-alt)] text-white/80"
-                      }`}
-                    >
-                      {active ? "Selected" : "Select"}
-                    </span>
-                  </div>
-                  <p className="mt-5 text-sm text-slate-200">{program.description}</p>
-                  <ul className="mt-6 space-y-3 text-sm text-slate-200">
-                    {program.benefits.map((item) => (
-                      <li key={item} className="flex items-start gap-3">
-                        <span className="mt-1 inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </button>
-              );
-            })}
-          </div>
-        </section>
+                    <p className="mt-5 text-sm text-slate-200">{program.description}</p>
+                    <ul className="mt-6 space-y-3 text-sm text-slate-200">
+                      {program.benefits.map((item) => (
+                        <li key={item} className="flex items-start gap-3">
+                          <span className="mt-1 inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
 
         {/* Was on the dashboard, which a student opens every day for things
             that are still true an hour later — an upsell isn't one of them.
@@ -231,5 +241,15 @@ export default function ProgramsPage() {
 
       {showUpsellPopup && <PrivateUpsellPopup onExplore={exploreUpsellPopup} onDismiss={dismissUpsellPopup} />}
     </div>
+  );
+}
+
+// useSearchParams opts the tree out of prerendering unless it sits inside a
+// Suspense boundary, so the page shell can still be generated at build time.
+export default function ProgramsPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[var(--surface-alt)] py-10" />}>
+      <ProgramsPageInner />
+    </Suspense>
   );
 }

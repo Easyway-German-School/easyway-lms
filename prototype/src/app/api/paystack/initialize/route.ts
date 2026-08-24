@@ -11,6 +11,7 @@ import {
   requiredDepositFor,
   tuitionFeeFor,
 } from "@/lib/payment";
+import { nextLevelAfter } from "@/lib/levels";
 
 /**
  * Opens a Paystack checkout.
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
     const { pathwayId, pathwayName } = body ?? {};
     const requestedStage = String(body?.paymentStage ?? body?.stage ?? "full").toLowerCase();
     const requestType = String(body?.type ?? "").toLowerCase();
+    const forNextLevel = Boolean(body?.forNextLevel);
 
     const studentRecord = await prisma.student.findUnique({
       where: { userId: session.user.id as string },
@@ -40,6 +42,8 @@ export async function POST(request: Request) {
         id: true,
         level: true,
         classType: true,
+        levelCompletedFor: true,
+        levelCompletedAt: true,
         branch: { select: { name: true } },
         payments: { where: { status: "completed" }, select: { amount: true } },
       },
@@ -112,16 +116,51 @@ export async function POST(request: Request) {
       });
     }
 
-    const feeLookup = { level: studentRecord.level, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType };
+    /**
+     * NEXT-LEVEL CHECKOUT — a student who just had their level signed off
+     * paying for the level after it, not a top-up on the one they finished.
+     *
+     * Billed against `nextLevelAfter(level)`, and re-verified here rather than
+     * trusted from the client: `forNextLevel` only ever reaches this branch
+     * from the "Continue to X" link on an offer the server already decided was
+     * eligible, but nothing stops a request being replayed after that changed.
+     *
+     * `alreadyPaid` is deliberately NOT the student's cumulative payment
+     * history here. `Payment` rows carry no record of which level they were
+     * for, so summing everything ever paid would net a brand-new level's
+     * deposit against tuition paid on the level just finished — in practice,
+     * "nothing outstanding" on a level nobody has paid a naira toward yet.
+     * A fresh level starts its own ledger at zero.
+     */
+    let billingLevel = studentRecord.level;
+    let alreadyPaid = studentRecord.payments.reduce((sum, payment) => sum + payment.amount, 0);
+
+    if (forNextLevel) {
+      if (studentRecord.levelCompletedFor !== studentRecord.level || !studentRecord.levelCompletedAt) {
+        return NextResponse.json(
+          { error: "Your level has not been signed off yet — nothing to continue to." },
+          { status: 409 },
+        );
+      }
+
+      const target = nextLevelAfter(studentRecord.level);
+      if (!target) {
+        return NextResponse.json({ error: "You are already at the top of the ladder." }, { status: 409 });
+      }
+
+      billingLevel = target;
+      alreadyPaid = 0;
+    }
+
+    const feeLookup = { level: billingLevel, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType };
     const normalizedTuitionFee = tuitionFeeFor(feeLookup);
     const requiredDeposit = requiredDepositFor(feeLookup);
-    const alreadyPaid = studentRecord.payments.reduce((sum, payment) => sum + payment.amount, 0);
 
-    if (requestedStage !== "registration" && !isLevelSellable(studentRecord.level)) {
+    if (requestedStage !== "registration" && !isLevelSellable(billingLevel)) {
       return NextResponse.json(
         {
           error:
-            `${studentRecord.level} tuition is quoted by your branch office rather than the portal. Please contact them to pay.`,
+            `${billingLevel} tuition is quoted by your branch office rather than the portal. Please contact them to pay.`,
         },
         { status: 409 },
       );
@@ -224,6 +263,8 @@ export async function POST(request: Request) {
           depositPercent: String(normalizedDepositPercent),
           paymentType,
           paymentStage: paymentType,
+          forNextLevel: forNextLevel ? "true" : "false",
+          targetLevel: billingLevel,
         },
       }),
     });

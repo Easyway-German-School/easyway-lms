@@ -517,6 +517,16 @@ model Student {
   levelCompletedFor String?
 
   /**
+   * A student the office will NOT sign off — failed assessment, unresolved
+   * fees, whatever the reason. Without this, the cohort console's bulk
+   * "select all not signed off" sweeps the same held-back name into every
+   * batch forever, since nothing else distinguishes "not signed off yet" from
+   * "not signed off, deliberately." heldBackAt null means not held back.
+   */
+  heldBackAt     DateTime?
+  heldBackReason String?
+
+  /**
    * Stages after the classroom — documents, visa, arrival — which no database
    * of ours can observe. The student reports them and the office may verify
    * them: { "visa": { "status": "claimed", "at": "...", "note": "..." } }

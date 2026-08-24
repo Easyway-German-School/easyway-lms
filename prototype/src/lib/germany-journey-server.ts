@@ -750,6 +750,9 @@ export type CohortMember = {
   levelCompletedFor: string | null;
   paymentStatus: string;
   outstanding: number;
+  /** ISO, or null when not held back. */
+  heldBackAt: string | null;
+  heldBackReason: string | null;
 };
 
 /**
@@ -779,6 +782,8 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
       notStartedCount: true,
       notStartedReason: true,
       levelCompletedFor: true,
+      heldBackAt: true,
+      heldBackReason: true,
       studentCode: true,
       user: { select: { name: true, email: true } },
       branch: { select: { name: true } },
@@ -829,6 +834,8 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
       levelCompletedFor: student.levelCompletedFor,
       paymentStatus: money.status,
       outstanding: Math.max(0, tuitionFee - totalPaid),
+      heldBackAt: student.heldBackAt?.toISOString() ?? null,
+      heldBackReason: student.heldBackReason,
     });
   }
 
@@ -926,6 +933,53 @@ export async function completeLevelForStudents(
   }
 
   return result;
+}
+
+/**
+ * "Do not sign this student off with the rest of the batch."
+ *
+ * Separate from `completeLevelForStudents` on purpose — this is a decision
+ * to WITHHOLD sign-off, not a variant of granting it. Without it, a student
+ * held back for a failed assessment or an unresolved dispute has no way to
+ * stop reappearing in the cohort console's "select all not signed off" every
+ * time the office works through a batch, since nothing else distinguishes
+ * "not signed off yet" from "not signed off, deliberately."
+ */
+export async function setHeldBack(
+  studentId: string,
+  input: { heldBack: boolean; reason?: string | null },
+  now = new Date(),
+): Promise<void> {
+  if (input.heldBack) {
+    const reason = (input.reason ?? "").trim();
+    if (!reason) {
+      throw new Error("A reason is required to hold a student back");
+    }
+    await prisma.student.update({
+      where: { id: studentId },
+      data: { heldBackAt: now, heldBackReason: reason },
+    });
+    await recordEvent(studentId, {
+      type: "held-back",
+      label: "Held back from sign-off",
+      detail: reason,
+      source: "admin",
+      occurredAt: now,
+    });
+    return;
+  }
+
+  await prisma.student.update({
+    where: { id: studentId },
+    data: { heldBackAt: null, heldBackReason: null },
+  });
+  await recordEvent(studentId, {
+    type: "held-back-cleared",
+    label: "Hold cleared",
+    detail: null,
+    source: "admin",
+    occurredAt: now,
+  });
 }
 
 export { nextLevelAfter };

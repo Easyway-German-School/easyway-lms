@@ -5,6 +5,7 @@ import { sendEmail } from "@/lib/mailer";
 import { classifyPaymentTransaction } from "@/lib/payment";
 import { settleExamFee } from "@/lib/exam-payments";
 import { enrollIfPathwayExists } from "@/lib/paystack-verify";
+import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { KIND, notifyInBackground } from "@/lib/notify";
 import { withUnscoped } from "@/lib/tenant/context";
 import { emitWebhook } from "@/lib/webhooks";
@@ -299,6 +300,10 @@ async function handlePOST(request: Request) {
 
       await enrollIfPathwayExists({ studentId: student.id, pathwayId, reference: paymentReference });
 
+      await promoteIfNextLevelPayment(student.id, metadata).catch((error) => {
+        console.error("Paystack webhook: next-level promotion failed", { studentId: student.id, error });
+      });
+
       return NextResponse.json({ received: true });
     }
 
@@ -354,6 +359,10 @@ async function handlePOST(request: Request) {
     );
 
     await enrollIfPathwayExists({ studentId: student.id, pathwayId, reference: paymentReference });
+
+    await promoteIfNextLevelPayment(student.id, metadata).catch((error) => {
+      console.error("Paystack webhook: next-level promotion failed", { studentId: student.id, error });
+    });
 
     const notificationMessage =
       effectivePaymentType === "registration"

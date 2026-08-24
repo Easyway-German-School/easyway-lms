@@ -130,6 +130,8 @@ type Dossier = {
     notStartedReason: string | null;
     levelCompletedAt: string | null;
     levelCompletedFor: string | null;
+    heldBackAt: string | null;
+    heldBackReason: string | null;
     germanyGoal: string | null;
     germanyGoalNote: string | null;
     events: Array<{
@@ -399,6 +401,9 @@ export default function StudentDossierPage() {
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetResult, setResetResult] = useState<{ password: string; email: string; emailed: boolean } | null>(null);
 
+  const [holdBusy, setHoldBusy] = useState(false);
+  const [holdError, setHoldError] = useState<string | null>(null);
+
   /**
    * Editing is deliberately behind its own modal rather than inline fields —
    * this file is read from during a live phone call, and a value that changes
@@ -506,6 +511,52 @@ export default function StudentDossierPage() {
       setResetError(resetErr instanceof Error ? resetErr.message : "Could not reset the password");
     } finally {
       setResetBusy(false);
+    }
+  }, [id, load]);
+
+  const holdBack = useCallback(async () => {
+    if (!id) return;
+    const reason = window.prompt("Why is this student being held back? (shown to other admins, not the student)");
+    if (reason === null) return;
+    if (!reason.trim()) {
+      setHoldError("A reason is required to hold a student back");
+      return;
+    }
+    setHoldBusy(true);
+    setHoldError(null);
+    try {
+      const response = await fetch("/api/admin/journey", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: id, heldBack: true, reason: reason.trim() }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Could not hold this student back");
+      void load(false);
+    } catch (holdErr) {
+      setHoldError(holdErr instanceof Error ? holdErr.message : "Could not hold this student back");
+    } finally {
+      setHoldBusy(false);
+    }
+  }, [id, load]);
+
+  const clearHold = useCallback(async () => {
+    if (!id) return;
+    setHoldBusy(true);
+    setHoldError(null);
+    try {
+      const response = await fetch("/api/admin/journey", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: id, heldBack: false }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Could not clear this hold");
+      void load(false);
+    } catch (holdErr) {
+      setHoldError(holdErr instanceof Error ? holdErr.message : "Could not clear this hold");
+    } finally {
+      setHoldBusy(false);
     }
   }, [id, load]);
 
@@ -992,12 +1043,43 @@ export default function StudentDossierPage() {
                   </span>
                 }
               />
+              <Field
+                label="Hold"
+                value={journey.heldBackAt ? <span className="text-red-600">Held back</span> : "—"}
+              />
             </div>
             {journey.notStartedReason && (
               <p className="mt-4 rounded-2xl bg-[var(--surface)]/40 p-3 text-sm text-[var(--muted)]">
                 Last reason given: “{journey.notStartedReason}”
               </p>
             )}
+            {journey.heldBackAt && (
+              <p className="mt-3 rounded-2xl bg-red-50 p-3 text-sm text-red-800">
+                Held back since {when(journey.heldBackAt)}: “{journey.heldBackReason}”
+              </p>
+            )}
+            <div className="mt-4 flex items-center gap-3">
+              {journey.heldBackAt ? (
+                <button
+                  type="button"
+                  onClick={clearHold}
+                  disabled={holdBusy}
+                  className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] hover:bg-[var(--surface-alt)] disabled:opacity-40"
+                >
+                  {holdBusy ? "…" : "Clear hold"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={holdBack}
+                  disabled={holdBusy}
+                  className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--muted)] hover:bg-[var(--surface-alt)] disabled:opacity-40"
+                >
+                  {holdBusy ? "…" : "Hold back this level"}
+                </button>
+              )}
+              {holdError && <span className="text-sm text-red-600">{holdError}</span>}
+            </div>
             {journey.germanyGoalNote && (
               <p className="mt-3 text-sm text-[var(--muted)]">In their words: “{journey.germanyGoalNote}”</p>
             )}

@@ -197,3 +197,31 @@ export async function promoteStudents(studentIds: string[], now = new Date()): P
 
   return result;
 }
+
+/**
+ * The other end of the "Continue to {nextLevel}" checkout — called from the
+ * Paystack verify/webhook paths once a `forNextLevel` payment completes.
+ *
+ * Re-checks sign-off from the database rather than trusting the payment
+ * metadata, and is naturally idempotent: the first call moves `Student.level`
+ * to the next level, so `levelCompletedFor` (still holding the OLD level
+ * string) can never again equal the new `level` — a retried webhook or a
+ * verify/webhook race landing here twice for the same transition is a no-op
+ * on the second call.
+ */
+export async function promoteIfNextLevelPayment(
+  studentId: string,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  if (String(metadata?.forNextLevel) !== "true") return;
+
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { id: true, level: true, levelCompletedFor: true, levelCompletedAt: true },
+  });
+
+  if (!student) return;
+  if (student.levelCompletedFor !== student.level || !student.levelCompletedAt) return;
+
+  await promoteStudents([studentId]);
+}
