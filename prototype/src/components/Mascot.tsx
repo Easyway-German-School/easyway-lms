@@ -124,7 +124,9 @@ export type MascotMood =
   /** Arms crossed, confident — she's hosting: briefs, recaps, "here's your week". */
   | "presenting"
   /** Rock-on hands, smug grin — a flawless round, a streak that won't quit. */
-  | "cocky";
+  | "cocky"
+  /** Palm out, unimpressed brow — the no-refund wall, and anywhere else the answer is a firm no. */
+  | "stern";
 
 type MoodSpec = {
   /** The glow colour hugging her silhouette — the primary way mood reads at a glance. */
@@ -152,6 +154,7 @@ const MOODS: Record<MascotMood, MoodSpec> = {
   tired: { glow: "#94a3b8" },
   presenting: { glow: "#0D7C7E" },
   cocky: { glow: "#FF6600", sparkle: true, bounce: true },
+  stern: { glow: "#c94f4f" },
 };
 
 const BASE_IMAGE = "/mascot/becca-bust.png";
@@ -169,32 +172,23 @@ const POSE_IMAGES: Partial<Record<MascotMood, string>> = {
   tired: "/mascot/becca-tired-bust.png",
   presenting: "/mascot/becca-presenting-bust.png",
   cocky: "/mascot/becca-cocky-bust.png",
+  stern: "/mascot/becca-stop-bust.png",
 };
 
 /**
  * Poses whose dedicated photo has not been shot yet.
  *
- * The three moods below were written against art that has not landed. Pointing
- * `POSE_IMAGES` straight at a missing file makes every render 404 and fall to
- * `BASE_IMAGE` — safe, because of the `onError` guard further down, but it
- * wastes a request and, worse, throws the mood away: a rough round and a
+ * Pointing `POSE_IMAGES` straight at a missing file makes every render 404 and
+ * fall to `BASE_IMAGE` — safe, because of the `onError` guard further down, but
+ * it wastes a request and, worse, throws the mood away: a rough round and a
  * flawless one would show the identical neutral face, which is the one thing
  * this whole map exists to prevent.
  *
- * So each pending mood names the nearest photo we DO have. `concerned` reads as
- * sympathetic rather than scolding, which is what `tired` is for; `celebrating`
- * is the closest thing to `cocky`; and `presenting` borrows the right-pointing
- * pose, because the surface that hosts her — the brief card — sits her to the
- * LEFT of the text she is presenting, so pointing right points at the words.
- *
- * WHEN THE REAL ART ARRIVES: delete that mood's line from this map. That is the
+ * So each pending mood names the nearest photo we DO have, until the real art
+ * lands. WHEN IT DOES: delete that mood's line from this map. That is the
  * entire change — `POSE_IMAGES` above already names the correct filename.
  */
-const PENDING_ART: Partial<Record<MascotMood, string>> = {
-  tired: "/mascot/becca-concerned-bust.png",
-  presenting: POINTING_RIGHT_IMAGE,
-  cocky: "/mascot/becca-celebrating-bust.png",
-};
+const PENDING_ART: Partial<Record<MascotMood, string>> = {};
 
 /**
  * Facial-feature positions, as fractions of `becca-bust.png` — measured
