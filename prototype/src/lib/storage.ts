@@ -175,7 +175,7 @@ export async function putFile(input: {
   body: Buffer;
   contentType?: string;
 }): Promise<string> {
-  const storage = objectStorage();
+  const storage = storageForKey(input.key);
 
   if (!storage) {
     if (process.env.NODE_ENV === "production") {

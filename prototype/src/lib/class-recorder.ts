@@ -25,6 +25,7 @@
 import { EgressStatus } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
+import { createRecordingThumbnail } from "@/lib/recording-thumbnail";
 import {
   AUDIO_ENCODING,
   CLASS_ENCODING,
@@ -247,6 +248,17 @@ export async function finaliseRecording(egress: {
     const sizeBytes = result?.size ? Number(result.size) : null;
     const fileUrl = recordingPublicUrl(objectKey);
     const recordedAt = row.startedAt;
+    let thumbnailPath: string | null = null;
+    try {
+      thumbnailPath = await createRecordingThumbnail({
+        objectKey,
+        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt }),
+        level: row.level,
+        recordedAt,
+      });
+    } catch (thumbnailError) {
+      console.error(`Could not create thumbnail for recording ${row.egressId}:`, thumbnailError);
+    }
 
     const material = await prisma.material.create({
       data: {
@@ -261,6 +273,7 @@ export async function finaliseRecording(egress: {
         kind: "recording",
         level: row.level,
         durationSeconds,
+        thumbnailPath,
         recordedAt,
       },
     });

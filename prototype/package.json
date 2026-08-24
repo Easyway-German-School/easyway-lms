@@ -25,7 +25,8 @@
     "prove": "node scripts/prove-tenant-isolation.mjs && node scripts/prove-api-key.mjs && node scripts/prove-v1-api.mjs && tsx scripts/prove-billing.ts && tsx scripts/prove-admin-scope.ts",
     "seed:spaces": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/seed-community-spaces.ts",
     "verify:community": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/verify-community.ts",
-    "test:community": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/test-community-e2e.ts"
+    "test:community": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/test-community-e2e.ts",
+    "backfill:thumbnails": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/backfill-recording-thumbnails.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -52,6 +53,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-webcam": "^7.2.0",
+    "sharp": "^0.35.3",
     "stripe": "^22.3.0",
     "web-push": "^3.6.7"
   },
