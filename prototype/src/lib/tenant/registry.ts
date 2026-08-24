@@ -125,6 +125,7 @@ export const TENANT_OWNED_MODELS = [
   "GameTurn",
   "ConstraintDeck",
   "MissionProgress",
+  "DailyMission",
   "PersonalizedPlan",
   "JourneyEvent",
   "IntegrationConnector",

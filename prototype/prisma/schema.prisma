@@ -117,6 +117,7 @@ model User {
   parent            Parent?
   sessions          Session[]
   missionProgress   MissionProgress[]
+  dailyMissions     DailyMission[]
   messages          Message[]
   moderatedMessages Message[]                @relation("MessageModerator")
   pinnedMessages    Message[]                @relation("MessagePinner")
@@ -236,6 +237,7 @@ model Tenant {
   enrollments             Enrollment[]
   grades                  Grade[]
   missionProgresses       MissionProgress[]
+  dailyMissions           DailyMission[]
   personalizedPlans       PersonalizedPlan[]
   notifications           Notification[]
   invoices                Invoice[]
@@ -1354,6 +1356,47 @@ model MissionProgress {
 
   @@unique([userId, missionId])
   @@index([tenantId])
+}
+
+/**
+ * The superseder of MissionProgress: a mission the SERVER assigned, with a
+ * `done` flag the server also sets, never the client. See
+ * src/lib/mission-detection.ts for what "done" is checked against, and
+ * src/lib/daily-missions-server.ts for where these rows get written.
+ *
+ * MissionProgress is left in place rather than dropped — its history is real
+ * (self-reported, but real history) and nothing here needs its rows deleted
+ * to work.
+ */
+model DailyMission {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Server UTC calendar day, "YYYY-MM-DD" — matches cohort-missions.ts's own key.
+  day   String
+  /// Position among that day's missions (0-2), so a row can be re-read without a client-supplied id.
+  index Int
+
+  title       String
+  description String
+  reward      String
+  /// lesson | assignment | quiz | attendance | voice | essay | generic — see mission-detection.ts.
+  detectType  String
+
+  done       Boolean   @default(false)
+  detectedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, day, index])
+  @@index([tenantId])
+  @@index([userId, day])
 }
 
 model PersonalizedPlan {

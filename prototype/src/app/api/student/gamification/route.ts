@@ -40,9 +40,14 @@ export async function GET() {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const missionsCompleted = await prisma.missionProgress.count({
-    where: { userId, done: true },
-  });
+  // Old self-reported rows plus new server-verified ones (see
+  // src/lib/mission-detection.ts) — summed rather than switched over, so a
+  // badge already earned under the old honour system is never taken back.
+  const [legacyMissionsCompleted, verifiedMissionsCompleted] = await Promise.all([
+    prisma.missionProgress.count({ where: { userId, done: true } }),
+    prisma.dailyMission.count({ where: { userId, done: true } }),
+  ]);
+  const missionsCompleted = legacyMissionsCompleted + verifiedMissionsCompleted;
 
   /**
    * Live quiz games this student played to the end.

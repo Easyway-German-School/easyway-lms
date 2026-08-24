@@ -1,55 +1,20 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import { prisma } from "@/lib/prisma";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
+import { ensureTodayMissions } from "@/lib/daily-missions-server";
 
-export async function GET(req: NextRequest) {
+/**
+ * Today's missions, and whether they're actually done.
+ *
+ * There used to be a POST here too: a student could send `{missionId, done:
+ * true}` and the server would write it, no questions asked. That is not
+ * gone because a checkbox is old-fashioned — it's gone because "done" now
+ * means something (see mission-detection.ts), and the one thing that must
+ * never decide whether a real record exists is the client that's asking.
+ */
+export async function GET() {
   const session = await requireAuthSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const userId = session.user.id as string;
-  const progress = await prisma.missionProgress.findMany({
-    where: { userId },
-  });
-
-  const missions = progress.reduce((acc: Record<string, boolean>, item) => {
-    acc[item.missionId] = item.done;
-    return acc;
-  }, {});
-
+  const missions = await ensureTodayMissions(session.user.id as string);
   return NextResponse.json({ missions });
-}
-
-export async function POST(req: NextRequest) {
-  const session = await requireAuthSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const body = await req.json();
-  const { missionId, done } = body || {};
-  if (!missionId) return NextResponse.json({ error: "missionId required" }, { status: 400 });
-
-  const userId = session.user.id as string;
-  const mission = await prisma.missionProgress.upsert({
-    where: { userId_missionId: { userId, missionId } },
-    create: { userId, missionId, done: !!done },
-    update: { done: !!done },
-  });
-
-  const progress = await prisma.missionProgress.findMany({
-    where: { userId },
-  });
-
-  const missions = progress.reduce((acc: Record<string, boolean>, item) => {
-    acc[item.missionId] = item.done;
-    return acc;
-  }, {});
-
-  return NextResponse.json({ missions, mission });
 }

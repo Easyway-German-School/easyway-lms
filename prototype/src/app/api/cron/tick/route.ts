@@ -210,6 +210,20 @@ async function handleGET(request: NextRequest) {
    * skipped — without it a single student who stops opening the app silently
    * ends every story they were offered a turn in.
    */
+  /**
+   * Push today's missions to whoever hasn't opened the dashboard yet — see
+   * src/lib/daily-missions-push.ts. Capped per tick for the same reason
+   * material-ai is: this runs a model call per (level, band) the first time
+   * each is seen today, plus a write per student, on the same box as the
+   * site itself.
+   */
+  results.push(
+    await run("daily-missions-push", async () => {
+      const { sendDueMissionPush } = await import("@/lib/daily-missions-push");
+      return sendDueMissionPush();
+    }),
+  );
+
   results.push(
     await run("satzkette-turns", async () => {
       const { openLapsedTurns, archiveStaleMatches } = await import("@/lib/satzkette-server");

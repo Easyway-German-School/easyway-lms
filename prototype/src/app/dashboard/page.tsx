@@ -26,6 +26,8 @@ type Mission = {
   category?: string;
   target?: string;
   done?: boolean;
+  /** lesson | assignment | quiz | attendance | voice | essay | generic — see mission-detection.ts. Absent on the offline fallback list. */
+  detectType?: string;
 };
 
 type Student = {
@@ -82,6 +84,7 @@ type PendingPayment = {
 };
 
 import StudentShell from "@/components/StudentShell";
+import StudentBrief from "@/components/StudentBrief";
 import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
 import TutorBioCard from "@/components/TutorBioCard";
@@ -119,7 +122,6 @@ function DashboardContent() {
     nextMilestone: "First lesson",
   });
   const [dailyMissions, setDailyMissions] = useState<Mission[]>([]);
-  const [completedMissionIds, setCompletedMissionIds] = useState<Record<string, boolean>>({});
   const [refreshToken, setRefreshToken] = useState(0);
   const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null);
   const [fastFallback, setFastFallback] = useState(false);
@@ -297,59 +299,19 @@ function DashboardContent() {
     }
   }, [loadStudentData, loadCourses]);
 
-  const loadDailyMissions = useCallback(async () => {
-    if (!student) return;
-    try {
-      const response = await fetch("/api/ai/daily-missions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        cache: "no-store",
-        body: JSON.stringify({
-          profile: {
-            name: student.name,
-            level: student.level,
-            pathway: student.pathway,
-            germanyGoal: student.germanyGoal,
-            germanyGoalNote: student.germanyGoalNote,
-            examReadiness: student.examReadiness,
-            streak: insights.streak,
-            completedLessons: insights.completedLessons,
-            contentTopics: courses.slice(0, 3).flatMap((course) => [course.title, course.description].filter(Boolean)).slice(0, 4),
-          },
-        }),
-      });
-      if (!response.ok) throw new Error(`Daily missions failed with status ${response.status}`);
-      const data = await response.json();
-      setDailyMissions(Array.isArray(data.missions) ? data.missions : []);
-    } catch (error) {
-      console.error("Failed to load daily missions:", error);
-      setDailyMissions([]);
-    }
-  }, [student, courses, insights.completedLessons, insights.streak]);
-
-  const loadMissionState = useCallback(() => {
+  /**
+   * The server decides today's missions AND whether each is done — see
+   * /api/student/missions and src/lib/mission-detection.ts. There is
+   * deliberately no client-side toggle any more: "done" used to be whatever
+   * the student last tapped, which is not the same thing as having done it.
+   */
+  const loadMissions = useCallback(() => {
     if (typeof window === "undefined") return;
     void fetch("/api/student/missions", { credentials: "include", cache: "no-store" })
-      .then((response) => response.ok ? response.json() : null)
-      .then((data) => setCompletedMissionIds(data?.missions || {}))
-      .catch(() => setCompletedMissionIds({}));
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setDailyMissions(Array.isArray(data?.missions) ? data.missions : []))
+      .catch(() => setDailyMissions([]));
   }, []);
-
-  const toggleMission = async (missionId: string, done: boolean) => {
-    setCompletedMissionIds((current) => ({ ...current, [missionId]: done }));
-    try {
-      const response = await fetch("/api/student/missions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ missionId, done }),
-      });
-      if (!response.ok) throw new Error("Mission progress was not saved");
-    } catch (error) {
-      console.error("Failed to save mission progress:", error);
-    }
-  };
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -394,16 +356,22 @@ function DashboardContent() {
 
   useEffect(() => {
     if (!student) return;
-    (async () => {
-      await loadDailyMissions();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [student, pathway, insights.completedLessons, insights.streak]);
+    loadMissions();
+  }, [student, loadMissions]);
 
+  /**
+   * The badge on the home-screen icon — the closest an installed PWA gets to
+   * a native widget's "you have things waiting" glance. Set from the same
+   * server-detected `done`, so it can never over-promise what the quest
+   * board itself shows; cleared once nothing is left outstanding.
+   */
   useEffect(() => {
-    if (!student) return;
-    void Promise.resolve().then(loadMissionState);
-  }, [student, loadMissionState]);
+    if (typeof navigator === "undefined" || !("setAppBadge" in navigator)) return;
+    const outstanding = dailyMissions.filter((m) => !m.done).length;
+    const nav = navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+    if (outstanding > 0) void nav.setAppBadge?.(outstanding).catch(() => {});
+    else void nav.clearAppBadge?.().catch(() => {});
+  }, [dailyMissions]);
 
   useEffect(() => {
     const fullPaidAt = paymentSummary?.fullPaidAt;
@@ -563,7 +531,7 @@ function DashboardContent() {
   ];
 
   const displayMissions = dailyMissions.length > 0 ? dailyMissions : dailyQuests;
-  const missionCompletedCount = displayMissions.filter((mission) => completedMissionIds[mission.id || ""] || mission.done).length;
+  const missionCompletedCount = displayMissions.filter((mission) => mission.done).length;
   const missionCompletePercent = displayMissions.length > 0 ? Math.round((missionCompletedCount / displayMissions.length) * 100) : 0;
   const quickStats = [
     { label: 'Courses enrolled', value: resolvedCourses.length.toString(), icon: <BookOpenIcon className="h-6 w-6" /> },
@@ -876,6 +844,8 @@ function DashboardContent() {
                 </div>
               </motion.div>}
 
+              <StudentBrief />
+
               <div className={cardClass}>
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -892,15 +862,16 @@ function DashboardContent() {
                 </div>
                 <div className="mt-6 space-y-4">
                   {displayMissions.slice(0, 3).map((quest) => {
-                    const done = quest.id ? completedMissionIds[quest.id] : quest.done;
+                    const done = quest.done;
                     return (
-                      <button
+                      <div
                         key={quest.id || quest.title}
-                        type="button"
-                        onClick={() => quest.id && void toggleMission(quest.id, !done)}
-                        aria-pressed={done}
+                        // Not a button any more — there is nothing to tap. The
+                        // school stopped taking a student's word for "done";
+                        // this card just reports what the server detected.
+                        // See src/lib/mission-detection.ts for what counts.
                         className={`group flex w-full items-start gap-4 rounded-[28px] border p-5 text-left transition-all duration-200 ${
-                          isPrivateStudent ? `${innerPanelClass} hover:border-[#D4AF37]/40` : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]"
+                          isPrivateStudent ? innerPanelClass : "border-[var(--border)] bg-[var(--surface-alt)]"
                         }`}
                       >
                         <span
@@ -908,8 +879,8 @@ function DashboardContent() {
                             done
                               ? 'bg-[var(--success)]'
                               : isPrivateStudent
-                              ? "bg-[#D4AF37] shadow-[0_0_10px_2px_rgba(212,175,55,0.5)] group-hover:animate-pulse"
-                              : 'bg-[var(--accent)] shadow-[0_0_10px_2px_color-mix(in_srgb,var(--accent)_65%,transparent)] group-hover:animate-pulse'
+                              ? "bg-[#D4AF37] shadow-[0_0_10px_2px_rgba(212,175,55,0.5)] animate-pulse"
+                              : 'bg-[var(--accent)] shadow-[0_0_10px_2px_color-mix(in_srgb,var(--accent)_65%,transparent)] animate-pulse'
                           }`}
                         />
                         <div className="flex flex-1 items-start justify-between gap-4">
@@ -922,10 +893,10 @@ function DashboardContent() {
                               done ? 'bg-[var(--success-soft)] text-[var(--success)]' : isPrivateStudent ? "bg-white/[0.03] text-white/40" : 'bg-[var(--surface-alt)] text-[var(--muted)]'
                             }`}
                           >
-                            {done ? 'Completed' : 'Pending'}
+                            {done ? 'Detected ✓' : 'Not yet'}
                           </span>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
