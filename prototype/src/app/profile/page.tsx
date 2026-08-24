@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import Link from "next/link";
 import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import { useGamification } from "@/lib/useGamification";
@@ -25,6 +26,15 @@ import {
   StarIcon,
   TargetIcon,
 } from "@/components/icons";
+
+type TermsStatus = {
+  accepted: boolean;
+  version?: string;
+  acceptedAt?: string;
+  currentVersionLabel: string;
+  upToDate?: boolean;
+  fallbackNotice?: string;
+};
 
 /** The badge list is built server-side and names its icon; this resolves it. */
 const BADGE_ICONS: Record<BadgeIcon, typeof FlameIcon> = {
@@ -221,6 +231,7 @@ export default function ProfilePage() {
   const [passwordMessage, setPasswordMessage] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [formState, setFormState] = useState(EMPTY_FORM);
+  const [terms, setTerms] = useState<TermsStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { game } = useGamification();
   const queryClient = useQueryClient();
@@ -309,6 +320,23 @@ export default function ProfilePage() {
         });
       } catch (loadError) {
         if (active) setError(loadError instanceof Error ? loadError.message : "Could not load your profile");
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/student/terms", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (active) setTerms(data);
+      } catch {
+        // The legal card just stays hidden — not worth an error banner over.
       }
     })();
     return () => {
@@ -781,6 +809,26 @@ export default function ProfilePage() {
             {passwordError && <p className="mt-3 text-sm font-semibold text-red-600">{passwordError}</p>}
           </div>
         </form>
+      </section>
+
+      <section className="mx-auto mt-6 w-full max-w-5xl rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7">
+        <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--accent)]">Legal</p>
+        <h2 className="mt-2 text-2xl font-black text-[var(--foreground)]">Terms and Conditions</h2>
+        {terms?.accepted ? (
+          <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
+            You accepted version {terms.version} on {terms.acceptedAt ? new Date(terms.acceptedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "—"}.
+            {terms.upToDate === false ? " The school has updated the Terms since then — please review the current version." : ""}
+          </p>
+        ) : terms ? (
+          <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">{terms.fallbackNotice}</p>
+        ) : null}
+        <Link
+          href="/terms"
+          target="_blank"
+          className="mt-4 inline-flex items-center rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-bold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+        >
+          Read the Terms and Conditions
+        </Link>
       </section>
 
       {/* ---------- Edit sheet ---------- */}

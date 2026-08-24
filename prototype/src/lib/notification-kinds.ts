@@ -47,6 +47,10 @@ export const KIND = {
   supportTicket: "support.ticket",
   /** The office answered. This is the one the student is waiting on. */
   supportReply: "support.reply",
+  /** A student submitted a refund request, acknowledging the policy first. */
+  refundRequested: "refund.requested",
+  /** The office approved, rejected, or paid out a refund request. */
+  refundDecided: "refund.decided",
   announcement: "announcement",
   /** Somebody started a game in the room's chat — see /api/community/messages. */
   gameInvite: "game.invite",

@@ -188,6 +188,16 @@ export const TENANT_OWNED_MODELS = [
   "SessionNote",
   "StudentAiUsage",
   "StudentSkillMastery",
+
+  /**
+   * The Terms and Conditions consent trail and the refund requests it gates.
+   * Both name one school's student and quote what they agreed to or asked
+   * for — the same category of leak as SupportTicket above, and this one
+   * doubles as the legal record a school would need to produce on its own,
+   * never another tenant's.
+   */
+  "TermsAcceptance",
+  "RefundRequest",
 ] as const;
 
 /**

@@ -10,6 +10,7 @@ import ThemeToggle, { useHideFloatingThemeToggle } from '@/components/ThemeToggl
 import PortalUpdates from '@/components/PortalUpdates';
 import SignOutButton from '@/components/SignOutButton';
 import {
+  AlertIcon,
   AttendanceIcon,
   BellIcon,
   SlidersIcon,
@@ -117,6 +118,7 @@ const navItems: NavItem[] = [
   // transaction list is what you open from it rather than the other way round.
   { label: 'Finance', href: '/admin/finance', icon: <WalletIcon />, group: 'Billing' },
   { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon />, group: 'Billing' },
+  { label: 'Legal & refunds', href: '/admin/legal', icon: <AlertIcon />, group: 'Billing' },
   { label: 'Reports', href: '/admin/reports', icon: <TrendingUpIcon />, group: 'Billing' },
   // The other direction of money: what this school owes for running on the
   // platform, itemised by meter. It had been built and reachable only by typing

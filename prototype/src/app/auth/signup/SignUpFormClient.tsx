@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { buildApiUrl } from "@/lib/api";
@@ -9,6 +9,8 @@ import { countries, nigerianStates, packageOptions, professionOptions } from "@/
 import PasswordInput from "@/components/PasswordInput";
 import PhotoCapture from "@/components/PhotoCapture";
 import SignupJourney from "@/components/SignupJourney";
+import TermsGate from "@/components/TermsGate";
+import { TERMS_SECTIONS } from "@/lib/terms-content";
 import { CheckCircleIcon, FamilyIcon, SignalIcon } from "@/components/icons";
 import { uploadErrorMessage, uploadImage } from "@/lib/upload";
 import {
@@ -81,6 +83,12 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [photoUrl, setPhotoUrl] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
+  // The unskippable gate. Ticked inside the TermsGate modal, never inline —
+  // handleSignUp opens the modal instead of submitting the moment this is
+  // false, and the modal's own button is what flips it and re-submits.
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const [heardFrom] = useState("");
   const [emergencyContactName] = useState("");
   const [emergencyContactInfo] = useState("");
@@ -361,6 +369,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
       return;
     }
 
+    // The last gate, after everything else about this signup is already
+    // valid. Not skippable and not a checkbox sitting quietly in the form —
+    // it stops the submit and puts the document in front of them instead.
+    if (!termsAccepted) {
+      setShowTerms(true);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -404,6 +420,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         country,
         photoUrl: uploadedPhotoUrl,
         photoFileName,
+        termsAccepted,
         heardFrom,
         emergencyContactName,
         emergencyContactInfo,
@@ -513,7 +530,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
           in a column three words across. Padding is a phone's scarcest
           resource; it earns its place above sm and not below.
         */}
-        <form onSubmit={handleSignUp} className="space-y-6 rounded-[32px] bg-white/95 p-4 shadow-[0_30px_80px_-24px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/70 sm:p-8">
+        <form ref={formRef} onSubmit={handleSignUp} className="space-y-6 rounded-[32px] bg-white/95 p-4 shadow-[0_30px_80px_-24px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/70 sm:p-8">
           {error ? <div className="rounded-xl bg-rose-500/10 p-4 text-sm text-rose-700">{error}</div> : null}
           {successMessage && showSuccess ? (
             <div className="rounded-3xl border border-emerald-200/80 bg-emerald-500/10 p-5 text-sm text-emerald-900 shadow-lg shadow-emerald-500/10 transition-all duration-200">
@@ -1039,6 +1056,22 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                   <p className="mt-2 text-xs text-[var(--muted)]">Uploading photo…</p>
                 ) : null}
               </div>
+
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <h3 className="text-sm font-semibold text-[var(--foreground)]">Terms and Conditions</h3>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  {termsAccepted
+                    ? "You've reviewed and accepted our Terms and Conditions, including the No-Refund Policy."
+                    : "Before we finish setting up your account, you'll review and accept our Terms and Conditions — including the No-Refund Policy."}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowTerms(true)}
+                  className="mt-2 text-sm font-semibold text-[var(--accent)] underline-offset-4 hover:underline"
+                >
+                  {termsAccepted ? "Review Terms and Conditions" : "Read Terms and Conditions"}
+                </button>
+              </div>
             </div>
           )}
 
@@ -1106,6 +1139,22 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
           </div>
         </form>
       </div>
+
+      <TermsGate
+        open={showTerms}
+        sections={TERMS_SECTIONS}
+        closable={termsAccepted}
+        onClose={termsAccepted ? () => setShowTerms(false) : undefined}
+        title="Before you finish signing up"
+        intro="Please read the Terms and Conditions below, including the No-Refund Policy. You must accept them to create your account."
+        onAgree={() => {
+          setTermsAccepted(true);
+          setShowTerms(false);
+          // Re-run the same submit path handleSignUp already validated —
+          // this time termsAccepted is true, so it goes through to the API.
+          formRef.current?.requestSubmit();
+        }}
+      />
     </div>
   );
 }

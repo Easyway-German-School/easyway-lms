@@ -307,6 +307,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
             from, so this is not decoration — it was missing entirely until now. */}
         <div className="border-t border-[var(--border)] p-3">
           <SignOutButton callbackUrl="/auth/signin" collapsed={collapsed} portalLabel="the student portal" />
+          <Link
+            href="/terms"
+            target="_blank"
+            className={`mt-2 block px-3 text-xs font-medium text-[var(--muted)] underline-offset-2 hover:text-[var(--foreground)] hover:underline ${collapsed ? "lg:text-center" : ""}`}
+          >
+            {collapsed ? "T&Cs" : "Terms & Conditions"}
+          </Link>
           <p className={`mt-2 px-3 text-xs text-[var(--muted)] ${collapsed ? "lg:text-center" : ""}`}>
             {collapsed ? "v1" : "AI-ready student workspace"}
           </p>

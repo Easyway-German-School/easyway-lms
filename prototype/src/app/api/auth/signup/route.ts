@@ -13,6 +13,7 @@ import { currentTenantId, setTenantScope } from "@/lib/tenant/context";
 import { resolveTenantId } from "@/lib/tenant/resolve";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import { TIME_SLOTS } from "@/lib/class-times";
+import { TERMS_CONTEXT, TERMS_VERSION } from "@/lib/terms";
 
 /**
  * Whether there is a Branch table to select from.
@@ -119,6 +120,7 @@ export async function POST(request: NextRequest) {
       idProofFileName,
       photoFileName,
       parentIdProofFileName,
+      termsAccepted,
       // previous school
       prevSchoolName,
       prevSchoolAddress,
@@ -331,6 +333,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // The client-side gate (TermsGate on the signup form) is a UX courtesy,
+    // not the enforcement — a crafted request that skips it must still be
+    // refused, the same way a crafted request cannot skip the level check
+    // above. `=== true` on purpose: anything else (missing, "yes", 1) is not
+    // acceptance.
+    if (normalizedRole === "STUDENT" && termsAccepted !== true) {
+      return NextResponse.json(
+        { error: "Please accept the Terms and Conditions to create your account." },
+        { status: 400 }
+      );
+    }
+
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
@@ -411,6 +425,25 @@ export async function POST(request: NextRequest) {
         }
       } catch (codeError) {
         console.error("Student code assignment failed:", codeError);
+      }
+
+      // The legal record of this exact moment: what they agreed to, and the
+      // wording as it stood then. Best-effort, like the code assignment above
+      // — a signup that already succeeded must not be undone by this failing,
+      // but losing it silently would defeat the reason it is written at all.
+      try {
+        await prisma.termsAcceptance.create({
+          data: {
+            userId: user.id,
+            studentId,
+            context: TERMS_CONTEXT.signup,
+            version: TERMS_VERSION,
+            ip: clientIp(request.headers),
+            userAgent: request.headers.get("user-agent") || undefined,
+          },
+        });
+      } catch (termsError) {
+        console.error("Terms acceptance recording failed:", termsError);
       }
 
       // The office needs to know a registration landed. Queued, not sent

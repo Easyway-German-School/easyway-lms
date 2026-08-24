@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import StudentShell from "@/components/StudentShell";
 import TuitionNudge from "@/components/TuitionNudge";
+import RefundModal from "@/components/RefundModal";
 import { CheckIcon } from "@/components/icons";
 
 type PaymentRecord = {
@@ -20,6 +21,7 @@ export default function PaymentsPage() {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refundOpen, setRefundOpen] = useState(false);
   // Tuition varies by level (A1 150k … C2 220k), so the figures have to come
   // from the server rather than a constant on this page.
   const [summary, setSummary] = useState<{
@@ -110,18 +112,29 @@ export default function PaymentsPage() {
                 live Pay button invites a duplicate payment that then has to be
                 refunded by hand.
               */}
-              {fullPaid ? (
-                <span
-                  aria-disabled="true"
-                  className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-6 py-3 text-sm font-semibold text-emerald-600"
-                >
-                  <CheckIcon className="h-4 w-4" /> Tuition fully paid
-                </span>
-              ) : (
-                <Link href="/programs" className="inline-flex items-center justify-center rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-110">
-                  Make a payment
-                </Link>
-              )}
+              <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                {fullPaid ? (
+                  <span
+                    aria-disabled="true"
+                    className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-6 py-3 text-sm font-semibold text-emerald-600"
+                  >
+                    <CheckIcon className="h-4 w-4" /> Tuition fully paid
+                  </span>
+                ) : (
+                  <Link href="/programs" className="inline-flex items-center justify-center rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-110">
+                    Make a payment
+                  </Link>
+                )}
+                {payments.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setRefundOpen(true)}
+                    className="text-xs font-semibold text-[var(--muted)] underline-offset-2 hover:text-[var(--foreground)] hover:underline"
+                  >
+                    Request a refund
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             <div className="mt-10 grid gap-6 lg:grid-cols-3">
@@ -182,6 +195,7 @@ export default function PaymentsPage() {
           </div>
         </div>
       </main>
+      <RefundModal open={refundOpen} onClose={() => setRefundOpen(false)} />
     </StudentShell>
   );
 }

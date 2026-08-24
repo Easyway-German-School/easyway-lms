@@ -48,6 +48,11 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
 
   { prefix: "/admin/payments", capability: "payments" },
   { prefix: "/admin/finance", capability: "payments" },
+  // Refund decisions are money leaving the school, and Terms acceptance is
+  // what a refund decision gets checked against — same desk as the rest of
+  // the fee book rather than a new capability for what is, underneath, a
+  // billing dispute.
+  { prefix: "/admin/legal", capability: "payments" },
   // What the school owes the platform, as opposed to what students owe the
   // school. Same desk reads both — it is the bursar who checks an invoice — so
   // it sits behind the same capability rather than inventing a tenth.
