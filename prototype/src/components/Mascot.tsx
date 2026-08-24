@@ -118,7 +118,13 @@ export type MascotMood =
   | "frowning"
   | "angry"
   | "concerned"
-  | "celebrating";
+  | "celebrating"
+  /** Hand on cheek, exasperated — a rough round, a lost game. Funny, never mean. */
+  | "tired"
+  /** Arms crossed, confident — she's hosting: briefs, recaps, "here's your week". */
+  | "presenting"
+  /** Rock-on hands, smug grin — a flawless round, a streak that won't quit. */
+  | "cocky";
 
 type MoodSpec = {
   /** The glow colour hugging her silhouette — the primary way mood reads at a glance. */
@@ -143,6 +149,9 @@ const MOODS: Record<MascotMood, MoodSpec> = {
   angry: { glow: "#e0654a", steam: true },
   concerned: { glow: "#7fd7ff", sweat: true },
   celebrating: { glow: "#FFC46B", cheeks: true, sparkle: true, bounce: true },
+  tired: { glow: "#94a3b8" },
+  presenting: { glow: "#0D7C7E" },
+  cocky: { glow: "#FF6600", sparkle: true, bounce: true },
 };
 
 const BASE_IMAGE = "/mascot/becca-bust.png";
@@ -157,6 +166,34 @@ const POSE_IMAGES: Partial<Record<MascotMood, string>> = {
   frowning: "/mascot/becca-concerned-bust.png",
   angry: "/mascot/becca-concerned-bust.png",
   celebrating: "/mascot/becca-celebrating-bust.png",
+  tired: "/mascot/becca-tired-bust.png",
+  presenting: "/mascot/becca-presenting-bust.png",
+  cocky: "/mascot/becca-cocky-bust.png",
+};
+
+/**
+ * Poses whose dedicated photo has not been shot yet.
+ *
+ * The three moods below were written against art that has not landed. Pointing
+ * `POSE_IMAGES` straight at a missing file makes every render 404 and fall to
+ * `BASE_IMAGE` — safe, because of the `onError` guard further down, but it
+ * wastes a request and, worse, throws the mood away: a rough round and a
+ * flawless one would show the identical neutral face, which is the one thing
+ * this whole map exists to prevent.
+ *
+ * So each pending mood names the nearest photo we DO have. `concerned` reads as
+ * sympathetic rather than scolding, which is what `tired` is for; `celebrating`
+ * is the closest thing to `cocky`; and `presenting` borrows the right-pointing
+ * pose, because the surface that hosts her — the brief card — sits her to the
+ * LEFT of the text she is presenting, so pointing right points at the words.
+ *
+ * WHEN THE REAL ART ARRIVES: delete that mood's line from this map. That is the
+ * entire change — `POSE_IMAGES` above already names the correct filename.
+ */
+const PENDING_ART: Partial<Record<MascotMood, string>> = {
+  tired: "/mascot/becca-concerned-bust.png",
+  presenting: POINTING_RIGHT_IMAGE,
+  cocky: "/mascot/becca-celebrating-bust.png",
 };
 
 /**
@@ -200,7 +237,7 @@ export default function Mascot({
   const pointingLeft = pointing && Math.abs(pointAngle) > 90;
   const image = pointing
     ? (pointingLeft ? POINTING_LEFT_IMAGE : POINTING_RIGHT_IMAGE)
-    : (POSE_IMAGES[mood] ?? BASE_IMAGE);
+    : (PENDING_ART[mood] ?? POSE_IMAGES[mood] ?? BASE_IMAGE);
   const usingBaseImage = image === BASE_IMAGE;
 
   /**
@@ -273,6 +310,14 @@ export default function Mascot({
           src={image}
           alt="Your EasyWay guide"
           className="h-full w-full select-none"
+          onError={(event) => {
+            // A pose whose photo hasn't been supplied yet (new moods get coded
+            // before the render lands) must not show a broken-image icon on a
+            // live student's dashboard — fall back to the one photo guaranteed
+            // to exist rather than leave this to chance.
+            if (event.currentTarget.src.endsWith(BASE_IMAGE)) return;
+            event.currentTarget.src = BASE_IMAGE;
+          }}
           style={{
             objectFit: "contain",
             objectPosition: "50% 100%",

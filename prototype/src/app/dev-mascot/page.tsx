@@ -15,6 +15,7 @@ import Mascot, { type MascotMood } from "@/components/Mascot";
 const MOODS: MascotMood[] = [
   "greeting", "happy", "cheerful", "smiling", "thinking", "curious",
   "proud", "frowning", "angry", "concerned", "celebrating",
+  "tired", "presenting", "cocky",
 ];
 
 export default function MascotGallery() {

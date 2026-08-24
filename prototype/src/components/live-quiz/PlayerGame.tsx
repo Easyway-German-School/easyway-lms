@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AnswerShape from "@/components/live-quiz/AnswerShape";
 import { buzz } from "@/lib/live-quiz-sound";
 import { CheckIcon, ClockIcon, CrossIcon, FlameIcon, SendIcon, TrophyIcon } from "@/components/icons";
+import Mascot, { type MascotMood } from "@/components/Mascot";
 
 type ViewOption = { index: number; text: string; shape: string; color: string; label: string };
 
@@ -440,11 +441,16 @@ export default function PlayerGame({ gameId, onLeave }: { gameId: string; onLeav
           survives the walk home, so it is the one that has to be about them. */}
       {view.game.phase === "ended" ? (
         <div className="pq-report">
+          <Mascot
+            mood={reactionMood(view.me.correct, view.game.questionCount)}
+            className="mx-auto h-20 w-20"
+          />
           <p className="pq-report-score">
             {view.me.correct}
             <em>of {view.game.questionCount}</em>
           </p>
           <p className="pq-report-line">{scoreline(view.me.correct, view.game.questionCount)}</p>
+          <p className="pq-report-becca">{reactionLine(view.me.correct, view.game.questionCount)}</p>
           <div className="pq-report-meta">
             <span>
               <strong>{view.me.score.toLocaleString()}</strong> points
@@ -549,6 +555,38 @@ function scoreline(correct: number, total: number): string {
   return "None this time — so these are exactly what to study next.";
 }
 
+/**
+ * Becca's face on the result screen, keyed off the same share as `scoreline`.
+ *
+ * A rough round gets `tired` — hand on cheek, exasperated on the student's
+ * behalf, not at them — because that reads as funny rather than as the app
+ * judging them. A flawless round gets `cocky`: she's earned the rock-on hands
+ * as much as they have. Everything in between is just her being pleased.
+ */
+function reactionMood(correct: number, total: number): MascotMood {
+  if (total <= 0) return "smiling";
+  const share = correct / total;
+  if (correct === total) return "cocky";
+  if (share >= 0.6) return "celebrating";
+  if (share >= 0.4) return "smiling";
+  return "tired";
+}
+
+/**
+ * Becca's own line, separate from `scoreline`'s honest verdict — this one is
+ * allowed to be funny, but it still has to end on the same place `scoreline`
+ * does: go again, don't quit here.
+ */
+function reactionLine(correct: number, total: number): string {
+  if (total <= 0) return "";
+  const share = correct / total;
+  if (correct === total) return "Okay, show-off. Next round, same energy.";
+  if (share >= 0.6) return "That's the good stuff. Keep that up.";
+  if (share >= 0.4) return "Not bad. You've got a comeback in you.";
+  if (correct > 0) return "Rough one. I've had worse days — go again.";
+  return "We don't talk about that round. Rematch?";
+}
+
 function ordinal(place: number): string {
   const suffix =
     place % 100 >= 11 && place % 100 <= 13
@@ -630,6 +668,7 @@ const PLAYER_CSS = `
 .pq-report-score{font-size:3.4rem;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
 .pq-report-score em{display:block;margin-top:.25rem;font-size:.95rem;font-weight:600;font-style:normal;opacity:.7}
 .pq-report-line{margin-top:.7rem;font-size:1rem;font-weight:600;text-wrap:balance}
+.pq-report-becca{margin-top:.35rem;font-size:.85rem;font-style:italic;opacity:.75;text-wrap:balance}
 .pq-report-meta{display:flex;justify-content:center;gap:1.6rem;margin-top:.9rem;font-size:.85rem;opacity:.85}
 .pq-report-meta strong{font-variant-numeric:tabular-nums}
 
