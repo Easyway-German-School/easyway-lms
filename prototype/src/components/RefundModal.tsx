@@ -1,22 +1,25 @@
 "use client";
 
 /**
- * "Request a refund" on the Payments page, end to end.
+ * "Request for a refund?" on the Payments page, end to end.
  *
- * Two stages, not one form: Becca holding up the policy first, then — only
- * once that is acknowledged — the actual request. Section 23 is a NO by
- * default with named exceptions, so this is not theatre that always ends in
- * rejection; a genuine request still reaches the office either way. What the
- * first stage buys the school is the thing section 24 is really asking for:
- * proof the student saw the policy on their way to asking for their money
- * back, not just that they agreed to it once at signup months earlier.
+ * Four stages, not one form. Becca opens with a friendly heads-up — not the
+ * policy itself — because leading with section 23's wall of text reads as a
+ * setup, like the button existed to catch people out. From there the student
+ * picks: read the full Terms and Conditions, or skip straight to the refund
+ * sections. Either path ends at the same acknowledgement TermsGate before the
+ * form unlocks, so section 24's requirement — proof the student saw the
+ * policy on their way to asking for their money back, not just once at
+ * signup months earlier — holds no matter which door they took. Section 23
+ * is a NO by default with named exceptions, so none of this is theatre that
+ * always ends in rejection; a genuine request still reaches the office.
  */
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Mascot from "@/components/Mascot";
 import TermsGate from "@/components/TermsGate";
-import { refundSections } from "@/lib/terms";
+import { refundSections, TERMS_SECTIONS } from "@/lib/terms";
 import { CheckIcon, CrossIcon } from "@/components/icons";
 
 type TermsStatus = {
@@ -25,8 +28,10 @@ type TermsStatus = {
   fallbackNotice?: string;
 };
 
+type Stage = "intro" | "fullGate" | "refundGate" | "form" | "success";
+
 export default function RefundModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [stage, setStage] = useState<"warning" | "form" | "success">("warning");
+  const [stage, setStage] = useState<Stage>("intro");
   const [mounted, setMounted] = useState(false);
   const [existingTerms, setExistingTerms] = useState<TermsStatus | null>(null);
 
@@ -42,7 +47,7 @@ export default function RefundModal({ open, onClose }: { open: boolean; onClose:
 
   useEffect(() => {
     if (!open) return;
-    setStage("warning");
+    setStage("intro");
     setError("");
     (async () => {
       try {
@@ -91,7 +96,62 @@ export default function RefundModal({ open, onClose }: { open: boolean; onClose:
     }
   }
 
-  if (stage === "warning") {
+  if (stage === "intro") {
+    return createPortal(
+      <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={onClose}>
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="w-full max-w-md overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-start gap-4">
+            <Mascot mood="smiling" className="h-20 w-20 shrink-0" />
+            <div>
+              <h2 className="text-lg font-black text-[var(--foreground)]">Before you request a refund</h2>
+              <p className="mt-1.5 text-sm text-[var(--muted)]">
+                Please take a moment to read our Terms and Conditions first — it covers what to expect and how the
+                process works.
+              </p>
+            </div>
+          </div>
+          <div className="mt-6 space-y-2">
+            <button
+              type="button"
+              onClick={() => setStage("fullGate")}
+              className="w-full rounded-xl bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[#FF6600]/20 transition hover:brightness-110"
+            >
+              Read the Terms and Conditions
+            </button>
+            <button
+              type="button"
+              onClick={() => setStage("refundGate")}
+              className="w-full rounded-xl px-6 py-2.5 text-xs font-semibold text-[var(--muted)] underline underline-offset-2 hover:text-[var(--foreground)]"
+            >
+              Skip to refund policy
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
+  if (stage === "fullGate") {
+    return (
+      <TermsGate
+        open
+        closable
+        onClose={onClose}
+        sections={TERMS_SECTIONS}
+        title="Terms and Conditions"
+        agreeLabel="I Agree — Continue"
+        onAgree={() => setStage("form")}
+      />
+    );
+  }
+
+  if (stage === "refundGate") {
     return (
       <TermsGate
         open
@@ -99,12 +159,12 @@ export default function RefundModal({ open, onClose }: { open: boolean; onClose:
         onClose={onClose}
         sections={refundSections()}
         showPreamble={false}
-        title="Before you request a refund"
+        title="The refund policy"
         agreeLabel="I Understand — Continue"
         checkboxLabel="I understand the refund policy above and still want to submit a request."
         intro={
           <div className="flex items-start gap-4">
-            <Mascot mood="stern" className="h-20 w-20 shrink-0" />
+            <Mascot mood="presenting" className="h-20 w-20 shrink-0" />
             <div>
               <p className="font-semibold text-[var(--foreground)]">Tuition fees are generally non-refundable.</p>
               <p className="mt-1">

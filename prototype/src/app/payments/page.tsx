@@ -129,9 +129,9 @@ export default function PaymentsPage() {
                   <button
                     type="button"
                     onClick={() => setRefundOpen(true)}
-                    className="text-xs font-semibold text-[var(--muted)] underline-offset-2 hover:text-[var(--foreground)] hover:underline"
+                    className="text-xs font-semibold text-[var(--muted)] underline underline-offset-2 hover:text-[var(--foreground)]"
                   >
-                    Request a refund
+                    Request for a refund?
                   </button>
                 ) : null}
               </div>
