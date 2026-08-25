@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import { EXAM_BODIES } from "@/lib/exam-centre";
 import { letterFor } from "@/lib/grading";
+import { isExamBodyLive } from "@/lib/tenant/features";
+import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
 
 /**
  * Staff view of exams: schedule sittings, manage the roster, enter results.
@@ -26,6 +28,8 @@ async function requireExamAdmin() {
 export async function GET() {
   const auth = await requireExamAdmin();
   if (auth instanceof NextResponse) return auth;
+
+  const features = await featuresForCurrentTenant();
 
   const [exams, branches] = await Promise.all([
     prisma.exam.findMany({
@@ -92,6 +96,7 @@ export async function GET() {
     exams: examsOut,
     branches,
     bodies: EXAM_BODIES,
+    liveBodies: EXAM_BODIES.filter((body) => isExamBodyLive(features, body)),
     stats: {
       published,
       booked,

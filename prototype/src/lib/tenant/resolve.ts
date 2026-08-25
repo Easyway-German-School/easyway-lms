@@ -25,9 +25,18 @@ const DEFAULT_SLUG = process.env.DEFAULT_TENANT_SLUG || "easyway";
 const CACHE_MS = 60_000;
 const cache = new Map<string, { id: string; at: number }>();
 
-function hostOf(request: { headers: { get(name: string): string | null } }): string {
-  const raw =
-    request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
+/**
+ * Exported rather than kept private: this is the same derivation
+ * `api/tenant/branding/route.ts`, the root layout and the exam centre need,
+ * and three hand-written copies of "strip the port, lowercase it" is how they
+ * end up disagreeing about what a host is.
+ *
+ * Takes the headers object directly (not a request wrapping one) — `next/
+ * headers`'s `headers()` and `NextRequest.headers` are both `Headers`-like
+ * with a `.get()`, which is the only overlap the two callers share.
+ */
+export function hostOf(headers: { get(name: string): string | null }): string {
+  const raw = headers.get("x-forwarded-host") || headers.get("host") || "";
   // Strip the port; localhost:3000 and localhost are the same customer.
   return raw.split(":")[0].trim().toLowerCase();
 }
@@ -35,7 +44,7 @@ function hostOf(request: { headers: { get(name: string): string | null } }): str
 export async function resolveTenantId(request: {
   headers: { get(name: string): string | null };
 }): Promise<string> {
-  const host = hostOf(request);
+  const host = hostOf(request.headers);
   const hit = cache.get(host);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.id;
 

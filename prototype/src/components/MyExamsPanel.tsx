@@ -89,14 +89,6 @@ function daysUntil(iso: string) {
   return Math.ceil(diff / 86_400_000);
 }
 
-/**
- * Goethe registration happens entirely on goethe.de — EasyWay never touches
- * the booking or the fee, so this is a plain outbound link rather than an
- * exam body in our own booking flow (see ExamBodyComingSoon for why we don't
- * put a "Register" button in front of a seat we can't actually deliver).
- */
-const GOETHE_REGISTRATION_URL = "https://www.goethe.de/ins/ng/en/m/spr/prf/anm.html";
-
 export default function MyExamsPanel() {
   const [upcoming, setUpcoming] = useState<MyExam[]>([]);
   const [past, setPast] = useState<MyExam[]>([]);
@@ -106,6 +98,15 @@ export default function MyExamsPanel() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [payingId, setPayingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<ExamFilter>("all");
+  /**
+   * Goethe registration happens entirely on goethe.de — EasyWay never touches
+   * the booking or the fee, so this is a plain outbound link rather than an
+   * exam body in our own booking flow. Tenant-configurable: a school that
+   * isn't teaching German has no Goethe sitting to point students at, so a
+   * `null` from the server hides the card entirely rather than defaulting to
+   * EasyWay's own link.
+   */
+  const [goetheUrl, setGoetheUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -115,6 +116,7 @@ export default function MyExamsPanel() {
       setUpcoming(data.upcoming ?? []);
       setPast(data.past ?? []);
       setAvailable(data.available ?? []);
+      setGoetheUrl(data.goetheReferralUrl ?? null);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -169,11 +171,13 @@ export default function MyExamsPanel() {
 
   const shownUpcoming = upcoming.filter((exam) => matchesFilter(filter, exam.examBody));
   const shownPast = past.filter((exam) => matchesFilter(filter, exam.examBody));
-  // ÖSD/telc booking isn't live — see ExamBodyComingSoon. Real historical
-  // bookings still show above; only new registrations are held back here.
-  const shownAvailable = available
-    .filter((exam) => isEasywayExam(exam.examBody))
-    .filter((exam) => matchesFilter(filter, exam.examBody));
+  // `available` is already filtered server-side to bodies this tenant has
+  // live (see /api/my-exams) — no client-side re-filtering by body needed,
+  // only by the display tab.
+  const shownAvailable = available.filter((exam) => matchesFilter(filter, exam.examBody));
+  // Whether ANY external-body sitting made it through the server-side gate —
+  // if so, the osd tab shows the real list instead of the sealed preview.
+  const hasLiveExternal = available.some((exam) => !isEasywayExam(exam.examBody));
 
   const counts: Record<ExamFilter, number> = {
     all: upcoming.length,
@@ -209,23 +213,25 @@ export default function MyExamsPanel() {
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl cinematic-card p-5">
-        <div className="min-w-0">
-          <h3 className="font-semibold">Prefer to sit Goethe instead?</h3>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Registration and fees for the Goethe-Zertifikat are handled entirely by the Goethe-Institut, not EasyWay —
-            this takes you straight to their official booking page.
-          </p>
+      {goetheUrl && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl cinematic-card p-5">
+          <div className="min-w-0">
+            <h3 className="font-semibold">Prefer to sit Goethe instead?</h3>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Registration and fees for the Goethe-Zertifikat are handled entirely by the Goethe-Institut, not EasyWay —
+              this takes you straight to their official booking page.
+            </p>
+          </div>
+          <a
+            href={goetheUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex shrink-0 items-center gap-2 rounded-full btn-glow px-5 py-2.5 text-sm font-semibold text-white"
+          >
+            Register on goethe.de <ExternalLinkIcon className="h-4 w-4" />
+          </a>
         </div>
-        <a
-          href={GOETHE_REGISTRATION_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex shrink-0 items-center gap-2 rounded-full btn-glow px-5 py-2.5 text-sm font-semibold text-white"
-        >
-          Register on goethe.de <ExternalLinkIcon className="h-4 w-4" />
-        </a>
-      </div>
+      )}
 
       <section>
         <h2 className="text-lg font-bold">Coming up</h2>
@@ -309,7 +315,7 @@ export default function MyExamsPanel() {
         )}
       </section>
 
-      {filter === "osd" ? (
+      {filter === "osd" && !hasLiveExternal ? (
         <ExamBodyComingSoon onExploreInternal={() => setFilter("easyway")} />
       ) : (
         shownAvailable.length > 0 && (

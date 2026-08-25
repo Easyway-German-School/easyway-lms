@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { brandingCss } from "@/lib/tenant/branding";
 import { brandingForHost } from "@/lib/tenant/branding-server";
+import { hostOf } from "@/lib/tenant/resolve";
 
 export const dynamic = "force-dynamic";
 
@@ -19,13 +20,7 @@ export const dynamic = "force-dynamic";
  * not get to choose.
  */
 export async function GET(request: NextRequest) {
-  const host = (
-    request.headers.get("x-forwarded-host") ||
-    request.headers.get("host") ||
-    ""
-  )
-    .split(":")[0]
-    .toLowerCase();
+  const host = hostOf(request.headers);
 
   const branding = await brandingForHost(host);
 

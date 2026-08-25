@@ -12,6 +12,7 @@ import {
   snapshotQuestions,
   uniquePin,
 } from "@/lib/live-quiz";
+import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,8 @@ export async function GET() {
       })
     : null;
 
+  const features = await featuresForCurrentTenant();
+
   return NextResponse.json({
     quizzes: quizzes
       .map((quiz) => {
@@ -105,7 +108,8 @@ export async function GET() {
       // Listing it and failing on the click would be a worse way to say so.
       .filter((quiz) => quiz.questionCount > 0),
     openGame: open,
-    requiresLiveClass: hostLecturer?.branch?.mode === "online",
+    requiresLiveClass:
+      features.games.onlineCohortRequiresLiveClass && hostLecturer?.branch?.mode === "online",
     pastGames: past.map((game) => ({
       id: game.id,
       title: game.title,
@@ -235,8 +239,13 @@ export async function POST(request: NextRequest) {
    * no shared moment, which is the opposite of what makes this format work.
    * So for an online branch, the live lesson IS the room, and there is no
    * game without one. Physical and hybrid branches are untouched.
+   *
+   * A tenant's to keep or drop: `games.onlineCohortRequiresLiveClass` is
+   * EasyWay's own policy call, not a platform-wide rule — a tenant with no
+   * live-class concept, or one happy to run games in the open, can turn it off.
    */
-  if (!liveSessionId && lecturer?.branch?.mode === "online") {
+  const features = await featuresForCurrentTenant();
+  if (features.games.onlineCohortRequiresLiveClass && !liveSessionId && lecturer?.branch?.mode === "online") {
     return NextResponse.json(
       {
         error:

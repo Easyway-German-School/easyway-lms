@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardedPrisma } from "@/lib/prisma";
 import { requirePlatformOperator } from "@/lib/platform";
+import { validateBrandingInput } from "@/lib/tenant/branding";
+import { FEATURES_KEY, parseFeatures } from "@/lib/tenant/features";
+import { forgetFeatures } from "@/lib/tenant/features-server";
+import { forgetBranding } from "@/lib/tenant/branding-server";
+import { forgetTenantHosts } from "@/lib/tenant/resolve";
 
 export const dynamic = "force-dynamic";
 
@@ -58,10 +63,15 @@ const SLUG = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
 /**
  * Onboard a school.
  *
- * Creates the tenant and its credit row together, in one transaction. A tenant
- * without a credit row is a tenant whose first metered request has to decide
- * what to do about a missing balance, and "create it on the fly" is how two
- * concurrent requests create two.
+ * Creates the tenant, its credit row, and — optionally, in the same
+ * transaction — its initial branding and feature configuration. Onboarding
+ * used to be create-then-edit-then-toggle across three separate round trips
+ * to three different sections of the console; an operator setting up a real
+ * client can now do it in one. A tenant without a credit row is a tenant
+ * whose first metered request has to decide what to do about a missing
+ * balance, and "create it on the fly" is how two concurrent requests create
+ * two — the same reasoning extends to shipping the feature row atomically
+ * with the tenant rather than as a follow-up write that could be lost.
  */
 export async function POST(request: NextRequest) {
   const gate = await requirePlatformOperator();
@@ -83,6 +93,24 @@ export async function POST(request: NextRequest) {
       },
       { status: 400 },
     );
+  }
+
+  const branding = validateBrandingInput(body ?? {});
+  if (!branding.ok) {
+    return NextResponse.json({ error: branding.error }, { status: 400 });
+  }
+  const brandName = "brandName" in (body ?? {}) ? String(body.brandName ?? "").trim() || null : undefined;
+
+  let features: ReturnType<typeof parseFeatures> | undefined;
+  if (body && "features" in body) {
+    const parsed = parseFeatures(body.features, { strict: true });
+    if (!parsed) {
+      return NextResponse.json(
+        { error: "That isn't a valid feature configuration." },
+        { status: 400 },
+      );
+    }
+    features = parsed;
   }
 
   const clash = await guardedPrisma.tenant.findFirst({
@@ -115,10 +143,31 @@ export async function POST(request: NextRequest) {
        * remember.
        */
       trialEndsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      ...(brandName !== undefined ? { brandName } : {}),
+      ...(branding.patch.logoUrl !== undefined ? { logoUrl: branding.patch.logoUrl } : {}),
+      ...(branding.patch.primaryColor !== undefined ? { primaryColor: branding.patch.primaryColor } : {}),
       credit: { create: {} },
+      ...(features ? { schoolSettings: { create: { key: FEATURES_KEY, value: features } } } : {}),
     },
-    select: { id: true, name: true, slug: true, domain: true, plan: true, trialEndsAt: true },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      domain: true,
+      plan: true,
+      trialEndsAt: true,
+      brandName: true,
+      logoUrl: true,
+      primaryColor: true,
+    },
   });
 
-  return NextResponse.json({ tenant }, { status: 201 });
+  // Cheap to drop, and an operator who just picked a domain and a colour for
+  // a brand-new school should not see stale (empty) branding on their own
+  // very next load. Same reasoning as the tenant PATCH.
+  forgetBranding();
+  forgetTenantHosts();
+  forgetFeatures();
+
+  return NextResponse.json({ tenant, features: features ?? null }, { status: 201 });
 }

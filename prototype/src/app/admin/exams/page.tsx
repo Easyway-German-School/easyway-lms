@@ -84,6 +84,7 @@ export default function AdminExamsPage() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [bodies, setBodies] = useState<string[]>([]);
+  const [liveBodies, setLiveBodies] = useState<string[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -108,6 +109,7 @@ export default function AdminExamsPage() {
       setExams(data.exams ?? []);
       setBranches(data.branches ?? []);
       setBodies(data.bodies ?? []);
+      setLiveBodies(data.liveBodies ?? []);
       setStats(data.stats ?? null);
       setError("");
     } catch (e) {
@@ -244,9 +246,9 @@ export default function AdminExamsPage() {
                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
                 {bodies.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
-              {!isInternal(form.examBody) && (
+              {!isInternal(form.examBody) && !liveBodies.includes(form.examBody) && (
                 <span className="mt-1 block text-[11px] text-amber-700">
-                  Hidden from student booking — ÖSD/telc booking isn't live yet.
+                  Hidden from student booking — this awarding body isn&apos;t live for this school yet.
                 </span>
               )}
             </label>

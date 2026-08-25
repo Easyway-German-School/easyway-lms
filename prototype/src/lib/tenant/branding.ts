@@ -151,3 +151,40 @@ export function brandingCss(primaryColor: string | null): string {
   --accent-soft: ${rgba(base, 0.18)};
 }`.trim();
 }
+
+export type BrandingPatch = { logoUrl?: string | null; primaryColor?: string | null };
+
+/**
+ * The shared guard-plus-error-message wrapper around `isSafeLogo`/
+ * `isSafeColor`, used by both the tenant `PATCH` and the onboarding `POST` —
+ * written once so the two routes cannot quietly disagree about what a valid
+ * logo or colour looks like. Only touches the keys actually present in
+ * `body`, matching each field's own "clear with an empty string" behaviour.
+ */
+export function validateBrandingInput(
+  body: Record<string, unknown>,
+): { ok: true; patch: BrandingPatch } | { ok: false; error: string } {
+  const patch: BrandingPatch = {};
+
+  if ("logoUrl" in body) {
+    const value = String(body.logoUrl ?? "").trim();
+    if (value && !isSafeLogo(value)) {
+      return {
+        ok: false,
+        error:
+          "The logo must be an https URL or a path on this site. Plain http is blocked as mixed content by the browser, so the logo would simply never appear.",
+      };
+    }
+    patch.logoUrl = value || null;
+  }
+
+  if ("primaryColor" in body) {
+    const value = String(body.primaryColor ?? "").trim();
+    if (value && !isSafeColor(value)) {
+      return { ok: false, error: "The colour must be a hex value such as #FF6600." };
+    }
+    patch.primaryColor = value || null;
+  }
+
+  return { ok: true, patch };
+}

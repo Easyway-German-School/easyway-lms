@@ -1,9 +1,13 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import { Providers } from "./providers";
 import PageContainer from "@/components/PageContainer";
 import { LiveCallProvider } from "@/components/live/LiveCallContext";
 import LiveCallDock from "@/components/live/LiveCallDock";
+import { brandingCss } from "@/lib/tenant/branding";
+import { brandingForHost } from "@/lib/tenant/branding-server";
+import { hostOf } from "@/lib/tenant/resolve";
 
 export const metadata: Metadata = {
   title: "Easyway German Language School",
@@ -76,11 +80,36 @@ if(t!=='light'&&t!=='dark'&&t!=='custom'){t='light'}
 document.documentElement.classList.add('theme-'+t);
 }catch(e){document.documentElement.classList.add('theme-light')}})();`;
 
-export default function RootLayout({
+/**
+ * Must match `STYLE_ID` in `BrandingProvider.tsx`. The provider looks this id
+ * up by `document.getElementById` and updates its `textContent` on SPA
+ * navigation rather than appending a second tag — if the ids ever disagree,
+ * the page ends up with two competing stylesheets whose winner is decided by
+ * DOM order.
+ */
+const TENANT_BRANDING_STYLE_ID = "tenant-branding";
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  /**
+   * Resolved server-side so the FIRST paint already carries a tenant's brand
+   * colour — `BrandingProvider`'s own docblock names this exact move as the
+   * deferred half of white-labelling, priced at "opts the whole app out of
+   * static rendering" and left undone while EasyWay was the only tenant (null
+   * brand columns render identically either way). Now that a school can
+   * actually have a colour, the trade is worth taking.
+   *
+   * `BrandingProvider` is untouched: it still fetches client-side for SPA
+   * navigation and the 60s staleness window, and it updates this same style
+   * tag by id rather than duplicating it.
+   */
+  const host = hostOf(await headers());
+  const branding = await brandingForHost(host);
+  const brandingStyle = brandingCss(branding.primaryColor);
+
   return (
     <html lang="en" className="h-full antialiased" suppressHydrationWarning>
       <head>
@@ -98,6 +127,11 @@ export default function RootLayout({
         */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
+        {/* Empty when the tenant has no colour set (EasyWay's own case) — the
+            HTML stays byte-identical to before this existed. */}
+        {brandingStyle && (
+          <style id={TENANT_BRANDING_STYLE_ID} dangerouslySetInnerHTML={{ __html: brandingStyle }} />
+        )}
       </head>
       {/* `app-canvas`, not `bg-[var(--background)]`: the latter compiles to
           background-color and throws the gradient away. See globals.css. */}

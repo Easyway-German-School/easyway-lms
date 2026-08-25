@@ -3,6 +3,7 @@ import { resolveApiKey, hasScope, type ResolvedKey } from "@/lib/api/keys";
 import { apiError } from "@/lib/api/response";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
 import { setTenantScope, beginRequestScope } from "@/lib/tenant/context";
+import { creditBlocked } from "@/lib/usage/guard";
 
 /**
  * The door on every /api/v1 route.
@@ -130,6 +131,30 @@ export async function requireApiKey(
    * handler that called it.
    */
   setTenantScope(key.tenantId);
+
+  /**
+   * A live key on a tenant whose credit has run out — including the grace
+   * allowance — is refused here, before the handler does any work. Test keys
+   * are exempt, same reasoning as the metering skip below: a sandbox that
+   * stops working because of somebody else's unpaid invoice is not a sandbox.
+   *
+   * Deliberately narrow: this blocks only the partner-facing /api/v1 surface,
+   * not student-facing AI, live classes or email — see the philosophy
+   * `warnLowBalances` in usage/record.ts already states ("not cut them off").
+   * A machine integration with no student watching is a different call.
+   */
+  if (key.environment === "live") {
+    const blocked = await creditBlocked(key.tenantId);
+    if (blocked) {
+      return {
+        ok: false,
+        response: apiError(
+          "payment_required",
+          "This school's platform credit is exhausted. Top up from Platform billing to resume API access.",
+        ),
+      };
+    }
+  }
 
   /**
    * The request itself is billable — the one meter that prices the platform

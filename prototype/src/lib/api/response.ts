@@ -23,6 +23,7 @@ export type ApiErrorCode =
   | "invalid_request"
   | "idempotency_conflict"
   | "rate_limited"
+  | "payment_required"
   | "internal_error";
 
 const STATUS_FOR: Record<ApiErrorCode, number> = {
@@ -32,6 +33,7 @@ const STATUS_FOR: Record<ApiErrorCode, number> = {
   invalid_request: 400,
   idempotency_conflict: 409,
   rate_limited: 429,
+  payment_required: 402,
   internal_error: 500,
 };
 

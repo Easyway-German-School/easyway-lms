@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardedPrisma } from "@/lib/prisma";
 import { requirePlatformOperator } from "@/lib/platform";
-import { isSafeColor, isSafeLogo } from "@/lib/tenant/branding";
+import { validateBrandingInput } from "@/lib/tenant/branding";
 import { forgetBranding } from "@/lib/tenant/branding-server";
 import { forgetTenantHosts } from "@/lib/tenant/resolve";
 
@@ -56,30 +56,11 @@ export async function PATCH(
     data.brandName = value || null;
   }
 
-  if ("logoUrl" in body) {
-    const value = String(body.logoUrl ?? "").trim();
-    if (value && !isSafeLogo(value)) {
-      return NextResponse.json(
-        {
-          error:
-            "The logo must be an https URL or a path on this site. Plain http is blocked as mixed content by the browser, so the logo would simply never appear.",
-        },
-        { status: 400 },
-      );
-    }
-    data.logoUrl = value || null;
+  const branding = validateBrandingInput(body);
+  if (!branding.ok) {
+    return NextResponse.json({ error: branding.error }, { status: 400 });
   }
-
-  if ("primaryColor" in body) {
-    const value = String(body.primaryColor ?? "").trim();
-    if (value && !isSafeColor(value)) {
-      return NextResponse.json(
-        { error: "The colour must be a hex value such as #FF6600." },
-        { status: 400 },
-      );
-    }
-    data.primaryColor = value || null;
-  }
+  Object.assign(data, branding.patch);
 
   if ("domain" in body) {
     const value = String(body.domain ?? "").trim().toLowerCase() || null;

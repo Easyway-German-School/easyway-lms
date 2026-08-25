@@ -1,6 +1,7 @@
 import { guardedPrisma } from "@/lib/prisma";
 import { currentTenantId } from "@/lib/tenant/context";
 import { METERS, PLACEHOLDER_RATES_KOBO, costKobo, meterKey, type MeterName } from "@/lib/usage/meter";
+import { forgetCredit } from "@/lib/usage/guard";
 
 /**
  * Writing down what a school used.
@@ -274,6 +275,12 @@ async function applyCredit(input: {
     }
 
     return { applied: true, balanceKobo: credit.balanceKobo };
+  }).then((result) => {
+    // The balance just moved — in either direction — so the credit-block
+    // cache in usage/guard.ts must not keep answering from before the write.
+    // Cheapest correct thing: drop it and let the next check re-read.
+    forgetCredit(input.tenantId);
+    return result;
   });
 }
 
