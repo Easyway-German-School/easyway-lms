@@ -224,6 +224,18 @@ async function handleGET(request: NextRequest) {
     }),
   );
 
+  /**
+   * "Your streak ends today" — the loss-aversion nudge Duolingo built its
+   * habit loop on. See src/lib/streak-reminders.ts for why it reuses the same
+   * attendance-day data every other streak display already reads.
+   */
+  results.push(
+    await run("streak-reminders", async () => {
+      const { sendDueStreakReminders } = await import("@/lib/streak-reminders");
+      return sendDueStreakReminders();
+    }),
+  );
+
   results.push(
     await run("satzkette-turns", async () => {
       const { openLapsedTurns, archiveStaleMatches } = await import("@/lib/satzkette-server");

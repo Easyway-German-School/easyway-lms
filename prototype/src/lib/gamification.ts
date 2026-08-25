@@ -248,3 +248,19 @@ export function calculateStreak(dates: Array<Date | string>): number {
   }
   return streak;
 }
+
+/**
+ * Whether any of these dates falls on today's UTC calendar day.
+ *
+ * Same day-key formatting `calculateStreak` uses internally, exported so a
+ * "has this student already kept their streak alive today?" check (streak
+ * reminders) never drifts from what the streak count itself considers today.
+ */
+export function hasActivityToday(dates: Array<Date | string>): boolean {
+  const today = new Date();
+  const todayKey = `${today.getUTCFullYear()}-${today.getUTCMonth()}-${today.getUTCDate()}`;
+  return dates.some((date) => {
+    const value = new Date(date);
+    return `${value.getUTCFullYear()}-${value.getUTCMonth()}-${value.getUTCDate()}` === todayKey;
+  });
+}

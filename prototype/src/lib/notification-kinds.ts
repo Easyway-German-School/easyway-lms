@@ -58,6 +58,8 @@ export const KIND = {
   recordingFailed: "recording.failed",
   /** One or more of a tutor's students look like they're drifting away — see src/lib/student-risk.ts. */
   studentAtRisk: "student.at_risk",
+  /** A student's day-streak lapses at midnight if they do nothing today — see src/lib/streak-reminders.ts. */
+  streakAtRisk: "streak.at_risk",
   general: "general",
 } as const;
 
