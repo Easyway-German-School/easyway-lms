@@ -177,6 +177,9 @@ export const TENANT_OWNED_MODELS = [
    * must never be reachable from another school's admin console.
    */
   "Parent",
+  /** The real parent-child link (Parent.studentId only ever held one). Same
+   * reasoning as Parent — it names a real family. */
+  "ParentStudent",
 
   /**
    * The private-tier 1:1 DM and the tutor's write-up after each session.

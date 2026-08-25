@@ -70,5 +70,6 @@ export function signInPathForRole(raw: unknown): string {
 export function portalOfPath(path: string): PortalRole {
   if (path.startsWith("/admin")) return "admin";
   if (path.startsWith("/lecturer")) return "lecturer";
+  if (path.startsWith("/parent")) return "parent";
   return "student";
 }

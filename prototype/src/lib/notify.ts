@@ -73,7 +73,13 @@ export type NotifyTarget =
    * Everyone holding a role. For admins, `capability` narrows it to the ones
    * cleared for that area, so the bursar is not woken for a community report.
    */
-  | { audience: "admin" | "lecturer" | "student" | "all"; capability?: string };
+  | { audience: "admin" | "lecturer" | "student" | "all"; capability?: string }
+  /**
+   * Every parent/guardian linked to any of these students, via ParentStudent.
+   * A student with two linked guardians reaches both; a student nobody has
+   * linked yet reaches no one, silently — that's correct, not an error.
+   */
+  | { parentsOfStudentIds: string[] };
 
 export type NotifyInput = {
   to: NotifyTarget;
@@ -145,6 +151,14 @@ async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
       select: { userId: true },
     });
     return [...new Set(students.map((s) => s.userId))];
+  }
+
+  if ("parentsOfStudentIds" in to) {
+    const links = await prisma.parentStudent.findMany({
+      where: { studentId: { in: to.parentsOfStudentIds } },
+      select: { parent: { select: { userId: true } } },
+    });
+    return [...new Set(links.map((l) => l.parent.userId))];
   }
 
   if ("students" in to) {

@@ -16,11 +16,28 @@ import { requireCapability } from "@/lib/admin-roles";
 
 const include = {
   user: { select: { id: true, name: true, email: true, createdAt: true } },
+  // @deprecated single-child legacy link — kept for one release cycle so the
+  // UI can flag drift against `children`, the real source of truth.
   student: {
     select: {
       id: true,
       studentCode: true,
       user: { select: { name: true, email: true } },
+    },
+  },
+  children: {
+    orderBy: { linkedAt: "asc" },
+    select: {
+      id: true,
+      studentId: true,
+      linkedAt: true,
+      student: {
+        select: {
+          id: true,
+          studentCode: true,
+          user: { select: { name: true, email: true } },
+        },
+      },
     },
   },
 } as const;
@@ -112,14 +129,30 @@ export async function POST(request: Request) {
         parent: {
           create: {
             phone: phone || null,
-            studentId: linkedStudent?.id ?? null,
             childName: childName || linkedStudent?.user.name || null,
             childEmail: childEmail || linkedStudent?.user.email || null,
             childStudentCode: childStudentCode || null,
+            // The real link lives in ParentStudent, not the legacy scalar —
+            // see the Parent.studentId doc-comment.
+            ...(linkedStudent
+              ? {
+                  children: {
+                    create: {
+                      studentId: linkedStudent.id,
+                      linkedBy: gate.session.user.id,
+                      tenantId: gate.session.user.tenantId,
+                    },
+                  },
+                }
+              : {}),
           },
         },
       },
-      include,
+      // Note: no `include` here — `include` above is shaped for querying a
+      // Parent row (user/student/children), not a User row, and passing it to
+      // user.create() throws "Unknown field `user`" (User's relation to
+      // Parent is called `parent`, singular). The response below only needs
+      // the scalar fields User.create already returns.
     });
 
     return NextResponse.json({ user: { id: user.id, email: user.email, name: user.name } }, { status: 201 });

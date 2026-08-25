@@ -210,6 +210,17 @@ export async function POST(req: NextRequest) {
           link: "/attendance",
           dedupeKey: `attendance-marked:${entry.studentId}:${day.toISOString()}:absent`,
         });
+        // Same fact, a parent's own copy — a linked guardian would rather
+        // hear this from the school than notice a gap later.
+        notifyInBackground({
+          to: { parentsOfStudentIds: [entry.studentId] },
+          kind: KIND.attendanceMarked,
+          severity: "info",
+          title: "Marked absent today",
+          message: "Your child's tutor recorded them as absent for today's class.",
+          link: "/parent/attendance",
+          dedupeKey: `attendance-marked:${entry.studentId}:${day.toISOString()}:absent:parent`,
+        });
       }
     }
 

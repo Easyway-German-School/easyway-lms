@@ -4,6 +4,16 @@ import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import PasswordInput from "@/components/PasswordInput";
 
+type LinkedChild = {
+  id: string; // ParentStudent row id
+  studentId: string;
+  student: {
+    id: string;
+    studentCode: string | null;
+    user: { name: string | null; email: string };
+  };
+};
+
 type ParentRow = {
   id: string;
   phone: string | null;
@@ -11,11 +21,13 @@ type ParentRow = {
   childEmail: string | null;
   childStudentCode: string | null;
   user: { id: string; name: string | null; email: string; createdAt: string };
+  // @deprecated single-child legacy link — `children` is the real list now.
   student: {
     id: string;
     studentCode: string | null;
     user: { name: string | null; email: string };
   } | null;
+  children: LinkedChild[];
 };
 
 type StudentOption = {
@@ -51,6 +63,11 @@ export default function AdminParentsPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedCredentials, setSavedCredentials] = useState<{ name: string; email: string; password: string } | null>(null);
+  // Only meaningful once a parent exists (editingId set) — a brand-new parent
+  // gets its first child via `selectedStudent` at creation, then more are
+  // added here after saving once.
+  const [linkedChildren, setLinkedChildren] = useState<LinkedChild[]>([]);
+  const [addingChild, setAddingChild] = useState(false);
 
   async function loadParents() {
     setLoading(true);
@@ -105,6 +122,7 @@ export default function AdminParentsPage() {
     setStudentQuery("");
     setStudentOptions([]);
     setEditingId(null);
+    setLinkedChildren([]);
     setError("");
   }
 
@@ -119,15 +137,46 @@ export default function AdminParentsPage() {
       childEmail: row.childEmail || "",
       childStudentCode: row.childStudentCode || "",
     });
-    setSelectedStudent(
-      row.student
-        ? { id: row.student.id, studentCode: row.student.studentCode, level: "", user: row.student.user }
-        : null,
-    );
+    setSelectedStudent(null);
+    setLinkedChildren(row.children);
     setStudentQuery("");
     setStudentOptions([]);
     setError("");
     setShowForm(true);
+  }
+
+  async function addChild(parentId: string, student: StudentOption) {
+    setAddingChild(true);
+    try {
+      const res = await fetch(`/api/admin/parents/${parentId}/children`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: student.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Unable to link child");
+      setLinkedChildren((prev) => [
+        ...prev,
+        { id: `pending-${student.id}`, studentId: student.id, student: { id: student.id, studentCode: student.studentCode, user: student.user } },
+      ]);
+      setStudentQuery("");
+      setStudentOptions([]);
+      await loadParents();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to link child");
+    } finally {
+      setAddingChild(false);
+    }
+  }
+
+  async function removeChild(parentId: string, studentId: string) {
+    setLinkedChildren((prev) => prev.filter((c) => c.studentId !== studentId));
+    await fetch(`/api/admin/parents/${parentId}/children`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ studentId }),
+    });
+    await loadParents();
   }
 
   async function handleSave() {
@@ -160,7 +209,9 @@ export default function AdminParentsPage() {
             childName: form.childName,
             childEmail: form.childEmail,
             childStudentCode: form.childStudentCode,
-            studentId: selectedStudent?.id ?? null,
+            // Note: no studentId here — the legacy single-child scalar is
+            // deprecated. Children are managed via linkedChildren/addChild/
+            // removeChild against /api/admin/parents/[id]/children instead.
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -212,8 +263,8 @@ export default function AdminParentsPage() {
           <div>
             <h1 className="text-2xl font-bold text-[var(--foreground)]">Parents</h1>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              {totalCount} parent account{totalCount === 1 ? "" : "s"}. Create one by hand, and link or relink which
-              student it can see once the monitoring screens exist.
+              {totalCount} parent account{totalCount === 1 ? "" : "s"}. Create one by hand, and link every child this
+              parent should see in their timetable and attendance dashboard.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -296,13 +347,38 @@ export default function AdminParentsPage() {
             </div>
 
             <div className="mt-6 border-t border-[var(--border)] pt-5">
-              <p className="text-sm font-semibold text-[var(--foreground)]">Linked child</p>
+              <p className="text-sm font-semibold text-[var(--foreground)]">Linked children</p>
               <p className="mt-1 text-xs text-[var(--muted)]">
-                Search the real roster and pick the student this parent may see. Picking one here is the confirmed
-                link — it overrides whatever the parent typed at self-signup.
+                {editingId
+                  ? "A parent can see every child linked here — add as many as this family has enrolled."
+                  : "Search the real roster and pick a student this parent may see. More children can be added once this account is saved."}
               </p>
 
-              {selectedStudent ? (
+              {editingId && linkedChildren.length ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {linkedChildren.map((child) => (
+                    <div
+                      key={child.studentId}
+                      className="flex items-center gap-2 rounded-full border border-[var(--accent)]/30 bg-[var(--accent-soft)] px-3 py-1.5 text-xs"
+                    >
+                      <span className="font-semibold text-[var(--foreground)]">
+                        {child.student.user.name || child.student.user.email}
+                      </span>
+                      <span className="text-[var(--muted)]">{child.student.studentCode || ""}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeChild(editingId, child.studentId)}
+                        className="ml-1 font-semibold text-red-600"
+                        aria-label={`Unlink ${child.student.user.name || child.student.user.email}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {!editingId && selectedStudent ? (
                 <div className="mt-3 flex items-center justify-between rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] px-4 py-3">
                   <div className="text-sm">
                     <p className="font-semibold text-[var(--foreground)]">{selectedStudent.user.name || selectedStudent.user.email}</p>
@@ -324,26 +400,33 @@ export default function AdminParentsPage() {
                     value={studentQuery}
                     onChange={(event) => setStudentQuery(event.target.value)}
                     placeholder="Search student by name or email…"
+                    disabled={addingChild}
                     className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                   />
                   {searchingStudents ? <p className="text-xs text-[var(--muted)]">Searching…</p> : null}
                   {studentOptions.length ? (
                     <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-[var(--border)] bg-white p-1">
-                      {studentOptions.map((option) => (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedStudent(option);
-                            setStudentQuery("");
-                            setStudentOptions([]);
-                          }}
-                          className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--accent-soft)]"
-                        >
-                          <span>{option.user.name || option.user.email}</span>
-                          <span className="text-xs text-[var(--muted)]">{option.studentCode || option.level}</span>
-                        </button>
-                      ))}
+                      {studentOptions
+                        .filter((option) => !linkedChildren.some((c) => c.studentId === option.id))
+                        .map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => {
+                              if (editingId) {
+                                addChild(editingId, option);
+                              } else {
+                                setSelectedStudent(option);
+                                setStudentQuery("");
+                                setStudentOptions([]);
+                              }
+                            }}
+                            className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--accent-soft)]"
+                          >
+                            <span>{option.user.name || option.user.email}</span>
+                            <span className="text-xs text-[var(--muted)]">{option.studentCode || option.level}</span>
+                          </button>
+                        ))}
                     </div>
                   ) : null}
                 </div>
@@ -412,7 +495,7 @@ export default function AdminParentsPage() {
                   <th className="px-6 py-4">Name</th>
                   <th className="px-6 py-4">Email</th>
                   <th className="px-6 py-4">Phone</th>
-                  <th className="px-6 py-4">Linked child</th>
+                  <th className="px-6 py-4">Linked children</th>
                   <th className="px-6 py-4">Actions</th>
                 </tr>
               </thead>
@@ -432,10 +515,17 @@ export default function AdminParentsPage() {
                       <td className="px-6 py-4 text-sm text-[var(--muted)]">{row.user.email}</td>
                       <td className="px-6 py-4 text-sm text-[var(--muted)]">{row.phone || "—"}</td>
                       <td className="px-6 py-4 text-sm">
-                        {row.student ? (
-                          <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                            {row.student.user.name || row.student.user.email}
-                          </span>
+                        {row.children.length ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {row.children.map((child) => (
+                              <span
+                                key={child.studentId}
+                                className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
+                              >
+                                {child.student.user.name || child.student.user.email}
+                              </span>
+                            ))}
+                          </div>
                         ) : row.childName || row.childEmail ? (
                           <span className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
                             Unconfirmed: {row.childName || row.childEmail}
