@@ -266,6 +266,23 @@ async function handleGET(request: NextRequest) {
     }),
   );
 
+  /**
+   * Turn newly finished class recordings into a transcript, a summary and
+   * the vocabulary that class actually taught — see class-transcription.ts.
+   * Capped even lower than material-ai: an ASR call over a full recording is
+   * the slowest, heaviest thing any cron job here does.
+   */
+  results.push(
+    await run("class-transcription", async () => {
+      try {
+        const { processTranscriptionQueue } = await import("@/lib/class-transcription");
+        return await processTranscriptionQueue(2);
+      } catch (error) {
+        return { skipped: true, reason: error instanceof Error ? error.message : String(error) };
+      }
+    }),
+  );
+
   const failed = results.filter((result) => !result.ok);
   return NextResponse.json(
     { ok: failed.length === 0, ran: results.length, results },

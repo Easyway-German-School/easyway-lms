@@ -140,6 +140,9 @@ export async function GET() {
           completed: false,
           embedUrl: iframed?.embedUrl ?? null,
           embedLabel: embed?.label ?? null,
+          // The query above only ever matches level-tagged material; a
+          // private recording carries no level and never appears here.
+          isPrivate: false,
           /** Whether this tutor is the one who taught it — used to badge the tile. */
           mine: record.lecturer?.id === lecturer.id,
         };

@@ -60,6 +60,8 @@ export const KIND = {
   studentAtRisk: "student.at_risk",
   /** A student's day-streak lapses at midnight if they do nothing today — see src/lib/streak-reminders.ts. */
   streakAtRisk: "streak.at_risk",
+  /** The transcript + AI notes for a class recording finished generating — see src/lib/class-transcription.ts. */
+  classNotesReady: "class.notes_ready",
   general: "general",
 } as const;
 

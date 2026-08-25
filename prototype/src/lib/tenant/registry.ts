@@ -81,6 +81,8 @@ export const TENANT_OWNED_MODELS = [
   "ChannelRead",
   "Message",
   "ClassRecording",
+  "ClassTranscript",
+  "StudentClassNote",
   "VideoProgress",
   /**
    * The live classroom. Added by the presence work and never classified, so

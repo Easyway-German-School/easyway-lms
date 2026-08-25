@@ -8,6 +8,8 @@ import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import VideoThumb from "@/components/video/VideoThumb";
 import CinemaPlayer from "@/components/video/CinemaPlayer";
+import ClassNotesPanel from "@/components/video/ClassNotesPanel";
+import MyNotesEditor from "@/components/video/MyNotesEditor";
 import { ArrowLeftIcon } from "@/components/icons";
 import {
   formatDuration,
@@ -261,7 +263,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
               <h1 className="text-2xl font-semibold tracking-tight">{video.title}</h1>
               <p className="mt-1.5 text-sm text-slate-300">
                 {[
-                  video.kind === "recording" ? "Class recording" : "Lesson video",
+                  video.kind === "recording" ? (video.isPrivate ? "Private lesson recording" : "Class recording") : "Lesson video",
                   video.level,
                   video.lecturerName,
                   video.series ? `${video.series}${video.episodeNumber ? ` · Episode ${video.episodeNumber}` : ""}` : null,
@@ -286,6 +288,25 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
             <p className="relative mt-4 max-w-3xl text-sm leading-7 text-slate-300">{video.description}</p>
           ) : null}
         </div>
+
+        {/* The AI-generated summary/vocabulary/transcript only ever exists for a
+            recording — a tutor's uploaded lesson video was never transcribed.
+            The personal notepad has no such dependency (it seeds from the AI
+            summary when one exists and starts blank otherwise), so it is
+            offered on every video — online, private, AND a physical
+            student's assigned lesson videos alike. */}
+        {video.kind === "recording" ? (
+          <ClassNotesPanel
+            materialId={video.id}
+            onSeekTo={(seconds) => {
+              const element = videoRef.current;
+              if (!element) return;
+              element.currentTime = seconds;
+              void element.play();
+            }}
+          />
+        ) : null}
+        <MyNotesEditor materialId={video.id} />
 
         {upNext.length > 0 ? (
           <div className="space-y-3">

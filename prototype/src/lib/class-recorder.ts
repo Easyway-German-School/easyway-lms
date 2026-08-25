@@ -31,6 +31,7 @@ import {
   CLASS_ENCODING,
   buildFileOutput,
   egressClient,
+  egressTemplateBaseUrl,
   recordingConfigured,
   recordingObjectKey,
   recordingPublicUrl,
@@ -47,6 +48,15 @@ export type StartRecordingInput = {
   level?: string | null;
   sessionSlot?: string | null;
   startedByUserId?: string | null;
+  /**
+   * Set only for a private one-to-one capture. See the module comment on
+   * `ClassRecording.privateClassId` in schema.prisma for why this is what
+   * scopes visibility instead of `level`/`branchId` — those two stay set
+   * (the room and object key still live under the student's own level
+   * folder) but are never used to broadcast a private recording the way a
+   * cohort one is.
+   */
+  privateClassId?: string | null;
 };
 
 /**
@@ -85,6 +95,7 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
           level: input.level ?? null,
           sessionSlot: input.sessionSlot ?? null,
           startedByUserId: input.startedByUserId ?? null,
+          privateClassId: input.privateClassId ?? null,
           status: "active",
         },
         update: {},
@@ -105,14 +116,22 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
     });
 
     const variant = recordingVariant();
+    // The custom template (src/app/live/egress-template) only ever matters for
+    // video — an audio-only capture has no layout to render. `customBaseUrl`
+    // is null wherever a public app URL isn't configured (local dev), which
+    // falls back to the built-in `layout: "speaker"` rather than pointing
+    // LiveKit's cloud egress at an unreachable localhost.
+    const templateUrl = variant === "video" ? egressTemplateBaseUrl() : null;
     const info = await client.startRoomCompositeEgress(
       input.roomName,
       { file: buildFileOutput(objectKey, storage) },
       {
-        // The tutor is the lesson. "speaker" keeps whoever is talking large and
-        // everyone else small, which is both the most useful tape and the
-        // cheapest one to encode.
-        layout: "speaker",
+        // Fallback only: built-in "speaker" keeps whoever is talking large and
+        // everyone else small. The custom template above is preferred — it
+        // understands screen-share and the tutor's own "give the floor"
+        // control, which "speaker" has no way to know about.
+        layout: templateUrl ? undefined : "speaker",
+        customBaseUrl: templateUrl ?? undefined,
         audioOnly: variant === "audio",
         encodingOptions: variant === "audio" ? AUDIO_ENCODING : CLASS_ENCODING,
       },
@@ -127,6 +146,7 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
         level: input.level ?? null,
         sessionSlot: input.sessionSlot ?? null,
         startedByUserId: input.startedByUserId ?? null,
+        privateClassId: input.privateClassId ?? null,
         status: "active",
         variant,
         objectKey,
@@ -170,10 +190,10 @@ const SLOT_LABEL: Record<string, string> = {
   evening: "Evening",
 };
 
-/** "A1 · Morning class · 2 August" — what a student scanning the shelf reads. */
-function recordingTitle(input: { level?: string | null; sessionSlot?: string | null; at: Date }): string {
+/** "A1 · Morning class · 2 August", or "A2 · Private class · 2 August" — what a student scanning the shelf reads. */
+function recordingTitle(input: { level?: string | null; sessionSlot?: string | null; at: Date; isPrivate?: boolean }): string {
   const level = (input.level || "Class").toUpperCase();
-  const slot = SLOT_LABEL[String(input.sessionSlot || "")] ?? null;
+  const slot = input.isPrivate ? "Private" : (SLOT_LABEL[String(input.sessionSlot || "")] ?? null);
   const date = input.at.toLocaleDateString("en-GB", { day: "numeric", month: "long" });
   return slot ? `${level} · ${slot} class · ${date}` : `${level} · ${date}`;
 }
@@ -248,11 +268,12 @@ export async function finaliseRecording(egress: {
     const sizeBytes = result?.size ? Number(result.size) : null;
     const fileUrl = recordingPublicUrl(objectKey);
     const recordedAt = row.startedAt;
+    const isPrivate = Boolean(row.privateClassId);
     let thumbnailPath: string | null = null;
     try {
       thumbnailPath = await createRecordingThumbnail({
         objectKey,
-        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt }),
+        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt, isPrivate }),
         level: row.level,
         recordedAt,
       });
@@ -262,8 +283,8 @@ export async function finaliseRecording(egress: {
 
     const material = await prisma.material.create({
       data: {
-        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt }),
-        description: "Recorded automatically from the live class.",
+        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt, isPrivate }),
+        description: isPrivate ? "Recorded automatically from your private class." : "Recorded automatically from the live class.",
         filePath: fileUrl,
         fileName: objectKey.split("/").pop() || "class.mp4",
         fileType: "video/mp4",
@@ -271,7 +292,12 @@ export async function finaliseRecording(egress: {
         // The whole point: it lands on the "class recordings" shelf, not among
         // the tutor's prepared lesson videos.
         kind: "recording",
-        level: row.level,
+        // A private recording gets NO level. `/api/student/videos` matches on
+        // level OR the material's own `privateClasses` relation (set just
+        // below) — leaving level set here would put a private lesson on
+        // every other student's shelf at the same level, which is exactly
+        // the leak this whole private-capture feature must not create.
+        level: isPrivate ? null : row.level,
         durationSeconds,
         thumbnailPath,
         recordedAt,
@@ -291,9 +317,33 @@ export async function finaliseRecording(egress: {
       },
     });
 
-    // Tell the cohort whose class it was, and only them. A student who missed
-    // Tuesday should not have to go looking.
-    if (row.level) {
+    if (isPrivate && row.privateClassId) {
+      // The relation `/api/student/videos` actually reads to grant this one
+      // student access — see the module comment on `level` above.
+      await prisma.privateClass.update({
+        where: { id: row.privateClassId },
+        data: { materialId: material.id },
+      });
+    }
+
+    if (isPrivate && row.privateClassId) {
+      const booking = await prisma.privateClass.findUnique({
+        where: { id: row.privateClassId },
+        select: { student: { select: { userId: true } } },
+      });
+      if (booking?.student.userId) {
+        notifyInBackground({
+          to: { userIds: [booking.student.userId] },
+          kind: KIND.materialPublished,
+          title: "Your private class recording is ready",
+          message: `${material.title} is now on your Watch shelf.`,
+          link: `/materials/watch/${material.id}`,
+          dedupeKey: `recording:${row.egressId}`,
+        });
+      }
+    } else if (row.level) {
+      // Tell the cohort whose class it was, and only them. A student who
+      // missed Tuesday should not have to go looking.
       notifyInBackground({
         to: { students: { branchId: row.branchId, level: row.level, sessionSlot: row.sessionSlot } },
         kind: KIND.materialPublished,

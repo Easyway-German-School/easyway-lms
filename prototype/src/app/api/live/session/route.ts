@@ -393,12 +393,20 @@ export async function GET(request: Request) {
      * swallows its errors and is idempotent, so a reload does not start a
      * second capture.
      *
-     * Private one-to-one classes are excluded. Recording a cohort lesson is a
-     * service to the cohort; silently recording a private conversation is a
-     * consent question the school should answer explicitly, not something to
-     * switch on by default.
+     * Private one-to-one classes ARE recorded too, as of the class-notes
+     * feature: this is the tutor's-tutor's-own capture becoming that
+     * student's transcript, vocabulary and personalised recap afterwards —
+     * see [[project-class-notes-pipeline]]. This used to be excluded outright
+     * on consent grounds; the product decision is now to record, on the
+     * understanding that a private session being recorded should be visibly
+     * communicated to both sides, not just true in a database column. The
+     * privacy half of that decision is enforced downstream, not here: a
+     * private `ClassRecording` carries `privateClassId`, its `Material`
+     * never gets `level` set, and `/api/student/videos` only ever surfaces it
+     * to the one enrolled student — see the module comment on
+     * `ClassRecording.privateClassId` in schema.prisma.
      */
-    if (role === "tutor" && !privateClassId) {
+    if (role === "tutor") {
       const { currentTenantId } = await import("@/lib/tenant/context");
       const tenantId = currentTenantId();
       void ensureRecordingStarted({
@@ -409,6 +417,7 @@ export async function GET(request: Request) {
         level,
         sessionSlot,
         startedByUserId: session.user.id,
+        privateClassId: privateClassId ?? null,
       });
     }
 

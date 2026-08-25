@@ -221,6 +221,39 @@ export function egressClient(): EgressClient | null {
 }
 
 /**
+ * The custom room-composite template — `src/app/live/egress-template` —
+ * instead of LiveKit's built-in `layout: "speaker"`. See that page's own
+ * module comment for why: it renders this app's own floor/screen-share
+ * concept, which no built-in template can know about.
+ *
+ * TWO separate conditions gate this, deliberately not one:
+ *
+ *   1. A real public base URL, because the LiveKit Cloud egress service
+ *      fetches this page over the public internet — a bare `localhost`
+ *      origin (the only one a dev machine has) would connect to nothing and
+ *      silently produce a blank recording.
+ *   2. `RECORDING_SMART_LAYOUT=true`, an EXPLICIT second flag on top of the
+ *      first. `NEXTAUTH_URL` is already set in production for reasons that
+ *      have nothing to do with this feature — if the URL alone were enough,
+ *      a plain `vercel --prod` deploy would switch every live class's
+ *      recording (group AND private) onto a template that has never been
+ *      run against a real LiveKit room, the moment the code merges. A
+ *      template that fails to connect fails QUIETLY — a static "waiting"
+ *      screen, and per this page's own audio-capture note, possibly no
+ *      audio at all — which is a worse outcome than the working built-in
+ *      layout it would silently replace. This flag is the difference
+ *      between "the code shipped" and "someone deliberately turned this on
+ *      after watching it work once on a deployed preview." Do not set it
+ *      until that has actually happened — see [[project-class-notes-pipeline]].
+ */
+export function egressTemplateBaseUrl(): string | null {
+  if (process.env.RECORDING_SMART_LAYOUT !== "true") return null;
+  const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "").trim();
+  if (!base || /localhost|127\.0\.0\.1/.test(base)) return null;
+  return `${base.replace(/\/+$/, "")}/live/egress-template`;
+}
+
+/**
  * Delete one object from the bucket.
  *
  * LiveKit writes objects but has no interest in removing them, so this is

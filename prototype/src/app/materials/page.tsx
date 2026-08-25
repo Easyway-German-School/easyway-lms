@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Mascot from "@/components/Mascot";
 import StudentShell from "@/components/StudentShell";
 import VideoLibrary from "@/components/video/VideoLibrary";
 import { isPlayableVideo, type LibraryVideo } from "@/lib/video-library";
@@ -190,7 +191,7 @@ export default function MaterialsPage() {
                       <h2 className="mt-2 text-xl font-bold text-[var(--foreground)]">Your next watch</h2>
                       <p className="mt-1 text-sm text-[var(--muted)]">Chosen from your progress, level, pathway, and learning goal.</p>
                     </div>
-                    <img src="/mascot/becca-pointing-right-bust.png" alt="Becca" className="hidden h-16 w-16 object-contain sm:block" />
+                    <Mascot mood="cocky" className="hidden h-16 w-16 sm:block" />
                   </div>
                   <div className="mt-4 grid gap-3 md:grid-cols-3">
                     {recommendations.map((recommendation) => {

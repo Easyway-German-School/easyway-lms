@@ -25,13 +25,13 @@ datasource db {
 }
 
 model User {
-  id                String  @id @default(cuid())
-  email             String  @unique
+  id                String    @id @default(cuid())
+  email             String    @unique
   name              String?
   password          String
-  role              Role    @default(STUDENT)
+  role              Role      @default(STUDENT)
   tenantId          String?
-  tenant            Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant            Tenant?   @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   /**
    * Which kind of admin, when role is ADMIN: super | secretary | data_comm.
    * Null for everyone else. Deliberately a separate field rather than more
@@ -59,9 +59,13 @@ model User {
    * still reaches the people on it.
    */
   adminCapabilities Json?
-  /** Set by a super admin to invalidate this admin's existing sessions. */
+  /**
+   * Set by a super admin to invalidate this admin's existing sessions.
+   */
   adminLockedAt     DateTime?
-  /** Last authenticated presence heartbeat from an admin browser. */
+  /**
+   * Last authenticated presence heartbeat from an admin browser.
+   */
   adminLastSeenAt   DateTime?
   /**
    * Restricts an admin to specific branches, as JSON: ["branchId1", "branchId2"].
@@ -77,7 +81,7 @@ model User {
    * password nobody knows. The claim link works only while this is false, so
    * a forwarded confirmation email cannot be used to take the account later.
    */
-  passwordClaimed   Boolean @default(true)
+  passwordClaimed   Boolean   @default(true)
 
   passwordResetTokens PasswordResetToken[]
 
@@ -112,43 +116,43 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  student           Student?
-  lecturer          Lecturer?
-  parent            Parent?
-  sessions          Session[]
-  missionProgress   MissionProgress[]
-  dailyMissions     DailyMission[]
-  messages          Message[]
-  moderatedMessages Message[]                @relation("MessageModerator")
-  pinnedMessages    Message[]                @relation("MessagePinner")
-  messageReactions  MessageReaction[]
-  communityMute     CommunityMute?           @relation("MutedMember")
-  mutesIssued       CommunityMute[]          @relation("MuteAuthor")
-  channelReads      ChannelRead[]
-  pushSubs          PushSubscription[]
-  examRegistrations ExamRegistration[]
-  notifications     Notification[]           @relation("NotificationRecipient")
-  notificationPrefs NotificationPreference[]
-  sentNotifications Notification[]           @relation("NotificationSender")
-  proposedActions   AdminAction[]            @relation("AdminActionCreator")
-  executedActions   AdminAction[]            @relation("AdminActionExecutor")
-  auditEvents       AuditLog[]               @relation("AuditActor")
-  auditRestores     AuditLog[]               @relation("AuditRestorer")
-  supportTickets    SupportTicket[]          @relation("SupportTicketAuthor")
-  assignedTickets   SupportTicket[]          @relation("SupportTicketAssignee")
-  supportReplies    SupportTicketMessage[]
-  gameMatches       GameMatch[]
-  gameTurnsAssigned GameTurn[]               @relation("GameTurnAssignee")
-  gameTurnsWritten  GameTurn[]               @relation("GameTurnAuthor")
-  constraintDecks   ConstraintDeck[]
-  sentTutorMessages TutorMessage[]
-  studentAiUsage    StudentAiUsage[]
-  betaFeedback      BetaFeedback[]
-  learnerUsage      LearnerUsageEvent[]
-  behaviourProfile  LearnerBehaviourProfile?
-  termsAcceptances  TermsAcceptance[]
-  refundRequests    RefundRequest[]          @relation("RefundRequestStudent")
-  refundsDecided    RefundRequest[]          @relation("RefundRequestDecider")
+  student            Student?
+  lecturer           Lecturer?
+  parent             Parent?
+  sessions           Session[]
+  missionProgress    MissionProgress[]
+  dailyMissions      DailyMission[]
+  messages           Message[]
+  moderatedMessages  Message[]                @relation("MessageModerator")
+  pinnedMessages     Message[]                @relation("MessagePinner")
+  messageReactions   MessageReaction[]
+  communityMute      CommunityMute?           @relation("MutedMember")
+  mutesIssued        CommunityMute[]          @relation("MuteAuthor")
+  channelReads       ChannelRead[]
+  pushSubs           PushSubscription[]
+  examRegistrations  ExamRegistration[]
+  notifications      Notification[]           @relation("NotificationRecipient")
+  notificationPrefs  NotificationPreference[]
+  sentNotifications  Notification[]           @relation("NotificationSender")
+  proposedActions    AdminAction[]            @relation("AdminActionCreator")
+  executedActions    AdminAction[]            @relation("AdminActionExecutor")
+  auditEvents        AuditLog[]               @relation("AuditActor")
+  auditRestores      AuditLog[]               @relation("AuditRestorer")
+  supportTickets     SupportTicket[]          @relation("SupportTicketAuthor")
+  assignedTickets    SupportTicket[]          @relation("SupportTicketAssignee")
+  supportReplies     SupportTicketMessage[]
+  gameMatches        GameMatch[]
+  gameTurnsAssigned  GameTurn[]               @relation("GameTurnAssignee")
+  gameTurnsWritten   GameTurn[]               @relation("GameTurnAuthor")
+  constraintDecks    ConstraintDeck[]
+  sentTutorMessages  TutorMessage[]
+  studentAiUsage     StudentAiUsage[]
+  betaFeedback       BetaFeedback[]
+  learnerUsage       LearnerUsageEvent[]
+  behaviourProfile   LearnerBehaviourProfile?
+  termsAcceptances   TermsAcceptance[]
+  refundRequests     RefundRequest[]          @relation("RefundRequestStudent")
+  refundsDecided     RefundRequest[]          @relation("RefundRequestDecider")
   analyticsConsentAt DateTime?
   /**
    * Set only when the person has ASKED to be left out of learning analytics.
@@ -158,7 +162,7 @@ model User {
    * a handful of volunteers and none on the other two hundred students it is
    * responsible for. An explicit column means an explicit refusal.
    */
-  analyticsOptOutAt DateTime?
+  analyticsOptOutAt  DateTime?
 
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
@@ -166,7 +170,7 @@ model User {
    * filters these rows out of ordinary reads, so the application behaves as
    * though the row is gone while the data is still on disk and restorable.
    */
-  deletedAt         DateTime?
+  deletedAt DateTime?
 }
 
 model Session {
@@ -234,7 +238,9 @@ model Tenant {
   lessons                 Lesson[]
   materials               Material[]
   classRecordings         ClassRecording[]
+  classTranscripts        ClassTranscript[]
   videoProgresses         VideoProgress[]
+  studentClassNotes       StudentClassNote[]
   completions             Completion[]
   progresses              Progress[]
   enrollments             Enrollment[]
@@ -293,10 +299,10 @@ model Tenant {
 
   /// Back-relations for the tenant-owned tables. Generated by
   /// scripts/add-tenant-columns.mjs; Prisma requires both sides.
-  parents                  Parent[]
-  parentStudents           ParentStudent[]
-  termsAcceptances         TermsAcceptance[]
-  refundRequests           RefundRequest[]
+  parents          Parent[]
+  parentStudents   ParentStudent[]
+  termsAcceptances TermsAcceptance[]
+  refundRequests   RefundRequest[]
 }
 
 /// School-wide configuration the office edits instead of asking for a deploy.
@@ -593,6 +599,7 @@ model Student {
   privateClassSeries    PrivateClassSeries[]
   certificates          Certificate[]
   videoProgress         VideoProgress[]
+  studentClassNotes     StudentClassNote[]
   convertedFromLead     Lead?
   journeyEvents         JourneyEvent[]
   liveInvites           LiveClassInvite[]
@@ -600,9 +607,13 @@ model Student {
   supportTickets        SupportTicket[]
   termsAcceptances      TermsAcceptance[]
   refundRequests        RefundRequest[]
-  /** Direct 1:1 thread with an assigned tutor. Only meaningful for classType=private. */
+  /**
+   * Direct 1:1 thread with an assigned tutor. Only meaningful for classType=private.
+   */
   tutorMessages         TutorMessage[]
-  /** What the tutor wrote up after each private session. */
+  /**
+   * What the tutor wrote up after each private session.
+   */
   sessionNotes          SessionNote[]
   // Parent/guardian accounts linked to this student. Plural because more than
   // one guardian can watch the same child (father and mother, say), each with
@@ -627,18 +638,18 @@ model Student {
 }
 
 model StudentSkillMastery {
-  id            String   @id @default(cuid())
-  studentId     String
-  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  skill         String
-  mastery       Float    @default(50)
-  attempts      Int      @default(0)
-  lastScore     Int?
+  id             String    @id @default(cuid())
+  studentId      String
+  student        Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  skill          String
+  mastery        Float     @default(50)
+  attempts       Int       @default(0)
+  lastScore      Int?
   lastActivityAt DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  tenantId      String?
-  tenant        Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  tenantId       String?
+  tenant         Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([studentId, skill])
   @@index([tenantId, skill, mastery])
@@ -647,14 +658,12 @@ model StudentSkillMastery {
 /**
  * A parent or guardian's own account, created through its own signup form
  * rather than bolted onto the student's.
- *
  * This is the account and the claimed link to a child — NOT the monitoring
  * screens (attendance, results, notifications) that read from it.
  * `studentId` is nullable and set by the office once they have checked the
  * child details the parent typed in against the real record, rather than
  * resolved automatically and trusted: a parent claiming to be somebody's
  * guardian is exactly the kind of claim that should not self-approve.
- *
  * @deprecated `studentId`/`student` only ever held ONE child. Real families
  * often have more than one enrolled, so the actual link now lives in
  * `ParentStudent` (see `children` below), which the office and every
@@ -683,12 +692,11 @@ model Parent {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([studentId])
-
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
-  tenantId String?
+  tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([studentId])
   @@index([tenantId])
 }
 
@@ -711,13 +719,12 @@ model ParentStudent {
   /// Admin User.id who made the link, for audit.
   linkedBy String?
 
-  @@unique([parentId, studentId])
-  @@index([studentId])
-
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
-  tenantId String?
+  tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([parentId, studentId])
+  @@index([studentId])
   @@index([tenantId])
 }
 
@@ -866,17 +873,17 @@ model Branch {
   exams          Exam[]
   lecturers      Lecturer[]
   schoolHolidays SchoolHoliday[]
-  leads         Lead[]
-  recordings    ClassRecording[]
-  liveSessions  LiveClassSession[]
-  quizGames     QuizGame[]
+  leads          Lead[]
+  recordings     ClassRecording[]
+  liveSessions   LiveClassSession[]
+  quizGames      QuizGame[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
    * filters these rows out of ordinary reads, so the application behaves as
    * though the row is gone while the data is still on disk and restorable.
    */
-  deletedAt     DateTime?
+  deletedAt      DateTime?
 }
 
 model ExamRegistration {
@@ -1136,14 +1143,15 @@ model Material {
   privateClasses     PrivateClass[]
   privateClassSeries PrivateClassSeries[]
   videoProgress      VideoProgress[]
-  recording      ClassRecording?
+  studentClassNotes  StudentClassNote[]
+  recording          ClassRecording?
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
    * filters these rows out of ordinary reads, so the application behaves as
    * though the row is gone while the data is still on disk and restorable.
    */
-  deletedAt      DateTime?
+  deletedAt          DateTime?
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
@@ -1189,6 +1197,18 @@ model ClassRecording {
    * Which tutor's join started it, for the audit trail.
    */
   startedByUserId String?
+
+  /**
+   * Set only for a private one-to-one capture — see class-recorder.ts and
+   * live/session/route.ts for why this used to be excluded outright. A
+   * private recording's Material is deliberately never given `level`, so it
+   * cannot appear on the level-wide "class recordings" shelf everyone else
+   * sees: visibility is scoped through this relation instead (one occurrence,
+   * one enrolled student), the same relation `/admin` already reads to file
+   * a private lesson under its student.
+   */
+  privateClassId String?
+  privateClass   PrivateClass? @relation(fields: [privateClassId], references: [id], onDelete: SetNull)
 
   /**
    * active | completed | failed | aborted | purged
@@ -1247,8 +1267,163 @@ model ClassRecording {
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  transcript ClassTranscript?
+
   @@index([status, startedAt])
   @@index([roomName, status])
+  @@index([privateClassId])
+  @@index([tenantId])
+}
+
+/**
+ * The Happy-Scribe-style layer on top of a class recording: a transcript,
+ * turned into a summary, action items and the German vocabulary actually
+ * taught that session.
+ * One row per `ClassRecording`, built once in the background after the file
+ * is verified readable (see `class-transcription.ts`), never on a request a
+ * student is waiting on — the ASR call alone can take longer than a page load
+ * should. Kept separate from `ClassRecording` rather than bolted onto it:
+ * that row's job is "did the capture succeed", this row's job is "what did
+ * the class actually cover", and they fail independently — a transcription
+ * provider being down must never mark a perfectly good recording as broken.
+ * Private one-to-one classes never reach this model at all: `ClassRecording`
+ * rows are only ever created for group classes (see class-recorder.ts's own
+ * module comment on why private capture is a consent decision, not a gap),
+ * so nothing here needs its own private/group check.
+ */
+model ClassTranscript {
+  id String @id @default(cuid())
+
+  classRecordingId String         @unique
+  classRecording   ClassRecording @relation(fields: [classRecordingId], references: [id], onDelete: Cascade)
+
+  /**
+   * pending | transcribing | summarizing | ready | failed | skipped_too_large | none
+   * `none` is a recording with nothing to transcribe (silent, or the audio
+   * track never made it) — not a failure, same distinction Material.aiState
+   * already draws for a video with no readable text.
+   */
+  status String @default("pending")
+
+  /**
+   * Flattened ASR output, capped at prompt size for the summarizer — see
+   * MAX_TRANSCRIPT_PROMPT_CHARS in class-transcription.ts. Kept in full here
+   * (not just the capped version) since the PDF export and a future
+   * "jump to this moment" reader both want the whole thing.
+   */
+  transcriptText String?
+  /**
+   * [{start, end, text}] straight from Whisper's verbose_json — no speaker
+   * diarization (that needs a model this stack does not run; see the module
+   * comment in class-transcription.ts). Timestamps only, in seconds.
+   */
+  segments       Json?
+
+  summary     String?
+  /**
+   * 3-6 short bullets — what a student skimming for 15 seconds needs.
+   */
+  keyPoints   Json?
+  /**
+   * Concrete follow-ups named in class: "practice the dative", "bring your workbook Thursday".
+   */
+  actionItems Json?
+  /**
+   * [{de, en, note?}] — new words/phrases this specific class actually taught.
+   */
+  vocabulary  Json?
+
+  /**
+   * Set when `classRecording.privateClassId` is set. Gates a richer prompt
+   * (see buildPrivateNotesPrompt in class-transcription.ts) a group class's
+   * transcript cannot honestly support — with fifteen voices in the room
+   * there is no reliable "this correction was FOR this student"; with
+   * exactly two, there is.
+   */
+  isPrivate Boolean @default(false)
+  /**
+   * Private only. [{mistake, correction, note?}] — corrected in this
+   * session, named from the transcript, never invented.
+   */
+  corrections Json?
+  /**
+   * Private only. Short list of concrete moments the tutor praised or the
+   * student visibly improved on.
+   */
+  progressHighlights Json?
+
+  /**
+   * [{from, to, speaker}] — `from`/`to` are indices into `segments` below,
+   * `speaker` is "tutor" | "student". A COARSE guess, not diarization: it
+   * distinguishes the tutor's voice from everyone else's by phrasing
+   * (explaining vs. asking/answering), never claims to know WHICH student
+   * spoke in a group class. Ranges rather than one label per segment,
+   * because most turns run several segments long and this keeps the
+   * summarizer's output small regardless of how long the class ran.
+   */
+  speakerRanges Json?
+
+  /**
+   * Which ASR/LLM pair produced this, so a bad batch is findable and clearable.
+   */
+  provider String?
+  error    String?
+
+  /**
+   * Set the first time a student asks to share this class's notes — see
+   * `/api/student/videos/:id/notes/share`. Null until then: generating it
+   * eagerly for every transcript would mean a working public URL exists for
+   * a class nobody ever asked to share. Never offered for a private lesson
+   * (`isPrivate`) — the public page this resolves to never reads
+   * `corrections`/`progressHighlights` regardless, but the share route
+   * itself refuses to issue a token at all, since even the shared summary
+   * and vocabulary belong to one paying family's one-to-one lesson.
+   */
+  shareToken String? @unique
+
+  generatedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([tenantId])
+}
+
+/**
+ * A student's own editable copy of a class's notes — "just like Zoho
+ * Notebook": whatever they type is theirs, autosaved, and never touched by a
+ * later re-generation of the AI notes above. That last part matters:
+ * `ClassTranscript` can be regenerated (a retried failure, a better model
+ * later) without ever clobbering something a student wrote in their own copy.
+ *
+ * One per (student, material) rather than per transcript, so a student can
+ * start jotting notes while watching even before the AI pass finishes — the
+ * two are independent, exactly like `VideoProgress` tracks a position
+ * regardless of whether AI summarisation ever runs on a material at all.
+ */
+model StudentClassNote {
+  id String @id @default(cuid())
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  materialId String
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  content String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, materialId])
   @@index([tenantId])
 }
 
@@ -1421,7 +1596,6 @@ model MissionProgress {
  * `done` flag the server also sets, never the client. See
  * src/lib/mission-detection.ts for what "done" is checked against, and
  * src/lib/daily-missions-server.ts for where these rows get written.
- *
  * MissionProgress is left in place rather than dropped — its history is real
  * (self-reported, but real history) and nothing here needs its rows deleted
  * to work.
@@ -1764,14 +1938,14 @@ model Lecturer {
    * primary columns above, so every tutor created before this existed keeps
    * exactly the class they had.
    */
-  branchIds    Json? // Branch ids
-  levels       Json? // ["A1", "A2"]
-  sessionSlots Json? // ["morning", "evening"]
+  branchIds        Json? // Branch ids
+  levels           Json? // ["A1", "A2"]
+  sessionSlots     Json? // ["morning", "evening"]
   /// Explicit branch + level + sitting groups. When present, these prevent
   /// unrelated levels and sittings from being combined accidentally.
   assignmentGroups Json? // [{ branchId, level, sessionSlot }]
-  classTypes   Json? // ["physical", "online", "private"]
-  batches      Json? // ["January", … "December"]
+  classTypes       Json? // ["physical", "online", "private"]
+  batches          Json? // ["January", … "December"]
 
   /**
    * Which optional areas of the portal this tutor may reach:
@@ -1789,8 +1963,8 @@ model Lecturer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  classes        Class[]
-  exams          Exam[]
+  classes            Class[]
+  exams              Exam[]
   materials          Material[]
   students           Student[]
   classSessions      ClassSession[]
@@ -1798,16 +1972,16 @@ model Lecturer {
   privateClasses     PrivateClass[]
   privateClassSeries PrivateClassSeries[]
   liveSessions       LiveClassSession[]
-  quizGames      QuizGame[]
-  tutorMessages  TutorMessage[]
-  sessionNotes   SessionNote[]
+  quizGames          QuizGame[]
+  tutorMessages      TutorMessage[]
+  sessionNotes       SessionNote[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
    * filters these rows out of ordinary reads, so the application behaves as
    * though the row is gone while the data is still on disk and restorable.
    */
-  deletedAt      DateTime?
+  deletedAt          DateTime?
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
@@ -1890,7 +2064,7 @@ model Exam {
   /**
    * Only published sittings are bookable by candidates.
    */
-  published Boolean @default(false)
+  published       Boolean @default(false)
   resultsReleased Boolean @default(true)
 
   /**
@@ -1960,7 +2134,7 @@ model Space {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  channels Channel[]
+  channels    Channel[]
   gameMatches GameMatch[]
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
@@ -2108,7 +2282,6 @@ model Message {
 
   /**
    * A sticker from the school's own set, sent instead of text.
-   *
    * An ID, never an image URL. The artwork is drawn in code (see
    * src/lib/community-stickers.tsx), so a sticker sent today still renders
    * after the set is redrawn, costs no storage, and cannot 404 the way an
@@ -2140,7 +2313,6 @@ model Message {
 
   /**
    * Staff pinning something to the top of the room. Null for the vast majority.
-   *
    * A pin is not moderation — it is the opposite. Removal takes a message away;
    * a pin is how "the exam is on the 14th" stops being buried under two hundred
    * lines of chat by Tuesday.
@@ -2694,7 +2866,6 @@ model PrivateClass {
   /**
    * scheduled | completed | cancelled | postponed | requested | declined |
    * cancel_requested | reschedule_requested | skipped
-   *
    * The last two are series-generated rows: `skipped` is a holiday the series
    * engine matched and did not book, kept as a row (not silently omitted) so
    * the calendar can say why nothing is there that day. `reschedule_requested`
@@ -2740,10 +2911,13 @@ model PrivateClass {
    */
   isException Boolean @default(false)
 
-  /** The student's proposed new time while status is `reschedule_requested`. */
+  /**
+   * The student's proposed new time while status is `reschedule_requested`.
+   */
   proposedAt DateTime?
 
   sessionNotes SessionNote[]
+  recordings   ClassRecording[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2759,7 +2933,6 @@ model PrivateClass {
 
 /**
  * A standing weekly (or twice-weekly) booking pattern for a private student.
- *
  * This does NOT hold the calendar itself — it is the recipe. The actual
  * bookable rows are materialised `PrivateClass` occurrences with `seriesId`
  * set, generated on a rolling window (see src/lib/private-class-series.ts),
@@ -2790,11 +2963,15 @@ model PrivateClassSeries {
   materialId String?
   material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
 
-  /** IANA name, e.g. "Africa/Lagos" — carried onto every generated occurrence's context. */
+  /**
+   * IANA name, e.g. "Africa/Lagos" — carried onto every generated occurrence's context.
+   */
   timezone String @default("UTC")
 
   startDate DateTime
-  /** Null means indefinite — keep generating until the series is ended. */
+  /**
+   * Null means indefinite — keep generating until the series is ended.
+   */
   endDate   DateTime?
 
   /**
@@ -2803,7 +2980,9 @@ model PrivateClassSeries {
    */
   status String @default("active")
 
-  /** "admin" | "tutor" — who set this pattern up, shown on the review screen. */
+  /**
+   * "admin" | "tutor" — who set this pattern up, shown on the review screen.
+   */
   createdBy String?
 
   occurrences PrivateClass[]
@@ -2830,7 +3009,9 @@ model SchoolHoliday {
   date  DateTime
   label String
 
-  /** Null applies to every branch; set applies to just that one. */
+  /**
+   * Null applies to every branch; set applies to just that one.
+   */
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
@@ -2859,7 +3040,9 @@ model TutorMessage {
   tutorId String
   tutor   Lecturer @relation(fields: [tutorId], references: [id], onDelete: Cascade)
 
-  /** Whichever side actually sent it — the student's User or the tutor's User. */
+  /**
+   * Whichever side actually sent it — the student's User or the tutor's User.
+   */
   senderId String
   sender   User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
@@ -3174,15 +3357,15 @@ model RefundRequest {
   /// submitted | under_review | approved | rejected | paid
   status String @default("submitted")
 
-  fullName          String
-  phone             String
-  courseOrPackage   String
+  fullName         String
+  phone            String
+  courseOrPackage  String
   /// Paystack reference or receipt number, per the section 24 procedure.
-  paymentReference  String
-  reason            String
+  paymentReference String
+  reason           String
   /// Uploaded file URLs (photos of a receipt, a withdrawal letter). Optional —
   /// section 24 asks for these "where applicable".
-  supportingDocs    Json?
+  supportingDocs   Json?
 
   acceptedTermsVersion String
   acceptedTermsAt      DateTime
@@ -3333,12 +3516,10 @@ model BetaFeedback {
 /// the user has explicitly enabled beta analytics.
 /**
  * ONE THING A LEARNER DID.
- *
  * This started life as a beta-programme counter: it recorded the first path
  * segment of a page somebody sat on for more than five seconds, and nothing
  * else. That is enough to say "the community tab is popular" and not enough to
  * say anything about a person.
- *
  * The columns below are the difference between counting and understanding.
  * `hourLocal`/`weekday` are stamped BY THE BROWSER, from the learner's own
  * clock — a server timestamp tells you when a row was written, which is a fact
@@ -3347,34 +3528,49 @@ model BetaFeedback {
  * makes "how long is a sitting" and "how many sittings a week" answerable at
  * all. `path` keeps the whole route so /community/threads and /community can
  * be told apart, while `area` stays coarse so the aggregates stay readable.
- *
  * Rows are small and numerous by design. The derived reading of them lives in
  * LearnerBehaviourProfile so that no admin screen ever scans this table live.
  */
 model LearnerUsageEvent {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tenantId  String?
-  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  /** Coarse bucket, e.g. "community". Aggregates group on this. */
-  area      String
-  /** view | click | complete | start | submit | play | search | idle */
-  action    String   @default("view")
-  /** The full in-app route, e.g. "/community/threads/abc". */
-  path      String?
-  /** Free label for the thing acted on — a button name, a lesson slug. */
-  detail    String?
-  /** mobile | tablet | desktop, as the browser reported it. */
-  deviceKind String?
-  /** 0-23 on the LEARNER'S clock, not the server's. Null on old rows. */
-  hourLocal  Int?
-  /** 0 = Sunday … 6 = Saturday, on the learner's clock. */
-  weekday    Int?
-  /** Groups events belonging to one continuous visit. */
-  sessionKey String?
-  durationSeconds Int @default(0)
-  occurredAt DateTime @default(now())
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId        String?
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /**
+   * Coarse bucket, e.g. "community". Aggregates group on this.
+   */
+  area            String
+  /**
+   * view | click | complete | start | submit | play | search | idle
+   */
+  action          String   @default("view")
+  /**
+   * The full in-app route, e.g. "/community/threads/abc".
+   */
+  path            String?
+  /**
+   * Free label for the thing acted on — a button name, a lesson slug.
+   */
+  detail          String?
+  /**
+   * mobile | tablet | desktop, as the browser reported it.
+   */
+  deviceKind      String?
+  /**
+   * 0-23 on the LEARNER'S clock, not the server's. Null on old rows.
+   */
+  hourLocal       Int?
+  /**
+   * 0 = Sunday … 6 = Saturday, on the learner's clock.
+   */
+  weekday         Int?
+  /**
+   * Groups events belonging to one continuous visit.
+   */
+  sessionKey      String?
+  durationSeconds Int      @default(0)
+  occurredAt      DateTime @default(now())
 
   @@index([tenantId, area, occurredAt])
   @@index([userId, occurredAt])
@@ -3384,13 +3580,11 @@ model LearnerUsageEvent {
 
 /**
  * WHAT WE HAVE WORKED OUT ABOUT ONE LEARNER, cached.
- *
  * Every number here is derived — delete the whole table and a recompute
  * rebuilds it from LearnerUsageEvent and the academic records. It exists
  * because the admin screens ask questions ("who is drifting away", "who are
  * the night owls") that would otherwise mean scanning millions of event rows
  * on every page load.
- *
  * `signals` carries the full computed blob (hour histogram, weekday
  * histogram, area mix, streaks) so the profile screen can draw charts without
  * a second pass; the scalar columns exist so the LIST screen can sort and
@@ -3403,26 +3597,42 @@ model LearnerBehaviourProfile {
   tenantId String?
   tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  /** Machine key of the behaviour archetype — see src/lib/learner-signals.ts. */
-  archetype       String  @default("newcomer")
-  /** Hour of day, on the learner's own clock, when they are most often here. */
-  peakHour        Int?
-  /** 0 = Sunday … 6 = Saturday. */
-  peakWeekday     Int?
-  sessionsPerWeek Float   @default(0)
-  avgSessionMinutes Float @default(0)
-  /** 0-1. How concentrated their timing is: 1 = clockwork, 0 = scattered. */
-  predictability  Float   @default(0)
-  /** 0-100, blended from recency, frequency and depth. */
-  engagementScore Float   @default(0)
-  /** 0-100. High means the pattern looks like somebody about to disappear. */
-  riskScore       Float   @default(0)
-  /** Days since their last recorded event; null if never seen. */
-  daysSinceSeen   Int?
-  totalEvents     Int     @default(0)
-  activeDays      Int     @default(0)
-  /** Full computed blob: histograms, area mix, streaks, top surfaces. */
-  signals         Json?
+  /**
+   * Machine key of the behaviour archetype — see src/lib/learner-signals.ts.
+   */
+  archetype         String @default("newcomer")
+  /**
+   * Hour of day, on the learner's own clock, when they are most often here.
+   */
+  peakHour          Int?
+  /**
+   * 0 = Sunday … 6 = Saturday.
+   */
+  peakWeekday       Int?
+  sessionsPerWeek   Float  @default(0)
+  avgSessionMinutes Float  @default(0)
+  /**
+   * 0-1. How concentrated their timing is: 1 = clockwork, 0 = scattered.
+   */
+  predictability    Float  @default(0)
+  /**
+   * 0-100, blended from recency, frequency and depth.
+   */
+  engagementScore   Float  @default(0)
+  /**
+   * 0-100. High means the pattern looks like somebody about to disappear.
+   */
+  riskScore         Float  @default(0)
+  /**
+   * Days since their last recorded event; null if never seen.
+   */
+  daysSinceSeen     Int?
+  totalEvents       Int    @default(0)
+  activeDays        Int    @default(0)
+  /**
+   * Full computed blob: histograms, area mix, streaks, top surfaces.
+   */
+  signals           Json?
 
   computedAt DateTime @default(now())
 
@@ -4158,14 +4368,12 @@ model QuizGame {
 
   /**
    * Play in teams rather than as individuals.
-   *
    * The reason this is worth having in a LANGUAGE school specifically: a solo
    * leaderboard is won by whoever already speaks the most German, so the
    * students who most need to practise learn within two rounds that they cannot
    * place and stop trying. In a team the weakest speaker's correct answer still
    * moves their team, and the room starts helping each other out loud — which
    * is the actual lesson.
-   *
    * Individual scores are still recorded underneath, because the gradebook and
    * the XP count are about a person, not a table of four.
    */
@@ -4217,7 +4425,6 @@ model QuizGamePlayer {
 
   /**
    * Which team, when the game is played in teams. Null in a solo game.
-   *
    * A name rather than a foreign key to a Team table: a team exists for forty
    * minutes and has no life outside this one game, so a row for it would be a
    * row nothing ever reads again. The set of names is fixed in code
@@ -4285,30 +4492,31 @@ model QuizGameAnswer {
 
 /**
  * One story written by a cohort, turn by turn.
- *
  * A match belongs to a Space (branch + level + session), so it scopes to the
  * cohort naturally. Private students get cross-branch pool matching handled
  * separately; this model stays the same.
- *
  * The story itself is built from GameTurn submissions in order — the channel
  * renders it, the GameMatch row just keeps state.
  */
 model GameMatch {
-  id        String   @id @default(cuid())
-  spaceId   String?
-  space     Space?   @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  title     String
-  prompt    String?
-  /** Tutor or system auto-start. Null for school-wide defaults. */
+  id          String  @id @default(cuid())
+  spaceId     String?
+  space       Space?  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  title       String
+  prompt      String?
+  /**
+   * Tutor or system auto-start. Null for school-wide defaults.
+   */
   createdById String?
-  createdBy User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
-  /** active | completed | archived. Completed = all turns done, no more moves. */
-  status    String   @default("active")
+  /**
+   * active | completed | archived. Completed = all turns done, no more moves.
+   */
+  status String @default("active")
 
   /**
    * How many sentences before the story is finished.
-   *
    * A story that could run forever never gets read back, and the moment it is
    * finished — the class scrolls the whole thing and sees what they made — is
    * the payoff the turns were for. Without an end there is no such moment, only
@@ -4318,7 +4526,6 @@ model GameMatch {
 
   /**
    * The deck this story draws its per-turn rules from, as a JSON array.
-   *
    * COPIED off the ConstraintDeck at creation rather than referenced, for the
    * same reason the quiz game freezes its questions: a tutor editing a deck
    * mid-story must not retroactively change what turn three was asked to do.
@@ -4327,16 +4534,20 @@ model GameMatch {
    */
   constraints Json?
 
-  /** The turns in order. */
-  turns     GameTurn[]
+  /**
+   * The turns in order.
+   */
+  turns GameTurn[]
 
-  /** The chat message(s) that invited people into this match — see Message.gameMatchId. */
-  messages  Message[]
+  /**
+   * The chat message(s) that invited people into this match — see Message.gameMatchId.
+   */
+  messages Message[]
 
-  startedAt DateTime @default(now())
+  startedAt   DateTime  @default(now())
   completedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
@@ -4348,59 +4559,67 @@ model GameMatch {
 
 /**
  * One turn in a story — one sentence.
- *
  * THE ASSIGNED/CLAIMED SPLIT IS THE WHOLE DESIGN, and it is what keeps a chain
  * alive. A turn is *offered* to one named student, because "it is your turn"
  * aimed at a person is the entire retention mechanic — a turn owed to nobody is
  * a turn nobody feels. But a turn that can ONLY be played by that student stalls
  * the story the first time somebody is ill, drops the course, or simply does not
  * open the app, and a chain that dies at student three teaches nobody anything.
- *
  * So the deadline does not skip the turn. It OPENS it: past `deadline` the turn
  * stays in place and anyone in the cohort may take it. The named student keeps
  * their claim until they lose it to somebody faster, which is both fairer than a
  * silent skip and quietly motivating.
- *
  * `playerId` is therefore who actually wrote the sentence, which is usually but
  * not always `assignedToId`. Scoring, streaks and the tutor's review all read
  * `playerId`; only the notification reads `assignedToId`.
  */
 model GameTurn {
-  id        String   @id @default(cuid())
-  matchId   String
-  match     GameMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  id      String    @id @default(cuid())
+  matchId String
+  match   GameMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
 
-  /** Who the turn was offered to. Set at creation, never changes. */
+  /**
+   * Who the turn was offered to. Set at creation, never changes.
+   */
   assignedToId String
   assignedTo   User   @relation("GameTurnAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
 
-  /** Who actually wrote it. Null until somebody does. */
-  playerId  String?
-  player    User?    @relation("GameTurnAuthor", fields: [playerId], references: [id], onDelete: SetNull)
+  /**
+   * Who actually wrote it. Null until somebody does.
+   */
+  playerId String?
+  player   User?   @relation("GameTurnAuthor", fields: [playerId], references: [id], onDelete: SetNull)
 
-  /** 1, 2, 3... the order in the game. */
-  position  Int
+  /**
+   * 1, 2, 3... the order in the game.
+   */
+  position Int
 
   /**
    * pending  — waiting on the assignee, before the deadline
    * open     — deadline passed, anyone in the cohort may take it
    * submitted — written
-   *
    * Stored rather than derived from `deadline` because "open" is a thing the
    * cohort gets *notified* about, and a state nobody can observe cannot be
    * announced.
    */
-  status    String   @default("pending")
+  status String @default("pending")
 
-  /** JSON: {rule: "dative"} | {rule: "vocab", words: ["Bauer", "Schloss"]} etc. */
+  /**
+   * JSON: {rule: "dative"} | {rule: "vocab", words: ["Bauer", "Schloss"]} etc.
+   */
   constraint Json?
 
-  /** The sentence written for this turn. Null until submitted. */
-  sentence  String?
+  /**
+   * The sentence written for this turn. Null until submitted.
+   */
+  sentence String?
 
   submittedAt DateTime?
-  /** When this turn stops being exclusive to the assignee. ~24h out. */
-  deadline  DateTime
+  /**
+   * When this turn stops being exclusive to the assignee. ~24h out.
+   */
+  deadline    DateTime
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -4422,7 +4641,6 @@ model GameTurn {
  * Reusable constraint decks — sets of rules a tutor can pick from when
  * starting a game, or the school defaults to. Constraints are JSON so new
  * types can be added without schema migration.
- *
  * Examples:
  * {rule: "dative"}
  * {rule: "vocab", words: ["Bauer", "Schloss", "Ausbildung"]}
@@ -4430,13 +4648,15 @@ model GameTurn {
  * {rule: "tense", tense: "future"}
  */
 model ConstraintDeck {
-  id        String   @id @default(cuid())
-  name      String
+  id          String  @id @default(cuid())
+  name        String
   description String?
-  /** JSON array of constraint objects. */
+  /**
+   * JSON array of constraint objects.
+   */
   constraints Json
   createdById String?
-  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

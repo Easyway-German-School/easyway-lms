@@ -69,16 +69,22 @@ export async function GET() {
     }
 
     // A video belongs to this student if it is tagged with their level, or it
-    // hangs off a course at their level. Both, because a class recording has a
-    // level but often no course, while an older lesson video has the reverse.
+    // hangs off a course at their level, or — a private recording, which
+    // deliberately carries NO level (see class-recorder.ts) — it was booked
+    // for them specifically via the `privateClasses` relation.
     const records = await prisma.material.findMany({
       where: {
         kind: { in: ["video", "recording"] },
-        OR: [{ level: student.level }, { course: { level: student.level } }],
+        OR: [
+          { level: student.level },
+          { course: { level: student.level } },
+          { privateClasses: { some: { studentId: student.id } } },
+        ],
       },
       include: {
         course: { select: { title: true, level: true } },
         lecturer: { select: { user: { select: { name: true } } } },
+        recording: { select: { privateClassId: true } },
       },
       orderBy: [{ recordedAt: "desc" }, { createdAt: "desc" }],
     });
@@ -117,6 +123,7 @@ export async function GET() {
           completed: progress?.completed ?? false,
           embedUrl: iframed?.embedUrl ?? null,
           embedLabel: embed?.label ?? null,
+          isPrivate: Boolean(record.recording?.privateClassId),
         };
       });
 

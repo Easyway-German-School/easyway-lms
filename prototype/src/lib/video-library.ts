@@ -38,6 +38,8 @@ export type LibraryVideo = {
   embedUrl: string | null;
   /** "YouTube", "Vimeo"… — shown on the tile so the shelf is honest about it. */
   embedLabel: string | null;
+  /** A private one-to-one capture — see class-recorder.ts. Splits the shelf and unlocks the premium notes panel. */
+  isPrivate: boolean;
 };
 
 export type VideoShelf = {
@@ -148,7 +150,22 @@ export function buildShelves(videos: LibraryVideo[], level?: string | null): Vid
     });
   }
 
-  const recordings = videos.filter((video) => video.kind === "recording").sort(byNewest);
+  // Private sessions get their own shelf rather than sitting inside the
+  // cohort's — a class/status division on purpose: a level-wide "class
+  // recordings" shelf and "these are yours alone" read very differently, and
+  // a private student paying for one-to-one time should see that reflected,
+  // not buried among group tapes that were never theirs to begin with.
+  const privateRecordings = videos.filter((video) => video.kind === "recording" && video.isPrivate).sort(byNewest);
+  if (privateRecordings.length > 0) {
+    shelves.push({
+      id: "private-sessions",
+      title: "Your private sessions",
+      subtitle: "One-to-one lessons, with corrections and progress notes only you can see.",
+      videos: privateRecordings,
+    });
+  }
+
+  const recordings = videos.filter((video) => video.kind === "recording" && !video.isPrivate).sort(byNewest);
   if (recordings.length > 0) {
     shelves.push({
       id: "recordings",
