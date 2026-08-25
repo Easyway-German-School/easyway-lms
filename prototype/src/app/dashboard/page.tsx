@@ -30,6 +30,36 @@ type Mission = {
   detectType?: string;
 };
 
+/** A destination for each mission's detectType, so the card is finally something a student can act on instead of just a status report. */
+const MISSION_HREF: Record<string, string> = {
+  lesson: "/materials",
+  assignment: "/assignment",
+  quiz: "/games",
+  attendance: "/live",
+  voice: "/tandem",
+  essay: "/essay",
+  generic: "/materials",
+};
+
+type Announcement = {
+  id: string;
+  title: string;
+  text: string;
+  time: string;
+};
+
+function relativeTime(iso: string): string {
+  const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 type Student = {
   name?: string;
   level?: string;
@@ -87,6 +117,8 @@ import StudentShell from "@/components/StudentShell";
 import StudentBrief from "@/components/StudentBrief";
 import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
+import SkillMasteryPanel from "@/components/SkillMasteryPanel";
+import Leaderboard from "@/components/Leaderboard";
 import TutorBioCard from "@/components/TutorBioCard";
 import TutorMessagesCard from "@/components/TutorMessagesCard";
 import SessionNotesCard from "@/components/SessionNotesCard";
@@ -122,6 +154,7 @@ function DashboardContent() {
     nextMilestone: "First lesson",
   });
   const [dailyMissions, setDailyMissions] = useState<Mission[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
   const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null);
   const [fastFallback, setFastFallback] = useState(false);
@@ -313,6 +346,32 @@ function DashboardContent() {
       .catch(() => setDailyMissions([]));
   }, []);
 
+  /**
+   * Real school announcements, not a fixed sample pair. Same feed the bell
+   * icon reads (see NotificationCenter) — this is just the "announcement"
+   * kind, most recent two, filtered client-side rather than duplicating the
+   * shared /api/notifications query logic for one caller.
+   */
+  const loadAnnouncements = useCallback(() => {
+    if (typeof window === "undefined") return;
+    void fetch("/api/notifications?limit=25", { credentials: "include", cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        const rows = Array.isArray(data?.notifications) ? data.notifications : [];
+        const items = rows
+          .filter((n: { kind?: string }) => typeof n.kind === "string" && n.kind.startsWith("announcement"))
+          .slice(0, 2)
+          .map((n: { id: string; title: string; message: string; createdAt: string }) => ({
+            id: n.id,
+            title: n.title,
+            text: n.message,
+            time: relativeTime(n.createdAt),
+          }));
+        setAnnouncements(items);
+      })
+      .catch(() => setAnnouncements([]));
+  }, []);
+
   useEffect(() => {
     if (status !== "authenticated") return;
 
@@ -357,7 +416,8 @@ function DashboardContent() {
   useEffect(() => {
     if (!student) return;
     loadMissions();
-  }, [student, loadMissions]);
+    loadAnnouncements();
+  }, [student, loadMissions, loadAnnouncements]);
 
   /**
    * The badge on the home-screen icon — the closest an installed PWA gets to
@@ -538,11 +598,6 @@ function DashboardContent() {
     { label: 'Active quests', value: displayMissions.length.toString(), icon: <CompassIcon className="h-6 w-6" /> },
     { label: 'Progress', value: `${xpProgress}%`, icon: <TrendingUpIcon className="h-6 w-6" /> },
     { label: 'Exam readiness', value: `${resolvedStudent?.examReadiness ?? 0}%`, icon: <TargetIcon className="h-6 w-6" /> },
-  ];
-
-  const displayAnnouncements = [
-    { title: 'New exam prep unit available', text: 'The new exam prep module is live in your course library.', time: '2h ago' },
-    { title: 'Session time updated', text: 'Wednesday class is now at 7:00 PM for this week.', time: '1d ago' },
   ];
 
   return (
@@ -863,15 +918,19 @@ function DashboardContent() {
                 <div className="mt-6 space-y-4">
                   {displayMissions.slice(0, 3).map((quest) => {
                     const done = quest.done;
+                    // "Done" is server-detected, never a checkbox — see
+                    // src/lib/mission-detection.ts. What was missing wasn't a
+                    // tap-to-complete button, it was ANY way to get from "here
+                    // is your mission" to the page where you'd actually do it.
+                    const href = MISSION_HREF[quest.detectType ?? "generic"] ?? "/materials";
                     return (
-                      <div
+                      <Link
                         key={quest.id || quest.title}
-                        // Not a button any more — there is nothing to tap. The
-                        // school stopped taking a student's word for "done";
-                        // this card just reports what the server detected.
-                        // See src/lib/mission-detection.ts for what counts.
+                        href={href}
                         className={`group flex w-full items-start gap-4 rounded-[28px] border p-5 text-left transition-all duration-200 ${
-                          isPrivateStudent ? innerPanelClass : "border-[var(--border)] bg-[var(--surface-alt)]"
+                          isPrivateStudent
+                            ? `${innerPanelClass} ${!done ? "hover:border-[#D4AF37]/40" : ""}`
+                            : `border-[var(--border)] bg-[var(--surface-alt)] ${!done ? "hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]" : ""}`
                         }`}
                       >
                         <span
@@ -889,14 +948,17 @@ function DashboardContent() {
                             <p className={`mt-2 text-sm ${mutedClass}`}>{quest.description}</p>
                           </div>
                           <span
-                            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
-                              done ? 'bg-[var(--success-soft)] text-[var(--success)]' : isPrivateStudent ? "bg-white/[0.03] text-white/40" : 'bg-[var(--surface-alt)] text-[var(--muted)]'
+                            className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+                              done ? 'bg-[var(--success-soft)] text-[var(--success)]' : isPrivateStudent ? "bg-[#D4AF37]/10 text-[#E8C766]" : 'bg-[var(--accent-soft)] text-[var(--accent)]'
                             }`}
                           >
-                            {done ? 'Detected ✓' : 'Not yet'}
+                            {done ? 'Detected ✓' : 'Go do this'}
+                            {!done && (
+                              <ArrowRightIcon className="h-3.5 w-3.5 shrink-0 transition group-hover:translate-x-0.5" />
+                            )}
                           </span>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                 </div>
@@ -989,6 +1051,17 @@ function DashboardContent() {
 
               <NewMaterialsCard />
 
+              <SkillMasteryPanel />
+
+              {/* Ranking a private 1:1 student against whoever happens to share
+                  their branch/level/sitting is meaningless — they have no real
+                  cohort. Group students only. */}
+              {!isPrivateStudent && (
+                <div className="cinematic-card rounded-[32px] p-8">
+                  <Leaderboard />
+                </div>
+              )}
+
               <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} whileHover={{ y: -3, scale: 1.005 }} className={cardClass}>
                 <div className="flex items-center justify-between gap-4">
                   <div>
@@ -1070,30 +1143,32 @@ function DashboardContent() {
             </div>
           </section>
 
-          <section className="mt-8">
-            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} whileHover={{ y: -3, scale: 1.005 }} className={cardClass}>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className={`text-sm uppercase tracking-[0.3em] ${eyebrowClass}`}>Announcements</p>
-                  <h2 className={`mt-3 text-2xl font-semibold ${headingClass}`}>What’s new</h2>
-                </div>
-              </div>
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                {displayAnnouncements.map((item) => (
-                  <div
-                    key={item.title}
-                    className={`rounded-[28px] border p-5 transition-all duration-200 ${
-                      isPrivateStudent ? `${innerPanelClass} hover:border-[#D4AF37]/40` : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]"
-                    }`}
-                  >
-                    <p className={`font-semibold ${headingClass}`}>{item.title}</p>
-                    <p className={`mt-2 text-sm ${mutedClass}`}>{item.text}</p>
-                    <p className={`mt-3 text-xs uppercase tracking-[0.3em] ${mutedClass}`}>{item.time}</p>
+          {announcements.length > 0 && (
+            <section className="mt-8">
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} whileHover={{ y: -3, scale: 1.005 }} className={cardClass}>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className={`text-sm uppercase tracking-[0.3em] ${eyebrowClass}`}>Announcements</p>
+                    <h2 className={`mt-3 text-2xl font-semibold ${headingClass}`}>What’s new</h2>
                   </div>
-                ))}
-              </div>
-            </motion.div>
-          </section>
+                </div>
+                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                  {announcements.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`rounded-[28px] border p-5 transition-all duration-200 ${
+                        isPrivateStudent ? `${innerPanelClass} hover:border-[#D4AF37]/40` : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]"
+                      }`}
+                    >
+                      <p className={`font-semibold ${headingClass}`}>{item.title}</p>
+                      <p className={`mt-2 text-sm ${mutedClass}`}>{item.text}</p>
+                      <p className={`mt-3 text-xs uppercase tracking-[0.3em] ${mutedClass}`}>{item.time}</p>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            </section>
+          )}
         </div>
       </motion.div>
     </StudentShell>
