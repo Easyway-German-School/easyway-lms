@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { getToken } from "next-auth/jwt";
 
 /**
  * The outermost layer: headers on every response, and a brake on the routes
@@ -8,6 +9,94 @@ import { NextResponse, type NextRequest } from "next/server";
  * the right place for rules that must not depend on a route remembering to
  * apply them.
  */
+
+/* -------------------------------------------------------------------------- */
+/* Portal gating                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Until this, "no middleware.ts exists" meant every portal's protection was
+ * whatever its Shell component happened to do client-side: a `useSession()`
+ * check that runs after the page has already shipped its JS, or — for
+ * `/admin/**`, which has no shell-level check at all — nothing before the
+ * page renders, with only the `/api/admin/*` handlers underneath ever
+ * refusing an unauthorised visitor. This closes that at the edge, for the
+ * three portals that live under one clean URL prefix each.
+ *
+ * `/student` deliberately has no entry here. Its pages are shared top-level
+ * routes (`/dashboard`, `/calendar`, `/community`, `/live`, ...) also used by
+ * other roles via `PortalShell`'s own dispatch, so there is no single prefix
+ * or role list to gate here without duplicating that dispatch logic. That
+ * portal keeps its existing page-level check for now.
+ *
+ * This is a fast-path reject, not the authority. Every route still calls
+ * `requireAuthSession()` (or the Shell's own `useSession()`), and that
+ * remains the source of truth — it does the DB-backed tenant scoping this
+ * edge check cannot do, and it is the only place that catches a lecturer
+ * revoked mid-session: that downgrade happens in the `session` callback
+ * (a Prisma lookup keyed off the *raw* role), not in the JWT this reads, so
+ * an inactive tutor's token still says "lecturer" here and clears this gate.
+ * Nothing downstream regresses — `requireAuthSession()` and every Shell's
+ * `useSession()` still see the downgraded role and refuse them exactly as
+ * before. What this gate reliably stops at the edge is the cheaper, more
+ * common case: no session at all, or a session for the wrong portal.
+ */
+type PortalRule = {
+  pagePattern: RegExp;
+  apiPattern: RegExp;
+  allowedRoles: string[];
+  signInPath: string;
+};
+
+const PORTALS: PortalRule[] = [
+  { pagePattern: /^\/admin(\/|$)/, apiPattern: /^\/api\/admin(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
+  {
+    pagePattern: /^\/lecturer(\/|$)/,
+    apiPattern: /^\/api\/lecturer(\/|$)/,
+    allowedRoles: ["lecturer", "tutor", "admin"],
+    signInPath: "/auth/lecturer/signin",
+  },
+  { pagePattern: /^\/parent(\/|$)/, apiPattern: /^\/api\/parent(\/|$)/, allowedRoles: ["parent"], signInPath: "/auth/parent/signin" },
+];
+
+// Mirrors lib/auth.ts's normalizeRole(). Not imported from there: that file
+// pulls in Prisma and bcrypt, which have no place in an edge bundle.
+const normalizeRole = (value: unknown) => String(value || "student").toLowerCase();
+
+/**
+ * The one legitimate call to `/api/admin/**` made with a non-admin token:
+ * ending an act-as-student session restores the admin's own cookie, and by
+ * construction it is called while that cookie holds the STUDENT's token (see
+ * src/lib/impersonation.ts). It authenticates itself — decoding the cookie
+ * and requiring a valid `impersonatorToken` claim — so it does not need, and
+ * must not receive, the role check below.
+ */
+const IMPERSONATION_END_PATH = "/api/admin/impersonate/end";
+
+async function guardPortal(request: NextRequest, path: string): Promise<NextResponse | null> {
+  if (path === IMPERSONATION_END_PATH) return null;
+
+  const portal = PORTALS.find((p) => p.pagePattern.test(path) || p.apiPattern.test(path));
+  if (!portal) return null;
+
+  const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
+  const role = normalizeRole(token?.role);
+  // A revoked or admin-locked token carries whatever role it had at issue
+  // time; treat it the same way the session callback does — unauthorised,
+  // not "whatever role it used to be".
+  const authorized =
+    Boolean(token?.id) && !token?.revoked && !(token?.adminLocked && role === "admin") && portal.allowedRoles.includes(role);
+
+  if (authorized) return null;
+
+  if (portal.apiPattern.test(path)) {
+    return applySecurityHeaders(NextResponse.json({ error: "Not authenticated." }, { status: 401 }));
+  }
+
+  const signInUrl = new URL(portal.signInPath, request.url);
+  signInUrl.searchParams.set("callbackUrl", path);
+  return applySecurityHeaders(NextResponse.redirect(signInUrl));
+}
 
 /* -------------------------------------------------------------------------- */
 /* Rate limiting                                                               */
@@ -218,8 +307,11 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
  * one at every boot; the behaviour is identical, and following the rename now
  * means it does not become a broken deploy on a future upgrade.
  */
-export default function proxy(request: NextRequest) {
+export default async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
+
+  const portalRejection = await guardPortal(request, path);
+  if (portalRejection) return portalRejection;
 
   const rule = RULES.find((candidate) => candidate.pattern.test(path));
   if (rule) {
