@@ -9,6 +9,7 @@ import AssignmentsPanel from "@/components/AssignmentsPanel";
 import BrandLoader from "@/components/BrandLoader";
 import { uploadFile } from "@/lib/upload";
 import { ArrowLeftIcon, CheckCircleIcon } from "@/components/icons";
+import { celebrateLessonComplete } from "@/components/LessonCompleteCelebration";
 
 function AssignmentContent() {
   const { status } = useSession();
@@ -96,6 +97,12 @@ function AssignmentContent() {
       setSubmission("");
       setFile(null);
       setNotice({ tone: "success", text: "Handed in. Your tutor will mark it and you will be told when it is back." });
+      if (data.celebrate) {
+        celebrateLessonComplete({
+          title: "Assignment submitted",
+          message: lesson?.title ? `Nice work finishing “${lesson.title}.”` : "Nice work — your tutor will mark it soon.",
+        });
+      }
     } catch (error) {
       console.error("Submission error:", error);
       setNotice({

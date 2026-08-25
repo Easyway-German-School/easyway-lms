@@ -66,7 +66,23 @@ export async function POST(request: NextRequest) {
       create: { studentId: student.id, materialId, positionSeconds: furthest, completed },
     });
 
-    return NextResponse.json({ ok: true, positionSeconds: furthest, completed });
+    // Only the tick that actually crosses the line celebrates — this route is
+    // called repeatedly on a timer, and re-saving progress on an already-
+    // finished video must not re-fire the moment on every subsequent tick.
+    const freshlyCompleted = completed && !existing?.completed;
+    let title: string | null = null;
+    if (freshlyCompleted) {
+      const material = await prisma.material.findUnique({ where: { id: materialId }, select: { title: true } });
+      title = material?.title ?? null;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      positionSeconds: furthest,
+      completed,
+      celebrate: freshlyCompleted,
+      title,
+    });
   } catch (error) {
     console.error("Failed to save video progress", error);
     return NextResponse.json({ error: "Failed to save progress" }, { status: 500 });

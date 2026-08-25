@@ -15,6 +15,7 @@ import {
   watchPercent,
   type LibraryVideo,
 } from "@/lib/video-library";
+import { celebrateLessonComplete } from "@/components/LessonCompleteCelebration";
 
 /** How often the player checkpoints, in seconds of playback. */
 const SAVE_EVERY_SECONDS = 15;
@@ -91,10 +92,20 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         headers: { "Content-Type": "application/json" },
         body: payload,
         keepalive: true,
-      }).catch(() => {
-        // A dropped checkpoint is not worth interrupting playback over — the
-        // next one is fifteen seconds away.
-      });
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.celebrate) {
+            celebrateLessonComplete({
+              title: "Video complete",
+              message: data.title ? `You finished “${data.title}.”` : "You watched the whole thing.",
+            });
+          }
+        })
+        .catch(() => {
+          // A dropped checkpoint is not worth interrupting playback over — the
+          // next one is fifteen seconds away.
+        });
     },
     [id],
   );

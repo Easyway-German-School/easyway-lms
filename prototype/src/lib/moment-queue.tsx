@@ -104,6 +104,7 @@ export type MomentId =
   | "welcome-tour"
   | "goal"
   | "level-advance"
+  | "lesson-complete"
   | "notifications"
   | "journey"
   | "poster"
@@ -143,6 +144,18 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Your level is complete",
     dockBlurb: "What you finished, and what comes next.",
+  },
+  /**
+   * A single lesson finished, not a whole level — smaller news, so it sits
+   * below level-advance. Still above the notification ask and the journey
+   * moment: this is earned, happened just now, and is why the student is
+   * still on the page.
+   */
+  "lesson-complete": {
+    priority: 65,
+    kind: "modal",
+    dockLabel: "Nice work",
+    dockBlurb: "You finished something — come see.",
   },
   /**
    * Asking for notification permission, and where it sits.

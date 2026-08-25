@@ -68,6 +68,14 @@ export async function POST(request: NextRequest) {
       }
     });
 
+    // Was this lesson already marked completed? Decides whether the client
+    // celebrates — a resubmission of already-finished work isn't a fresh win.
+    const existingCompletion = await prisma.completion.findUnique({
+      where: { studentId_lessonId: { studentId: student.id, lessonId } },
+      select: { status: true },
+    });
+    const freshCompletion = existingCompletion?.status !== "completed";
+
     // Mark lesson as completed
     await prisma.completion.upsert({
       where: {
@@ -104,7 +112,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       message: "Assignment submitted successfully",
-      gradeId: grade.id
+      gradeId: grade.id,
+      celebrate: freshCompletion,
     });
   } catch (error) {
     console.error("Assignment submission error:", error);

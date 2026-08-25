@@ -12,6 +12,7 @@ import BrandLogo from "@/components/BrandLogo";
 import LiveClassCall from "@/components/live/LiveClassCall";
 import MomentDock from "@/components/MomentDock";
 import GameTurnToast from "@/components/GameTurnToast";
+import LessonCompleteCelebration from "@/components/LessonCompleteCelebration";
 import BetaFeedbackPrompt from "@/components/BetaFeedbackPrompt";
 import StudentUsageTracker from "@/components/StudentUsageTracker";
 import NotificationCenter from "@/components/NotificationCenter";
@@ -422,6 +423,10 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       {/* The old dashboard "waiting on you" games card, now a queued nudge
           instead of a permanent section — see lib/moment-queue.tsx. */}
       <GameTurnToast />
+
+      {/* Fires on a genuine server-validated completion — see
+          celebrateLessonComplete() in LessonCompleteCelebration.tsx. */}
+      <LessonCompleteCelebration />
 
       {/* Outranks all of the above, and knows it. A class that has started is
           the only thing in this portal that expires while you look at it. */}
