@@ -70,18 +70,34 @@ export default function EgressTemplatePage() {
       .on(RoomEvent.LocalTrackPublished, bumpTopology)
       .on(RoomEvent.LocalTrackUnpublished, bumpTopology);
 
-    instance
-      .connect(EgressHelper.getLiveKitURL(), EgressHelper.getAccessToken())
-      .then(() => {
-        if (disposed) return;
-        EgressHelper.setRoom(instance);
-        setRoom(instance);
-        bumpTopology();
-      })
-      .catch((error) => {
-        console.error("[egress-template] could not connect to the room:", error);
-        if (!disposed) setFailed(true);
-      });
+    // `getLiveKitURL()`/`getAccessToken()` throw SYNCHRONOUSLY when the
+    // `url`/`token` query params egress is supposed to supply are missing —
+    // which they always will be for anyone (a crawler, a curious visitor)
+    // who opens this URL directly rather than LiveKit's own egress service.
+    // A throw here happens as an argument to `.connect()`, before there is
+    // any promise to `.catch()` — wrapping the whole thing is what turns
+    // that into the same graceful "waiting" state as a connection failure,
+    // instead of an uncaught exception. Found by hitting this URL bare in
+    // production right after deploying it.
+    try {
+      const url = EgressHelper.getLiveKitURL();
+      const token = EgressHelper.getAccessToken();
+      instance
+        .connect(url, token)
+        .then(() => {
+          if (disposed) return;
+          EgressHelper.setRoom(instance);
+          setRoom(instance);
+          bumpTopology();
+        })
+        .catch((error) => {
+          console.error("[egress-template] could not connect to the room:", error);
+          if (!disposed) setFailed(true);
+        });
+    } catch (error) {
+      console.error("[egress-template] missing url/token query params:", error);
+      setFailed(true);
+    }
 
     return () => {
       disposed = true;
