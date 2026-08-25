@@ -57,6 +57,15 @@ const PORTALS: PortalRule[] = [
     signInPath: "/auth/lecturer/signin",
   },
   { pagePattern: /^\/parent(\/|$)/, apiPattern: /^\/api\/parent(\/|$)/, allowedRoles: ["parent"], signInPath: "/auth/parent/signin" },
+  /**
+   * The operator console. Its own prefix, outside `/admin/**`, and — unlike
+   * `/api/admin/**` — `/api/platform/**` previously had no edge gate at all;
+   * every route relied solely on requirePlatformOperator() inside the
+   * handler. `allowedRoles` only checks the coarse "admin" role here, same as
+   * `/admin` above; requirePlatformOperator() remains the one that checks the
+   * actual platformRole column and 404s a non-operator admin.
+   */
+  { pagePattern: /^\/platform(\/|$)/, apiPattern: /^\/api\/platform(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
 ];
 
 // Mirrors lib/auth.ts's normalizeRole(). Not imported from there: that file

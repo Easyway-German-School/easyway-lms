@@ -152,7 +152,7 @@ const navItems: NavItem[] = [
 
   // Last, and its own group, because it is not part of running a school. This
   // is the console for the business that sells the software to schools.
-  { label: 'Schools & API keys', href: '/admin/platform', icon: <PackageIcon />, group: 'Platform', platformOnly: true },
+  { label: 'Schools & API keys', href: '/platform', icon: <PackageIcon />, group: 'Platform', platformOnly: true },
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
