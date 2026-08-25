@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # The app that actually deploys — see project memory "Two source trees":
+  # only prototype/ ships. This is the one that matters for security patches.
+  - package-ecosystem: "npm"
+    directory: "/prototype"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # One PR for routine patch/minor bumps instead of dozens — a security
+      # fix in a major-version bump still gets its own PR so it isn't buried.
+      routine:
+        update-types:
+          - "patch"
+          - "minor"
+
+  # The workflows themselves — pins like actions/checkout@vN go stale too,
+  # and an out-of-date action is the same class of risk as an out-of-date npm package.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
