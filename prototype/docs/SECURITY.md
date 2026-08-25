@@ -205,7 +205,7 @@ Repository → Settings → Secrets and variables → Actions:
 
 | Secret | Value |
 |---|---|
-| `DIRECT_DATABASE_URL` | The **direct** Neon string, not the pooled one |
+| `DIRECT_DATABASE_URL` | **Not** the app's own connection string — a dedicated read-only role. Run `scripts/create-backup-role.sql` once, then use *its* direct (unpooled) connection string here. A leaked GitHub secret can then leak data but never alter or delete it. |
 | `RESTIC_REPOSITORY` | e.g. `s3:s3.us-west-004.backblazeb2.com/easyway-backups` |
 | `RESTIC_PASSWORD` | Long random string. **Store it in the password manager before the first run** |
 | `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | Backup bucket credentials |
