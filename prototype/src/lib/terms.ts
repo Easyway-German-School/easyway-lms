@@ -107,6 +107,23 @@ export function nonRefundSections(): TermsSection[] {
 }
 
 /**
+ * THE SECTIONS THE PRIVACY PAGE IS BUILT FROM.
+ *
+ * There is no separate privacy document — only this one Terms and Conditions
+ * text, already vetted section by section. Rather than write new privacy
+ * language that could drift from or contradict what students actually agreed
+ * to, the /privacy page is these same sections, re-grouped under one heading:
+ * what personal information is collected and why (22M), how account access is
+ * kept secure (22K), and the photo/video consent taken at registration (15).
+ */
+export const PRIVACY_SECTION_NUMBERS = ["22M", "22K", "15"] as const;
+
+/** The privacy-relevant sections, in the order the privacy page shows them. */
+export function privacySections(): TermsSection[] {
+  return PRIVACY_SECTION_NUMBERS.map(termsSection).filter((section): section is TermsSection => Boolean(section));
+}
+
+/**
  * THE FALLBACK FOR SOMEBODY WITH NO CONSENT RECORD.
  *
  * The refund wall's strongest line is "you agreed to this on 12 August" — and
