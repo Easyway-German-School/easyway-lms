@@ -149,7 +149,7 @@ function StatPill({
       {/* Tracking that wide turns "Attendance" into an overflow on a 160px
           pill. It keeps the look where there is room and gives it up where
           there is not. */}
-      <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] sm:tracking-[0.22em]">
+      <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-white/60 sm:tracking-[0.22em]">
         {label}
       </p>
     </motion.div>
@@ -487,7 +487,7 @@ export default function ProfilePage() {
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="shrink-0 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-white backdrop-blur transition hover:bg-[var(--surface-alt)] sm:px-4 sm:text-xs sm:tracking-[0.18em]"
+              className="shrink-0 whitespace-nowrap rounded-full border border-white/20 bg-white/10 px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-white backdrop-blur transition hover:bg-white/20 sm:px-4 sm:text-xs sm:tracking-[0.18em]"
             >
               Edit profile
             </button>
@@ -582,13 +582,13 @@ export default function ProfilePage() {
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 font-mono text-sm text-[var(--muted)]">@{profile.studentCode}</p>
+                  <p className="mt-1 font-mono text-sm text-white/60">@{profile.studentCode}</p>
 
                   <div className="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
-                    <span className="rounded-full bg-[var(--surface-alt)] px-3 py-1.5 text-xs font-semibold text-white">
+                    <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
                       {profile.currentLevel} · German
                     </span>
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--surface-alt)] px-3 py-1.5 text-xs font-semibold text-white">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
                       <PinIcon className="h-3.5 w-3.5" /> {profile.branch}
                     </span>
                     <span
@@ -625,7 +625,7 @@ export default function ProfilePage() {
               {/* XP bar */}
               {game && (
                 <div className="mt-6">
-                  <div className="flex items-center justify-between text-xs font-semibold text-[var(--muted)]">
+                  <div className="flex items-center justify-between text-xs font-semibold text-white/60">
                     <span>
                       Level {game.level} → {game.level + 1}
                     </span>
@@ -633,7 +633,7 @@ export default function ProfilePage() {
                       {game.xpIntoLevel} / {game.xpForNextLevel} XP
                     </span>
                   </div>
-                  <div className="mt-2 h-3 overflow-hidden rounded-full bg-[var(--surface-alt)]">
+                  <div className="mt-2 h-3 overflow-hidden rounded-full bg-white/10">
                     <motion.div
                       className="h-full rounded-full"
                       style={{ background: ring }}

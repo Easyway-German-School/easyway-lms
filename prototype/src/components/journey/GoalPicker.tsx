@@ -161,7 +161,12 @@ export default function GoalPicker({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 14, scale: 0.98 }}
         transition={{ type: "spring", stiffness: 240, damping: 26 }}
-        className="my-auto w-full max-w-2xl overflow-hidden rounded-[30px] bg-[var(--background)] shadow-2xl"
+        // `bg-[var(--background)]` compiles to `background-color`, which drops
+        // a gradient value and leaves the card transparent (see the note in
+        // globals.css) — this is why the body of this modal was rendering
+        // straight through to the dark backdrop, swallowing the card text.
+        style={{ background: "var(--background)" }}
+        className="my-auto w-full max-w-2xl overflow-hidden rounded-[30px] shadow-2xl"
       >
         {/* The header is the flag, because the question is about Germany and
             because the flag is the image this whole feature walks towards. */}

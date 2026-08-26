@@ -24,7 +24,7 @@ export default async function HomePage() {
               <Link href="/auth/signup" className="rounded-2xl bg-[#FF6600] px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-[#FF7722]">
                 Register now
               </Link>
-              <Link href="/auth/signin" className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-5 py-3 text-sm font-semibold text-white backdrop-blur transition hover:bg-[var(--surface-alt)]">
+              <Link href="/auth/signin" className="rounded-2xl border border-white/25 bg-white/10 px-5 py-3 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20">
                 Sign in
               </Link>
             </div>

@@ -208,7 +208,7 @@ export default function SignupJourney({
 
         {/* The road */}
         <div className="relative mt-7 h-px sm:mt-8">
-          <div className="absolute inset-x-0 top-0 h-1.5 -translate-y-1/2 rounded-full bg-[var(--surface-alt)]" />
+          <div className="absolute inset-x-0 top-0 h-1.5 -translate-y-1/2 rounded-full bg-white/15" />
           <motion.div
             className="absolute left-0 top-0 h-1.5 -translate-y-1/2 rounded-full bg-gradient-to-r from-[#FF6600] to-[#ffa04d]"
             initial={false}
@@ -233,8 +233,8 @@ export default function SignupJourney({
                     done
                       ? "bg-[#FF6600] text-white"
                       : here
-                        ? "bg-[var(--surface)] text-[#0D7C7E]"
-                        : "bg-[var(--surface-alt)] text-white/60"
+                        ? "bg-white text-[#0D7C7E]"
+                        : "bg-white/15 text-white/60"
                   }`}
                 >
                   {done ? <CheckIcon className="h-3.5 w-3.5" strokeWidth={3.5} /> : i + 1}
@@ -262,7 +262,7 @@ export default function SignupJourney({
         </div>
 
         {/* THE STAMPS. What you have, not what is left. */}
-        <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-[var(--border)] pt-4">
+        <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-white/15 pt-4">
           <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white/50">Collected</span>
           {milestones.map((milestone, i) => {
             const earned = i < index;
@@ -277,7 +277,7 @@ export default function SignupJourney({
                 }
                 transition={{ duration: 0.4 }}
                 className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors ${
-                  earned ? "bg-[#FF6600] text-white" : "bg-[var(--surface-alt)] text-white/35"
+                  earned ? "bg-[#FF6600] text-white" : "bg-white/15 text-white/50"
                 }`}
               >
                 {earned && <CheckIcon className="h-2.5 w-2.5" strokeWidth={3.5} />}
