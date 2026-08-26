@@ -88,7 +88,28 @@ async function guardPortal(request: NextRequest, path: string): Promise<NextResp
   const portal = PORTALS.find((p) => p.pagePattern.test(path) || p.apiPattern.test(path));
   if (!portal) return null;
 
-  const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
+  /**
+   * secureCookie must be forced, not inferred.
+   *
+   * getToken() defaults to checking whether NEXTAUTH_URL starts with
+   * "https://" to decide which cookie name to read — but NEXTAUTH_URL is
+   * marked Sensitive in Vercel, and Sensitive env vars are not exposed to
+   * the Edge Middleware runtime this file runs in. So that check silently
+   * saw `undefined` here and looked for the plain "next-auth.session-token"
+   * cookie, while every real sign-in (a Node.js serverless function, where
+   * the var IS visible) issues the browser "__Secure-next-auth.session-
+   * token". The result: a session that /api/auth/session reports as valid
+   * was rejected at this gate on every single request — every admin and
+   * lecturer sign-in bounced straight back to the sign-in page it just came
+   * from. Deriving it from the request's own protocol instead of an env var
+   * makes it correct regardless of what NEXTAUTH_URL is set to or which
+   * runtime can see it.
+   */
+  const token = await getToken({
+    req: request,
+    secret: process.env.NEXTAUTH_SECRET,
+    secureCookie: request.nextUrl.protocol === "https:",
+  });
   const role = normalizeRole(token?.role);
   // A revoked or admin-locked token carries whatever role it had at issue
   // time; treat it the same way the session callback does — unauthorised,
