@@ -2,11 +2,18 @@
 
 /**
  * The personalized, illustrated scene experience — what a student with a
- * matching germanyGoal (currently just "care") sees instead of
+ * matching germanyGoal (care/ausbildung/work/study) sees instead of
  * GenericTandemChat. Full-bleed background, an anchored character portrait,
  * a novel-style dialogue box, light branching choices, and one writing beat
- * per chapter, all driven by the same real Whisper/Azure/Claude pipeline
+ * per episode, all driven by the same real Whisper/Azure/Claude pipeline
  * the generic experience uses for its speaking beats.
+ *
+ * This is a SERIES, not a single chapter: `access` (a StoryAccessState) is
+ * the single source of truth for which of three modes we're in — mid-episode
+ * ("playable"), between episodes with the next one's day-gate not yet open
+ * ("locked"), or every written episode finished ("season-complete"). The
+ * server decides which state applies; this component just renders whichever
+ * one it's handed and re-fetches it after every mutation.
  *
  * State is keyed by {sceneId, beatId} rather than a flat turn index — a
  * choice beat can send two different students down the same next beat with
@@ -16,14 +23,33 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { usePronunciationRecorder } from "@/lib/client/use-pronunciation-recorder";
-import type { StoryChapter, StoryCharacter, ExpressionKey } from "@/lib/story/types";
-import type { StoryProgress } from "@/lib/story-progress";
-import { MicIcon, SpeakerIcon, CheckCircleIcon } from "@/components/icons";
+import type { StoryCharacter, ExpressionKey } from "@/lib/story/types";
+import type { StoryAccessState } from "@/lib/story-progress";
+import { MicIcon, SpeakerIcon, CheckCircleIcon, ClockIcon } from "@/components/icons";
 
 type WriteResult = { score: number; feedback: string; corrections: string[]; achievementTitle: string | null };
 
-export default function VisualNovelStory({ chapter, initialProgress }: { chapter: StoryChapter; initialProgress: StoryProgress }) {
-  const [progress, setProgress] = useState(initialProgress);
+function useCountdown(targetIso: string | undefined): string {
+  const [label, setLabel] = useState("soon");
+  useEffect(() => {
+    if (!targetIso) return;
+    const target = new Date(targetIso).getTime();
+    const tick = () => {
+      const remainingMs = target - Date.now();
+      if (remainingMs <= 0) { setLabel("now"); return; }
+      const hours = Math.floor(remainingMs / 3_600_000);
+      const minutes = Math.floor((remainingMs % 3_600_000) / 60_000);
+      setLabel(hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`);
+    };
+    tick();
+    const interval = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(interval);
+  }, [targetIso]);
+  return label;
+}
+
+export default function VisualNovelStory({ initialAccess }: { initialAccess: StoryAccessState }) {
+  const [access, setAccess] = useState<StoryAccessState>(initialAccess);
   const [isAdvancing, setIsAdvancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flavorNote, setFlavorNote] = useState<string | null>(null);
@@ -31,30 +57,35 @@ export default function VisualNovelStory({ chapter, initialProgress }: { chapter
 
   const [writeText, setWriteText] = useState("");
   const [writeResult, setWriteResult] = useState<WriteResult | null>(null);
-  const [pendingProgress, setPendingProgress] = useState<StoryProgress | null>(null);
+  const [pendingAccess, setPendingAccess] = useState<StoryAccessState | null>(null);
   const [isSubmittingWrite, setIsSubmittingWrite] = useState(false);
+  const [spokenResult, setSpokenResult] = useState<{
+    transcription: string; wordAccuracy: number; pronunciationScore: number | null; achievementTitle: string | null;
+  } | null>(null);
 
-  const characterById = useMemo(() => new Map(chapter.characters.map((character) => [character.id, character])), [chapter]);
-  const scene = chapter.scenes[progress.currentSceneId];
-  const beat = scene?.beats[progress.currentBeatId];
-  const chapterComplete = progress.completedSceneIds.includes(chapter.sceneOrder[chapter.sceneOrder.length - 1]);
+  const playable = access.state === "playable" ? access : null;
+  const chapter = playable?.chapter;
+  const progress = playable?.progress;
+  const characterById = useMemo(() => new Map((chapter?.characters ?? []).map((character) => [character.id, character])), [chapter]);
+  const scene = chapter && progress ? chapter.scenes[progress.currentSceneId] : undefined;
+  const beat = scene && progress ? scene.beats[progress.currentBeatId] : undefined;
+
+  const countdown = useCountdown(access.state === "locked" ? access.unlocksAt : undefined);
 
   useEffect(() => {
+    if (!progress) return;
     setWriteText("");
     setWriteResult(null);
-    setPendingProgress(null);
+    setPendingAccess(null);
     setSpokenResult(null);
     setError(null);
-  }, [progress.currentSceneId, progress.currentBeatId]);
+  }, [progress?.currentSceneId, progress?.currentBeatId]);
 
   const speakerId = beat && beat.type !== "write" ? beat.speakerId : undefined;
   const speaker: StoryCharacter | undefined = speakerId ? characterById.get(speakerId) : undefined;
   const expression: ExpressionKey = beat?.type === "line" ? beat.expression : speaker?.defaultExpression ?? "neutral";
   const portraitSrc = speaker ? speaker.portraits[expression] ?? speaker.portraits[speaker.defaultExpression] : undefined;
 
-  const [spokenResult, setSpokenResult] = useState<{
-    transcription: string; wordAccuracy: number; pronunciationScore: number | null; achievementTitle: string | null;
-  } | null>(null);
   const recorder = usePronunciationRecorder({
     expectedPhrase: beat?.type === "yourLine" ? beat.targetPhrase : "",
     onResult: (result) => setSpokenResult(result),
@@ -92,7 +123,7 @@ export default function VisualNovelStory({ chapter, initialProgress }: { chapter
       const data = await response.json();
       if (!response.ok) { setError(data?.error || "Unable to continue the story."); return; }
       setSpokenResult(null);
-      setProgress(data.progress);
+      setAccess(data.access);
       setFlavorNote(nextFlavorNote ?? null);
     } catch {
       setError("Unable to continue the story.");
@@ -114,7 +145,7 @@ export default function VisualNovelStory({ chapter, initialProgress }: { chapter
       const data = await response.json();
       if (!response.ok) { setError(data?.error || "Unable to submit your response."); return; }
       setWriteResult({ score: data.score, feedback: data.feedback, corrections: data.corrections ?? [], achievementTitle: data.achievementTitle ?? null });
-      setPendingProgress(data.progress);
+      setPendingAccess(data.access);
     } catch {
       setError("Unable to submit your response.");
     } finally {
@@ -123,29 +154,49 @@ export default function VisualNovelStory({ chapter, initialProgress }: { chapter
   }
 
   function continueAfterWrite() {
-    if (pendingProgress) setProgress(pendingProgress);
+    if (pendingAccess) setAccess(pendingAccess);
     setFlavorNote(null);
   }
 
   const wordCount = writeText.trim().split(/\s+/).filter(Boolean).length;
   const background = scene?.background;
 
-  if (chapterComplete) {
+  if (access.state === "locked") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--surface-alt)] p-6 text-[var(--foreground)]">
         <div className="max-w-md rounded-3xl bg-[var(--surface)] p-8 text-center shadow-2xl ring-1 ring-white/10">
           <CheckCircleIcon className="mx-auto h-10 w-10 text-[var(--accent)]" />
-          <h1 className="mt-4 text-2xl font-semibold">{chapter.title} — complete</h1>
-          <p className="mt-2 text-sm text-[var(--muted)]">{chapter.synopsis}</p>
+          <h1 className="mt-4 text-2xl font-semibold">{access.completedChapter.title} — complete</h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Every line you spoke and wrote here was scored for real, not just clicked through.
+          </p>
+          <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-left">
+            <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
+              <ClockIcon className="h-3.5 w-3.5" /> Next: unlocks in {countdown}
+            </p>
+            <p className="mt-2 text-sm font-semibold">{access.nextChapter.title}</p>
+            <p className="mt-1 text-xs text-[var(--muted)]">{access.nextChapter.synopsis}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (access.state === "season-complete") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--surface-alt)] p-6 text-[var(--foreground)]">
+        <div className="max-w-md rounded-3xl bg-[var(--surface)] p-8 text-center shadow-2xl ring-1 ring-white/10">
+          <CheckCircleIcon className="mx-auto h-10 w-10 text-[var(--accent)]" />
+          <h1 className="mt-4 text-2xl font-semibold">{access.completedChapter.title} — complete</h1>
           <p className="mt-4 text-sm text-[var(--muted)]">
-            Come back tomorrow for the next chapter of your story — every line you spoke and wrote here was scored for real, not just clicked through.
+            You've finished every episode of your story so far. More is coming — check back soon.
           </p>
         </div>
       </div>
     );
   }
 
-  if (!scene || !beat) {
+  if (!chapter || !scene || !beat || !progress) {
     return <div className="flex min-h-screen items-center justify-center bg-[var(--surface-alt)] text-[var(--foreground)]">Loading your story…</div>;
   }
 
@@ -167,7 +218,7 @@ export default function VisualNovelStory({ chapter, initialProgress }: { chapter
 
       <div className="relative flex min-h-screen flex-col justify-end px-4 pb-6 pt-10 sm:px-8">
         <div className="mx-auto flex w-full max-w-2xl items-center justify-between text-xs uppercase tracking-[0.2em] text-white/70">
-          <span>{chapter.title}</span>
+          <span>{chapter.title} · Episode {playable.episodeIndex + 1}</span>
           <span>{scene.title}</span>
         </div>
 

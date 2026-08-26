@@ -2,7 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { missionsForCohort, bandFor, personalise, type Mission } from "@/lib/cohort-missions";
 import { calculateStreak } from "@/lib/gamification";
 import { detectionFor, ctxSince } from "@/lib/mission-detection";
-import { storyChapterFor } from "@/lib/story/content";
+import { goalFor } from "@/lib/germany-goals";
+import { storySeriesFor } from "@/lib/story/content";
+import { getStoryAccess } from "@/lib/story-progress";
 
 /**
  * Missions the STUDENT can act on, decided by the SERVER.
@@ -107,8 +109,14 @@ function fallbackMissions(profile: NonNullable<Awaited<ReturnType<typeof student
  * changes anything for a student whose germanyGoal has a matching story
  * (currently just "care"); everyone else's missions are untouched.
  */
-function withStoryMission(missions: Mission[], profile: NonNullable<Awaited<ReturnType<typeof studentProfile>>>): Mission[] {
-  if (!storyChapterFor(profile.germanyGoal)) return missions;
+async function withStoryMission(missions: Mission[], profile: NonNullable<Awaited<ReturnType<typeof studentProfile>>>): Promise<Mission[]> {
+  const series = storySeriesFor(profile.germanyGoal);
+  if (!series) return missions;
+  const access = await getStoryAccess(profile.studentId, goalFor(profile.germanyGoal).id, series);
+  // Fixes a real pre-existing bug: today this mission appears even once the
+  // (single) chapter is finished, with nothing left to advance. Only offer
+  // it while there's actually a playable episode right now.
+  if (access.state !== "playable") return missions;
   const storyMission: Mission = {
     title: "Continue your story",
     description: "Play the next scene of your personalized story — speak, choose, and write your way through it.",
@@ -145,7 +153,7 @@ export async function ensureTodayMissions(userId: string): Promise<DailyMissionV
       ? personalise(cohort, { name: profile.name, streak: profile.streak, examReadiness: profile.examReadiness })
       : fallbackMissions(profile);
 
-    const toCreate = withStoryMission(missions.length ? missions : fallbackMissions(profile), profile).slice(0, 3);
+    const toCreate = (await withStoryMission(missions.length ? missions : fallbackMissions(profile), profile)).slice(0, 3);
     await prisma.dailyMission.createMany({
       data: toCreate.map((mission, index) => ({
         userId,

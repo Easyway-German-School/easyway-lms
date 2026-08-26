@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { DetectType } from "@/lib/cohort-missions";
-import { storyChapterFor } from "@/lib/story/content";
-import { getStoryProgress } from "@/lib/story-progress";
+import { goalFor } from "@/lib/germany-goals";
+import { storySeriesFor } from "@/lib/story/content";
+import { getStoryAccess } from "@/lib/story-progress";
 
 /**
  * Did this actually happen, or did somebody just tap a button?
@@ -118,11 +119,11 @@ async function didAnythingToday(ctx: DetectionContext): Promise<boolean> {
  */
 async function didAdvanceStory(ctx: DetectionContext): Promise<boolean> {
   const student = await prisma.student.findUnique({ where: { id: ctx.studentId }, select: { germanyGoal: true } });
-  const chapter = storyChapterFor(student?.germanyGoal);
-  if (!chapter) return false;
-  const progress = await getStoryProgress(ctx.studentId, chapter.goalId);
-  if (!progress) return false;
-  return progress.history.some((entry) => new Date(entry.at) >= ctx.since);
+  const series = storySeriesFor(student?.germanyGoal);
+  if (!series) return false;
+  const access = await getStoryAccess(ctx.studentId, goalFor(student?.germanyGoal).id, series);
+  if (access.state !== "playable") return false;
+  return access.progress.history.some((entry) => new Date(entry.at) >= ctx.since);
 }
 
 /** One check per detect type. Unknown types fall through to "anything today". */

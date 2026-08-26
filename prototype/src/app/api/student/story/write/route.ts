@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { storyChapterFor } from "@/lib/story/content";
-import { advanceStoryPosition, getStoryProgress, saveStoryProgress } from "@/lib/story-progress";
+import { goalFor } from "@/lib/germany-goals";
+import { storySeriesFor } from "@/lib/story/content";
+import { advanceStoryPosition, describeAccessAfterMutation, getPlayableEpisode, saveSeriesProgress } from "@/lib/story-progress";
 import { gradeStoryWriting } from "@/lib/ai";
 import { reserveStudentAiRequest } from "@/lib/ai-limits";
 import { recordSkillOutcome } from "@/lib/skill-mastery";
@@ -23,8 +24,8 @@ export async function POST(request: NextRequest) {
   });
   if (!student) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const chapter = storyChapterFor(student.germanyGoal);
-  if (!chapter) return NextResponse.json({ error: "No story available" }, { status: 404 });
+  const series = storySeriesFor(student.germanyGoal);
+  if (!series) return NextResponse.json({ error: "No story available" }, { status: 404 });
 
   const body = (await request.json().catch(() => null)) as { sceneId?: unknown; beatId?: unknown; response?: unknown } | null;
   const sceneId = typeof body?.sceneId === "string" ? body.sceneId : "";
@@ -33,8 +34,12 @@ export async function POST(request: NextRequest) {
   if (!response) return NextResponse.json({ error: "A written response is required." }, { status: 400 });
   if (response.length > MAX_RESPONSE_LENGTH) return NextResponse.json({ error: "Keep it under 2000 characters." }, { status: 400 });
 
-  const progress = await getStoryProgress(student.id, chapter.goalId);
-  if (!progress) return NextResponse.json({ error: "No progress found — load the story first." }, { status: 409 });
+  const goalId = goalFor(student.germanyGoal).id;
+  const episode = await getPlayableEpisode(student.id, goalId, series);
+  if (!episode) return NextResponse.json({ error: "This episode isn't currently playable." }, { status: 409 });
+  const { seriesProgress, chapter } = episode;
+  const progress = seriesProgress.progress;
+
   if (progress.currentSceneId !== sceneId || progress.currentBeatId !== beatId) {
     return NextResponse.json({ error: "This beat is no longer current." }, { status: 409 });
   }
@@ -65,7 +70,9 @@ export async function POST(request: NextRequest) {
   progress.writingResponses.push({ sceneId, beatId, prompt: beat.prompt, response, score: graded.score, feedback: graded.feedback, at: now });
   progress.history.push({ sceneId, beatId, type: "write", at: now });
   advanceStoryPosition(chapter, progress, sceneId, beat.next);
-  await saveStoryProgress(student.id, chapter.goalId, progress);
+
+  const access = describeAccessAfterMutation(series, seriesProgress);
+  await saveSeriesProgress(student.id, goalId, seriesProgress);
 
   return NextResponse.json({
     score: graded.score,
@@ -74,6 +81,6 @@ export async function POST(request: NextRequest) {
     achievementTitle: graded.achievementTitle,
     masteryBefore: masteryBefore?.mastery ?? null,
     masteryAfter: masteryAfter?.mastery ?? null,
-    progress,
+    access,
   });
 }

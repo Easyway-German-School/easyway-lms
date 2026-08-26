@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { storyChapterFor } from "@/lib/story/content";
-import { advanceStoryPosition, getStoryProgress, saveStoryProgress } from "@/lib/story-progress";
+import { goalFor } from "@/lib/germany-goals";
+import { storySeriesFor } from "@/lib/story/content";
+import { advanceStoryPosition, describeAccessAfterMutation, getPlayableEpisode, saveSeriesProgress } from "@/lib/story-progress";
 
 export const dynamic = "force-dynamic";
 
@@ -16,22 +17,25 @@ export async function POST(request: NextRequest) {
   });
   if (!student) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const chapter = storyChapterFor(student.germanyGoal);
-  if (!chapter) return NextResponse.json({ error: "No story available" }, { status: 404 });
+  const series = storySeriesFor(student.germanyGoal);
+  if (!series) return NextResponse.json({ error: "No story available" }, { status: 404 });
 
   const body = (await request.json().catch(() => null)) as { sceneId?: unknown; beatId?: unknown; choiceOptionId?: unknown } | null;
   const sceneId = typeof body?.sceneId === "string" ? body.sceneId : "";
   const beatId = typeof body?.beatId === "string" ? body.beatId : "";
   const choiceOptionId = typeof body?.choiceOptionId === "string" ? body.choiceOptionId : undefined;
 
-  const progress = await getStoryProgress(student.id, chapter.goalId);
-  if (!progress) return NextResponse.json({ error: "No progress found — load the story first." }, { status: 409 });
+  const goalId = goalFor(student.germanyGoal).id;
+  const episode = await getPlayableEpisode(student.id, goalId, series);
+  if (!episode) return NextResponse.json({ error: "This episode isn't currently playable." }, { status: 409 });
+  const { seriesProgress, chapter } = episode;
+  const progress = seriesProgress.progress;
 
   // Only ever advance from where the server thinks the student actually is.
   // A stale sceneId/beatId (a duplicate click, a resumed tab) is a no-op that
   // just returns current progress, never trusted as new state.
   if (progress.currentSceneId !== sceneId || progress.currentBeatId !== beatId) {
-    return NextResponse.json({ progress });
+    return NextResponse.json({ access: describeAccessAfterMutation(series, seriesProgress) });
   }
 
   const scene = chapter.scenes[sceneId];
@@ -51,7 +55,8 @@ export async function POST(request: NextRequest) {
 
   progress.history.push({ sceneId, beatId, type: beat.type, at: new Date().toISOString() });
   advanceStoryPosition(chapter, progress, sceneId, nextBeatId);
-  await saveStoryProgress(student.id, chapter.goalId, progress);
 
-  return NextResponse.json({ progress });
+  const access = describeAccessAfterMutation(series, seriesProgress);
+  await saveSeriesProgress(student.id, goalId, seriesProgress);
+  return NextResponse.json({ access });
 }

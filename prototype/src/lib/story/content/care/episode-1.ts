@@ -1,7 +1,7 @@
 import type { StoryChapter } from "@/lib/story/types";
 
 /**
- * Pilot chapter for the "care" (nursing) Germany-goal track — see the `care`
+ * First episode of the "care" (nursing) Germany-goal track — see the `care`
  * entry in germany-goals.ts for the tone this should match: a hospital ward,
  * B2-level, "your ward" as the destination.
  *
@@ -9,7 +9,7 @@ import type { StoryChapter } from "@/lib/story/types";
  * choice), a patient round (the chapter's speaking-heavy beat plus its one
  * writing beat), and a break-room debrief that closes the chapter.
  */
-export const careChapter: StoryChapter = {
+export const careEpisode1: StoryChapter = {
   id: "care-first-shift",
   goalId: "care",
   title: "Your First Shift",

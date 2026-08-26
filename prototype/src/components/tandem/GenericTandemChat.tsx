@@ -3,9 +3,9 @@
 /**
  * The original /tandem experience: a scripted, linear chat-thread roleplay.
  * Kept as-is (pixel-identical to what shipped) for every student whose
- * germanyGoal has no personalized story yet — see storyChapterFor() in
- * lib/story/content — so the "no regression for the other 8 goal tracks"
- * promise costs nothing to keep.
+ * germanyGoal has no personalized story series — see storySeriesFor() in
+ * lib/story/content — so the relational/open-ended goal tracks (family,
+ * aupair, settle, explore, custom) cost nothing to keep unchanged.
  */
 
 import { motion } from "framer-motion";

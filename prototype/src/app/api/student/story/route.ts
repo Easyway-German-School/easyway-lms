@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { storyChapterFor } from "@/lib/story/content";
-import { getOrStartStoryProgress } from "@/lib/story-progress";
+import { goalFor } from "@/lib/germany-goals";
+import { storySeriesFor } from "@/lib/story/content";
+import { getStoryAccess, type StoryAccessState } from "@/lib/story-progress";
 import type { StoryChapter } from "@/lib/story/types";
 
 export const dynamic = "force-dynamic";
@@ -34,11 +35,12 @@ export async function GET() {
     where: { userId: session.user.id },
     select: { id: true, germanyGoal: true },
   });
-  if (!student) return NextResponse.json({ available: false });
+  if (!student) return NextResponse.json({ access: { state: "unavailable" } });
 
-  const chapter = storyChapterFor(student.germanyGoal);
-  if (!chapter) return NextResponse.json({ available: false });
+  const series = storySeriesFor(student.germanyGoal);
+  if (!series) return NextResponse.json({ access: { state: "unavailable" } });
 
-  const progress = await getOrStartStoryProgress(student.id, chapter.goalId, chapter);
-  return NextResponse.json({ available: true, chapter: stripAnswers(chapter), progress });
+  const access = await getStoryAccess(student.id, goalFor(student.germanyGoal).id, series);
+  const safe: StoryAccessState = access.state === "playable" ? { ...access, chapter: stripAnswers(access.chapter) } : access;
+  return NextResponse.json({ access: safe });
 }

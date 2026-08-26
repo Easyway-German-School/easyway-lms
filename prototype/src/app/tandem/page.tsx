@@ -3,12 +3,9 @@
 import { useEffect, useState } from "react";
 import GenericTandemChat from "@/components/tandem/GenericTandemChat";
 import VisualNovelStory from "@/components/tandem/VisualNovelStory";
-import type { StoryChapter } from "@/lib/story/types";
-import type { StoryProgress } from "@/lib/story-progress";
+import type { StoryAccessState } from "@/lib/story-progress";
 
-type StoryResponse =
-  | { available: true; chapter: StoryChapter; progress: StoryProgress }
-  | { available: false };
+type StoryResponse = { access: StoryAccessState };
 
 export default function TandemPartner() {
   const [story, setStory] = useState<StoryResponse | null>(null);
@@ -16,16 +13,18 @@ export default function TandemPartner() {
   useEffect(() => {
     let cancelled = false;
     fetch("/api/student/story", { credentials: "include", cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : { available: false }))
+      .then((response) => (response.ok ? response.json() : { access: { state: "unavailable" } }))
       .then((data: StoryResponse) => { if (!cancelled) setStory(data); })
-      .catch(() => { if (!cancelled) setStory({ available: false }); });
+      .catch(() => { if (!cancelled) setStory({ access: { state: "unavailable" } }); });
     return () => { cancelled = true; };
   }, []);
 
   // Nothing personalized yet for this student — including the loading
   // instant itself, since a flash of the wrong experience is worse than a
-  // brief delay. Every non-"care" goal falls through here today.
-  if (!story || !story.available) return <GenericTandemChat />;
+  // brief delay. Every goal without a story series falls through here.
+  // VisualNovelStory itself renders the playable/locked/season-complete
+  // states — this component's only job is the top-level available/not switch.
+  if (!story || story.access.state === "unavailable") return <GenericTandemChat />;
 
-  return <VisualNovelStory chapter={story.chapter} initialProgress={story.progress} />;
+  return <VisualNovelStory initialAccess={story.access} />;
 }
