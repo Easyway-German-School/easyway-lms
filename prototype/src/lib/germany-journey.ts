@@ -332,7 +332,13 @@ export function buildCountdown(
   const daysElapsed = Math.max(0, rawElapsed);
   const daysLeft = Math.max(0, totalDays - daysElapsed);
 
-  const weeksTotal = Math.max(1, Math.round(totalDays / 7));
+  // A calendar month is 28-31 days, so deriving "weeks total" from totalDays/7
+  // makes an August-started level read as 9 weeks and a February-started one
+  // read as 8 — while every other line in the portal (the advance offer, the
+  // per-week price) states the level as a flat WEEKS_OF_TEACHING (months * 4).
+  // Pin this to the same constant so "8 weeks" never depends on which month a
+  // student happened to start in.
+  const weeksTotal = Math.max(1, months * 4);
   const weeksElapsed = Math.floor(daysElapsed / 7);
   const weekNumber = Math.min(weeksTotal, weeksElapsed + 1);
 
@@ -398,14 +404,27 @@ export function buildCountdown(
 /* -------------------------------------------------------------------------- */
 
 export type ArrivalEstimate = {
-  /** ISO. Null when there is nothing honest to project from. */
+  /** ISO. Null when there is nothing honest to project from. Germany, after paperwork. */
   date: string | null;
   /** "March 2028" */
   label: string | null;
+  /**
+   * ISO. When {@link monthsOfTeaching} of classes alone would be done — no
+   * paperwork added. This is the date that actually matches "N levels to
+   * {targetLevel}", and is what the UI must show next to that sentence: a
+   * card that says "4 levels to B2 · 8 months of teaching" beside a DATE that
+   * silently also counts 8 months of visa paperwork reads as "B2 in 16
+   * months," which is not what it means and is not what it said.
+   */
+  levelDate: string | null;
+  /** "April 2027" */
+  levelLabel: string | null;
   /** Levels still to teach between here and the target. */
   levelsRemaining: number;
   /** Months of teaching left, before paperwork. */
   monthsOfTeaching: number;
+  /** Months allowed for paperwork after the teaching is done — this goal's, not a flat number. */
+  paperworkMonths: number;
   /** The words that must appear next to the date. Not optional. */
   caveat: string;
 };
@@ -443,8 +462,11 @@ export function estimateArrival(input: {
     return {
       date: null,
       label: null,
+      levelDate: null,
+      levelLabel: null,
       levelsRemaining: 0,
       monthsOfTeaching: 0,
+      paperworkMonths,
       caveat: "An estimate, not a promise.",
     };
   }
@@ -457,15 +479,26 @@ export function estimateArrival(input: {
     : SESSION_MONTHS;
 
   const monthsOfTeaching = currentLevelMonthsLeft + levelsAfterCurrent * SESSION_MONTHS;
+  const levelMonths = Math.ceil(monthsOfTeaching);
   const totalMonths = Math.ceil(monthsOfTeaching + paperworkMonths);
 
+  // Two dates, on purpose. `levelDate` is when the classes alone are done —
+  // the one that has to match "N levels · N months of teaching" on the same
+  // card. `date` is Germany itself, teaching plus this goal's paperwork
+  // allowance. Handing back only the second one (as this used to) meant the
+  // UI's only honest option was to bury the paperwork months in a caveat
+  // line, which reads as a lie about how long the levels themselves take.
+  const levelDate = new Date(now.getFullYear(), now.getMonth() + levelMonths, 1);
   const date = new Date(now.getFullYear(), now.getMonth() + totalMonths, 1);
 
   return {
     date: date.toISOString(),
     label: date.toLocaleString("en-US", { month: "long", year: "numeric" }),
+    levelDate: levelDate.toISOString(),
+    levelLabel: levelDate.toLocaleString("en-US", { month: "long", year: "numeric" }),
     levelsRemaining: levelsAfterCurrent + 1,
     monthsOfTeaching: Math.round(monthsOfTeaching),
+    paperworkMonths,
     caveat: `If your levels run back to back and paperwork takes the usual ${paperworkMonths} months. An estimate, not a promise.`,
   };
 }

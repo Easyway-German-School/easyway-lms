@@ -160,6 +160,7 @@ function ProgressRibbon({ journey, onChangeGoal, premium }: { journey: Journey; 
 
 function ArrivalCard({ journey }: { journey: Journey }) {
   if (!journey.arrival.label) return null;
+  const { arrival, targetLevel } = journey;
 
   return (
     <div className="rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -167,17 +168,23 @@ function ArrivalCard({ journey }: { journey: Journey }) {
         <TrendingUpIcon className="h-4 w-4" />
         <p className="text-[10px] font-bold uppercase tracking-[0.22em]">If you keep this pace</p>
       </div>
-      <p className="mt-2 text-2xl font-bold text-[var(--foreground)]">{journey.arrival.label}</p>
+      {/* This date has to be the one that matches the sentence under it —
+          "N levels · N months of teaching" — not a date that has quietly also
+          counted months of visa paperwork nobody mentioned above the fold. */}
+      <p className="mt-2 text-2xl font-bold text-[var(--foreground)]">{arrival.levelLabel}</p>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        {journey.arrival.levelsRemaining} {journey.arrival.levelsRemaining === 1 ? "level" : "levels"} to{" "}
-        {journey.targetLevel} · about {journey.arrival.monthsOfTeaching} months of teaching left.
+        {arrival.levelsRemaining} {arrival.levelsRemaining === 1 ? "level" : "levels"} to{" "}
+        {targetLevel} · about {arrival.monthsOfTeaching} months of teaching left.
       </p>
-      {/* The caveat travels with the number rather than being a prop the UI can
-          forget. A projected date is the most motivating thing on this screen
-          and the easiest to turn into a lie. */}
-      <p className="mt-3 border-t border-[var(--border)] pt-3 text-[11px] leading-5 text-[var(--muted)]">
-        {journey.arrival.caveat}
-      </p>
+
+      {/* Germany itself is a separate, later date — teaching plus this goal's
+          paperwork allowance — and it stays visible, just never merged into
+          the number above it. */}
+      <div className="mt-4 border-t border-[var(--border)] pt-3">
+        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Then, Germany itself</p>
+        <p className="mt-1 text-lg font-bold text-[var(--foreground)]">{arrival.label}</p>
+        <p className="mt-2 text-[11px] leading-5 text-[var(--muted)]">{arrival.caveat}</p>
+      </div>
     </div>
   );
 }
