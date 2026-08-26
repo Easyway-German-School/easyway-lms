@@ -35,6 +35,8 @@ export const DETECT_TYPES = [
   "voice",
   "essay",
   "generic",
+  /** A personalized story-chapter beat — see storyChapterFor() and mission-detection.ts. */
+  "scene",
 ] as const;
 export type DetectType = (typeof DETECT_TYPES)[number];
 

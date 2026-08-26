@@ -38,6 +38,7 @@ const MISSION_HREF: Record<string, string> = {
   attendance: "/live",
   voice: "/tandem",
   essay: "/essay",
+  scene: "/tandem",
   generic: "/materials",
 };
 

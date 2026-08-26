@@ -5,12 +5,14 @@ export const AI_DAILY_LIMITS = {
   essay: 3,
   pronunciation: 10,
   missionPractice: 10,
+  storyWriting: 5,
 } as const;
 
 export const PRIVATE_AI_DAILY_LIMITS = {
   essay: 8,
   pronunciation: 30,
   missionPractice: 30,
+  storyWriting: 15,
 } as const;
 
 export type StudentAiKind = keyof typeof AI_DAILY_LIMITS;

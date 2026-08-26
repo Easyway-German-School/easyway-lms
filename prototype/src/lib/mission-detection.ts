@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { DetectType } from "@/lib/cohort-missions";
+import { storyChapterFor } from "@/lib/story/content";
+import { getStoryProgress } from "@/lib/story-progress";
 
 /**
  * Did this actually happen, or did somebody just tap a button?
@@ -108,6 +110,21 @@ async function didAnythingToday(ctx: DetectionContext): Promise<boolean> {
   return Boolean(row);
 }
 
+/**
+ * "scene" gets a real signal instead of the dwell-time proxy "voice"/"essay"
+ * use — a personalized story records exactly which beats were completed and
+ * when (story-progress.ts's `history`), so there is no need to guess from
+ * time-on-page here.
+ */
+async function didAdvanceStory(ctx: DetectionContext): Promise<boolean> {
+  const student = await prisma.student.findUnique({ where: { id: ctx.studentId }, select: { germanyGoal: true } });
+  const chapter = storyChapterFor(student?.germanyGoal);
+  if (!chapter) return false;
+  const progress = await getStoryProgress(ctx.studentId, chapter.goalId);
+  if (!progress) return false;
+  return progress.history.some((entry) => new Date(entry.at) >= ctx.since);
+}
+
 /** One check per detect type. Unknown types fall through to "anything today". */
 export async function detectionFor(type: DetectType, ctx: DetectionContext): Promise<boolean> {
   switch (type) {
@@ -123,6 +140,8 @@ export async function detectionFor(type: DetectType, ctx: DetectionContext): Pro
       return didUseArea(ctx, ["tandem", "voice-coach", "pronunciation"]);
     case "essay":
       return didUseArea(ctx, ["essay"]);
+    case "scene":
+      return didAdvanceStory(ctx);
     case "generic":
     default:
       return didAnythingToday(ctx);

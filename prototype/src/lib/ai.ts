@@ -390,6 +390,33 @@ export async function gradeEssay(essay: string): Promise<{
   }
 }
 
+/**
+ * Grades a short (2-3 sentence) in-scene German writing response from a
+ * personalized story beat — e.g. a handover note in the care/nursing
+ * chapter. Deliberately a separate function from gradeEssay rather than a
+ * reused call: gradeEssay's rubric (Grammar/Vocabulary/Structure/Spelling
+ * categories, a full "summary" paragraph) is built for a multi-paragraph
+ * exam-style essay, and asking it to grade two sentences the same way
+ * produces feedback that doesn't fit what the student actually wrote.
+ */
+export async function gradeStoryWriting(input: {
+  prompt: string;
+  promptGerman?: string;
+  response: string;
+  goalId: string;
+  sceneTitle: string;
+}): Promise<{ score: number; feedback: string; corrections: string[]; achievementTitle: string | null }> {
+  const provider = getAIProvider("student");
+
+  if (provider === "claude" || provider === "groq" || provider === "deepseek") {
+    return gradeStoryWritingWithClaude(input);
+  } else if (provider === "ollama") {
+    return gradeStoryWritingWithOllama(input);
+  } else {
+    return gradeStoryWritingMock(input);
+  }
+}
+
 export async function analyzePronunciation(
   phrase: string,
   expectedPhrase = phrase,
@@ -2358,6 +2385,100 @@ function gradeEssayMock(essay: string) {
     ],
     achievementTitle: hasGrammarErrors ? "Vocabulary Builder" : "Structure Specialist",
     summary: `Score: ${score}/100. Your essay demonstrates solid B2 competency with clear structure and appropriate vocabulary. Focus on varying sentence complexity and refining grammatical accuracy for C1-level writing.`,
+  };
+}
+
+async function gradeStoryWritingWithClaude(input: {
+  prompt: string;
+  promptGerman?: string;
+  response: string;
+  goalId: string;
+  sceneTitle: string;
+}) {
+  const raw = await callHostedText(
+    `You are a warm, precise German writing coach reviewing a short in-scene response from a personalized
+roleplay story. The student is practising for a real goal ("${input.goalId}"), in a scene titled
+"${input.sceneTitle}". This is NOT a full essay — grade it as what it is: a short, situational piece of writing,
+2-3 sentences, written under time pressure inside a story. Every comment must reference the student's ACTUAL words.
+
+The prompt they were given: ${input.prompt}${input.promptGerman ? `\nGerman version of the prompt: ${input.promptGerman}` : ""}
+What they wrote: ${input.response}
+
+Return JSON:
+{
+  "score": (0-100, judged as a short situational response, not against full-essay standards),
+  "feedback": "1-2 sentences, second person, specific to what they actually wrote",
+  "corrections": ["a specific correction quoting their text, if any real error exists — omit if the writing is clean"],
+  "achievementTitle": "a short (2-4 word) badge-style title for what this response did well, e.g. 'Clear Handover', 'Precise Detail' — ground it in a real strength, or use something honest like 'Good Start' if nothing stands out yet"
+}
+Do not invent errors that are not in the text. If the response is too short to fairly judge, say so in feedback rather than inventing detail that was not attempted.${JSON_ONLY}`,
+    500,
+  );
+
+  const parsed = parseJsonReply<{ score?: number; feedback?: string; corrections?: string[]; achievementTitle?: string }>(raw);
+  if (!parsed) return gradeStoryWritingMock(input);
+
+  return {
+    score: typeof parsed.score === "number" ? Math.max(0, Math.min(100, parsed.score)) : 70,
+    feedback: parsed.feedback || "Written response recorded.",
+    corrections: parsed.corrections || [],
+    achievementTitle: parsed.achievementTitle || null,
+  };
+}
+
+async function gradeStoryWritingWithOllama(input: {
+  prompt: string;
+  promptGerman?: string;
+  response: string;
+  goalId: string;
+  sceneTitle: string;
+}) {
+  const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+
+  try {
+    const response = await fetch(`${baseUrl}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: getOllamaModel(),
+        prompt: `Grade this short (2-3 sentence) German writing response from a roleplay scene titled "${input.sceneTitle}". Prompt given: ${input.prompt}. Response: ${input.response}. Return only valid JSON with score (0-100), feedback (1-2 sentences), and corrections (array).`,
+        stream: false,
+        temperature: 0.1,
+      }),
+    });
+
+    if (!response.ok) return gradeStoryWritingMock(input);
+
+    const data = await response.json() as any;
+    const text = data.response || "{}";
+
+    try {
+      const parsed = parseModelJson<any>(text);
+      if (!parsed) throw new Error("unparseable");
+      return {
+        score: typeof parsed.score === "number" ? Math.max(0, Math.min(100, parsed.score)) : 70,
+        feedback: parsed.feedback || "Written response recorded.",
+        corrections: parsed.corrections || [],
+        achievementTitle: parsed.achievementTitle || null,
+      };
+    } catch {
+      return gradeStoryWritingMock(input);
+    }
+  } catch {
+    return gradeStoryWritingMock(input);
+  }
+}
+
+function gradeStoryWritingMock(input: { response: string }) {
+  const wordCount = input.response.trim().split(/\s+/).filter(Boolean).length;
+  const score = wordCount >= 12 ? 78 : wordCount >= 6 ? 68 : 50;
+  return {
+    score,
+    feedback: wordCount >= 12
+      ? "A clear, situational response — this reads like something a real colleague would write."
+      : "A good start — try adding one more detail to make this feel complete.",
+    corrections: [],
+    achievementTitle: wordCount >= 12 ? "Clear Handover" : null,
   };
 }
 

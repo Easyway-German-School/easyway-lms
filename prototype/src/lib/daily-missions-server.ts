@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { missionsForCohort, bandFor, personalise, type Mission } from "@/lib/cohort-missions";
 import { calculateStreak } from "@/lib/gamification";
 import { detectionFor, ctxSince } from "@/lib/mission-detection";
+import { storyChapterFor } from "@/lib/story/content";
 
 /**
  * Missions the STUDENT can act on, decided by the SERVER.
@@ -42,6 +43,7 @@ async function studentProfile(userId: string) {
       level: true,
       examReadiness: true,
       tenantId: true,
+      germanyGoal: true,
       user: { select: { name: true } },
       completions: { where: { status: "completed" }, select: { id: true } },
       attendances: { select: { date: true, present: true, status: true } },
@@ -60,6 +62,7 @@ async function studentProfile(userId: string) {
     level: student.level,
     examReadiness: student.examReadiness ?? 0,
     name: student.user?.name ?? null,
+    germanyGoal: student.germanyGoal,
     streak,
     completedLessons: student.completions.length,
   };
@@ -98,6 +101,24 @@ function fallbackMissions(profile: NonNullable<Awaited<ReturnType<typeof student
 }
 
 /**
+ * Goal-gated top-up, applied after either mission source resolves (cohort-
+ * personalized or fallback) — not folded into fallbackMissions() itself,
+ * since that function only runs on one of the two branches below. Only ever
+ * changes anything for a student whose germanyGoal has a matching story
+ * (currently just "care"); everyone else's missions are untouched.
+ */
+function withStoryMission(missions: Mission[], profile: NonNullable<Awaited<ReturnType<typeof studentProfile>>>): Mission[] {
+  if (!storyChapterFor(profile.germanyGoal)) return missions;
+  const storyMission: Mission = {
+    title: "Continue your story",
+    description: "Play the next scene of your personalized story — speak, choose, and write your way through it.",
+    reward: "+25 XP",
+    detectType: "scene",
+  };
+  return [storyMission, ...missions];
+}
+
+/**
  * The day's missions for this student — generated once, read many times.
  *
  * Idempotent per (userId, day): a second call the same day is a pure read
@@ -124,7 +145,7 @@ export async function ensureTodayMissions(userId: string): Promise<DailyMissionV
       ? personalise(cohort, { name: profile.name, streak: profile.streak, examReadiness: profile.examReadiness })
       : fallbackMissions(profile);
 
-    const toCreate = (missions.length ? missions : fallbackMissions(profile)).slice(0, 3);
+    const toCreate = withStoryMission(missions.length ? missions : fallbackMissions(profile), profile).slice(0, 3);
     await prisma.dailyMission.createMany({
       data: toCreate.map((mission, index) => ({
         userId,
