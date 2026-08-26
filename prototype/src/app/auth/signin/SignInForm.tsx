@@ -22,23 +22,31 @@ export default function SignInForm() {
     setError(null);
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      role: "student",
-      redirect: false,
-    });
+    try {
+      const result = await signIn("credentials", {
+        email,
+        password,
+        role: "student",
+        redirect: false,
+      });
 
-    if (!result?.ok) {
-      setError(result?.error || "Unable to sign in. Check your email and password.");
+      if (!result?.ok) {
+        setError(result?.error || "Unable to sign in. Check your email and password.");
+        setLoading(false);
+        return;
+      }
+
+      // Candidates have no student portal to land in.
+      const me = await fetch("/api/auth/session", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+      const role = String(me?.user?.role ?? "").toLowerCase();
+      router.push(role === "candidate" ? "/candidate" : "/dashboard");
+    } catch {
+      // A network hiccup, a slow serverless function, or a non-JSON response
+      // from a timed-out request all land here. Without this catch the loader
+      // above never clears and the page looks hung forever.
+      setError("Sign-in is taking too long or the connection dropped. Please try again.");
       setLoading(false);
-      return;
     }
-
-    // Candidates have no student portal to land in.
-    const me = await fetch("/api/auth/session", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
-    const role = String(me?.user?.role ?? "").toLowerCase();
-    router.push(role === "candidate" ? "/candidate" : "/dashboard");
   };
 
   if (loading) {

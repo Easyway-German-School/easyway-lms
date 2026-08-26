@@ -31,46 +31,57 @@ export default function AdminSignInForm() {
     setError(null);
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      totp,
-      role: "admin",
-      redirect: false,
-    });
+    try {
+      const result = await signIn("credentials", {
+        email,
+        password,
+        totp,
+        role: "admin",
+        redirect: false,
+      });
 
-    if (!result?.ok) {
-      // These strings are thrown by authorize() in src/lib/auth.ts and passed
-      // through by NextAuth verbatim. Keep the two in step.
-      if (result?.error === "MFA_REQUIRED") {
-        setNeedsCode(true);
-        setError(null);
+      if (!result?.ok) {
+        // These strings are thrown by authorize() in src/lib/auth.ts and passed
+        // through by NextAuth verbatim. Keep the two in step.
+        if (result?.error === "MFA_REQUIRED") {
+          setNeedsCode(true);
+          setError(null);
+          setLoading(false);
+          return;
+        }
+
+        if (result?.error === "MFA_INVALID") {
+          setNeedsCode(true);
+          setTotp("");
+          setError("That code was not accepted. Codes can only be used once — wait for the next one.");
+          setLoading(false);
+          return;
+        }
+
+        if (result?.error === "MFA_ENROLMENT_REQUIRED") {
+          setError(
+            "This account must have two-factor authentication set up before it can be used. Ask a super admin to enrol it, or turn MFA_ENFORCED off temporarily to get back in.",
+          );
+          setLoading(false);
+          return;
+        }
+
+        setError(result?.error || "Unable to sign in. Check your email and password.");
         setLoading(false);
         return;
       }
 
-      if (result?.error === "MFA_INVALID") {
-        setNeedsCode(true);
-        setTotp("");
-        setError("That code was not accepted. Codes can only be used once — wait for the next one.");
-        setLoading(false);
-        return;
-      }
-
-      if (result?.error === "MFA_ENROLMENT_REQUIRED") {
-        setError(
-          "This account must have two-factor authentication set up before it can be used. Ask a super admin to enrol it, or turn MFA_ENFORCED off temporarily to get back in.",
-        );
-        setLoading(false);
-        return;
-      }
-
-      setError(result?.error || "Unable to sign in. Check your email and password.");
+      // Loading stays true here: the page is about to navigate away, so
+      // flipping it off would flash the form back for a frame before the
+      // redirect lands.
+      router.push("/admin");
+    } catch {
+      // A network hiccup, a slow serverless function, or a non-JSON response
+      // from a timed-out request all land here. Without this catch the loader
+      // above never clears and the page looks hung forever.
+      setError("Sign-in is taking too long or the connection dropped. Please try again.");
       setLoading(false);
-      return;
     }
-
-    router.push("/admin");
   };
 
   if (loading) {
