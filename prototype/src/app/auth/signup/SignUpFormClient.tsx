@@ -1061,8 +1061,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <h3 className="text-sm font-semibold text-[var(--foreground)]">Terms and Conditions</h3>
                 <p className="mt-2 text-sm text-[var(--muted)]">
                   {termsAccepted
-                    ? "You've reviewed and accepted our Terms and Conditions, including the No-Refund Policy."
-                    : "Before we finish setting up your account, you'll review and accept our Terms and Conditions — including the No-Refund Policy."}
+                    ? "You've reviewed and accepted our Terms and Conditions."
+                    : "Before we finish setting up your account, you'll review and accept our Terms and Conditions, including the Refund Policy."}
                 </p>
                 <button
                   type="button"
@@ -1146,7 +1146,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         closable={termsAccepted}
         onClose={termsAccepted ? () => setShowTerms(false) : undefined}
         title="Before you finish signing up"
-        intro="Please read the Terms and Conditions below, including the No-Refund Policy. You must accept them to create your account."
+        intro="Please read the Terms and Conditions below. You must accept them to create your account."
         onAgree={() => {
           setTermsAccepted(true);
           setShowTerms(false);

@@ -28,7 +28,7 @@ export default function TermsGate({
   title = "Please read before you continue",
   intro,
   agreeLabel = "I Agree — Continue",
-  checkboxLabel = "I have read and agree to the Terms and Conditions, including the No-Refund Policy in section 23.",
+  checkboxLabel = "I have read and agree to the Terms and Conditions.",
   footnote,
   showPreamble = true,
 }: {
