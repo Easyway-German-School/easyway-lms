@@ -82,6 +82,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [photoUrl, setPhotoUrl] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const [heardFrom] = useState("");
   const [emergencyContactName] = useState("");
@@ -363,6 +364,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
       return;
     }
 
+    if (!termsAccepted) {
+      setError("Please agree to the Terms and Conditions before enrolling.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -406,10 +412,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         country,
         photoUrl: uploadedPhotoUrl,
         photoFileName,
-        // No separate checkbox or modal step — the fine print under the
-        // submit button says clicking it is the agreement, so reaching this
-        // line (past every earlier validation) IS that click.
-        termsAccepted: true,
+        termsAccepted,
         heardFrom,
         emergencyContactName,
         emergencyContactInfo,
@@ -1070,6 +1073,24 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
               </p>
             ) : null}
 
+            {isLastStep ? (
+              <label className="flex items-start gap-3 text-sm text-[var(--foreground)]">
+                <input
+                  type="checkbox"
+                  checked={termsAccepted}
+                  onChange={(event) => setTermsAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-[#0D7C7E]"
+                />
+                <span>
+                  I agree to the{" "}
+                  <Link href="/terms" target="_blank" className="font-semibold underline underline-offset-2 hover:text-[var(--accent)]">
+                    Terms and Conditions
+                  </Link>
+                  .
+                </span>
+              </label>
+            ) : null}
+
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
                 {step > 1 ? (
@@ -1102,7 +1123,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
               ) : (
                 <button
                   type="submit"
-                  disabled={loading || uploadingPhoto}
+                  disabled={loading || uploadingPhoto || !termsAccepted}
                   className="w-full rounded-xl bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] px-8 py-3.5 text-sm font-bold text-white shadow-lg shadow-[#FF6600]/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
                   {loading ? "Enrolling you…" : uploadingPhoto ? "Uploading your photo…" : "Finish and enrol me"}
@@ -1112,11 +1133,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
 
             {isLastStep ? (
               <p className="text-center text-[11px] leading-relaxed text-[var(--muted)]/80 sm:text-left">
-                By clicking &ldquo;Finish and enrol me&rdquo;, you agree to our{" "}
+                Please review our{" "}
                 <Link href="/terms" target="_blank" className="underline underline-offset-2 hover:text-[var(--foreground)]">
                   Terms
                 </Link>{" "}
-                and have read our{" "}
+                and our{" "}
                 <Link href="/privacy" target="_blank" className="underline underline-offset-2 hover:text-[var(--foreground)]">
                   Privacy Policy
                 </Link>
