@@ -2,6 +2,7 @@
 .next
 node_modules
 prototype
+.git.bak
 .vercel
 
 # Temporary research, logs, and generated diagnostics
