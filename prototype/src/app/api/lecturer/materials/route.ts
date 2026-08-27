@@ -23,9 +23,11 @@ function serialise(material: {
   durationSeconds: number | null;
   recordedAt: Date | null;
   createdAt: Date;
+  aiState: string;
 }) {
   return {
     id: material.id,
+    aiState: material.aiState,
     title: material.title,
     description: material.description,
     courseId: material.courseId,

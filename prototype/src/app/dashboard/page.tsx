@@ -12,7 +12,7 @@ import LiveClassBanner from "@/components/live/LiveClassBanner";
 import LevelAdvance from "@/components/LevelAdvance";
 import WelcomeTour from "@/components/WelcomeTour";
 import NotificationInvite from "@/components/NotificationInvite";
-import { ArrowRightIcon, BookOpenIcon, CompassIcon, FlameIcon, SparklesIcon, StarIcon, TargetIcon, TrendingUpIcon, UserIcon, VideoIcon } from "@/components/icons";
+import { ArrowRightIcon, BookOpenIcon, CheckCircleIcon, CompassIcon, FlameIcon, SparklesIcon, StarIcon, TargetIcon, TrendingDownIcon, TrendingUpIcon, UserIcon, VideoIcon } from "@/components/icons";
 import { summarizeGamification } from "@/lib/gamification";
 import { REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { useGamification } from "@/lib/useGamification";
@@ -47,6 +47,14 @@ type Announcement = {
   title: string;
   text: string;
   time: string;
+};
+
+/** Mirrors MissionHistory in src/lib/mission-history-server.ts. */
+type MissionHistory = {
+  days: { day: string; total: number; done: number }[];
+  categories: { detectType: string; label: string; total: number; done: number; rate: number }[];
+  totalDone: number;
+  totalMissions: number;
 };
 
 function relativeTime(iso: string): string {
@@ -116,6 +124,7 @@ type PendingPayment = {
 
 import StudentShell from "@/components/StudentShell";
 import StudentBrief from "@/components/StudentBrief";
+import QuestHistoryCard from "@/components/QuestHistoryCard";
 import UpcomingExamsCard from "@/components/UpcomingExamsCard";
 import NewMaterialsCard from "@/components/NewMaterialsCard";
 import SkillMasteryPanel from "@/components/SkillMasteryPanel";
@@ -155,6 +164,7 @@ function DashboardContent() {
     nextMilestone: "First lesson",
   });
   const [dailyMissions, setDailyMissions] = useState<Mission[]>([]);
+  const [missionHistory, setMissionHistory] = useState<MissionHistory | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
   const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null);
@@ -348,6 +358,20 @@ function DashboardContent() {
   }, []);
 
   /**
+   * The record of every DailyMission row this student has ever had, rolled up
+   * by day and by detectType — see src/lib/mission-history-server.ts. Fetched
+   * alongside today's missions so a completed quest updates both "today" and
+   * "the trend" in the same round trip.
+   */
+  const loadMissionHistory = useCallback(() => {
+    if (typeof window === "undefined") return;
+    void fetch("/api/student/missions/history", { credentials: "include", cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setMissionHistory(data && Array.isArray(data.days) ? data : null))
+      .catch(() => setMissionHistory(null));
+  }, []);
+
+  /**
    * Real school announcements, not a fixed sample pair. Same feed the bell
    * icon reads (see NotificationCenter) — this is just the "announcement"
    * kind, most recent two, filtered client-side rather than duplicating the
@@ -378,6 +402,11 @@ function DashboardContent() {
 
     const refreshOnFocus = () => {
       void syncPendingPayment();
+      // Coming back from /tandem (or any mission destination) should show the
+      // quest as done without a manual reload — detection already ran server
+      // side the moment the real activity happened, this just goes and looks.
+      loadMissions();
+      loadMissionHistory();
     };
 
     const handleVisibility = () => {
@@ -392,7 +421,7 @@ function DashboardContent() {
       window.removeEventListener("focus", refreshOnFocus);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [status, syncPendingPayment]);
+  }, [status, syncPendingPayment, loadMissions, loadMissionHistory]);
 
   // Initial load: fetch student and courses in parallel.
   useEffect(() => {
@@ -417,8 +446,9 @@ function DashboardContent() {
   useEffect(() => {
     if (!student) return;
     loadMissions();
+    loadMissionHistory();
     loadAnnouncements();
-  }, [student, loadMissions, loadAnnouncements]);
+  }, [student, loadMissions, loadMissionHistory, loadAnnouncements]);
 
   /**
    * The badge on the home-screen icon — the closest an installed PWA gets to
@@ -908,13 +938,17 @@ function DashboardContent() {
                     <p className={`text-sm uppercase tracking-[0.3em] ${eyebrowClass}`}>{isPrivateStudent ? "This week's focus" : "Daily missions"}</p>
                     <h2 className={`mt-3 text-2xl font-semibold ${headingClass}`}>{isPrivateStudent ? "Your coaching plan" : "Quest board"}</h2>
                   </div>
-                  <span
+                  <motion.span
+                    key={missionCompletePercent}
+                    initial={{ scale: 0.82, opacity: 0.4 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 320, damping: 18 }}
                     className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] ${
                       isPrivateStudent ? "bg-[#D4AF37]/10 text-[#E8C766]" : "bg-[var(--accent-soft)] text-[var(--accent)]"
                     }`}
                   >
                     {missionCompletePercent}% complete
-                  </span>
+                  </motion.span>
                 </div>
                 <div className="mt-6 space-y-4">
                   {displayMissions.slice(0, 3).map((quest) => {
@@ -923,29 +957,46 @@ function DashboardContent() {
                     // src/lib/mission-detection.ts. What was missing wasn't a
                     // tap-to-complete button, it was ANY way to get from "here
                     // is your mission" to the page where you'd actually do it.
+                    // A finished quest STAYS in the list rather than
+                    // disappearing — see missionHistory below for where it
+                    // goes once the day rolls over.
                     const href = MISSION_HREF[quest.detectType ?? "generic"] ?? "/materials";
                     return (
                       <Link
                         key={quest.id || quest.title}
                         href={href}
                         className={`group flex w-full items-start gap-4 rounded-[28px] border p-5 text-left transition-all duration-200 ${
-                          isPrivateStudent
-                            ? `${innerPanelClass} ${!done ? "hover:border-[#D4AF37]/40" : ""}`
-                            : `border-[var(--border)] bg-[var(--surface-alt)] ${!done ? "hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]" : ""}`
+                          done
+                            ? "border-[var(--success)]/25 bg-[var(--success-soft)]/40"
+                            : isPrivateStudent
+                            ? `${innerPanelClass} hover:border-[#D4AF37]/40`
+                            : "border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]"
                         }`}
                       >
                         <span
-                          className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${
+                          className={`mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
                             done
-                              ? 'bg-[var(--success)]'
+                              ? 'bg-[var(--success)] text-white'
                               : isPrivateStudent
-                              ? "bg-[#D4AF37] shadow-[0_0_10px_2px_rgba(212,175,55,0.5)] animate-pulse"
-                              : 'bg-[var(--accent)] shadow-[0_0_10px_2px_color-mix(in_srgb,var(--accent)_65%,transparent)] animate-pulse'
+                              ? "bg-[#D4AF37]/15 text-transparent"
+                              : 'bg-[var(--accent-soft)] text-transparent'
                           }`}
-                        />
+                        >
+                          {done ? (
+                            <CheckCircleIcon className="h-4 w-4" />
+                          ) : (
+                            <span
+                              className={`h-2.5 w-2.5 rounded-full ${
+                                isPrivateStudent
+                                  ? "bg-[#D4AF37] shadow-[0_0_10px_2px_rgba(212,175,55,0.5)] animate-pulse"
+                                  : 'bg-[var(--accent)] shadow-[0_0_10px_2px_color-mix(in_srgb,var(--accent)_65%,transparent)] animate-pulse'
+                              }`}
+                            />
+                          )}
+                        </span>
                         <div className="flex flex-1 items-start justify-between gap-4">
                           <div>
-                            <p className={`font-semibold ${headingClass}`}>{quest.title}</p>
+                            <p className={`font-semibold ${done ? `${mutedClass} line-through decoration-[var(--success)]/60` : headingClass}`}>{quest.title}</p>
                             <p className={`mt-2 text-sm ${mutedClass}`}>{quest.description}</p>
                           </div>
                           <span
@@ -953,7 +1004,7 @@ function DashboardContent() {
                               done ? 'bg-[var(--success-soft)] text-[var(--success)]' : isPrivateStudent ? "bg-[#D4AF37]/10 text-[#E8C766]" : 'bg-[var(--accent-soft)] text-[var(--accent)]'
                             }`}
                           >
-                            {done ? 'Detected ✓' : 'Go do this'}
+                            {done ? 'Completed' : 'Go do this'}
                             {!done && (
                               <ArrowRightIcon className="h-3.5 w-3.5 shrink-0 transition group-hover:translate-x-0.5" />
                             )}
@@ -964,6 +1015,10 @@ function DashboardContent() {
                   })}
                 </div>
               </div>
+
+              {!isPrivateStudent && missionHistory && missionHistory.totalMissions > 0 && (
+                <QuestHistoryCard history={missionHistory} cardClass={cardClass} eyebrowClass={eyebrowClass} headingClass={headingClass} mutedClass={mutedClass} />
+              )}
             </div>
 
             <div className="space-y-6">

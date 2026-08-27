@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AttachmentIcon, LockIcon } from "@/components/icons";
+import MaterialQuestPanel from "@/components/materials/MaterialQuestPanel";
 import {
   type ClassNode,
   type Month,
@@ -78,7 +79,17 @@ function anchorFor(col: number): { box: string; arrow: string } {
   return { box: "left-1/2 -translate-x-1/2", arrow: "left-1/2 -translate-x-1/2" };
 }
 
-function DayPopover({ node, below, col }: { node: ClassNode; below: boolean; col: number }) {
+function DayPopover({
+  node,
+  below,
+  col,
+  onOpenQuests,
+}: {
+  node: ClassNode;
+  below: boolean;
+  col: number;
+  onOpenQuests: (material: { id: string; title: string }) => void;
+}) {
   const s = nodeSummary(node);
   const anchor = anchorFor(col);
   return (
@@ -164,10 +175,14 @@ function DayPopover({ node, below, col }: { node: ClassNode; below: boolean; col
               rather than fourteen pages. Named as a count so it reads as an
               amount of work, not as another document. */}
           {Boolean(s.materialAlways.aiQuestCount) && (
-            <p className="mt-1 text-[11px] font-semibold text-[var(--accent)]">
+            <button
+              type="button"
+              onClick={() => onOpenQuests({ id: s.materialAlways!.id, title: s.materialAlways!.title })}
+              className="mt-1 text-[11px] font-semibold text-[var(--accent)] underline underline-offset-2"
+            >
               {s.materialAlways.aiQuestCount} quick quest
               {s.materialAlways.aiQuestCount === 1 ? "" : "s"} from this — about 5 minutes each
-            </p>
+            </button>
           )}
         </div>
       )}
@@ -187,6 +202,7 @@ function DayPopover({ node, below, col }: { node: ClassNode; below: boolean; col
 export default function ClassGridView({ months, nodes }: { months: Month[]; nodes: ClassNode[] }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const [questMaterial, setQuestMaterial] = useState<{ id: string; title: string } | null>(null);
 
   // Index classes by calendar day so a grid cell can find its class in O(1).
   const byDay = new Map<string, ClassNode>();
@@ -267,7 +283,9 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
                     </button>
 
                     <AnimatePresence>
-                      {showing && <DayPopover node={node} below={inTopRow} col={col} />}
+                      {showing && (
+                        <DayPopover node={node} below={inTopRow} col={col} onOpenQuests={setQuestMaterial} />
+                      )}
                     </AnimatePresence>
                   </div>
                 );
@@ -284,6 +302,8 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
           </div>
         );
       })}
+
+      <MaterialQuestPanel material={questMaterial} onClose={() => setQuestMaterial(null)} />
     </div>
   );
 }

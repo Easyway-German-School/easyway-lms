@@ -34,6 +34,8 @@ export type XpInputs = {
    * from it as well. Turning up and playing is the behaviour worth rewarding.
    */
   quizGamesPlayed?: number;
+  /** Self-marked correct on a quest generated from a tutor's material. */
+  materialQuestsCompleted?: number;
 };
 
 export type GamificationSummary = {
@@ -85,6 +87,9 @@ export function calculateXp(inputs: XpInputs): number {
     // Between a mission and a submission: more than ticking a box, less than
     // handing in written work, which is what a revision game is worth.
     (inputs.quizGamesPlayed ?? 0) * 25 +
+    // Same weight as a mission tick — a five-minute self-marked task, not a
+    // graded artifact like a submission.
+    (inputs.materialQuestsCompleted ?? 0) * 20 +
     gradeBonus;
 
   return Math.max(XP_FLOOR, raw);

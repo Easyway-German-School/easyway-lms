@@ -279,6 +279,7 @@ model Tenant {
   quizGames               QuizGame[]
   quizGamePlayers         QuizGamePlayer[]
   quizGameAnswers         QuizGameAnswer[]
+  materialQuestAttempts   MaterialQuestAttempt[]
   tutorMessages           TutorMessage[]
   sessionNotes            SessionNote[]
   studentAiUsage          StudentAiUsage[]
@@ -604,6 +605,7 @@ model Student {
   journeyEvents         JourneyEvent[]
   liveInvites           LiveClassInvite[]
   quizGamePlays         QuizGamePlayer[]
+  materialQuestAttempts MaterialQuestAttempt[]
   supportTickets        SupportTicket[]
   termsAcceptances      TermsAcceptance[]
   refundRequests        RefundRequest[]
@@ -1118,6 +1120,14 @@ model Material {
   aiState       String    @default("none") // none | pending | ready | failed
   aiUpdatedAt   DateTime?
   /**
+   * A tutor's sign-off on the AI-generated quests, separate from `aiState`
+   * (which only tracks whether generation finished, not whether anyone
+   * checked the result). Null means "generated but unreviewed" — a student
+   * never sees quests for this material until a tutor has looked at them.
+   */
+  questsReviewedAt DateTime?
+  questsReviewedBy String?
+  /**
    * Which CEFR level this belongs to. Duplicated from `course.level` on
    * purpose — a class recording belongs to a level but not always to a
    * course, and the library filters on level far more often than it joins.
@@ -1145,6 +1155,7 @@ model Material {
   videoProgress      VideoProgress[]
   studentClassNotes  StudentClassNote[]
   recording          ClassRecording?
+  questAttempts      MaterialQuestAttempt[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -4446,6 +4457,35 @@ model QuizGamePlayer {
   @@index([gameId, score])
   @@index([gameId, team])
   @@index([tenantId])
+}
+
+/**
+ * One student's self-mark on one quest generated from a tutor's material
+ * (see src/lib/material-ai.ts). One row per (student, material, questIndex) —
+ * self-marking again just flips `correct` on the same row rather than piling
+ * up attempts, matching how the rest of the app treats self-reported
+ * completion. XP is never written here: src/api/student/gamification counts
+ * `correct: true` rows the same way it counts finished missions or quiz games.
+ */
+model MaterialQuestAttempt {
+  id         String   @id @default(cuid())
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  materialId String
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  questIndex Int
+  correct    Boolean
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, materialId, questIndex])
+  @@index([tenantId])
+  @@index([studentId])
 }
 
 /**

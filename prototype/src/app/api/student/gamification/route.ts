@@ -60,6 +60,10 @@ export async function GET() {
     where: { studentId: student.id, game: { phase: "ended" }, answered: { gt: 0 } },
   });
 
+  const materialQuestsCompleted = await prisma.materialQuestAttempt.count({
+    where: { studentId: student.id, correct: true },
+  });
+
   const presentDays = student.attendances.filter(
     (record) => record.present || record.status === "present" || record.status === "late",
   );
@@ -80,6 +84,7 @@ export async function GET() {
     sessionsAttended,
     missionsCompleted,
     quizGamesPlayed,
+    materialQuestsCompleted,
   });
 
   const badges = deriveBadges({
@@ -110,6 +115,7 @@ export async function GET() {
       examsRegistered: student.examRegistrations.length,
       missionsCompleted,
       quizGamesPlayed,
+      materialQuestsCompleted,
       examReadiness: student.examReadiness ?? 0,
       memberSince: student.createdAt.toISOString(),
     },

@@ -8,6 +8,7 @@ import BrandLoader from "@/components/BrandLoader";
 import { BookOpenIcon, CalendarIcon, DocumentIcon, EmptyIcon, LecturerIcon, LinkIcon, PackageIcon, VideoIcon } from '@/components/icons';
 import { uploadFile } from '@/lib/upload';
 import { parseEmbed } from '@/lib/media-embed';
+import LecturerQuestReview from '@/components/materials/LecturerQuestReview';
 
 interface Course {
   id: string;
@@ -28,6 +29,7 @@ interface Material {
   fileName: string;
   fileSize: number;
   uploadedAt: string;
+  aiState: string;
 }
 
 export default function LecturerMaterials() {
@@ -551,6 +553,8 @@ export default function LecturerMaterials() {
                       Download
                     </button>
                   </div>
+
+                  {material.aiState === 'ready' && <LecturerQuestReview materialId={material.id} />}
                 </div>
               ))}
             </div>
