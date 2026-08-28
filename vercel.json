@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "npm --prefix prototype install --include=dev --no-audit --no-fund",
-  "buildCommand": "npm --prefix prototype run build && node -e \"const fs=require('fs'); const path=require('path'); const out='.next'; if (fs.existsSync(out)) fs.rmSync(out,{recursive:true,force:true}); fs.cpSync('prototype/.next', out, {recursive:true,force:true}); const src=path.join(out,'routes-manifest.json'); const dst=path.join(out,'routes-manifest-deterministic.json'); if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src,dst); if (!fs.existsSync('.env')) fs.writeFileSync('.env',''); try { if (fs.existsSync('prototype/public')) { if (fs.existsSync('public')) fs.rmSync('public',{recursive:true,force:true}); fs.cpSync('prototype/public','public',{recursive:true,force:true}); } } catch (e) {}\"",
+  "buildCommand": "npm run vercel-build",
   "crons": [
     {
       "path": "/api/cron/tick",
