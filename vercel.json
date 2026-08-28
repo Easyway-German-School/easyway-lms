@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "npm install --include=dev --no-audit --no-fund",
-  "buildCommand": "npm run build",
+  "buildCommand": "cd prototype && npm run build",
+  "outputDirectory": "prototype/.next",
   "crons": [
     {
       "path": "/api/cron/tick",
@@ -10,11 +11,11 @@
     }
   ],
   "functions": {
-    "src/app/api/ai/**/route.ts": { "maxDuration": 60 },
-    "src/app/api/student/private-schedule-preferences/suggest/route.ts": { "maxDuration": 60 },
-    "src/app/api/admin/intelligence/route.ts": { "maxDuration": 60 },
-    "src/app/api/cron/tick/route.ts": { "maxDuration": 60 },
-    "src/app/api/live/recording/**/route.ts": { "maxDuration": 60 },
-    "src/app/api/admin/students/import/route.ts": { "maxDuration": 60 }
+    "prototype/src/app/api/ai/**/route.ts": { "maxDuration": 60 },
+    "prototype/src/app/api/student/private-schedule-preferences/suggest/route.ts": { "maxDuration": 60 },
+    "prototype/src/app/api/admin/intelligence/route.ts": { "maxDuration": 60 },
+    "prototype/src/app/api/cron/tick/route.ts": { "maxDuration": 60 },
+    "prototype/src/app/api/live/recording/**/route.ts": { "maxDuration": 60 },
+    "prototype/src/app/api/admin/students/import/route.ts": { "maxDuration": 60 }
   }
 }
