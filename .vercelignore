@@ -1,5 +1,4 @@
 root-push/
-prototype-push/
 README.md
 *.md
 *.yml
@@ -18,7 +17,6 @@ README.md
 *.tsbuildinfo
 
 # Leftover nested copy from an old deploy attempt — not part of the app.
-prototype/prototype/
 
 # Unrelated local project with a vendored Python env.
 TRON/
