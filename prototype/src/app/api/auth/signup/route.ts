@@ -526,9 +526,14 @@ export async function POST(request: NextRequest) {
                   parent: {
                     create: {
                       phone: parentPhone || null,
-                      studentId,
                       childName: normalizedName,
                       childEmail: normalizedEmail,
+                      children: {
+                        create: {
+                          studentId,
+                          tenantId: currentTenantId(),
+                        },
+                      },
                     },
                   },
                 },
@@ -540,10 +545,19 @@ export async function POST(request: NextRequest) {
                 temporaryPassword,
                 studentName: normalizedName,
               });
-            } else if (existingParentUser.role === "PARENT" && existingParentUser.parent && !existingParentUser.parent.studentId) {
+            } else if (existingParentUser.role === "PARENT" && existingParentUser.parent) {
               await prisma.parent.update({
                 where: { userId: existingParentUser.id },
-                data: { studentId, childName: normalizedName, childEmail: normalizedEmail },
+                data: {
+                  childName: normalizedName,
+                  childEmail: normalizedEmail,
+                  children: {
+                    connectOrCreate: {
+                      where: { parentId_studentId: { parentId: existingParentUser.parent.id, studentId } },
+                      create: { studentId, tenantId: currentTenantId() },
+                    },
+                  },
+                },
               });
             }
             // Any other existing-account shape (a student, an admin, or a
