@@ -101,12 +101,12 @@ function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeG
       </div>
 
       <div className="relative flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--foreground)] backdrop-blur">
           <MapIcon className="h-3.5 w-3.5" />
           Your road to Germany
         </span>
         {journey.tribe ? (
-          <span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur">
+          <span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--foreground)] backdrop-blur">
             {journey.tribe}
           </span>
         ) : null}

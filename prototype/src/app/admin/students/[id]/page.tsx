@@ -697,7 +697,7 @@ export default function StudentDossierPage() {
                     ? "bg-emerald-500 text-white"
                     : identity.status === "graduated"
                       ? "bg-sky-500 text-white"
-                      : "bg-[var(--surface-alt)]0 text-white"
+                      : "bg-[var(--surface-alt)] text-[var(--foreground)]"
                 }`}
               >
                 {identity.status}

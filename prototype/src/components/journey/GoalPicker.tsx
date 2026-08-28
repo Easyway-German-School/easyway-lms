@@ -180,7 +180,7 @@ export default function GoalPicker({
               type="button"
               onClick={onDismiss}
               aria-label="Close"
-              className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-alt)] text-white backdrop-blur transition hover:bg-[var(--surface)]/25"
+              className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-alt)] text-[var(--foreground)] backdrop-blur transition hover:bg-[var(--surface)]/25"
             >
               <CrossIcon className="h-4 w-4" />
             </button>
