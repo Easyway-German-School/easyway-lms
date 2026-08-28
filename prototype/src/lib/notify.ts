@@ -203,11 +203,10 @@ async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
   return users.map((u) => u.id);
 }
 
-/** Push is on by default for the two severities that mean "look now". */
+/** Every notification is pushed unless its caller explicitly opts out. */
 function shouldPush(input: NotifyInput): boolean {
   if (typeof input.push === "boolean") return input.push;
-  const severity = input.severity ?? "info";
-  return severity === "warning" || severity === "critical";
+  return true;
 }
 
 export async function notify(input: NotifyInput): Promise<NotifyResult> {

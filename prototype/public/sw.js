@@ -129,6 +129,7 @@ self.addEventListener("push", (event) => {
     body: payload.body || "",
     icon: "/icon-192.png",
     badge: "/icon-192.png",
+    silent: false,
     // Same tag collapses repeat notifications for one thread into a single
     // entry instead of stacking a dozen buzzes for one busy conversation.
     tag: payload.tag || "easyway-community",
