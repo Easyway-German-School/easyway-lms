@@ -8,8 +8,8 @@
     "react-dom": "19.2.4"
   },
   "scripts": {
-    "vercel-build": "cd prototype && npm run build",
-    "build": "cd prototype && npm run build",
+    "vercel-build": "npm --prefix prototype run build",
+    "build": "npm --prefix prototype run build",
     "seed:spaces": "tsx --tsconfig tsconfig.json scripts/seed-community-spaces.ts",
     "verify:community": "tsx --tsconfig tsconfig.json scripts/verify-community.ts"
   },
