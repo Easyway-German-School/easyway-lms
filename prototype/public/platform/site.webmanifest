@@ -1,0 +1,18 @@
+{
+  "id": "/platform",
+  "name": "EduPrime Operator Console",
+  "short_name": "EduPrime",
+  "description": "The console for the schools running on the platform, and the keys they integrate with.",
+  "start_url": "/platform/console",
+  "scope": "/platform",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#4338CA",
+  "background_color": "#0B1020",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "education"],
+  "icons": [
+    { "src": "/platform/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

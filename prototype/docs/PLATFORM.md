@@ -6,8 +6,16 @@ EasyWay is two products in one codebase.
 **The platform** is what lets a *second* school run on the same deployment
 without ever seeing the first one's data — and produces a bill for doing so.
 
-This document is the second thing. If you only run EasyWay itself, you can
-ignore all of it; `tenant_easyway_root` already exists and everything works.
+The platform has its own name, brand and domain: **EduPrime**. The school stays
+EasyWay (teal, orange, a classroom); the platform is EduPrime (indigo, a
+console). See `docs/EDUPRIME_BRAND.md` for the identity and the domain/routing
+setup. This document is the mechanics.
+
+If you only run EasyWay itself, you can ignore all of it; `tenant_easyway_root`
+already exists and everything works.
+
+- **Marketing site:** `/platform` (or `/` on an EduPrime host)
+- **Operator console:** `/platform/console` (or `/console` on an EduPrime host)
 
 ---
 
@@ -69,7 +77,7 @@ deploy. It is an incident tool, not a setting. Turn it back off.
 
 ### 1. Create the tenant
 
-`/admin/platform` → **Add school**. Or:
+`/platform/console` → **Onboard a school**. Or:
 
 ```bash
 curl -X POST https://easyway-lms.vercel.app/api/platform/tenants -H 'Content-Type: application/json' -d '{"name":"Bright Futures Academy","slug":"brightfutures","domain":"lms.brightfutures.ng"}'
@@ -94,7 +102,7 @@ one school and appear at another.
 
 ### 3. Issue an API key
 
-`/admin/platform` → the school → **New key**. Choose **test** first.
+`/platform/console` → the school → **Issue a key**. Choose **test** first.
 
 ```
 ewk_test_a1b2c3d4_<43-character secret>
@@ -216,6 +224,10 @@ Be straight with anybody you're selling to about these.
   the source so nobody quotes it by accident. They need real provider invoices
   and a margin decision before a customer sees a number.
 - **No self-service signup.** A school is onboarded by an operator, by hand.
+  The EduPrime marketing site has a "book a demo" form (`/api/platform/enquiry`)
+  that logs the enquiry and optionally pings `PLATFORM_ENQUIRY_WEBHOOK` — it
+  creates **nothing**. No User, no Tenant, no lead row (leads are tenant-scoped
+  and a platform enquiry belongs to no tenant).
 - **No `POST /v1/students`.** Enrolment writes a User, a Student, a student
   code and an office alert together, and has photo-upload and branch-pricing
   steps. Half of that over the API produces accounts the school's own screens

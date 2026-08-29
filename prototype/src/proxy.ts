@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
+import { isPlatformHost } from "@/lib/platform/brand";
 
 /**
  * The outermost layer: headers on every response, and a brake on the routes
@@ -64,9 +65,20 @@ const PORTALS: PortalRule[] = [
    * handler. `allowedRoles` only checks the coarse "admin" role here, same as
    * `/admin` above; requirePlatformOperator() remains the one that checks the
    * actual platformRole column and 404s a non-operator admin.
+   *
+   * Only `/platform/console/**` is gated, NOT `/platform` itself: that path is
+   * now the public EduPrime marketing site. `/api/platform/enquiry` is the one
+   * public API under the prefix (the demo-request form) and is excluded below.
    */
-  { pagePattern: /^\/platform(\/|$)/, apiPattern: /^\/api\/platform(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
+  { pagePattern: /^\/platform\/console(\/|$)/, apiPattern: /^\/api\/platform(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
 ];
+
+/**
+ * Public routes that sit under a gated prefix. `/api/platform/enquiry` takes an
+ * unauthenticated POST from the EduPrime marketing site's "book a demo" form —
+ * it writes nothing tenant-owned, only logs the enquiry and pings a webhook.
+ */
+const PUBLIC_UNDER_GATED_PREFIX = [/^\/api\/platform\/enquiry(\/|$)/];
 
 // Mirrors lib/auth.ts's normalizeRole(). Not imported from there: that file
 // pulls in Prisma and bcrypt, which have no place in an edge bundle.
@@ -84,6 +96,7 @@ const IMPERSONATION_END_PATH = "/api/admin/impersonate/end";
 
 async function guardPortal(request: NextRequest, path: string): Promise<NextResponse | null> {
   if (path === IMPERSONATION_END_PATH) return null;
+  if (PUBLIC_UNDER_GATED_PREFIX.some((p) => p.test(path))) return null;
 
   const portal = PORTALS.find((p) => p.pagePattern.test(path) || p.apiPattern.test(path));
   if (!portal) return null;
@@ -337,8 +350,32 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
  * one at every boot; the behaviour is identical, and following the rename now
  * means it does not become a broken deploy on a future upgrade.
  */
+/**
+ * On an EduPrime host, the platform IS the site: `/` is the marketing page and
+ * `/console` the operator console, both of which physically live under
+ * `/platform/**`. Rewrite (not redirect) so the short URLs stay in the address
+ * bar. A school host is untouched — `/` there is still the school's own page.
+ *
+ * Returns the internal path to serve, or null to leave the request alone.
+ */
+function platformHostTarget(request: NextRequest, path: string): string | null {
+  const raw = request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
+  const host = raw.split(":")[0].trim().toLowerCase();
+  if (!isPlatformHost(host)) return null;
+
+  if (path === "/" || path === "") return "/platform";
+  if (path === "/console" || path === "/console/") return "/platform/console";
+  // Already under the real prefix, or an auth/api/asset path — serve as-is.
+  return null;
+}
+
 export default async function proxy(request: NextRequest) {
-  const path = request.nextUrl.pathname;
+  const requestedPath = request.nextUrl.pathname;
+
+  const rewriteTarget = platformHostTarget(request, requestedPath);
+  // Gate against the path that will actually be served, so `/console` on an
+  // EduPrime host is protected exactly as `/platform/console` is.
+  const path = rewriteTarget ?? requestedPath;
 
   const portalRejection = await guardPortal(request, path);
   if (portalRejection) return portalRejection;
@@ -357,6 +394,12 @@ export default async function proxy(request: NextRequest) {
       response.headers.set("Retry-After", String(retryAfter));
       return applySecurityHeaders(response);
     }
+  }
+
+  if (rewriteTarget) {
+    const url = request.nextUrl.clone();
+    url.pathname = rewriteTarget;
+    return applySecurityHeaders(NextResponse.rewrite(url));
   }
 
   return applySecurityHeaders(NextResponse.next());

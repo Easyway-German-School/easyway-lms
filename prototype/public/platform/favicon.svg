@@ -1,0 +1,15 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ep-prism" x1="18" y1="36" x2="34" y2="10" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4338CA"/>
+      <stop offset="0.55" stop-color="#8B7CFF"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="46" height="46" rx="13" fill="#0B1020"/>
+  <path d="M20 35L30 11L33 35Z" fill="url(#ep-prism)"/>
+  <path d="M7 25.5H20.5" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" opacity="0.95"/>
+  <path d="M30 23L42 15.5" stroke="#6D64E8" stroke-width="2.3" stroke-linecap="round"/>
+  <path d="M31 27H43" stroke="#8B7CFF" stroke-width="2.3" stroke-linecap="round"/>
+  <path d="M30 31L42 38" stroke="#22D3EE" stroke-width="2.3" stroke-linecap="round"/>
+</svg>
