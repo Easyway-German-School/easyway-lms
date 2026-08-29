@@ -3,19 +3,19 @@ import "../eduprime.css";
 import { EDUPRIME } from "@/lib/platform/brand";
 
 /**
- * The EduPrime shell for everything under `/platform` — the marketing site at
- * `/platform` and the operator console at `/platform/console`.
+ * The EduPrime shell for everything under `/platform` — the operator console at
+ * `/platform` and the billing view at `/platform/billing`.
  *
  * This layout nests inside the app's root layout (which still paints the theme
  * boot script and the shared providers), and does two things on top of it:
  *
  *  1. Loads `eduprime.css`, whose `.eduprime` block overrides the EasyWay
- *     school palette with the platform's own indigo one — scoped, so no
+ *     school palette with the platform's own blue/purple one — scoped, so no
  *     student portal is touched.
  *  2. Replaces the page metadata. Root layout titles every page "Easyway
- *     German Language School"; these pages are a different product sold to a
- *     different person, so they say so — in the tab, in a shared link, in the
- *     favicon.
+ *     German Language School"; these screens belong to a different product run
+ *     by a different person, so they say so — in the tab, in a shared link, in
+ *     the favicon.
  *
  * Deeper-segment metadata overrides the root's in Next, so nothing here has to
  * reach up and edit `app/layout.tsx`.
@@ -51,8 +51,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#4338CA" },
-    { media: "(prefers-color-scheme: dark)", color: "#0B1020" },
+    { media: "(prefers-color-scheme: light)", color: "#2563EB" },
+    { media: "(prefers-color-scheme: dark)", color: "#0c1120" },
   ],
 };
 

@@ -343,7 +343,7 @@ export async function warnLowBalances(): Promise<{ checked: number; warned: stri
           `and email running. Nothing stops immediately — this is a heads-up, not a cut-off.`,
         kind: "billing-low-balance",
         severity: "warning",
-        link: "/admin/billing",
+        link: "/platform/billing",
         dedupeKey: `low-balance:${credit.tenantId}:${new Date().toISOString().slice(0, 10)}`,
       });
     });

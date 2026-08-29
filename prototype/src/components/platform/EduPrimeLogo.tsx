@@ -3,18 +3,18 @@ import { EDUPRIME } from "@/lib/platform/brand";
 /**
  * The EduPrime mark: a prism.
  *
- * A single beam of white light — one codebase, one deployment — enters the
- * left face and leaves the right as three coloured rays: many schools, each
- * its own, cleanly separated. "Prime" as in prism, and as in the layer
- * underneath everything else.
+ * A beam of light — one codebase, one deployment — enters the left face and
+ * leaves the right as three separated rays: many schools, each its own, cleanly
+ * apart. "Prime" as in prism, and as in the layer underneath everything else.
  *
- * Drawn inline rather than loaded as an <img> so it inherits `currentColor`
- * for the incoming beam and stays crisp at every size, and so a header does
- * not pay a network request to show the logo. The three outgoing rays are
- * fixed spectrum hex — they ARE the brand and must not drift with the theme.
+ * Colour follows the brief: blue and purple in the prism body, a yellow beam,
+ * and blue / purple / orange rays out. Drawn inline rather than loaded as an
+ * <img> so the beam inherits `currentColor` and the whole thing stays crisp at
+ * any size. The prism gradient and the ray hexes ARE the brand and do not drift
+ * with the theme.
  *
- * Rendered only inside `.eduprime` scope (the /platform layout), where
- * `--primary` is defined.
+ * Rendered only inside `.eduprime` scope (PlatformShell / the /platform
+ * layout), where `--primary` and `--eduprime-purple` are defined.
  */
 
 export function EduPrimeMark({
@@ -40,13 +40,12 @@ export function EduPrimeMark({
     >
       <defs>
         <linearGradient id="ep-prism" x1="18" y1="36" x2="34" y2="10" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#4338CA" />
-          <stop offset="0.55" stopColor="#8B7CFF" />
-          <stop offset="1" stopColor="#22D3EE" />
+          <stop offset="0" stopColor="#2563EB" />
+          <stop offset="1" stopColor="#7C3AED" />
         </linearGradient>
       </defs>
 
-      {withTile && <rect x="2" y="2" width="44" height="44" rx="13" fill="#0B1020" />}
+      {withTile && <rect x="2" y="2" width="44" height="44" rx="13" fill="#0d1220" />}
 
       {/* the prism */}
       <path d="M20 35L30 11L33 35Z" fill="url(#ep-prism)" />
@@ -60,10 +59,10 @@ export function EduPrimeMark({
         opacity={withTile ? 0.95 : 0.9}
       />
 
-      {/* refracted output */}
-      <path d="M30 23L42 15.5" stroke="#4338CA" strokeWidth="2.3" strokeLinecap="round" />
-      <path d="M31 27H43" stroke="#8B7CFF" strokeWidth="2.3" strokeLinecap="round" />
-      <path d="M30 31L42 38" stroke="#22D3EE" strokeWidth="2.3" strokeLinecap="round" />
+      {/* refracted output: blue, purple, orange */}
+      <path d="M30 23L42 15.5" stroke="#2563EB" strokeWidth="2.3" strokeLinecap="round" />
+      <path d="M31 27H43" stroke="#7C3AED" strokeWidth="2.3" strokeLinecap="round" />
+      <path d="M30 31L42 38" stroke="#F97316" strokeWidth="2.3" strokeLinecap="round" />
     </svg>
   );
 }
@@ -71,7 +70,7 @@ export function EduPrimeMark({
 /**
  * Mark + wordmark. `tone`:
  *  - "auto"    inherits currentColor for the text (default; use inside themed UI)
- *  - "inverse" forces white text, for the indigo hero
+ *  - "inverse" forces white text, for a dark header
  */
 export default function EduPrimeLogo({
   markSize = 30,
@@ -93,7 +92,7 @@ export default function EduPrimeLogo({
       {wordmark && (
         <span className="text-[1.05rem] font-semibold tracking-tight leading-none">
           Edu
-          <span style={{ color: tone === "inverse" ? "#B7B0FF" : "var(--primary)" }}>
+          <span style={{ color: tone === "inverse" ? "#C4B5FD" : "var(--eduprime-purple)" }}>
             Prime
           </span>
         </span>

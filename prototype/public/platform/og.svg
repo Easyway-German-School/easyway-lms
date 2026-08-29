@@ -1,17 +1,17 @@
 <svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0B1020"/>
-      <stop offset="1" stop-color="#141A2E"/>
+      <stop offset="0" stop-color="#0c1120"/>
+      <stop offset="1" stop-color="#141a2c"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(180 70) rotate(38) scale(720)">
-      <stop offset="0" stop-color="#4338CA" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#4338CA" stop-opacity="0"/>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(170 60) rotate(38) scale(760)">
+      <stop offset="0" stop-color="#2563EB" stop-opacity="0.5"/>
+      <stop offset="0.6" stop-color="#7C3AED" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#7C3AED" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="ep-prism" x1="0" y1="360" x2="360" y2="80" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#4338CA"/>
-      <stop offset="0.55" stop-color="#8B7CFF"/>
-      <stop offset="1" stop-color="#22D3EE"/>
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#7C3AED"/>
     </linearGradient>
   </defs>
   <rect width="1200" height="630" fill="url(#bg)"/>
@@ -19,18 +19,18 @@
 
   <g transform="translate(96 232)">
     <path d="M0 165L150 0L195 165Z" fill="url(#ep-prism)"/>
-    <path d="M-70 118H2" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round" opacity="0.92"/>
-    <path d="M150 96L300 12" stroke="#6D64E8" stroke-width="8" stroke-linecap="round"/>
-    <path d="M162 132H320" stroke="#8B7CFF" stroke-width="8" stroke-linecap="round"/>
-    <path d="M150 168L300 250" stroke="#22D3EE" stroke-width="8" stroke-linecap="round"/>
+    <path d="M-70 118H2" stroke="#FDE047" stroke-width="9" stroke-linecap="round" opacity="0.95"/>
+    <path d="M150 96L300 12" stroke="#3B82F6" stroke-width="8" stroke-linecap="round"/>
+    <path d="M162 132H320" stroke="#A78BFA" stroke-width="8" stroke-linecap="round"/>
+    <path d="M150 168L300 250" stroke="#FB923C" stroke-width="8" stroke-linecap="round"/>
   </g>
 
   <text x="470" y="286" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="76" font-weight="700" letter-spacing="-2">
-    <tspan fill="#FFFFFF">Edu</tspan><tspan fill="#B7B0FF">Prime</tspan>
+    <tspan fill="#FFFFFF">Edu</tspan><tspan fill="#C4B5FD">Prime</tspan>
   </text>
-  <text x="472" y="344" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="34" font-weight="500" fill="#C7CCE6">Run your school like a company.</text>
+  <text x="472" y="344" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="34" font-weight="500" fill="#C7CCE6">The platform your schools run on.</text>
   <text x="472" y="392" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="22" font-weight="400" fill="#8B93B4">White-label portals · isolated data · usage-based billing</text>
 
-  <rect x="96" y="486" width="1008" height="2" fill="url(#ep-prism)" opacity="0.7"/>
-  <text x="96" y="536" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" font-weight="500" fill="#8B93B4">The layer underneath your school.</text>
+  <rect x="96" y="486" width="1008" height="2" fill="url(#ep-prism)" opacity="0.8"/>
+  <text x="96" y="536" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" font-weight="500" fill="#8B93B4">Operator console · billing · API keys</text>
 </svg>

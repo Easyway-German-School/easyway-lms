@@ -59,26 +59,21 @@ const PORTALS: PortalRule[] = [
   },
   { pagePattern: /^\/parent(\/|$)/, apiPattern: /^\/api\/parent(\/|$)/, allowedRoles: ["parent"], signInPath: "/auth/parent/signin" },
   /**
-   * The operator console. Its own prefix, outside `/admin/**`, and — unlike
-   * `/api/admin/**` — `/api/platform/**` previously had no edge gate at all;
-   * every route relied solely on requirePlatformOperator() inside the
-   * handler. `allowedRoles` only checks the coarse "admin" role here, same as
-   * `/admin` above; requirePlatformOperator() remains the one that checks the
-   * actual platformRole column and 404s a non-operator admin.
+   * EduPrime — the platform, as distinct from any one school. `/platform` is
+   * the operator console and `/platform/billing` the billing view. Its own
+   * prefix, outside `/admin/**`, and — unlike `/api/admin/**` —
+   * `/api/platform/**` previously had no edge gate at all; every route relied
+   * solely on requirePlatformOperator() inside the handler.
    *
-   * Only `/platform/console/**` is gated, NOT `/platform` itself: that path is
-   * now the public EduPrime marketing site. `/api/platform/enquiry` is the one
-   * public API under the prefix (the demo-request form) and is excluded below.
+   * `allowedRoles` only checks the coarse "admin" role here, same as `/admin`
+   * above. That is intentional: `/platform/billing` is a school's own bill and
+   * a school admin must be able to reach it, while `/platform` (the console)
+   * and every `/api/platform/**` route call requirePlatformOperator()
+   * themselves — the one that checks the real platformRole column and 404s a
+   * non-operator admin.
    */
-  { pagePattern: /^\/platform\/console(\/|$)/, apiPattern: /^\/api\/platform(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
+  { pagePattern: /^\/platform(\/|$)/, apiPattern: /^\/api\/platform(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
 ];
-
-/**
- * Public routes that sit under a gated prefix. `/api/platform/enquiry` takes an
- * unauthenticated POST from the EduPrime marketing site's "book a demo" form —
- * it writes nothing tenant-owned, only logs the enquiry and pings a webhook.
- */
-const PUBLIC_UNDER_GATED_PREFIX = [/^\/api\/platform\/enquiry(\/|$)/];
 
 // Mirrors lib/auth.ts's normalizeRole(). Not imported from there: that file
 // pulls in Prisma and bcrypt, which have no place in an edge bundle.
@@ -96,7 +91,6 @@ const IMPERSONATION_END_PATH = "/api/admin/impersonate/end";
 
 async function guardPortal(request: NextRequest, path: string): Promise<NextResponse | null> {
   if (path === IMPERSONATION_END_PATH) return null;
-  if (PUBLIC_UNDER_GATED_PREFIX.some((p) => p.test(path))) return null;
 
   const portal = PORTALS.find((p) => p.pagePattern.test(path) || p.apiPattern.test(path));
   if (!portal) return null;
@@ -345,14 +339,8 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Named `proxy` in `src/proxy.ts` rather than `middleware` in
- * `src/middleware.ts`. Next 16 renamed this convention and warns on the old
- * one at every boot; the behaviour is identical, and following the rename now
- * means it does not become a broken deploy on a future upgrade.
- */
-/**
- * On an EduPrime host, the platform IS the site: `/` is the marketing page and
- * `/console` the operator console, both of which physically live under
+ * On an EduPrime host, the platform IS the site: `/` is the operator console
+ * and `/billing` the billing view, both of which physically live under
  * `/platform/**`. Rewrite (not redirect) so the short URLs stay in the address
  * bar. A school host is untouched — `/` there is still the school's own page.
  *
@@ -364,17 +352,23 @@ function platformHostTarget(request: NextRequest, path: string): string | null {
   if (!isPlatformHost(host)) return null;
 
   if (path === "/" || path === "") return "/platform";
-  if (path === "/console" || path === "/console/") return "/platform/console";
+  if (path === "/billing" || path === "/billing/") return "/platform/billing";
   // Already under the real prefix, or an auth/api/asset path — serve as-is.
   return null;
 }
 
+/**
+ * Named `proxy` in `src/proxy.ts` rather than `middleware` in
+ * `src/middleware.ts`. Next 16 renamed this convention and warns on the old
+ * one at every boot; the behaviour is identical, and following the rename now
+ * means it does not become a broken deploy on a future upgrade.
+ */
 export default async function proxy(request: NextRequest) {
   const requestedPath = request.nextUrl.pathname;
 
   const rewriteTarget = platformHostTarget(request, requestedPath);
-  // Gate against the path that will actually be served, so `/console` on an
-  // EduPrime host is protected exactly as `/platform/console` is.
+  // Gate against the path that will actually be served, so `/` on an EduPrime
+  // host is protected exactly as `/platform` is.
   const path = rewriteTarget ?? requestedPath;
 
   const portalRejection = await guardPortal(request, path);
@@ -413,6 +407,6 @@ export const config = {
      * putting the middleware in front of them would add latency to every image
      * on every page to no purpose.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|mp4|webm|woff|woff2)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|mp4|webm|woff|woff2|webmanifest)$).*)",
   ],
 };

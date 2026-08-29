@@ -14,8 +14,11 @@ setup. This document is the mechanics.
 If you only run EasyWay itself, you can ignore all of it; `tenant_easyway_root`
 already exists and everything works.
 
-- **Marketing site:** `/platform` (or `/` on an EduPrime host)
-- **Operator console:** `/platform/console` (or `/console` on an EduPrime host)
+- **Operator console:** `/platform` (or `/` on an EduPrime host)
+- **Billing:** `/platform/billing` (or `/billing` on an EduPrime host).
+  `/admin/billing` redirects here.
+
+There is no marketing/landing page — EduPrime is an internal product surface.
 
 ---
 
@@ -77,7 +80,7 @@ deploy. It is an incident tool, not a setting. Turn it back off.
 
 ### 1. Create the tenant
 
-`/platform/console` → **Onboard a school**. Or:
+`/platform` → **Onboard a school**. Or:
 
 ```bash
 curl -X POST https://easyway-lms.vercel.app/api/platform/tenants -H 'Content-Type: application/json' -d '{"name":"Bright Futures Academy","slug":"brightfutures","domain":"lms.brightfutures.ng"}'
@@ -102,7 +105,7 @@ one school and appear at another.
 
 ### 3. Issue an API key
 
-`/platform/console` → the school → **Issue a key**. Choose **test** first.
+`/platform` → the school → **Issue a key**. Choose **test** first.
 
 ```
 ewk_test_a1b2c3d4_<43-character secret>
@@ -205,7 +208,7 @@ At or below threshold, the school gets an in-app notification and a
 `credit.low` webhook. The flag clears on top-up, so a school that runs low,
 pays, and runs low again is warned **both** times.
 
-The school tops up at `/admin/billing` — Paystack, prepaid, in naira. The
+The school tops up at `/platform/billing` — Paystack, prepaid, in naira. The
 webhook branches on `metadata.kind === "platform_topup"` **first**, before the
 student-payment path. Without that discriminator a top-up arrives looking like
 a student payment and gets credited to a student who never paid.

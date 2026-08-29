@@ -35,7 +35,6 @@ import {
   MailIcon,
   MapIcon,
   MenuIcon,
-  PackageIcon,
   PaletteIcon,
   PaymentIcon,
   PencilIcon,
@@ -57,13 +56,6 @@ type NavItem = {
   href: string;
   icon: ReactNode;
   group?: string;
-  /**
-   * Shown only to a platform operator — somebody who runs the system the
-   * schools sit on, rather than any one school. Separate from `capability`
-   * because no school can grant it: it is a column set from a shell, and the
-   * routes behind these entries answer 404 to everybody else.
-   */
-  platformOnly?: boolean;
 };
 
 /**
@@ -120,11 +112,10 @@ const navItems: NavItem[] = [
   { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon />, group: 'Billing' },
   { label: 'Legal & refunds', href: '/admin/legal', icon: <AlertIcon />, group: 'Billing' },
   { label: 'Reports', href: '/admin/reports', icon: <TrendingUpIcon />, group: 'Billing' },
-  // The other direction of money: what this school owes for running on the
-  // platform, itemised by meter. It had been built and reachable only by typing
-  // the URL, which meant the one screen that justifies the invoice was the one
-  // screen the person paying it could not find.
-  { label: 'Platform usage', href: '/admin/billing', icon: <PulseIcon />, group: 'Billing' },
+  // What this school owes for running on the platform ("Platform usage") is no
+  // longer here. It moved to EduPrime — the platform's own space — at
+  // /platform/billing, alongside the operator console. It stays reachable from
+  // the low-balance notification and the top-up callback.
 
   // What the school's students actually DO, read as patterns rather than as a
   // list of page views. First in this group because it is the one screen here
@@ -150,9 +141,10 @@ const navItems: NavItem[] = [
   // not the office that will open a terminal to check.
   { label: 'Webhooks', href: '/admin/webhooks', icon: <LinkIcon />, group: 'Settings' },
 
-  // Last, and its own group, because it is not part of running a school. This
-  // is the console for the business that sells the software to schools.
-  { label: 'Schools & API keys', href: '/platform', icon: <PackageIcon />, group: 'Platform', platformOnly: true },
+  // The platform operator console ("Schools & API keys") is no longer in this
+  // sidebar. It is not part of running a school — it is the business that sells
+  // the software to schools — so it lives in its own brand, EduPrime, at
+  // /platform. Operators reach it there directly.
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
@@ -168,13 +160,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   // items away on first paint.
   const [capabilities, setCapabilities] = useState<string[] | null>(null);
   const [adminRoleLabel, setAdminRoleLabel] = useState<string | null>(null);
-  /**
-   * Note the opposite default to `capabilities`. Unknown capabilities show
-   * everything, so a failed lookup never blanks out somebody's own portal.
-   * Unknown platform role shows nothing, because this door leads out of the
-   * school entirely and almost nobody holds it.
-   */
-  const [platformOperator, setPlatformOperator] = useState(false);
   /** Help requests nobody in the office has opened yet. Drives the ping. */
   const [unreadEnquiries, setUnreadEnquiries] = useState(0);
 
@@ -187,7 +172,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         const data = await res.json();
         setCapabilities(data.capabilities ?? null);
         setAdminRoleLabel(data.label ?? null);
-        setPlatformOperator(Boolean(data.platformOperator));
       } catch {
         /* Leave the sidebar fully visible; the routes still enforce access. */
       }
@@ -223,7 +207,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     return () => { cancelled = true; window.clearInterval(timer); };
   }, []);
 
-  const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings', 'Platform'];
+  const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings'];
 
   useEffect(() => {
     if (status === 'unauthenticated' || (status === 'authenticated' && session?.user?.role?.toLowerCase() !== 'admin')) {
@@ -338,7 +322,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             // enforce it too — this only avoids showing doors that 403.
             const groupItems = navItems.filter((item) => {
               if (item.group !== group) return false;
-              if (item.platformOnly && !platformOperator) return false;
               const capability = capabilityOf(item);
               return !capability || capabilities === null || capabilities.includes(capability);
             });
