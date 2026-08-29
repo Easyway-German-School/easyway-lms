@@ -250,7 +250,7 @@ jobs:
 
       - name: Keep the artifact
         if: steps.config.outputs.destination == 'artifact'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: database-backup-${{ github.run_id }}
           path: "*.dump.enc"
