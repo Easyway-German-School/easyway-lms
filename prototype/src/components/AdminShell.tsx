@@ -39,6 +39,7 @@ import {
   PaymentIcon,
   PencilIcon,
   PulseIcon,
+  ResultsIcon,
   RobotIcon,
   SendIcon,
   ShieldIcon,
@@ -98,6 +99,10 @@ const navItems: NavItem[] = [
   // The dashboard has counted unmarked work since it was built and had nowhere
   // to send anybody. This is that somewhere.
   { label: 'Marking queue', href: '/admin/marking', icon: <PencilIcon />, group: 'Exams' },
+  // The hand-keyed side of assessment: what every tutor has entered, and who
+  // is behind on it. The marking queue's counterpart for scores with no
+  // submission behind them.
+  { label: 'School gradebook', href: '/admin/gradebook', icon: <ResultsIcon />, group: 'Exams' },
 
   // Course create/delete/import used to be on the demo page at `/lecturer`,
   // an admin screen sitting in the tutor portal. It lives here now, above the

@@ -38,7 +38,9 @@ type Payload = {
 
 export default function LecturerGradeEntry() {
   const [data, setData] = useState<Payload | null>(null);
-  const [type, setType] = useState("classwork");
+  // Must be a real assessment type — the server rejects anything else, and the
+  // dropdown below is seeded from the same list.
+  const [type, setType] = useState("writing");
   const [draft, setDraft] = useState<Record<string, { score: string; feedback: string }>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -77,6 +79,28 @@ export default function LecturerGradeEntry() {
   }, [load]);
 
   async function save() {
+    // A last look before a big swing goes onto a permanent record. Compares
+    // each new score against what this student was last given for the SAME
+    // skill — a 30-point drop is usually a typo, and this is the only moment
+    // it is cheap to catch.
+    const swings = (data?.students ?? [])
+      .map((student) => {
+        const next = draft[student.id]?.score ?? "";
+        if (next === "" || student.score === null) return null;
+        const to = Number(next);
+        if (!Number.isFinite(to) || Math.abs(to - student.score) < 25) return null;
+        return `${student.name}: ${student.score} → ${to}`;
+      })
+      .filter((line): line is string => line !== null);
+
+    if (swings.length) {
+      const ok = window.confirm(
+        `These marks move a lot from what the student last scored in ${type}:\n\n` +
+          `${swings.join("\n")}\n\nSave anyway?`,
+      );
+      if (!ok) return;
+    }
+
     setSaving(true);
     setSaved("");
     setError("");

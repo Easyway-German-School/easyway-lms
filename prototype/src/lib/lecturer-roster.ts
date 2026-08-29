@@ -47,42 +47,23 @@ export const UNASSIGNED_MESSAGE =
   "You have not been assigned a class yet. The school office sets this.";
 
 /**
- * What a tutor can be marking, and how heavily each one counts.
- *
- * One list, because the mark-entry grid writes these strings into `Grade.type`
- * and the gradebook reads them back as its columns. When the two had their own
- * copies, a type added to one was a column of marks the other could not see.
- * Free text would make the book unsortable, so this is the whole vocabulary.
+ * What a tutor can be marking, and how heavily each one counts, now lives in
+ * `lib/grading.ts` alongside the pass mark and the letter scale — the results
+ * page and the certificate need the same numbers, and they cannot import a
+ * lecturer-only module. Re-exported here so the mark-entry routes that already
+ * import from this file keep working.
  */
-export const ASSESSMENT_TYPES = [
-  "writing",
-  "reading",
-  "speaking",
-  "listening",
-] as const;
-export const OPTIONAL_ASSESSMENT_TYPES = [
-  "classwork",
-  "quiz",
-  "mock exam",
-] as const;
-export type AssessmentType = (typeof ASSESSMENT_TYPES | typeof OPTIONAL_ASSESSMENT_TYPES)[number];
-
-export const ASSESSMENT_WEIGHTS: Record<(typeof ASSESSMENT_TYPES)[number], number> = {
-  writing: 1,
-  reading: 1,
-  speaking: 1,
-  listening: 1,
-};
-
-export const OPTIONAL_ASSESSMENT_WEIGHTS: Record<(typeof OPTIONAL_ASSESSMENT_TYPES)[number], number> = {
-  classwork: 1,
-  quiz: 0.75,
-  "mock exam": 1.75,
-};
-
-export function isAssessmentType(value: unknown): value is AssessmentType {
-  return typeof value === "string" && [...ASSESSMENT_TYPES, ...OPTIONAL_ASSESSMENT_TYPES].includes(value as never);
-}
+export {
+  ASSESSMENT_TYPES,
+  REQUIRED_ASSESSMENT_TYPES,
+  OPTIONAL_ASSESSMENT_TYPES,
+  ASSESSMENT_WEIGHTS,
+  isAssessmentType,
+  isRequiredAssessmentType,
+  weightFor,
+  weightedCourseworkAverage,
+  type AssessmentType,
+} from "@/lib/grading";
 
 export async function resolveRoster(userId: string): Promise<Roster> {
   const lecturer = await prisma.lecturer.findUnique({ where: { userId } });

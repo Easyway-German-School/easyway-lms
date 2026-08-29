@@ -51,6 +51,8 @@ export async function GET(req: NextRequest) {
           courseName: exam.course?.title ?? exam.examBody ?? "Exam centre",
           totalStudents: exam._count.registrations,
           gradedStudents: gradedCount,
+          // Exam grades are hidden from students until this is true.
+          resultsReleased: exam.resultsReleased,
         };
       })
     );
@@ -118,8 +120,10 @@ export async function POST(req: NextRequest) {
       update: {
         score,
         grade: calculateGrade(score),
-        // undefined leaves existing feedback alone when only the score changes.
-        feedback: typeof feedback === 'string' ? feedback.trim() || null : undefined,
+        // Only overwrite feedback when the tutor actually typed something. A
+        // blank box on a score correction means "leave my note alone", not
+        // "erase last month's advice".
+        feedback: typeof feedback === 'string' && feedback.trim() ? feedback.trim() : undefined,
         submissionMode: mode,
       },
     });

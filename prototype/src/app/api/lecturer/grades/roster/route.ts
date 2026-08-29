@@ -136,7 +136,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Scores must be between 0 and 100." }, { status: 400 });
     }
 
-    const feedback = typeof entry.feedback === "string" ? entry.feedback.trim() || null : null;
+    // Only write feedback when the tutor typed something. An empty box on a
+    // score correction means "keep the note I left last time", not "wipe it".
+    const feedbackText =
+      typeof entry.feedback === "string" && entry.feedback.trim() ? entry.feedback.trim() : undefined;
 
     // Grade has a unique index on (studentId, examId), which does not
     // constrain classwork rows — examId is null for all of them. So the update
@@ -151,11 +154,23 @@ export async function POST(request: NextRequest) {
     if (previous) {
       await prisma.grade.update({
         where: { id: previous.id },
-        data: { score, grade: letterFor(score), feedback, submissionMode: "physical" },
+        data: {
+          score,
+          grade: letterFor(score),
+          submissionMode: "physical",
+          ...(feedbackText === undefined ? {} : { feedback: feedbackText }),
+        },
       });
     } else {
       await prisma.grade.create({
-        data: { studentId, type, score, grade: letterFor(score), feedback, submissionMode: "physical" },
+        data: {
+          studentId,
+          type,
+          score,
+          grade: letterFor(score),
+          feedback: feedbackText ?? null,
+          submissionMode: "physical",
+        },
       });
     }
     written.push(studentId);

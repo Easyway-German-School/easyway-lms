@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
 
 import { prisma } from "@/lib/prisma";
-import { awardFor, hasPassed, type Award } from "@/lib/grading";
+import { awardFor, hasPassed, weightedCourseworkAverage, type Award } from "@/lib/grading";
 import { SESSION_MONTHS } from "@/lib/levels";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { resolveBatchWindow } from "@/lib/batch";
@@ -181,7 +181,11 @@ export async function issueCertificateForStudent(
       user: { select: { name: true } },
       branch: { select: { name: true } },
       tutor: { select: { user: { select: { name: true } } } },
-      grades: { select: { score: true } },
+      grades: {
+        where: { examId: null },
+        orderBy: { createdAt: "desc" },
+        select: { score: true, type: true },
+      },
       payments: { where: { status: "completed" }, select: { amount: true } },
     },
   });
@@ -213,9 +217,16 @@ export async function issueCertificateForStudent(
   });
   if (existing) return { issued: true, certificateId: existing.id, created: false };
 
-  const averageScore = student.grades.length
-    ? Math.round(student.grades.reduce((sum, grade) => sum + grade.score, 0) / student.grades.length)
-    : null;
+  // The same weighted figure the student sees on their results page and the
+  // tutor sees in the gradebook: newest mark per skill, weighted by type, exam
+  // sittings excluded (they are certified as pass/fail, not averaged in).
+  const latestPerSkill = new Map<string, { type: string; score: number }>();
+  for (const grade of student.grades) {
+    if (!latestPerSkill.has(grade.type)) {
+      latestPerSkill.set(grade.type, { type: grade.type, score: grade.score });
+    }
+  }
+  const averageScore = weightedCourseworkAverage([...latestPerSkill.values()]);
   const passed = hasPassed(averageScore);
   const award = awardFor(averageScore);
 

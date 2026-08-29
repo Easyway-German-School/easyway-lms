@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-import { letterFor, PASS_MARK } from "@/lib/grading";
+import { letterFor, PASS_MARK, weightedCourseworkAverage } from "@/lib/grading";
 
 /**
  * A student's own scores, grouped so the page can show performance per course
@@ -109,10 +109,21 @@ export async function GET() {
       );
     }
 
-    const allScores = grades.map((g) => g.score);
-    const overall = allScores.length
-      ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length)
-      : null;
+    /**
+     * One overall number, computed exactly the way the tutor's gradebook
+     * computes it: the newest mark in each coursework skill, weighted by type
+     * (a quiz counts 0.75, a mock exam 1.75, everything else 1). Exam sittings
+     * are reported on their own below and never folded in here — a formal
+     * result and a week's classwork are different things, and averaging them
+     * gave the student a headline figure that matched nothing on the tutor's
+     * screen.
+     */
+    const latestPerSkill = new Map<string, { type: string; score: number }>();
+    for (const g of grades) {
+      if (g.exam) continue;
+      if (!latestPerSkill.has(g.type)) latestPerSkill.set(g.type, { type: g.type, score: g.score });
+    }
+    const overall = weightedCourseworkAverage([...latestPerSkill.values()]);
 
     /**
      * Skills, not a single number.
@@ -201,16 +212,27 @@ export async function GET() {
           sessionSlot: student.sessionSlot,
           status: "active",
         },
-        select: { id: true, grades: { select: { score: true } } },
+        select: {
+          id: true,
+          grades: {
+            where: { examId: null },
+            orderBy: { createdAt: "desc" },
+            select: { score: true, type: true },
+          },
+        },
       });
 
+      // Each classmate measured the same way this student is — newest mark per
+      // skill, weighted — so the band compares like with like.
       const averages = classmates
-        .filter((mate) => mate.grades.length > 0)
-        .map((mate) => ({
-          id: mate.id,
-          average:
-            mate.grades.reduce((sum, grade) => sum + grade.score, 0) / mate.grades.length,
-        }));
+        .map((mate) => {
+          const latest = new Map<string, { type: string; score: number }>();
+          for (const grade of mate.grades) {
+            if (!latest.has(grade.type)) latest.set(grade.type, { type: grade.type, score: grade.score });
+          }
+          return { id: mate.id, average: weightedCourseworkAverage([...latest.values()]) };
+        })
+        .filter((mate): mate is { id: string; average: number } => mate.average !== null);
 
       // Below four graded classmates a "band" is a rank wearing a disguise:
       // "top 25%" in a class of three names one person.

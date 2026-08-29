@@ -59,6 +59,7 @@ type Student = {
 
 type Column = {
   type: string;
+  required: boolean;
   marked: number;
   missing: number;
   average: number | null;
@@ -276,6 +277,29 @@ export default function GradebookPage() {
   const types = data?.types ?? [];
 
   async function saveCell(studentId: string, type: string, score: string) {
+    // One confirm before a big swing lands on a permanent record. Checked
+    // against this student's existing mark for the same skill, or failing that
+    // their overall average — a 30-point drop is nearly always a slip.
+    if (score.trim() !== "") {
+      const next = Number(score);
+      const student = data?.students.find((row) => row.id === studentId);
+      const previous = student?.marks[type]?.score ?? null;
+      const reference = previous ?? student?.average ?? null;
+      if (
+        student &&
+        Number.isFinite(next) &&
+        reference !== null &&
+        reference - next >= (previous === null ? 30 : 25)
+      ) {
+        const label = previous === null ? "their average" : `their last ${type} mark`;
+        const ok = window.confirm(
+          `Save ${next} for ${student.name}? That is well below ${label} (${reference}).`,
+        );
+        // Throwing makes the cell revert to what was there before.
+        if (!ok) throw new Error("cancelled");
+      }
+    }
+
     const res = await fetch("/api/lecturer/gradebook", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -470,7 +494,7 @@ export default function GradebookPage() {
                     </span>
                     <span className="shrink-0 text-xs font-bold tabular-nums text-[var(--muted)]">
                       {column.average ?? "—"}
-                      {column.missing > 0 && (
+                      {column.required && column.missing > 0 && (
                         <span className="ml-1.5 font-medium text-amber-600">{column.missing} left</span>
                       )}
                     </span>
