@@ -118,3 +118,7 @@ export async function POST(request: Request) {
     evidence: advice.evidence,
   });
 }
+
+// Long-running: model calls / bulk work. Set here (not vercel.json) so it
+// travels with the route regardless of where the app is built from.
+export const maxDuration = 60;

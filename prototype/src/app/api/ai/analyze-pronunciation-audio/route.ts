@@ -94,3 +94,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ ...result, audioAnalyzed: true, analysisMode: "speech-transcript", transcription, phonemeAssessed: Boolean(azureAssessment), masteryBefore, masteryAfter });
 }
 
+
+// Long-running: model calls / bulk work. Set here (not vercel.json) so it
+// travels with the route regardless of where the app is built from.
+export const maxDuration = 60;

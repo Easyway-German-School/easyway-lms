@@ -68,3 +68,7 @@ async function prismaStudentForSession(userId: string) {
   const { prisma } = await import("@/lib/prisma");
   return prisma.student.findUnique({ where: { userId }, select: { id: true } });
 }
+
+// Long-running: model calls / bulk work. Set here (not vercel.json) so it
+// travels with the route regardless of where the app is built from.
+export const maxDuration = 60;

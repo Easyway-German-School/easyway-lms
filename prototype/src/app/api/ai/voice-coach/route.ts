@@ -50,3 +50,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Voice provider unavailable." }, { status: 502 });
   }
 }
+
+// Long-running: model calls / bulk work. Set here (not vercel.json) so it
+// travels with the route regardless of where the app is built from.
+export const maxDuration = 60;
