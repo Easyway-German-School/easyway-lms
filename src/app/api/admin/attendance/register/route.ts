@@ -33,6 +33,9 @@ export async function GET(request: NextRequest) {
   const dateParam = params.get("date");
 
   const branches = await prisma.branch.findMany({
+    where: gate.session.user.tenantId
+      ? { tenantId: gate.session.user.tenantId }
+      : {},
     orderBy: { name: "asc" },
     select: { id: true, name: true, mode: true },
   });
@@ -48,22 +51,15 @@ export async function GET(request: NextRequest) {
   const date = dayKey(dateParam ?? new Date());
   const sessionSlot = slot ? normalizeSlot(slot) : null;
 
-  type StudentWithAttendance = {
-    id: string;
-    studentCode: string | null;
-    level: string;
-    sessionSlot: string | null;
-    admission: unknown;
-    user: { name: string | null; email: string };
-    attendances: Array<{ present: boolean }>;
-  };
-
-  const students: StudentWithAttendance[] = await prisma.student.findMany({
+  const students = await prisma.student.findMany({
     where: {
       branchId,
       level: level.toUpperCase(),
       ...(sessionSlot ? { sessionSlot } : {}),
       status: "active",
+      branch: gate.session.user.tenantId
+        ? { tenantId: gate.session.user.tenantId }
+        : undefined,
     },
     select: {
       id: true,

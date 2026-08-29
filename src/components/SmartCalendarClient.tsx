@@ -87,7 +87,17 @@ export default function SmartCalendarClient() {
 
   useEffect(() => { load(previewLevel); }, [load, previewLevel]);
 
-  const { nodes, done, total, nextNode } = useMemo(() => buildNodes(data?.months), [data]);
+  /**
+   * The map is built from what the student DID, not from what the calendar
+   * says. `joinedAt` and `attendance` come from the server because only the
+   * server knows them — without both, every past date was drawn as a completed
+   * class, so a student who registered yesterday met a progress bar celebrating
+   * work they had never done.
+   */
+  const { nodes, done, total, unmarked, nextNode } = useMemo(
+    () => buildNodes(data?.months, new Date(), { joinedAt: data?.joinedAt, attendance: data?.attendance }),
+    [data],
+  );
 
   function tapNode(node: ClassNode) {
     if (node.state === "locked") {
@@ -131,19 +141,32 @@ export default function SmartCalendarClient() {
             <p className="mt-1 text-2xl font-extrabold sm:text-3xl">
               {done} <span className="text-lg font-bold text-white/70 sm:text-xl">/ {total} classes</span>
             </p>
+            {/*
+              Says why the number is what it is. A brand-new student sees 0 of
+              their own classes rather than a bar full of somebody else's, and
+              a student whose tutor has not marked the register is told that
+              instead of being quietly counted as absent.
+            */}
+            <p className="mt-1 text-xs font-medium text-white/75">
+              {total === 0
+                ? "Your first class is still ahead — nothing counted yet."
+                : unmarked > 0
+                  ? `${unmarked} held ${unmarked === 1 ? "class is" : "classes are"} waiting on your tutor's register.`
+                  : "Counted from the register your tutor marks."}
+            </p>
           </div>
 
-          <div className="flex items-center gap-2 rounded-2xl bg-white/15 px-4 py-2 backdrop-blur">
+          <div className="flex items-center gap-2 rounded-2xl bg-[var(--surface-alt)] px-4 py-2 backdrop-blur">
             <BoltIcon />
             <span className="text-lg font-extrabold">{percent}%</span>
           </div>
         </div>
 
-        <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-white/25">
+        <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-[var(--surface)]/25">
           <motion.div
             // White, not a theme surface: this bar sits on the brand gradient
             // hero, where the copy around it is white too.
-            className="h-full rounded-full bg-white"
+            className="h-full rounded-full bg-[var(--surface)]"
             initial={{ width: 0 }}
             animate={{ width: `${percent}%` }}
             transition={{ duration: 0.8, ease: "easeOut" }}
@@ -238,6 +261,7 @@ export default function SmartCalendarClient() {
                   openIndex={openIndex}
                   shake={shake}
                   onTap={tapNode}
+                  close={() => setOpenIndex(null)}
                 />
               </div>
 

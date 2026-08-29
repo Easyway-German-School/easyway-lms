@@ -1,25 +1,16 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
-import { adminHasCapability } from "@/lib/admin-roles";
+import { requireCapability } from "@/lib/admin-roles";
 import { deleteFile, keyFromUrl } from "@/lib/storage";
 
-async function isAdmin(userId: string) {
-  // Admin AND cleared for this area — see src/lib/admin-roles.ts.
-  return adminHasCapability(userId, "materials");
+async function requireMaterialsAdmin() {
+  return requireCapability("materials");
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions as any) as any;
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!await isAdmin(session.user.id)) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
+    const gate = await requireMaterialsAdmin();
+    if (!gate.ok) return gate.response;
 
     const { searchParams } = new URL(req.url);
     const courseId = searchParams.get("courseId");
@@ -48,14 +39,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions as any) as any;
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!await isAdmin(session.user.id)) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
+    const gate = await requireMaterialsAdmin();
+    if (!gate.ok) return gate.response;
 
     /**
      * The browser has already put the file in the bucket (see lib/upload.ts)
@@ -100,7 +85,7 @@ export async function POST(req: NextRequest) {
         fileName,
         fileType: fileType || fileName.split(".").pop() || "bin",
         fileSize,
-        uploadedBy: session.user.id,
+        uploadedBy: gate.session.user.id,
       },
       include: {
         course: {
@@ -121,14 +106,8 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions as any) as any;
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!await isAdmin(session.user.id)) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
+    const gate = await requireMaterialsAdmin();
+    if (!gate.ok) return gate.response;
 
     const { id } = await req.json();
 

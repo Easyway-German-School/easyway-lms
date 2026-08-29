@@ -141,7 +141,7 @@ export default function ActionProposal({
 
   if (state === "cancelled") {
     return (
-      <section className="mt-4 flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+      <section className="mt-4 flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-sm text-[var(--muted)]">
         <CrossIcon className="h-4 w-4 shrink-0" />
         Discarded — nothing was sent.
       </section>
@@ -166,7 +166,7 @@ export default function ActionProposal({
 
   return (
     <section
-      className={`mt-4 overflow-hidden rounded-3xl border-2 bg-white ${
+      className={`mt-4 overflow-hidden rounded-3xl border-2 bg-[var(--surface)] ${
         irreversible ? "border-rose-200" : "border-[var(--accent)]/40"
       }`}
     >
@@ -182,7 +182,7 @@ export default function ActionProposal({
         >
           Waiting for you · {label}
         </span>
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--muted)]">
           <ClockIcon className="h-3.5 w-3.5" />
           {expired ? "List may have changed" : `Checked ${minutes} min ago at most`}
         </span>
@@ -192,18 +192,18 @@ export default function ActionProposal({
         {/* The count, in the largest type on the card. This is the number that
             catches a mis-read filter before it reaches anybody's phone. */}
         <div className="flex items-baseline gap-3">
-          <span className="text-4xl font-black leading-none text-slate-900">{preview.affected}</span>
-          <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-500">
+          <span className="text-4xl font-black leading-none text-[var(--foreground)]">{preview.affected}</span>
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-[var(--muted)]">
             <UsersIcon className="h-4 w-4" />
             {preview.affected === 1 ? "person" : "people"} affected
           </span>
         </div>
 
-        <p className="mt-2 text-base font-bold text-slate-900">{preview.summary}</p>
+        <p className="mt-2 text-base font-bold text-[var(--foreground)]">{preview.summary}</p>
 
         <ul className="mt-3 space-y-1.5">
           {preview.lines.map((line, index) => (
-            <li key={index} className="flex gap-2 text-sm leading-relaxed text-slate-700">
+            <li key={index} className="flex gap-2 text-sm leading-relaxed text-[var(--foreground-soft)]">
               <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-slate-300" />
               <span className="whitespace-pre-wrap">{line}</span>
             </li>
@@ -211,19 +211,19 @@ export default function ActionProposal({
         </ul>
 
         {preview.sample.length > 0 && (
-          <div className="mt-4 rounded-2xl bg-slate-50 p-3">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+          <div className="mt-4 rounded-2xl bg-[var(--surface-alt)] p-3">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">
               Including
             </p>
             <div className="mt-1.5 space-y-1">
               {preview.sample.map((person) => (
-                <p key={person.name} className="flex flex-wrap gap-x-2 text-xs text-slate-700">
+                <p key={person.name} className="flex flex-wrap gap-x-2 text-xs text-[var(--foreground-soft)]">
                   <span className="font-semibold">{person.name}</span>
-                  <span className="text-slate-500">{person.detail}</span>
+                  <span className="text-[var(--muted)]">{person.detail}</span>
                 </p>
               ))}
               {preview.affected > preview.sample.length && (
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-[var(--muted)]">
                   and {preview.affected - preview.sample.length} more
                 </p>
               )}
@@ -265,11 +265,11 @@ export default function ActionProposal({
             type="button"
             onClick={() => run(true)}
             disabled={state === "running"}
-            className="rounded-full border border-slate-200 px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-full border border-[var(--border)] px-4 py-3 text-sm font-bold text-[var(--muted)] transition hover:bg-[var(--surface-alt)] disabled:opacity-50"
           >
             Discard
           </button>
-          <span className="text-[11px] text-slate-500">
+          <span className="text-[11px] text-[var(--muted)]">
             {irreversible
               ? "This cannot be undone from the portal."
               : "This can be changed afterwards on its own page."}

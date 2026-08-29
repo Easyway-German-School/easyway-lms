@@ -1,6 +1,7 @@
 "use client";
 
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { buildApiUrl } from "@/lib/api";
@@ -8,8 +9,9 @@ import BrandLoader from "@/components/BrandLoader";
 import { countries, nigerianStates, packageOptions, professionOptions } from "@/app/auth/signup/options";
 import PasswordInput from "@/components/PasswordInput";
 import PhotoCapture from "@/components/PhotoCapture";
-import { CheckCircleIcon, SignalIcon } from "@/components/icons";
-import { uploadImage } from "@/lib/upload";
+import SignupJourney from "@/components/SignupJourney";
+import { CheckCircleIcon, FamilyIcon, SignalIcon } from "@/components/icons";
+import { uploadErrorMessage, uploadImage } from "@/lib/upload";
 import {
   CONNECTION_OPTIONS,
   DEVICE_OPTIONS,
@@ -17,6 +19,7 @@ import {
   isOnlineBranch,
 } from "@/lib/online-branch";
 import { TIME_SLOTS, slotLabel } from "@/lib/class-times";
+import { OFFERED_LEVELS } from "@/lib/levels";
 
 type BranchOption = { id: string; name: string; location?: string | null; mode?: string | null };
 
@@ -48,18 +51,23 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [name, setName] = useState("");
   const branchRole = "student";
   const [branchId, setBranchId] = useState("");
-  const [level, setLevel] = useState("A1");
+  // Empty rather than defaulted to "A1" — a student who never opens this
+  // dropdown must be stopped by canAdvanceStep below, not silently enrolled
+  // as a beginner. Same reasoning for sessionSlot further down.
+  const [level, setLevel] = useState("");
   const [pathway, setPathway] = useState(packageOptions[0]);
   const [gender, setGender] = useState("");
   const [dob, setDob] = useState("");
   const [religion, setReligion] = useState("");
   const [profession, setProfession] = useState("");
   const [batch, setBatch] = useState("");
-  const [sessionSlot, setSessionSlot] = useState("morning");
+  const [sessionSlot, setSessionSlot] = useState("");
   /**
-   * physical | hybrid — how a CAMPUS student attends. The Online branch has no
-   * choice to make (it is online by definition), so this control only appears
-   * for a campus branch and the server ignores it for an online one.
+   * physical | hybrid — how the student attends. The server always forces
+   * "online" for an Online-branch signup regardless of what this sends, so for
+   * an online student the choice is informational (flags interest in an
+   * in-person meetup) rather than gating anything — see normalizedDeliveryMode
+   * in the signup route.
    */
   const [deliveryMode, setDeliveryMode] = useState("physical");
   /** group | private — a private student books a tutor rather than a seat. */
@@ -74,9 +82,25 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [photoUrl, setPhotoUrl] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const [heardFrom] = useState("");
   const [emergencyContactName] = useState("");
   const [emergencyContactInfo] = useState("");
+  /**
+   * The optional 4th step. Off by default — most students sign themselves up
+   * and this whole panel is skippable — but a parent registering on their
+   * child's behalf turns it on and gives their OWN email, so the school
+   * knows who is actually watching this account. No password field: that
+   * account's login is generated and mailed once the form is submitted,
+   * because asking somebody to invent and remember a second password inside
+   * somebody else's signup is exactly the friction that would make this
+   * step skipped by the people who most need it.
+   */
+  const [parentEnabled, setParentEnabled] = useState(false);
+  const [parentName, setParentName] = useState("");
+  const [parentEmail, setParentEmail] = useState("");
+  const [parentPhone, setParentPhone] = useState("");
   // Online-only answers. They decide what the classroom optimises for, so they
   // are asked once at signup rather than left for the student to discover
   // through a frozen video mid-lesson.
@@ -89,7 +113,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const [showSuccess, setShowSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(1);
-  const stepCount = 3;
+  const stepCount = 4;
   const router = useRouter();
   const selectedBranch = branches.find((branch) => branch.id === branchId) || null;
 
@@ -98,20 +122,34 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   // a campus question and a campus student never sees a bandwidth one.
   const isOnline = isOnlineBranch(selectedBranch);
 
-  const stepTitles = isOnline ? ["Program", "Your setup", "Launch"] : ["Program", "Profile", "Launch"];
-  const stepIntroText = (
-    isOnline
-      ? {
-          1: "Pick your level, your session, and your account details.",
-          2: "Tell us how you will be joining class so we can tune your video.",
-          3: "Review and finish — you go straight to your dashboard.",
-        }
-      : {
-          1: "Pick your branch, pathway, and account details.",
-          2: "Tell us about yourself so we can tailor your plan.",
-          3: "Review and finish your signup quickly.",
-        }
-  )[step] as string;
+  /**
+   * The three milestones, in the guide's voice.
+   *
+   * The copy carries the weight here, and every line is doing one job: telling
+   * somebody who has just decided to learn German that this is the beginning of
+   * something rather than an administrative hurdle. It names the destination
+   * ("Germany", "your first class") instead of the mechanism ("submit the
+   * form"), and it says what each answer is FOR — a student who knows why they
+   * are being asked for a date of birth answers it; one who does not, leaves.
+   *
+   * The online variant is genuinely different, not reworded: an online student
+   * is asked about their connection, and the reason for that question is worth
+   * saying out loud on a Nigerian line.
+   */
+  const milestones = isOnline
+    ? [
+        { label: "Program", stamp: "Chosen", line: "Willkommen! First — which level are you starting at, and when can you actually make class? Everything after this is shaped around that answer." },
+        { label: "Your setup", stamp: "Ready", line: "Now the part most schools skip: how you get online. Tell us honestly and we tune your video to your line, so your first lesson does not freeze." },
+        { label: "Parent/Guardian", stamp: "Optional", line: "Registering for yourself? Skip this. Registering for your child, or want a parent kept in the loop? Add their email and we set up their own account too." },
+        { label: "Launch", stamp: "Enrolled", line: "That is everything. Finish up and your dashboard, your timetable and your classmates are waiting on the other side." },
+      ]
+    : [
+        { label: "Program", stamp: "Chosen", line: "Willkommen! Let us start with where you are learning and where you are heading. Germany is the destination — this is choosing the road." },
+        { label: "Profile", stamp: "Known", line: "Now a little about you. Your tutor sees this, so it is how you stop being a row in a spreadsheet and start being a student they know." },
+        { label: "Parent/Guardian", stamp: "Optional", line: "Registering for yourself? Skip this. Registering for your child, or want a parent kept in the loop? Add their email and we set up their own account too." },
+        { label: "Launch", stamp: "Enrolled", line: "That is everything. Finish up and your dashboard, your timetable and your classmates are waiting on the other side." },
+      ];
+
   const isLastStep = step === stepCount;
   /**
    * DOB is now a real date picker, so the value arriving here is always
@@ -135,6 +173,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   };
   const maxDob = new Date(Date.now() - 10 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const isAusbildungPathway = pathway === "Ausbildung (vocational training)";
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
   // The Nigerian-states dropdown only makes sense inside Nigeria. Online reaches
   // the diaspora, so outside Nigeria the field becomes free text — a student in
@@ -143,7 +182,17 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
 
   const canAdvanceStep =
     step === 1
-      ? name.trim() !== "" && email.trim() !== "" && password.length >= 8 && branchId !== "" && pathway.trim() !== "" && batch !== ""
+      ? name.trim() !== "" &&
+        email.trim() !== "" &&
+        password.length >= 8 &&
+        branchId !== "" &&
+        pathway.trim() !== "" &&
+        batch !== "" &&
+        level !== "" &&
+        // A private student agrees their own times with their tutor and never
+        // sees the session dropdown (it is hidden below), so it cannot gate
+        // them forward.
+        (classType === "private" || sessionSlot !== "")
       : step === 2
       ? phone.trim() !== "" &&
         city.trim() !== "" &&
@@ -154,6 +203,12 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         isDobValid(dob) &&
         (!isAusbildungPathway || profession.trim() !== "") &&
         (!isOnline || (device !== "" && connection !== "" && timezone !== ""))
+      : step === 3
+      ? // Skippable by default. Only gates forward progress once the parent
+        // section has actually been turned on — a toggle nobody touched must
+        // never block anybody's signup.
+        (!parentEnabled ||
+          (parentName.trim() !== "" && isValidEmail(parentEmail) && parentEmail.trim().toLowerCase() !== email.trim().toLowerCase()))
       : true;
   const nextButtonLabel = !isLastStep ? "Next" : "Finish signup";
   const branchHint = selectedBranch
@@ -204,11 +259,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
 
     prefill("email", setEmail);
     prefill("name", setName);
-    prefill("level", (v) => setLevel(v.toUpperCase()));
+    prefill("level", (v) => {
+      const requested = v.toUpperCase();
+      if ((OFFERED_LEVELS as readonly string[]).includes(requested)) setLevel(requested);
+    });
     prefill("branchId", setBranchId);
     prefill("sessionSlot", (v) => {
       const slot = v.toLowerCase();
-      if (["morning", "afternoon", "evening"].includes(slot)) setSessionSlot(slot);
+      if ((TIME_SLOTS as readonly string[]).includes(slot)) setSessionSlot(slot);
     });
   }, []);
 
@@ -223,10 +281,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
     try {
       const uploadedUrl = await uploadImage(file);
       setPhotoUrl(uploadedUrl);
+      // The bytes are in storage now, so drop the File handle. Holding it is
+      // what let the submit path re-read a reference the phone had already
+      // invalidated.
+      setPhotoFile(null);
       setUploadMessage("Photo uploaded successfully.");
       return uploadedUrl;
     } catch (uploadError) {
-      const message = uploadError instanceof Error ? uploadError.message : "Upload failed";
+      const message = uploadErrorMessage(uploadError);
       setError(message);
       setUploadMessage("Photo upload failed. Please try another photo or contact support.");
       setPhotoFileName("");
@@ -280,6 +342,18 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
       return;
     }
 
+    if (!level.trim()) {
+      setError("Please choose your level.");
+      return;
+    }
+
+    // A private student books their own times with their tutor and never
+    // sees this question — see the hidden sessionSlot field in step 1.
+    if (classType !== "private" && !sessionSlot.trim()) {
+      setError("Please choose a session.");
+      return;
+    }
+
     if (!dob.trim() || !isDobValid(dob)) {
       setError("Please pick a valid date of birth.");
       return;
@@ -290,12 +364,21 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
       return;
     }
 
+    if (!termsAccepted) {
+      setError("Please agree to the Terms and Conditions before enrolling.");
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // Upload the photo first and use the RETURNED url (state would be stale here).
+      // The photo goes up the moment it is chosen, so by here there is normally
+      // a URL already and nothing left to do. Only fall back to the File if
+      // that first upload failed — re-reading it unconditionally is what broke
+      // mobile signups, because a File is an OS handle rather than bytes and
+      // the phone invalidates it while the rest of the form is being filled in.
       let uploadedPhotoUrl = photoUrl;
-      if (photoFile) {
+      if (!uploadedPhotoUrl && photoFile) {
         uploadedPhotoUrl = await uploadImage(photoFile);
       }
 
@@ -329,6 +412,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         country,
         photoUrl: uploadedPhotoUrl,
         photoFileName,
+        termsAccepted,
         heardFrom,
         emergencyContactName,
         emergencyContactInfo,
@@ -336,6 +420,10 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         // answer to any of it, and an empty object in their admission record
         // would just be noise for whoever reads it in the admin later.
         ...(isOnline ? { online: { timezone, device, connection } } : {}),
+        // The optional 4th step. Omitted entirely when skipped, rather than
+        // sent empty, so the server's "was a parent section filled in?" check
+        // stays a simple truthiness test.
+        ...(parentEnabled ? { parent: { name: parentName, email: parentEmail, phone: parentPhone } } : {}),
       } as Record<string, unknown>;
 
       const res = await fetch(buildApiUrl("/api/auth/signup"), {
@@ -358,7 +446,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
       // A campus student still gets the confirmation page, which is where the
       // office's next-steps instructions live.
       if (isOnline) {
-        setSuccessMessage("Welcome to EasyWay Online. Taking you to your dashboard…");
+        setSuccessMessage(
+          parentEnabled
+            ? "Welcome to EasyWay Online. Taking you to your dashboard — your parent/guardian's login is on its way to their email."
+            : "Welcome to EasyWay Online. Taking you to your dashboard…",
+        );
         setShowSuccess(true);
 
         const signedIn = await signIn("credentials", {
@@ -374,13 +466,19 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         return;
       }
 
-      setSuccessMessage("Signup successful. You will receive confirmation and can sign in next.");
+      setSuccessMessage(
+        parentEnabled
+          ? "Signup successful. You will receive confirmation and can sign in next — your parent/guardian's login is on its way to their email."
+          : "Signup successful. You will receive confirmation and can sign in next.",
+      );
       setShowSuccess(true);
       window.setTimeout(() => {
         router.replace("/auth/signup/success");
       }, 750);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      // The photo retry above can land here, so route through the same mapper
+      // rather than showing a raw DOMException. Anything else keeps its message.
+      setError(uploadErrorMessage(err, "An error occurred"));
     } finally {
       setLoading(false);
     }
@@ -400,17 +498,31 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.12),_transparent_35%),linear-gradient(180deg,_#f5f5f5_0%,_#ffffff_100%)] px-4 py-12 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-5xl space-y-10">
-        <div className="rounded-[32px] bg-gradient-to-br from-[#0D7C7E] via-[#FF6600] to-[#FF8533] px-8 py-8 text-white shadow-[0_30px_90px_-30px_rgba(13,124,126,0.25)] sm:px-12">
+        {/*
+          This said "STUDENT SIGN IN" on the page where you create an account,
+          twice, and promised "a simpler signin experience". Nobody signing up
+          is signing in, and a school that cannot tell the difference on its own
+          enrolment page is not a confidence-inspiring place to send ₦400,000.
+        */}
+        <div className="rounded-[32px] bg-gradient-to-br from-[#0D7C7E] via-[#FF6600] to-[#FF8533] px-6 py-8 text-white shadow-[0_30px_90px_-30px_rgba(13,124,126,0.25)] sm:px-12">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-sky-100">EASYWAY LMS STUDENT SIGN IN</p>
-            <h1 className="mt-4 text-4xl font-semibold leading-tight sm:text-5xl">{pageTitle || "Student Sign In"}</h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-sky-100/90">
-              Secure your place, choose your pathway, and launch your learning progress with a simpler signin experience.
+            <p className="text-xs font-semibold uppercase tracking-[0.36em] text-white/70">Enrolment · EasyWay German</p>
+            <h1 className="mt-4 text-3xl font-semibold leading-tight sm:text-5xl">{pageTitle || "Start your German journey"}</h1>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-white/85">
+              A few short steps and you are enrolled — your level, your class times, your tutor. Registering for your
+              child? There is a spot further in to add their own parent account too.
             </p>
           </div>
         </div>
 
-        <form onSubmit={handleSignUp} className="space-y-6 rounded-[32px] bg-white/95 p-8 shadow-[0_30px_80px_-24px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/70">
+        {/*
+          `p-8` unconditionally was costing 64px of a 375px screen, and the page
+          around it another 32. Measured: the companion's speech bubble was
+          being squeezed to 171px wide and wrapping to 211px tall — a paragraph
+          in a column three words across. Padding is a phone's scarcest
+          resource; it earns its place above sm and not below.
+        */}
+        <form ref={formRef} onSubmit={handleSignUp} className="space-y-6 rounded-[32px] bg-white/95 p-4 shadow-[0_30px_80px_-24px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/70 sm:p-8">
           {error ? <div className="rounded-xl bg-rose-500/10 p-4 text-sm text-rose-700">{error}</div> : null}
           {successMessage && showSuccess ? (
             <div className="rounded-3xl border border-emerald-200/80 bg-emerald-500/10 p-5 text-sm text-emerald-900 shadow-lg shadow-emerald-500/10 transition-all duration-200">
@@ -424,30 +536,15 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
             </div>
           ) : null}
 
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-            <div className="mb-4 grid gap-3 sm:grid-cols-3">
-              {stepTitles.map((title, index) => {
-                const active = step === index + 1;
-                return (
-                  <div key={title} className="flex items-center gap-3">
-                    <span className={`h-9 w-9 shrink-0 rounded-full grid place-items-center text-sm font-semibold ${active ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--muted)]"}`}>
-                      {index + 1}
-                    </span>
-                    <div>
-                      <div className={`text-xs uppercase tracking-[0.24em] ${active ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}>{title}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-[var(--background)]">
-              <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${(step / stepCount) * 100}%` }} />
-            </div>
-            <div className="mt-4 rounded-3xl bg-white/80 p-4 text-sm text-[var(--muted)] shadow-sm">
-              <p className="font-semibold text-[var(--foreground)]">Step {step} of {stepCount}</p>
-              <p className="mt-1">{stepIntroText}</p>
-            </div>
-          </div>
+          {/* Replaced three numbered circles, a grey bar and "Step 1 of 3".
+              See SignupJourney for why that framing was the wrong one to open
+              an enrolment with. */}
+          <SignupJourney
+            milestones={milestones}
+            current={step}
+            ready={canAdvanceStep}
+            errored={Boolean(error)}
+          />
 
           {step === 1 ? (
             <div className="space-y-6">
@@ -502,6 +599,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <div>
                   <label htmlFor="level" className="block text-sm font-semibold text-[var(--muted)]">What class are you starting with?</label>
                   <select id="level" name="level" value={level} onChange={(e) => setLevel(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
+                    <option value="">Select your level</option>
                     <option value="A1">A1 Beginner — new learners starting from basics</option>
                     <option value="A2">A2 — upper beginners class</option>
                     <option value="B1">B1 — intermediate class</option>
@@ -511,25 +609,41 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                   <p className="mt-2 text-xs text-[var(--muted)]">Choose the level that best matches your current language confidence. A1/A2 are for beginners, B1/B2 are for learners moving into stronger communication, and C1 is for professional learners.</p>
                 </div>
               </div>
-              {/* How you attend. Only a campus branch has a decision to make:
-                  the Online branch is online by definition, and the server
-                  forces it there regardless of what this form sends. */}
-              {selectedBranch && !isOnline ? (
+              {/* How you attend. A campus branch is choosing a real product
+                  (a seat in a room vs. a live video feed); an Online-branch
+                  student is choosing an informational flag only, since the
+                  server always forces "online" for that branch regardless of
+                  what this sends. Shown for both, worded for each. */}
+              {selectedBranch ? (
                 <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
                   <p className="text-sm font-semibold text-[var(--foreground)]">How will you attend?</p>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {[
-                      {
-                        value: "physical",
-                        title: "On campus",
-                        blurb: `Attend your classes in person at the ${selectedBranch.name} branch.`,
-                      },
-                      {
-                        value: "hybrid",
-                        title: "Online / hybrid",
-                        blurb: "Attend on campus when you can, and join the same class live over video when you cannot.",
-                      },
-                    ].map((option) => (
+                    {(isOnline
+                      ? [
+                          {
+                            value: "physical",
+                            title: "Online only",
+                            blurb: "Join every class live over video. This is what most online students choose.",
+                          },
+                          {
+                            value: "hybrid",
+                            title: "Online / hybrid",
+                            blurb: "Join live over video, and flag interest in an in-person meetup if one opens near you.",
+                          },
+                        ]
+                      : [
+                          {
+                            value: "physical",
+                            title: "On campus",
+                            blurb: `Attend your classes in person at the ${selectedBranch.name} branch.`,
+                          },
+                          {
+                            value: "hybrid",
+                            title: "Online / hybrid",
+                            blurb: "Attend on campus when you can, and join the same class live over video when you cannot.",
+                          },
+                        ]
+                    ).map((option) => (
                       <button
                         key={option.value}
                         type="button"
@@ -546,9 +660,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                     ))}
                   </div>
                   <p className="mt-3 text-xs text-[var(--muted)]">
-                    {deliveryMode === "hybrid"
-                      ? "You will have the live classroom in your portal as well as your campus timetable."
-                      : "Your portal will show your campus timetable. Choose online/hybrid if you also want to join live over video."}
+                    {isOnline
+                      ? "Either way you get full access to live classes and recordings — this just tells the office whether to reach out about in-person meetups."
+                      : deliveryMode === "hybrid"
+                        ? "You will have the live classroom in your portal as well as your campus timetable."
+                        : "Your portal will show your campus timetable. Choose online/hybrid if you also want to join live over video."}
                   </p>
                 </div>
               ) : null}
@@ -602,6 +718,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <div>
                   <label htmlFor="sessionSlot" className="block text-sm font-semibold text-[var(--muted)]">Which session suits you?</label>
                   <select id="sessionSlot" name="sessionSlot" value={sessionSlot} onChange={(e) => setSessionSlot(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
+                    <option value="">Select a session</option>
                     {SESSION_SLOTS.map((slot) => (
                       <option key={slot.value} value={slot.value}>
                         {isOnline ? `${slot.label} WAT` : slot.label}
@@ -789,6 +906,80 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <p className="mt-2 text-xs text-[var(--muted)]">{isAusbildungPathway ? "Pick the vocational track you are registering for." : "Choose the closest match. Select “Other / not listed” if your occupation is not shown."}</p>
               </div>
             </div>
+          ) : step === 3 ? (
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 grid h-10 w-10 flex-none place-items-center rounded-2xl bg-white/80 text-[var(--accent)] shadow-sm">
+                    <FamilyIcon className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h2 className="text-base font-semibold text-[var(--foreground)]">Add a parent or guardian?</h2>
+                    <p className="mt-1 text-sm text-[var(--muted)]">
+                      Entirely optional — most students skip this. If you are a parent registering for your child, or
+                      you just want somebody kept in the loop, add their details below and we set up a separate,
+                      linked account for them automatically. They get their own login by email once you finish.
+                    </p>
+                  </div>
+                </div>
+
+                <label className="mt-5 flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-white px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={parentEnabled}
+                    onChange={(e) => setParentEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-[var(--border)] text-[var(--accent)]"
+                  />
+                  <span className="text-sm font-semibold text-[var(--foreground)]">
+                    Set up a parent/guardian account for this student
+                  </span>
+                </label>
+
+                {parentEnabled ? (
+                  <div className="mt-4 grid gap-4 md:grid-cols-3">
+                    <div>
+                      <label htmlFor="parentName" className="block text-sm font-semibold text-[var(--muted)]">Parent/guardian name</label>
+                      <input
+                        id="parentName"
+                        value={parentName}
+                        onChange={(e) => setParentName(e.target.value)}
+                        className="mt-1 w-full rounded-xl border px-3 py-2 bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="parentEmail" className="block text-sm font-semibold text-[var(--muted)]">Parent/guardian email</label>
+                      <input
+                        id="parentEmail"
+                        type="email"
+                        value={parentEmail}
+                        onChange={(e) => setParentEmail(e.target.value)}
+                        className="mt-1 w-full rounded-xl border px-3 py-2 bg-white"
+                      />
+                      {parentEmail && !isValidEmail(parentEmail) ? (
+                        <p className="mt-2 text-xs text-rose-600">Please check this email address.</p>
+                      ) : parentEmail && parentEmail.trim().toLowerCase() === email.trim().toLowerCase() ? (
+                        <p className="mt-2 text-xs text-rose-600">This must be different from the student's own email above.</p>
+                      ) : null}
+                    </div>
+                    <div>
+                      <label htmlFor="parentPhone" className="block text-sm font-semibold text-[var(--muted)]">Parent/guardian phone</label>
+                      <input
+                        id="parentPhone"
+                        type="tel"
+                        value={parentPhone}
+                        onChange={(e) => setParentPhone(e.target.value)}
+                        className="mt-1 w-full rounded-xl border px-3 py-2 bg-white"
+                      />
+                    </div>
+                    <p className="text-xs text-[var(--muted)] md:col-span-3">
+                      No password to set here — their login is generated automatically and emailed to them, with a
+                      link to their own parent sign-in page. The school confirms the link to this student before
+                      anything shows in their account.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           ) : (
             <div className="space-y-6">
               <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
@@ -802,7 +993,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                   <p className="mt-2 text-sm text-[var(--muted)]">Pathway: {pathway}</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">Level: {level}</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">
-                    Attending: {isOnline ? "Online only" : deliveryMode === "hybrid" ? "Online / hybrid" : "On campus"}
+                    Attending: {deliveryMode === "hybrid" ? "Online / hybrid" : isOnline ? "Online only" : "On campus"}
                   </p>
                   <p className="mt-2 text-sm text-[var(--muted)]">
                     Class: {classType === "private" ? "Private (one-to-one)" : "Group class"}
@@ -827,6 +1018,17 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                     <p className="mt-3 text-xs text-[var(--muted)]">You can change any of this later on your Profile — nothing here is locked in.</p>
                   </div>
                 ) : null}
+                {parentEnabled ? (
+                  <div className="rounded-3xl border border-[var(--border)] bg-white p-4 md:col-span-2">
+                    <h3 className="text-sm font-semibold text-[var(--foreground)]">Parent/guardian</h3>
+                    <p className="mt-2 text-sm text-[var(--muted)]">Name: {parentName}</p>
+                    <p className="mt-2 text-sm text-[var(--muted)]">Email: {parentEmail}</p>
+                    <p className="mt-2 text-sm text-[var(--muted)]">Phone: {parentPhone || "Not specified"}</p>
+                    <p className="mt-3 text-xs text-[var(--muted)]">
+                      A separate account is created for them and their login is emailed to this address.
+                    </p>
+                  </div>
+                ) : null}
               </div>
               <div>
                 <label className="block text-sm font-semibold text-[var(--muted)]">Your profile photo</label>
@@ -849,23 +1051,99 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
             </div>
           )}
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
-            <div className="flex gap-3">
-              {step > 1 ? (
-                <button type="button" onClick={() => setStep((current) => Math.max(1, current - 1))} className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Back</button>
-              ) : null}
-              {!isLastStep ? (
-                <button type="button" onClick={() => canAdvanceStep && setStep((current) => Math.min(stepCount, current + 1))} disabled={!canAdvanceStep} className="rounded-xl bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[#FF6600]/10 disabled:opacity-60 disabled:cursor-not-allowed">{nextButtonLabel}</button>
-              ) : null}
-            </div>
+          {/*
+            THE FOOTER, REORDERED AROUND WHAT PEOPLE ACTUALLY TAP.
+
+            Two things were wrong with it. The primary action sat on the LEFT
+            beside Back — on a phone, in a column, that meant the first button
+            under your thumb was the one that goes backwards. And "Cancel" was
+            given equal visual weight to "Finish signup" on the last step, which
+            is a strange thing to offer somebody 90 seconds into enrolling.
+
+            Now: the way forward is full-width and first, Back is secondary
+            beside it, and leaving is a quiet text link. The disabled state also
+            says WHY it is disabled, because a greyed-out button with no
+            explanation is the single most common reason a form is abandoned —
+            the student cannot see which field they missed.
+          */}
+          <div className="space-y-3 border-t border-slate-200/70 pt-5">
+            {!isLastStep && !canAdvanceStep ? (
+              <p className="text-center text-xs text-[var(--muted)] sm:text-left">
+                Fill in the highlighted fields above to carry on.
+              </p>
+            ) : null}
+
             {isLastStep ? (
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <button type="submit" disabled={loading || uploadingPhoto} className="rounded-xl bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[#FF6600]/20 transition duration-200 hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60">{loading ? "Submitting…" : uploadingPhoto ? "Uploading files…" : "Finish signup"}</button>
-                <button type="button" onClick={() => router.push("/auth/signin")} className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Cancel</button>
+              <label className="flex items-start gap-3 text-sm text-[var(--foreground)]">
+                <input
+                  type="checkbox"
+                  checked={termsAccepted}
+                  onChange={(event) => setTermsAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-[#0D7C7E]"
+                />
+                <span>
+                  I agree to the{" "}
+                  <Link href="/terms" target="_blank" className="font-semibold underline underline-offset-2 hover:text-[var(--accent)]">
+                    Terms and Conditions
+                  </Link>
+                  .
+                </span>
+              </label>
+            ) : null}
+
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                {step > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setStep((current) => Math.max(1, current - 1))}
+                    className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                  >
+                    Back
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => router.push("/auth/signin")}
+                  className="text-sm font-medium text-[var(--muted)] underline-offset-4 transition hover:text-[var(--foreground)] hover:underline"
+                >
+                  I already have an account
+                </button>
               </div>
-            ) : (
-              <button type="button" onClick={() => router.push("/auth/signin")} className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Cancel</button>
-            )}
+
+              {!isLastStep ? (
+                <button
+                  type="button"
+                  onClick={() => canAdvanceStep && setStep((current) => Math.min(stepCount, current + 1))}
+                  disabled={!canAdvanceStep}
+                  className="w-full rounded-xl bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] px-8 py-3.5 text-sm font-bold text-white shadow-lg shadow-[#FF6600]/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none sm:w-auto"
+                >
+                  {nextButtonLabel}
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={loading || uploadingPhoto || !termsAccepted}
+                  className="w-full rounded-xl bg-gradient-to-r from-[#0D7C7E] to-[#FF6600] px-8 py-3.5 text-sm font-bold text-white shadow-lg shadow-[#FF6600]/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                >
+                  {loading ? "Enrolling you…" : uploadingPhoto ? "Uploading your photo…" : "Finish and enrol me"}
+                </button>
+              )}
+            </div>
+
+            {isLastStep ? (
+              <p className="text-center text-[11px] leading-relaxed text-[var(--muted)]/80 sm:text-left">
+                Please review our{" "}
+                <Link href="/terms" target="_blank" className="underline underline-offset-2 hover:text-[var(--foreground)]">
+                  Terms
+                </Link>{" "}
+                and our{" "}
+                <Link href="/privacy" target="_blank" className="underline underline-offset-2 hover:text-[var(--foreground)]">
+                  Privacy Policy
+                </Link>
+                .
+              </p>
+            ) : null}
           </div>
         </form>
       </div>

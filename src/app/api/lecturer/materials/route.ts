@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
-import { isAssigned, matchesBatch, readAssignment, studentWhereForAssignment } from '@/lib/lecturer-assignment';
+import { belongsToLecturer, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
+import { EMBED_FILE_TYPE, parseEmbed } from '@/lib/media-embed';
 
 function serialise(material: {
   id: string;
@@ -23,9 +23,11 @@ function serialise(material: {
   durationSeconds: number | null;
   recordedAt: Date | null;
   createdAt: Date;
+  aiState: string;
 }) {
   return {
     id: material.id,
+    aiState: material.aiState,
     title: material.title,
     description: material.description,
     courseId: material.courseId,
@@ -47,7 +49,7 @@ function serialise(material: {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
 
     if (!session || session.user.role !== 'lecturer') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -73,7 +75,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
 
     if (!session || session.user.role !== 'lecturer') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -96,16 +98,29 @@ export async function POST(req: NextRequest) {
     const description = String(body.description ?? '').trim();
     const courseId = String(body.courseId ?? '').trim();
 
-    // Handle embedded URLs
-    const isEmbedded = String(body.isEmbedded ?? '') === 'true';
-    const embedUrl = String(body.embedUrl ?? '').trim();
-    const embedProvider = String(body.embedProvider ?? '').trim().toLowerCase();
+    /**
+     * A LINK IS AN ALTERNATIVE TO A FILE, not an extra field on one.
+     *
+     * When `sourceUrl` is present nothing was uploaded, so the file fields are
+     * synthesised from the parsed link instead of being required. Everything
+     * downstream — the shelves, the student queries, the notification — then
+     * treats it as an ordinary video row. See lib/media-embed.ts.
+     */
+    const sourceUrl = String(body.sourceUrl ?? '').trim();
+    const embed = sourceUrl ? parseEmbed(sourceUrl) : null;
+    if (sourceUrl && !embed) {
+      return NextResponse.json(
+        { error: 'That link is not a video we recognise. Paste a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.' },
+        { status: 400 },
+      );
+    }
 
-    // Handle file uploads
-    const fileUrl = String(body.fileUrl ?? '').trim();
-    const fileName = String(body.fileName ?? '').trim();
-    const fileType = String(body.fileType ?? '').trim() || 'application/octet-stream';
-    const fileSize = Number(body.fileSize) || 0;
+    const fileUrl = embed ? embed.sourceUrl : String(body.fileUrl ?? '').trim();
+    const fileName = embed ? embed.label : String(body.fileName ?? '').trim();
+    const fileType = embed ? EMBED_FILE_TYPE : String(body.fileType ?? '').trim() || 'application/octet-stream';
+    // A link occupies no storage. Recording it as 0 keeps the tutor's "MB used"
+    // honest rather than inventing a size for something we do not host.
+    const fileSize = embed ? 0 : Number(body.fileSize) || 0;
 
     // Video-library metadata. All optional — a plain document upload sends none
     // of it and behaves exactly as it did before.
@@ -116,38 +131,43 @@ export async function POST(req: NextRequest) {
     const durationRaw = String(body.durationSeconds ?? '').trim();
     const isRecording = String(body.isRecording ?? '') === 'true';
 
-    if (!title) {
-      return NextResponse.json({ error: 'A title is required' }, { status: 400 });
-    }
-
-    // Validate embedded URL submission
-    if (isEmbedded) {
-      if (!embedUrl) {
-        return NextResponse.json({ error: 'Please provide a video URL' }, { status: 400 });
-      }
-      if (!embedProvider) {
-        return NextResponse.json({ error: 'Invalid URL format' }, { status: 400 });
-      }
-    } else {
-      // Validate file upload submission
-      if (!fileUrl || !fileName) {
-        return NextResponse.json({ error: 'A title and a file are required' }, { status: 400 });
-      }
+    if (!title || !fileUrl || !fileName) {
+      return NextResponse.json({ error: 'A title and either a file or a video link are required' }, { status: 400 });
     }
 
     // A recording belongs to a level, not a course. Everything else still
     // needs a course so it lands somewhere students can find it.
-    const kind = isEmbedded ? 'video' : isRecording ? 'recording' : deriveMaterialKind(fileType);
-    
-    if (!isRecording && !courseId) {
+    const kind = isRecording ? 'recording' : deriveMaterialKind(fileType);
+    if (kind !== 'recording' && !courseId) {
       return NextResponse.json({ error: 'Please choose a course for this material' }, { status: 400 });
     }
+    if (kind === 'recording' && !level) {
+      return NextResponse.json({ error: 'Please choose the level this recording is for' }, { status: 400 });
+    }
 
+    /**
+     * THE LEVEL IS ALWAYS STAMPED ON THE ROW, even when it came from a course.
+     *
+     * Students are found by level, and the row carried one only when the tutor
+     * was uploading a recording — for a document it stayed null and visibility
+     * rested entirely on the join to `course.level`. One denormalised column
+     * left empty meant a material's reachability depended on a course row
+     * staying correct forever, and there are already forty-odd courses here
+     * with near-duplicate names for a tutor to choose wrongly between.
+     *
+     * Copying it down at write time makes the material self-describing: it says
+     * which level it is for, and the student query can match it directly.
+     */
+    let resolvedLevel = level || null;
     if (courseId) {
-      const course = await prisma.course.findUnique({ where: { id: courseId } });
+      const course = await prisma.course.findUnique({
+        where: { id: courseId },
+        select: { level: true },
+      });
       if (!course) {
         return NextResponse.json({ error: 'Course not found' }, { status: 404 });
       }
+      resolvedLevel = resolvedLevel || (course.level ? String(course.level).toUpperCase() : null);
     }
 
     const material = await prisma.material.create({
@@ -156,18 +176,20 @@ export async function POST(req: NextRequest) {
         description: description || null,
         courseId: courseId || null,
         lecturerId,
-        fileName: isEmbedded ? embedProvider : fileName,
-        filePath: isEmbedded ? embedUrl : fileUrl,
-        fileType: isEmbedded ? 'video/embedded' : fileType,
-        fileSize: isEmbedded ? 0 : fileSize,
+        fileName,
+        filePath: fileUrl,
+        fileType,
+        fileSize,
         kind,
-        level: level || null,
+        level: resolvedLevel,
         series: series || null,
         episodeNumber: episodeRaw ? Number(episodeRaw) || null : null,
         durationSeconds: durationRaw ? Number(durationRaw) || null : null,
         recordedAt: recordedAtRaw ? new Date(recordedAtRaw) : kind === 'recording' ? new Date() : null,
-        isEmbedded,
-        embedProvider: isEmbedded ? embedProvider : null,
+        // YouTube publishes a poster at a predictable URL, so a linked video
+        // gets a real thumbnail on the shelf instead of the grey placeholder
+        // every other provider falls back to.
+        thumbnailPath: embed?.thumbnailUrl ?? null,
       },
       include: { course: { select: { title: true } } },
     });
@@ -183,13 +205,14 @@ export async function POST(req: NextRequest) {
      */
     const lecturer = await prisma.lecturer.findUnique({ where: { id: lecturerId } });
     const assignment = readAssignment(lecturer);
-    if (isAssigned(assignment)) {
+    const audience = studentWhereForLecturer(assignment, lecturerId);
+    if (audience) {
       const recipients = await prisma.student.findMany({
-        where: (studentWhereForAssignment(assignment) ?? {}) as any,
-        select: { id: true, admission: true },
+        where: audience as any,
+        select: { id: true, admission: true, tutorId: true },
       });
       const studentIds = recipients
-        .filter((student) => matchesBatch(assignment, student.admission))
+        .filter((student) => belongsToLecturer(assignment, lecturerId, student))
         .map((student) => student.id);
 
       if (studentIds.length) {

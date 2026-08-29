@@ -6,8 +6,68 @@ import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import type { StudentAccess } from "@/lib/access";
-import TuitionMascot from "@/components/TuitionMascot";
+import Mascot from "@/components/Mascot";
 import GermanyJourney from "@/components/journey/GermanyJourney";
+import { PRIVATE_CLASS_UPGRADE_PRICE } from "@/lib/payment";
+
+/**
+ * The one-to-one option, offered on the locked screen.
+ *
+ * Its own component so the checkout call and its failure state stay out of the
+ * lock screen's animation tree — this panel can be mid-request while the
+ * mascot is still walking in, and neither should re-render the other.
+ */
+function PrivateClassAlternative() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function start() {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/paystack/initialize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "private_class_upgrade" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error || "Could not start that payment.");
+        return;
+      }
+      if (data.authorizationUrl) window.location.href = data.authorizationUrl;
+      else setError("Could not start that payment.");
+    } catch {
+      setError("Could not start that payment.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    // This card sits on the screen's own hardcoded dark scrim, not on the
+    // site's themed background, so its colours are fixed light-on-dark rather
+    // than pulled from --surface/--border/--muted — those flip to near-white
+    // in the light theme and made this whole panel unreadable.
+    <div className="mt-6 rounded-2xl border border-white/15 bg-white/[0.04] p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/60">
+        Or study one-to-one
+      </p>
+      <p className="mt-2 text-sm leading-6 text-white/70">
+        Private tuition is a tutor to yourself, at times you choose, instead of a seat in
+        the group class — {naira(PRIVATE_CLASS_UPGRADE_PRICE)} for your level.
+      </p>
+      <button
+        onClick={start}
+        disabled={busy}
+        className="mt-3 rounded-full border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:opacity-50"
+      >
+        {busy ? "Starting…" : "Study one-to-one instead"}
+      </button>
+      {error && <p className="mt-2 text-xs text-rose-300">{error}</p>}
+    </div>
+  );
+}
 
 /** Fixed, not random — random positions would differ between server and client. */
 const EMBERS = [
@@ -41,11 +101,11 @@ function BlurredPageGhost() {
         <div className="h-4 w-3/5 rounded-full bg-slate-300/45" />
         <div className="grid grid-cols-2 gap-5 pt-4 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-28 rounded-3xl bg-white/55" />
+            <div key={i} className="h-28 rounded-3xl bg-[var(--surface-alt)]/50" />
           ))}
         </div>
         <div className="grid gap-5 lg:grid-cols-[1.4fr_0.6fr]">
-          <div className="space-y-4 rounded-3xl bg-white/55 p-6">
+          <div className="space-y-4 rounded-3xl bg-[var(--surface-alt)]/50 p-6">
             {[0, 1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="flex items-center gap-4">
                 <div className="h-11 w-11 rounded-2xl bg-slate-400/40" />
@@ -56,7 +116,7 @@ function BlurredPageGhost() {
               </div>
             ))}
           </div>
-          <div className="space-y-4 rounded-3xl bg-white/55 p-6">
+          <div className="space-y-4 rounded-3xl bg-[var(--surface-alt)]/50 p-6">
             {[0, 1, 2, 3].map((i) => (
               <div key={i} className="h-16 rounded-2xl bg-slate-300/40" />
             ))}
@@ -228,7 +288,11 @@ export default function PaymentLockScreen({
                 transition={{ type: "spring", stiffness: 80, damping: 15, delay: 0.25 }}
                 className="shrink-0"
               >
-                <TuitionMascot pointing className="h-44 w-44 sm:h-56 sm:w-56" />
+                {/* `concerned`, not cheerful and certainly not stern. This is the
+                    screen where somebody has hit a wall over money; a beaming
+                    mascot reads as gloating and a frowning one as blame. An
+                    awkward, attentive face is the only honest option. */}
+                <Mascot mood="concerned" className="h-44 w-44 sm:h-56 sm:w-56" />
               </motion.div>
 
               <motion.div
@@ -263,7 +327,7 @@ export default function PaymentLockScreen({
 
                 {access && access.requiredDeposit > 0 && (
                   <div className="mt-6">
-                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-300">
+                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-white/60">
                       <span>Towards your seat</span>
                       <span>{progress}%</span>
                     </div>
@@ -275,7 +339,7 @@ export default function PaymentLockScreen({
                         transition={{ duration: 1, delay: 0.8, ease: "easeOut" }}
                       />
                     </div>
-                    <p className="mt-2 text-xs text-[var(--muted)]">
+                    <p className="mt-2 text-xs text-white/60">
                       {naira(access.totalPaid)} of {naira(access.requiredDeposit)} paid
                     </p>
                   </div>
@@ -295,13 +359,30 @@ export default function PaymentLockScreen({
                     View my payments
                   </Link>
                 </div>
+
+                {/*
+                  THE OTHER DOOR.
+
+                  One-to-one tuition is an ALTERNATIVE to the group fee, not an
+                  extra on top of it, and this screen is the one moment a
+                  student is actively deciding how to pay for the course. The
+                  upsell used to live only on the dashboard — which this student
+                  cannot reach, because they have not paid — so the people most
+                  likely to be weighing "is the group class right for me" were
+                  the only people never shown the other option.
+
+                  Deliberately quieter than the tuition button. Somebody who has
+                  hit a wall over money must not be sold at; the offer is there
+                  to be found, not pushed.
+                */}
+                <PrivateClassAlternative />
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
         {!revealed && (
-          <p className="mt-10 max-w-md text-sm leading-7 text-[var(--muted)]">
+          <p className="mt-10 max-w-md text-sm leading-7 text-white/60">
             Your registration is confirmed — pay the tuition fee to unlock {areaLabel.toLowerCase()}.
           </p>
         )}

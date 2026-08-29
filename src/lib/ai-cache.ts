@@ -18,7 +18,10 @@ import { prisma } from "@/lib/prisma";
 export type CacheTask =
   | "material_summary"
   | "material_quests"
-  | "cohort_missions";
+  | "cohort_missions"
+  | "student_brief_line"
+  | "class_transcript_notes"
+  | "class_note_personal_line";
 
 function keyFor(task: CacheTask, input: string): string {
   return crypto.createHash("sha256").update(`${task}:${input}`).digest("hex");

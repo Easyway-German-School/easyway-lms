@@ -39,7 +39,7 @@ export default function DashboardPageHeader({
                 value={searchValue ?? ""}
                 onChange={(event: ChangeEvent<HTMLInputElement>) => onSearchChange(event.target.value)}
                 placeholder={`Search ${title.toLowerCase()}`}
-                className="w-full rounded-2xl border border-[var(--border)] bg-[#F9F7F5] px-4 py-3 text-sm text-[var(--foreground)] outline-none transition focus:border-[#FF6600] focus:bg-[var(--surface)] focus:ring-4 focus:ring-orange-100"
+                className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-sm text-[var(--foreground)] outline-none transition focus:border-[#FF6600] focus:bg-[var(--surface)] focus:ring-4 focus:ring-orange-100"
               />
             ) : null}
             {action ? <div className={`mt-4 ${onSearchChange ? "md:mt-4" : "md:mt-0"}`}>{action}</div> : null}
@@ -57,7 +57,7 @@ export default function DashboardPageHeader({
               className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
                 activeTab === tab
                   ? "bg-[#FF6600] text-white shadow-sm"
-                  : "bg-[#F8FBFF] text-[var(--foreground-soft)] hover:bg-[#eef6ff]"
+                  : "bg-[var(--surface-alt)] text-[var(--foreground-soft)] hover:bg-[var(--border)]"
               }`}
             >
               {tab}

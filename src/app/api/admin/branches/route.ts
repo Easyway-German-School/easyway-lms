@@ -1,25 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-import { adminHasCapability } from "@/lib/admin-roles";
-import { requireTenantSession, tenantScopeForUser } from "@/lib/tenant-access";
-
-async function isAdmin(userId: string) {
-  // Admin AND cleared for this area — see src/lib/admin-roles.ts.
-  return adminHasCapability(userId, "branches");
-}
+import { requireCapability } from "@/lib/admin-roles";
+import { tenantWhere } from "@/lib/auth";
 
 export async function GET() {
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
-
-  if (!await isAdmin(auth.session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
-
-  const where: Record<string, unknown> = tenantScopeForUser(auth.tenantId);
+  const gate = await requireCapability("branches");
+  if (!gate.ok) return gate.response;
 
   const branches = await prisma.branch.findMany({
-    where,
+    where: tenantWhere(gate.session.user.tenantId),
     orderBy: { name: "asc" },
   });
 
@@ -27,12 +16,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
-
-  if (!await isAdmin(auth.session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const gate = await requireCapability("branches");
+  if (!gate.ok) return gate.response;
 
   const body = await request.json().catch(() => ({}));
   const name = typeof body.name === "string" ? body.name.trim() : "";
@@ -49,7 +34,7 @@ export async function POST(request: Request) {
         name,
         location: location || null,
         status,
-        ...(auth.tenantId ? { tenantId: auth.tenantId } : {}),
+        ...(gate.session.user.tenantId ? { tenantId: gate.session.user.tenantId } : {}),
       },
     });
     return NextResponse.json({ branch }, { status: 201 });
@@ -59,12 +44,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
-
-  if (!await isAdmin(auth.session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const gate = await requireCapability("branches");
+  if (!gate.ok) return gate.response;
 
   const body = await request.json().catch(() => ({}));
   const branchId = typeof body.branchId === "string" ? body.branchId : "";
@@ -77,12 +58,12 @@ export async function PATCH(request: Request) {
   }
 
   try {
-    if (auth.tenantId) {
+    if (gate.session.user.tenantId) {
       const existing = await prisma.branch.findUnique({
         where: { id: branchId },
         select: { tenantId: true },
       });
-      if (!existing || existing.tenantId !== auth.tenantId) {
+      if (!existing || existing.tenantId !== gate.session.user.tenantId) {
         return NextResponse.json({ error: "Branch not found" }, { status: 404 });
       }
     }
@@ -102,12 +83,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
-
-  if (!await isAdmin(auth.session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const gate = await requireCapability("branches");
+  if (!gate.ok) return gate.response;
 
   const body = await request.json().catch(() => ({}));
   const branchId = typeof body.branchId === "string" ? body.branchId : "";
@@ -116,12 +93,12 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    if (auth.tenantId) {
+    if (gate.session.user.tenantId) {
       const existing = await prisma.branch.findUnique({
         where: { id: branchId },
         select: { tenantId: true },
       });
-      if (!existing || existing.tenantId !== auth.tenantId) {
+      if (!existing || existing.tenantId !== gate.session.user.tenantId) {
         return NextResponse.json({ error: "Branch not found" }, { status: 404 });
       }
     }

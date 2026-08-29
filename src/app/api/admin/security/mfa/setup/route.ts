@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import QRCode from "qrcode";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { resolveAdmin } from "@/lib/admin-roles";
+import { requireAdmin } from "@/lib/admin-roles";
 import { beginEnrolment } from "@/lib/mfa";
 
 /**
@@ -14,9 +12,9 @@ import { beginEnrolment } from "@/lib/mfa";
  * and came back needs to happen.
  */
 export async function POST() {
-  const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
-  const admin = await resolveAdmin(session?.user?.id);
-  if (!admin) return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+  const admin = auth.admin;
 
   const existing = await prisma.user.findUnique({
     where: { id: admin.userId },

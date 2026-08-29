@@ -34,11 +34,34 @@ export const KIND = {
   levelAdvance: "level.advance",
   materialPublished: "material.published",
   assignmentDue: "assignment.due",
+  /** A student handed in work. The tutor who set it is waiting to mark it. */
+  assignmentSubmitted: "assignment.submitted",
   resultPublished: "result.published",
+  certificateIssued: "certificate.issued",
   classStarting: "class.starting",
+  privateClassUpdated: "private_class.updated",
+  attendanceMarked: "attendance.marked",
   lecturerMessage: "lecturer.message",
   leadCaptured: "lead.captured",
+  /** A student asked the office for help, or wrote back on a thread. */
+  supportTicket: "support.ticket",
+  /** The office answered. This is the one the student is waiting on. */
+  supportReply: "support.reply",
+  /** A student submitted a refund request, acknowledging the policy first. */
+  refundRequested: "refund.requested",
+  /** The office approved, rejected, or paid out a refund request. */
+  refundDecided: "refund.decided",
   announcement: "announcement",
+  /** Somebody started a game in the room's chat — see /api/community/messages. */
+  gameInvite: "game.invite",
+  /** A class recording uploaded but the bucket won't serve it back — admins need to know before a student does. */
+  recordingFailed: "recording.failed",
+  /** One or more of a tutor's students look like they're drifting away — see src/lib/student-risk.ts. */
+  studentAtRisk: "student.at_risk",
+  /** A student's day-streak lapses at midnight if they do nothing today — see src/lib/streak-reminders.ts. */
+  streakAtRisk: "streak.at_risk",
+  /** The transcript + AI notes for a class recording finished generating — see src/lib/class-transcription.ts. */
+  classNotesReady: "class.notes_ready",
   general: "general",
 } as const;
 

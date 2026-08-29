@@ -13,7 +13,18 @@ import { KIND, notify } from "@/lib/notify";
  * office; it must never be the reason a student's signup or payment fails.
  */
 
+/** Where an alert about one student should land. */
+function studentLink(studentId?: string | null): string {
+  return studentId ? `/admin/students/${studentId}` : "/admin/students";
+}
+
 type RegistrationAlert = {
+  /**
+   * Who to open. Null only when the post-create lookup failed, in which case
+   * both the bell and the email fall back to the roster — a link to a list is
+   * a mild annoyance, a link to /admin/students/null is a broken page.
+   */
+  studentId?: string | null;
   studentName: string;
   studentEmail: string;
   studentCode: string | null;
@@ -26,6 +37,7 @@ type RegistrationAlert = {
 
 function registrationHtml(input: RegistrationAlert): string {
   const base = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
+  const target = studentLink(input.studentId);
   const row = (label: string, value: string) => `
     <tr>
       <td style="padding:6px 12px 6px 0;color:#64748b;font-size:13px">${label}</td>
@@ -51,9 +63,9 @@ function registrationHtml(input: RegistrationAlert): string {
       </table>
 
       <p style="margin:24px 0 0">
-        <a href="${base}/admin/students"
+        <a href="${base}${target}"
            style="background:#0a7cff;color:#fff;padding:10px 22px;text-decoration:none;border-radius:6px;display:inline-block;font-size:14px">
-          Open the student roster
+          ${input.studentId ? "Open this student's file" : "Open the student roster"}
         </a>
       </p>
 
@@ -82,7 +94,7 @@ export async function notifyAdminsOfRegistration(input: RegistrationAlert): Prom
       message: `${input.studentName} signed up for ${input.level} (${input.sessionSlot}${
         input.classType === "private" ? ", private" : ""
       }) at ${input.branchName ?? "no branch selected"}.`,
-      link: "/admin/students",
+      link: studentLink(input.studentId),
       push: true,
     });
   } catch (error) {

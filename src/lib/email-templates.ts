@@ -292,3 +292,53 @@ export function examResultsEmailTemplate(
     `,
   };
 }
+
+/**
+ * The reset link.
+ *
+ * Deliberately the plainest mail this system sends. No banner image, no
+ * marketing, nothing to click except the one button — because this is the
+ * message a phisher most wants to imitate, and the more decorated the real one
+ * is, the easier a fake one is to pass off. It also states the expiry and what
+ * to do if the request was not theirs, which is the only useful thing we can
+ * tell somebody whose account may be under attack.
+ */
+export function passwordResetEmailTemplate(name: string | null, link: string): EmailTemplate {
+  const greeting = name?.trim() ? name.trim().split(/\s+/)[0] : "there";
+  return {
+    subject: "Reset your Easyway password",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+        <h1 style="font-size: 20px; margin-bottom: 20px;">Reset your password</h1>
+
+        <p>Hello ${greeting},</p>
+
+        <p>Somebody asked to reset the password on your Easyway account. If that was you, use the button below.</p>
+
+        <p style="margin: 28px 0;">
+          <a href="${link}" style="background-color: #1f6f4a; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+            Choose a new password
+          </a>
+        </p>
+
+        <p style="font-size: 14px; color: #666;">
+          This link works once and expires in one hour.
+        </p>
+
+        <p style="font-size: 14px; color: #666;">
+          If you did not ask for this, you can ignore this email — your password
+          will not change. If you keep receiving these, please reply and tell us.
+        </p>
+
+        <p style="margin-top: 24px; font-size: 12px; color: #999;">
+          If the button does not work, paste this into your browser:<br/>
+          <span style="word-break: break-all;">${link}</span>
+        </p>
+
+        <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
+          Easyway Language School
+        </p>
+      </div>
+    `,
+  };
+}

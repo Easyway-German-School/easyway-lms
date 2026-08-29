@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { resolveAdmin } from "@/lib/admin-roles";
+import { requireAdmin, type AdminContext } from "@/lib/admin-roles";
 import { ollamaWarm } from "@/lib/ollama";
 import { runTool, toolSpecsFor, type ToolOutcome } from "@/lib/assistant-tools";
 import { actionSpecsFor, isActionName } from "@/lib/assistant-actions";
@@ -305,18 +303,9 @@ number of people it affects and a Confirm button. You are drafting; they decide.
  */
 const MAX_TOOL_ROUNDS = 4;
 
-async function requireAssistantAdmin() {
-  const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
-  const admin = await resolveAdmin(session?.user?.id);
-  if (!admin) {
-    return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
-  }
-  return { admin };
-}
-
 export async function GET() {
-  const auth = await requireAssistantAdmin();
-  if (auth.error) return auth.error;
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
 
   const [status, briefing] = await Promise.all([
     brainStatus(),
@@ -355,8 +344,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAssistantAdmin();
-  if (auth.error) return auth.error;
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
 
   const body = await request.json().catch(() => ({}));
   const question = typeof body.question === "string" ? body.question.trim() : "";
@@ -512,12 +501,16 @@ export async function POST(request: Request) {
         /**
          * Which brain is actually answering, once we know.
          *
-         * Set the moment a round comes back from the local model, and pinned
-         * for the rest of the loop — see the `force` option on brainTurn. One
-         * question is answered by one model; re-deciding per round produces a
-         * conversation half of which the answering model never saw.
+         * Set the moment a round comes back from a brain other than the
+         * default hosted one — Groq after a Claude fallback, or Ollama after
+         * either — and pinned for the rest of the loop — see the `force`
+         * option on brainTurn. One question is answered by one model;
+         * re-deciding per round produces a conversation half of which the
+         * answering model never saw, and would otherwise re-try Claude on the
+         * next round, fail the same way, and find the conversation mid-tool-
+         * call — refusing the very fallback that just happened.
          */
-        let pinned: "ollama" | undefined;
+        let pinned: "groq" | "ollama" | undefined;
 
         /**
          * The tool loop.
@@ -554,7 +547,7 @@ export async function POST(request: Request) {
             send({ type: "error", error: turn.reason });
             return finish();
           }
-          if (turn.provider === "ollama") pinned = "ollama";
+          if (turn.provider === "groq" || turn.provider === "ollama") pinned = turn.provider;
 
           if (turn.toolCalls.length === 0) {
             send({

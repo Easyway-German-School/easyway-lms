@@ -24,11 +24,13 @@ type Student = {
 export default function StudentPicker({
   level,
   branchId,
+  sessionSlot,
   selected,
   onChange,
 }: {
   level: string;
   branchId?: string | null;
+  sessionSlot?: string | null;
   selected: string[];
   onChange: (ids: string[]) => void;
 }) {
@@ -43,6 +45,7 @@ export default function StudentPicker({
 
     const params = new URLSearchParams({ level });
     if (branchId) params.set("branchId", branchId);
+    if (sessionSlot) params.set("sessionSlot", sessionSlot);
 
     fetch(`/api/lecturer/assignments/students?${params}`, { cache: "no-store" })
       .then((response) => response.json())
@@ -63,7 +66,7 @@ export default function StudentPicker({
     // `selected` and `onChange` are deliberately absent: this must re-run when
     // the level changes, not on every tick of a checkbox.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, branchId]);
+  }, [level, branchId, sessionSlot]);
 
   const visible = students.filter((student) => {
     const needle = query.trim().toLowerCase();

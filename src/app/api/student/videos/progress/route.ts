@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isEffectivelyComplete } from "@/lib/video-library";
 
@@ -16,7 +16,8 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = (await getServerSession(authOptions as any)) as any;
+    const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -65,7 +66,23 @@ export async function POST(request: NextRequest) {
       create: { studentId: student.id, materialId, positionSeconds: furthest, completed },
     });
 
-    return NextResponse.json({ ok: true, positionSeconds: furthest, completed });
+    // Only the tick that actually crosses the line celebrates — this route is
+    // called repeatedly on a timer, and re-saving progress on an already-
+    // finished video must not re-fire the moment on every subsequent tick.
+    const freshlyCompleted = completed && !existing?.completed;
+    let title: string | null = null;
+    if (freshlyCompleted) {
+      const material = await prisma.material.findUnique({ where: { id: materialId }, select: { title: true } });
+      title = material?.title ?? null;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      positionSeconds: furthest,
+      completed,
+      celebrate: freshlyCompleted,
+      title,
+    });
   } catch (error) {
     console.error("Failed to save video progress", error);
     return NextResponse.json({ error: "Failed to save progress" }, { status: 500 });

@@ -94,7 +94,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
 
   if (loading) {
     return (
-      <div className="rounded-[32px] border border-white/10 bg-[#0b1220] p-8 text-slate-300">
+      <div className="rounded-[32px] border border-[var(--border)] bg-[#0b1220] p-8 text-[var(--muted)]">
         Loading your tuition figures…
       </div>
     );
@@ -131,7 +131,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
   return (
     <div className="overflow-hidden rounded-[32px] border border-[#c8a24a]/30 bg-gradient-to-b from-[#0b1220] via-[#0d1526] to-[#0b1220] shadow-[0_30px_80px_-40px_rgba(200,162,74,0.45)]">
       {/* ---- Anchor: the whole fee, then shrunk to a weekly figure ---- */}
-      <div className="border-b border-white/10 px-8 pt-8 pb-6">
+      <div className="border-b border-[var(--border)] px-8 pt-8 pb-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.32em] text-[#c8a24a]">
@@ -149,7 +149,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
         </div>
 
         {offer.totalPaid > 0 ? (
-          <p className="mt-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+          <p className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-sm text-[var(--muted)]">
             {naira(offer.totalPaid)} received so far.{" "}
             <span className="font-semibold text-white">{naira(offer.outstanding)} still owing</span> —{" "}
             {offer.remainingPercent}% of your tuition.
@@ -203,7 +203,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
 
         {/* ---- Part-payment: available, but never the path of least resistance ---- */}
         {options.deposit.available ? (
-          <div className="mt-8 border-t border-white/10 pt-6">
+          <div className="mt-8 border-t border-[var(--border)] pt-6">
             <button
               type="button"
               onClick={() => setPartPayOpen((open) => !open)}
@@ -222,7 +222,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
                   transition={{ duration: 0.25 }}
                   className="overflow-hidden"
                 >
-                  <div className="mt-5 rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+                  <div className="mt-5 rounded-3xl border border-[var(--border)] bg-[var(--surface)]/[0.03] p-6">
                     <p className="text-base font-semibold text-slate-200">{options.deposit.headline}</p>
                     <p className="mt-2 text-sm text-[var(--muted)]">{options.deposit.subline}</p>
                     <ul className="mt-4 space-y-2 text-sm text-[var(--muted)]">
@@ -234,7 +234,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
                       type="button"
                       onClick={() => startCheckout("deposit")}
                       disabled={busy !== null}
-                      className="mt-5 rounded-full border border-white/20 bg-white/5 px-5 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-5 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-5 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:bg-[var(--surface-alt)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {busy === "deposit" ? "Opening…" : `Pay ${naira(options.deposit.amount)} and owe the rest`}
                     </button>
@@ -257,7 +257,7 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
 
 function PerkRow({ perk }: { perk: Perk }) {
   return (
-    <li className="flex items-start gap-3 rounded-2xl bg-white/[0.04] px-4 py-3">
+    <li className="flex items-start gap-3 rounded-2xl bg-[var(--surface)]/[0.04] px-4 py-3">
       <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-[#c8a24a]" />
       <span>
         <span className="block text-sm font-medium text-slate-100">{perk.label}</span>

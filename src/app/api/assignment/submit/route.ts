@@ -2,15 +2,19 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthSession } from "@/lib/auth";
+import { notify, KIND } from "@/lib/notify";
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions as any) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const student = await prisma.student.findUnique({
-    where: { userId: session.user.id as string }
+    where: { userId: session.user.id as string },
+    include: { tutor: { select: { userId: true } } },
   });
 
   if (!student) {
@@ -18,20 +22,39 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const formData = await request.formData();
-    const lessonId = formData.get("lessonId")?.toString();
-    const submission = formData.get("submission")?.toString() || "";
-    const file = formData.get("file") as File | null;
+    /**
+     * JSON, not multipart — and that is the fix, not a refactor.
+     *
+     * This route used to take the file itself and then THROW THE BYTES AWAY,
+     * recording `[File uploaded: homework.pdf]` in a text column and returning
+     * "Assignment submitted successfully". A student handed in their work, was
+     * told it arrived, and there was nothing for the tutor to open. Silent data
+     * loss with a success message on top is the worst failure in the app.
+     *
+     * The browser now sends the file to the bucket first, through the same
+     * presigned path everything else uses, and posts the resulting URL here.
+     * That also gets a real homework scan off Vercel's 4.5 MB request-body
+     * ceiling, which this route would have hit anyway the moment it did try to
+     * store anything.
+     */
+    const body = await request.json().catch(() => ({} as Record<string, unknown>));
+    const lessonId = String(body.lessonId ?? "");
+    const submission = String(body.submission ?? "");
+    const fileUrl = body.fileUrl ? String(body.fileUrl) : null;
+    const fileName = body.fileName ? String(body.fileName) : null;
 
     if (!lessonId) {
       return NextResponse.json({ error: "Lesson ID required" }, { status: 400 });
     }
+    if (!submission.trim() && !fileUrl) {
+      return NextResponse.json({ error: "Write something or attach a file" }, { status: 400 });
+    }
 
     let submissionText = submission;
-    if (file) {
-      const fileName = file.name;
-      // In production, upload to S3 or similar. For now, just record the file info
-      submissionText += `\n\n[File uploaded: ${fileName}]`;
+    if (fileUrl) {
+      // A link the tutor can actually click, rather than a filename that only
+      // proves a file once existed on somebody else's laptop.
+      submissionText += `${submissionText ? "\n\n" : ""}[${fileName ?? "Attached file"}](${fileUrl})`;
     }
 
     // Record as a Grade with type "assignment"
@@ -44,6 +67,14 @@ export async function POST(request: NextRequest) {
         feedback: "Pending lecturer review"
       }
     });
+
+    // Was this lesson already marked completed? Decides whether the client
+    // celebrates — a resubmission of already-finished work isn't a fresh win.
+    const existingCompletion = await prisma.completion.findUnique({
+      where: { studentId_lessonId: { studentId: student.id, lessonId } },
+      select: { status: true },
+    });
+    const freshCompletion = existingCompletion?.status !== "completed";
 
     // Mark lesson as completed
     await prisma.completion.upsert({
@@ -65,9 +96,24 @@ export async function POST(request: NextRequest) {
       }
     });
 
+    // Same rule as the modern assignment path: tell the tutor this student is
+    // actually assigned to, not a guess at who teaches the lesson.
+    if (student.tutor?.userId) {
+      await notify({
+        to: { userIds: [student.tutor.userId] },
+        kind: KIND.assignmentSubmitted,
+        severity: "info",
+        title: "A submission needs marking",
+        message: `${session.user?.name ?? "A student"} handed in work — it's pending review.`,
+        link: "/lecturer/assignments/mark",
+        dedupeKey: `assignment-submitted:${lessonId}:${student.id}`,
+      }).catch((error) => console.error("Legacy assignment notification failed", error));
+    }
+
     return NextResponse.json({
       message: "Assignment submitted successfully",
-      gradeId: grade.id
+      gradeId: grade.id,
+      celebrate: freshCompletion,
     });
   } catch (error) {
     console.error("Assignment submission error:", error);

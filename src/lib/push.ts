@@ -79,19 +79,28 @@ export async function sendPushToUsers(userIds: string[], payload: PushPayload) {
 }
 
 /**
- * Everyone who belongs to a space: the students at that branch and level.
- * Staff are not included — a lecturer teaching six levels should not get a
- * phone buzz for every message in all of them.
+ * Everyone who belongs to a space: the students in that branch, level AND
+ * sitting.
+ *
+ * The sitting was missing, and it was a real leak rather than an untidiness —
+ * a space is now one cohort, but this resolved its membership by branch and
+ * level alone, so a message in the morning A1 room buzzed the phones of the
+ * afternoon and evening A1 students too. They cannot open the room the push
+ * points at, which is the worst kind of notification: one you are not allowed
+ * to act on.
+ *
+ * Staff are still not included — a lecturer teaching six levels should not get
+ * a phone buzz for every message in all of them.
  */
 export async function spaceMemberIds(spaceId: string, exclude?: string) {
   const space = await prisma.space.findUnique({
     where: { id: spaceId },
-    select: { branchId: true, level: true },
+    select: { branchId: true, level: true, sessionSlot: true },
   });
   if (!space) return [];
 
   const students = await prisma.student.findMany({
-    where: { branchId: space.branchId, level: space.level },
+    where: { branchId: space.branchId, level: space.level, sessionSlot: space.sessionSlot },
     select: { userId: true },
   });
 
@@ -99,18 +108,24 @@ export async function spaceMemberIds(spaceId: string, exclude?: string) {
 }
 
 /**
- * Everyone already involved in a thread — its author plus anyone who replied.
- * Replies notify this narrower set rather than the whole space, so a busy
- * thread does not spam people who never opened it.
+ * Everyone already involved in a conversation — the author of a message plus
+ * anyone who has quoted it.
+ *
+ * Kept, but much narrower than it was. Under the old forum this backed a push
+ * on every reply; in a chat that would buzz a phone for every sentence, which
+ * is how a school teaches its students to turn notifications off. Ordinary chat
+ * now interrupts through the in-portal popup only — see `community-notify.ts`
+ * for where that line is drawn — and this is left for the cases where somebody
+ * is genuinely being answered.
  */
-export async function threadParticipantIds(threadId: string, exclude?: string) {
-  const thread = await prisma.thread.findUnique({
-    where: { id: threadId },
-    select: { authorId: true, comments: { select: { authorId: true } } },
+export async function messageParticipantIds(messageId: string, exclude?: string) {
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: { authorId: true, quotedBy: { select: { authorId: true } } },
   });
-  if (!thread) return [];
+  if (!message) return [];
 
-  const ids = new Set<string>([thread.authorId, ...thread.comments.map((c) => c.authorId)]);
+  const ids = new Set<string>([message.authorId, ...message.quotedBy.map((m) => m.authorId)]);
   if (exclude) ids.delete(exclude);
   return [...ids];
 }

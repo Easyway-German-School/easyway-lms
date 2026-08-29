@@ -13,6 +13,12 @@ export type LecturerStudent = {
   classType: string;
   status: string;
   pathway: string;
+  /**
+   * Put here by the office rather than found by branch + level. Worth marking:
+   * a tutor scanning their own class for a name they do not recognise should
+   * be able to see straight away that it was deliberate.
+   */
+  namedByOffice?: boolean;
   joinedAt: string;
   phone: string | null;
   city: string | null;
@@ -193,8 +199,9 @@ export default function LecturerStudentRoster({ compact = false }: { compact?: b
 
       {students.length === 0 ? (
         <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-6 text-sm text-[var(--muted)]">
-          Nobody has enrolled in this class yet. New students appear here the moment they register for your branch, level
-          and session — you do not have to add them.
+          Nobody is in this class yet. Students appear here the moment they register for your branch, level and session
+          — you do not have to add them. If somebody should be here and is not, ask the office to put them on your class
+          by name; their branch or sitting probably does not match yours.
         </p>
       ) : compact ? null : (
         <>
@@ -224,7 +231,17 @@ export default function LecturerStudentRoster({ compact = false }: { compact?: b
                       <div className="flex items-center gap-3">
                         <Avatar student={student} />
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-[var(--foreground)]">{student.name}</p>
+                          <p className="flex items-center gap-2 truncate font-medium text-[var(--foreground)]">
+                            {student.name}
+                            {student.namedByOffice ? (
+                              <span
+                                className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[var(--accent)]"
+                                title="The office assigned this student to you individually."
+                              >
+                                Assigned to you
+                              </span>
+                            ) : null}
+                          </p>
                           <p className="truncate text-xs text-[var(--muted)]">{student.email}</p>
                         </div>
                       </div>

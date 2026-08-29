@@ -25,16 +25,19 @@
 import { EgressStatus } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
+import { createRecordingThumbnail } from "@/lib/recording-thumbnail";
 import {
   AUDIO_ENCODING,
   CLASS_ENCODING,
   buildFileOutput,
   egressClient,
+  egressTemplateBaseUrl,
   recordingConfigured,
   recordingObjectKey,
   recordingPublicUrl,
   recordingStorage,
   recordingVariant,
+  verifyRecordingObject,
 } from "@/lib/recording";
 
 export type StartRecordingInput = {
@@ -45,6 +48,15 @@ export type StartRecordingInput = {
   level?: string | null;
   sessionSlot?: string | null;
   startedByUserId?: string | null;
+  /**
+   * Set only for a private one-to-one capture. See the module comment on
+   * `ClassRecording.privateClassId` in schema.prisma for why this is what
+   * scopes visibility instead of `level`/`branchId` — those two stay set
+   * (the room and object key still live under the student's own level
+   * folder) but are never used to broadcast a private recording the way a
+   * cohort one is.
+   */
+  privateClassId?: string | null;
 };
 
 /**
@@ -79,14 +91,14 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
         create: {
           egressId: adopted.egressId,
           roomName: input.roomName,
-          tenantId: input.tenantId ?? null,
           branchId: input.branchId ?? null,
           level: input.level ?? null,
           sessionSlot: input.sessionSlot ?? null,
           startedByUserId: input.startedByUserId ?? null,
+          privateClassId: input.privateClassId ?? null,
           status: "active",
         },
-        update: { tenantId: input.tenantId ?? null },
+        update: {},
       });
       return adopted.egressId;
     }
@@ -104,14 +116,22 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
     });
 
     const variant = recordingVariant();
+    // The custom template (src/app/live/egress-template) only ever matters for
+    // video — an audio-only capture has no layout to render. `customBaseUrl`
+    // is null wherever a public app URL isn't configured (local dev), which
+    // falls back to the built-in `layout: "speaker"` rather than pointing
+    // LiveKit's cloud egress at an unreachable localhost.
+    const templateUrl = variant === "video" ? egressTemplateBaseUrl() : null;
     const info = await client.startRoomCompositeEgress(
       input.roomName,
       { file: buildFileOutput(objectKey, storage) },
       {
-        // The tutor is the lesson. "speaker" keeps whoever is talking large and
-        // everyone else small, which is both the most useful tape and the
-        // cheapest one to encode.
-        layout: "speaker",
+        // Fallback only: built-in "speaker" keeps whoever is talking large and
+        // everyone else small. The custom template above is preferred — it
+        // understands screen-share and the tutor's own "give the floor"
+        // control, which "speaker" has no way to know about.
+        layout: templateUrl ? undefined : "speaker",
+        customBaseUrl: templateUrl ?? undefined,
         audioOnly: variant === "audio",
         encodingOptions: variant === "audio" ? AUDIO_ENCODING : CLASS_ENCODING,
       },
@@ -126,6 +146,7 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
         level: input.level ?? null,
         sessionSlot: input.sessionSlot ?? null,
         startedByUserId: input.startedByUserId ?? null,
+        privateClassId: input.privateClassId ?? null,
         status: "active",
         variant,
         objectKey,
@@ -169,10 +190,10 @@ const SLOT_LABEL: Record<string, string> = {
   evening: "Evening",
 };
 
-/** "A1 · Morning class · 2 August" — what a student scanning the shelf reads. */
-function recordingTitle(input: { level?: string | null; sessionSlot?: string | null; at: Date }): string {
+/** "A1 · Morning class · 2 August", or "A2 · Private class · 2 August" — what a student scanning the shelf reads. */
+function recordingTitle(input: { level?: string | null; sessionSlot?: string | null; at: Date; isPrivate?: boolean }): string {
   const level = (input.level || "Class").toUpperCase();
-  const slot = SLOT_LABEL[String(input.sessionSlot || "")] ?? null;
+  const slot = input.isPrivate ? "Private" : (SLOT_LABEL[String(input.sessionSlot || "")] ?? null);
   const date = input.at.toLocaleDateString("en-GB", { day: "numeric", month: "long" });
   return slot ? `${level} · ${slot} class · ${date}` : `${level} · ${date}`;
 }
@@ -192,15 +213,16 @@ export async function finaliseRecording(egress: {
   fileResults?: Array<{ filename?: string; duration?: bigint | number; size?: bigint | number; location?: string }>;
 }): Promise<"created" | "already" | "failed" | "unknown"> {
   try {
-    console.debug && console.debug('finaliseRecording called', { egressId: egress.egressId, status: egress.status });
-    const row = await prisma.classRecording.findUnique({ where: { egressId: egress.egressId } });
+    const row =
+      (await prisma.classRecording.findUnique({ where: { egressId: egress.egressId } })) ??
+      (egress.fileResults?.[0]?.filename
+        ? await prisma.classRecording.findFirst({ where: { objectKey: egress.fileResults[0]!.filename } })
+        : null);
     if (!row) return "unknown";
-    console.debug && console.debug('found classRecording row', { id: row.id, status: row.status, materialId: row.materialId });
     if (row.materialId) return "already";
 
     const failed = egress.status === EgressStatus.EGRESS_FAILED || egress.status === EgressStatus.EGRESS_ABORTED;
     if (failed) {
-      console.info(`Recording egress ${egress.egressId} finished with failure status ${egress.status}`);
       await prisma.classRecording.update({
         where: { id: row.id },
         data: {
@@ -216,17 +238,53 @@ export async function finaliseRecording(egress: {
     const objectKey = result?.filename || row.objectKey;
     if (!objectKey) return "unknown";
 
+    // LiveKit saying the upload finished is not the same as this app being
+    // able to read it back — see the comment on `verifyRecordingObject`. A
+    // Backblaze/R2 outage, an exhausted download quota or a rotated key all
+    // answer LiveKit's own upload just fine and only show up here, on the
+    // read side. Catching it now means a "failed" row and an admin ping,
+    // instead of a Material row that looks ready and 404s the first time a
+    // student presses play.
+    const verified = await verifyRecordingObject(objectKey);
+    if (!verified.ok) {
+      await prisma.classRecording.update({
+        where: { id: row.id },
+        data: { status: "failed", endedAt: new Date(), objectKey, error: verified.reason },
+      });
+      notifyInBackground({
+        to: { audience: "admin", capability: "materials" },
+        kind: KIND.recordingFailed,
+        severity: "critical",
+        title: "A class recording uploaded but can't be read back",
+        message: `${recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: row.startedAt })}: ${verified.reason}`,
+        link: "/admin/materials",
+        dedupeKey: `recording-verify-failed:${row.egressId}`,
+      });
+      return "failed";
+    }
+
     // LiveKit reports duration in nanoseconds, as a bigint.
     const durationSeconds = result?.duration ? Math.round(Number(result.duration) / 1_000_000_000) : null;
     const sizeBytes = result?.size ? Number(result.size) : null;
     const fileUrl = recordingPublicUrl(objectKey);
     const recordedAt = row.startedAt;
+    const isPrivate = Boolean(row.privateClassId);
+    let thumbnailPath: string | null = null;
+    try {
+      thumbnailPath = await createRecordingThumbnail({
+        objectKey,
+        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt, isPrivate }),
+        level: row.level,
+        recordedAt,
+      });
+    } catch (thumbnailError) {
+      console.error(`Could not create thumbnail for recording ${row.egressId}:`, thumbnailError);
+    }
 
-    console.debug && console.debug('creating material row', { fileUrl, objectKey, durationSeconds, sizeBytes });
     const material = await prisma.material.create({
       data: {
-        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt }),
-        description: "Recorded automatically from the live class.",
+        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt, isPrivate }),
+        description: isPrivate ? "Recorded automatically from your private class." : "Recorded automatically from the live class.",
         filePath: fileUrl,
         fileName: objectKey.split("/").pop() || "class.mp4",
         fileType: "video/mp4",
@@ -234,8 +292,14 @@ export async function finaliseRecording(egress: {
         // The whole point: it lands on the "class recordings" shelf, not among
         // the tutor's prepared lesson videos.
         kind: "recording",
-        level: row.level,
+        // A private recording gets NO level. `/api/student/videos` matches on
+        // level OR the material's own `privateClasses` relation (set just
+        // below) — leaving level set here would put a private lesson on
+        // every other student's shelf at the same level, which is exactly
+        // the leak this whole private-capture feature must not create.
+        level: isPrivate ? null : row.level,
         durationSeconds,
+        thumbnailPath,
         recordedAt,
       },
     });
@@ -253,11 +317,33 @@ export async function finaliseRecording(egress: {
       },
     });
 
-    console.info(`Recording finalised and material created: materialId=${material.id} egress=${egress.egressId}`);
+    if (isPrivate && row.privateClassId) {
+      // The relation `/api/student/videos` actually reads to grant this one
+      // student access — see the module comment on `level` above.
+      await prisma.privateClass.update({
+        where: { id: row.privateClassId },
+        data: { materialId: material.id },
+      });
+    }
 
-    // Tell the cohort whose class it was, and only them. A student who missed
-    // Tuesday should not have to go looking.
-    if (row.level) {
+    if (isPrivate && row.privateClassId) {
+      const booking = await prisma.privateClass.findUnique({
+        where: { id: row.privateClassId },
+        select: { student: { select: { userId: true } } },
+      });
+      if (booking?.student.userId) {
+        notifyInBackground({
+          to: { userIds: [booking.student.userId] },
+          kind: KIND.materialPublished,
+          title: "Your private class recording is ready",
+          message: `${material.title} is now on your Watch shelf.`,
+          link: `/materials/watch/${material.id}`,
+          dedupeKey: `recording:${row.egressId}`,
+        });
+      }
+    } else if (row.level) {
+      // Tell the cohort whose class it was, and only them. A student who
+      // missed Tuesday should not have to go looking.
       notifyInBackground({
         to: { students: { branchId: row.branchId, level: row.level, sessionSlot: row.sessionSlot } },
         kind: KIND.materialPublished,
@@ -283,42 +369,85 @@ export async function finaliseRecording(egress: {
  * actually happened to every capture we still think is running, which makes the
  * webhook an optimisation rather than a dependency.
  */
+/**
+ * The webhook is the fast path. This is what stops a lost one costing a day.
+ *
+ * `reconcileRecordings` is driven by the daily cron, which is the right cadence
+ * for tidying up and completely the wrong one for a student who has just sat
+ * through a class and wants to rewatch the bit they missed. A capture finishes
+ * encoding a few minutes after the room empties, so the moment that actually
+ * matters is somebody opening the Watch shelf — and at that moment we can
+ * simply go and ask.
+ *
+ * Throttled to one pass a minute per server instance, because the shelf is
+ * opened by every student in the cohort at roughly the same time and none of
+ * them need their own round trip to LiveKit. It only ever looks at captures
+ * still marked active, so on the overwhelmingly common path it is a single
+ * indexed query that returns nothing.
+ *
+ * Never awaited by a page, and never allowed to throw: the shelf must render
+ * whether or not LiveKit is reachable.
+ */
+const RECONCILE_THROTTLE_MS = 60_000;
+let lastReconcileAt = 0;
+
+export function reconcileRecordingsSoon(): void {
+  const now = Date.now();
+  if (now - lastReconcileAt < RECONCILE_THROTTLE_MS) return;
+  lastReconcileAt = now;
+  void reconcileRecordings().catch((error) => {
+    console.error("Opportunistic recording reconcile failed:", error);
+  });
+}
+
+// A capture LiveKit has forgotten about (garbage-collected on its side, or
+// the egress id is simply wrong) is never going to answer `listEgress`. Left
+// alone that row sits "active" forever — nobody's fault, just nothing left to
+// ask. Past this age with no answer, it is dead and should say so.
+const STUCK_ACTIVE_HOURS = 6;
+
 export async function reconcileRecordings(): Promise<{ checked: number; finalised: number }> {
   const client = egressClient();
   if (!client || !recordingConfigured()) return { checked: 0, finalised: 0 };
 
+  // Only ACTIVE rows belong here. A row already sitting at "failed" or
+  // "aborted" already went through `finaliseRecording` once and got that
+  // status from LiveKit's own report — there is no second opinion to ask for,
+  // and re-finalising it by faking `EGRESS_COMPLETE` (the bug this used to
+  // have) is exactly how a class that genuinely never recorded ends up with a
+  // Material row pointing at a file that was never written.
   const open = await prisma.classRecording.findMany({
-    where: { materialId: null, objectKey: { not: null }, status: { not: "purged" } },
-    select: { egressId: true, objectKey: true, status: true },
+    where: { status: "active", objectKey: { not: null } },
+    select: { egressId: true, startedAt: true },
   });
   if (open.length === 0) return { checked: 0, finalised: 0 };
 
+  const staleBefore = Date.now() - STUCK_ACTIVE_HOURS * 3_600_000;
   let finalised = 0;
-  for (const { egressId, objectKey, status } of open) {
+  for (const { egressId, startedAt } of open) {
     try {
-      if (status === "active") {
-        const [info] = await client.listEgress({ egressId });
-        if (!info) continue;
-        const done =
-          info.status === EgressStatus.EGRESS_COMPLETE ||
-          info.status === EgressStatus.EGRESS_FAILED ||
-          info.status === EgressStatus.EGRESS_ABORTED;
-        if (!done) continue;
-
-        const outcome = await finaliseRecording({
-          egressId: info.egressId,
-          status: info.status,
-          error: info.error,
-          fileResults: info.fileResults,
-        });
-        if (outcome === "created" || outcome === "failed") finalised += 1;
+      const [info] = await client.listEgress({ egressId });
+      if (!info) {
+        if (startedAt.getTime() < staleBefore) {
+          await prisma.classRecording.update({
+            where: { egressId },
+            data: { status: "failed", endedAt: new Date(), error: "LiveKit has no record of this egress" },
+          });
+          finalised += 1;
+        }
         continue;
       }
+      const done =
+        info.status === EgressStatus.EGRESS_COMPLETE ||
+        info.status === EgressStatus.EGRESS_FAILED ||
+        info.status === EgressStatus.EGRESS_ABORTED;
+      if (!done) continue;
 
       const outcome = await finaliseRecording({
-        egressId,
-        status: EgressStatus.EGRESS_COMPLETE,
-        fileResults: [{ filename: objectKey ?? undefined }],
+        egressId: info.egressId,
+        status: info.status,
+        error: info.error,
+        fileResults: info.fileResults,
       });
       if (outcome === "created" || outcome === "failed") finalised += 1;
     } catch (error) {

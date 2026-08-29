@@ -35,6 +35,7 @@ type ResultRow = {
   note: string;
   password?: string;
   studentCode?: string | null;
+  emailed?: boolean;
 };
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -103,6 +104,7 @@ export default function BulkStudentAdd({
   const [preview, setPreview] = useState<ResultRow[] | null>(null);
   const [created, setCreated] = useState<ResultRow[] | null>(null);
   const [error, setError] = useState("");
+  const [sendState, setSendState] = useState<"idle" | "sending" | "done">("idle");
 
   const parsed = useMemo(() => {
     return text
@@ -167,12 +169,37 @@ export default function BulkStudentAdd({
       } else {
         setCreated(data.results ?? []);
         setPreview(null);
+        setSendState("idle");
         onImported?.();
       }
     } catch {
       setError("Network problem — nothing was imported.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** The batch version of the single-add form's "send it now?" prompt. */
+  async function sendLogins() {
+    if (!created) return;
+    const toSend = created.filter((row) => row.status === "created" && row.password);
+    if (toSend.length === 0) return;
+    setSendState("sending");
+    try {
+      const response = await fetch("/api/admin/students/send-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          students: toSend.map((row) => ({ name: row.name, email: row.email, password: row.password, studentCode: row.studentCode })),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      const emailedByAddress = new Set(
+        (data.results ?? []).filter((r: { email: string; emailed: boolean }) => r.emailed).map((r: { email: string }) => r.email),
+      );
+      setCreated((rows) => rows?.map((row) => (emailedByAddress.has(row.email) ? { ...row, emailed: true } : row)) ?? rows);
+    } finally {
+      setSendState("done");
     }
   }
 
@@ -219,14 +246,14 @@ export default function BulkStudentAdd({
   const skippedCount = created?.filter((r) => r.status === "skipped").length ?? 0;
 
   return (
-    <div className="w-full rounded-[28px] border border-[var(--border)] bg-white p-5 shadow-sm sm:p-6">
+    <div className="w-full rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+          <h3 className="flex items-center gap-2 text-lg font-bold text-[var(--foreground)]">
             <UsersIcon className="h-5 w-5 text-[var(--accent)]" />
             Add many students at once
           </h3>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-[var(--muted)]">
             Paste one student per line. Name and email in any order — commas, tabs or
             <span className="font-mono text-xs"> Name &lt;email&gt;</span> all work.
           </p>
@@ -236,7 +263,7 @@ export default function BulkStudentAdd({
             setOpen(false);
             reset();
           }}
-          className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
+          className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
         >
           Close
         </button>
@@ -266,30 +293,42 @@ export default function BulkStudentAdd({
               Download logins CSV
             </button>
             <button
+              onClick={() => void sendLogins()}
+              disabled={madeCount === 0 || sendState === "sending"}
+              className="rounded-full border border-[var(--accent)] px-5 py-2.5 text-sm font-bold text-[var(--accent)] transition hover:bg-[var(--accent)]/10 disabled:opacity-40"
+            >
+              {sendState === "sending"
+                ? "Sending…"
+                : sendState === "done"
+                  ? "Send login emails again"
+                  : "Send everyone their login emails now?"}
+            </button>
+            <button
               onClick={reset}
-              className="rounded-full border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+              className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
             >
               Add another batch
             </button>
           </div>
 
-          <div className="mt-5 max-h-64 overflow-y-auto rounded-2xl border border-slate-200">
+          <div className="mt-5 max-h-64 overflow-y-auto rounded-2xl border border-[var(--border)]">
             <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <thead className="sticky top-0 bg-[var(--surface-alt)] text-xs uppercase tracking-wide text-[var(--muted)]">
                 <tr>
                   <th className="px-3 py-2">Student</th>
                   <th className="px-3 py-2">Student ID</th>
                   <th className="px-3 py-2">Result</th>
+                  <th className="px-3 py-2">Email</th>
                 </tr>
               </thead>
               <tbody>
                 {created.map((row) => (
-                  <tr key={`${row.row}-${row.email}`} className="border-t border-slate-100">
+                  <tr key={`${row.row}-${row.email}`} className="border-t border-[var(--border)]">
                     <td className="px-3 py-2">
-                      <span className="font-medium text-slate-800">{row.name}</span>
-                      <span className="block text-xs text-slate-500">{row.email}</span>
+                      <span className="font-medium text-[var(--foreground)]">{row.name}</span>
+                      <span className="block text-xs text-[var(--muted)]">{row.email}</span>
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs text-slate-600">{row.studentCode ?? "—"}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-[var(--muted)]">{row.studentCode ?? "—"}</td>
                     <td className="px-3 py-2">
                       <span
                         className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
@@ -303,6 +342,19 @@ export default function BulkStudentAdd({
                         {row.note}
                       </span>
                     </td>
+                    <td className="px-3 py-2 text-xs">
+                      {row.status !== "created" ? (
+                        "—"
+                      ) : row.emailed ? (
+                        <span className="text-emerald-600">Sent</span>
+                      ) : sendState === "sending" ? (
+                        <span className="text-[var(--muted)]">Sending…</span>
+                      ) : sendState === "done" ? (
+                        <span className="text-red-600">Not sent</span>
+                      ) : (
+                        <span className="text-[var(--muted)]">Not sent yet</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -313,11 +365,11 @@ export default function BulkStudentAdd({
         <>
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="text-sm">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Level</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Level</span>
               <select
                 value={level}
                 onChange={(event) => setLevel(event.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm"
               >
                 {LEVELS.map((value) => (
                   <option key={value} value={value}>
@@ -328,11 +380,11 @@ export default function BulkStudentAdd({
             </label>
 
             <label className="text-sm">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Branch</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Branch</span>
               <select
                 value={branchId}
                 onChange={(event) => setBranchId(event.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm"
               >
                 <option value="">No branch</option>
                 {branches.map((branch) => (
@@ -344,11 +396,11 @@ export default function BulkStudentAdd({
             </label>
 
             <label className="text-sm">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Session</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Session</span>
               <select
                 value={sessionSlot}
                 onChange={(event) => setSessionSlot(event.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm capitalize"
+                className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm capitalize"
               >
                 {SLOTS.map((value) => (
                   <option key={value} value={value}>
@@ -359,19 +411,19 @@ export default function BulkStudentAdd({
             </label>
 
             <label className="text-sm">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                 Batch month
               </span>
               <input
                 value={batch}
                 onChange={(event) => setBatch(event.target.value)}
                 placeholder="e.g. JUL 2026"
-                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm"
               />
             </label>
           </div>
 
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-[var(--muted)]">
             The batch month is what the timetable and the level-end date are worked out from. Without it these
             students will have neither.
           </p>
@@ -382,7 +434,7 @@ export default function BulkStudentAdd({
             rows={8}
             spellCheck={false}
             placeholder={"Ada Obi, ada.obi@example.com\nTunde Bello <tunde@example.com>\nchidi@example.com  Chidi Nwosu"}
-            className="mt-4 w-full resize-y rounded-2xl border border-slate-200 bg-slate-50 p-4 font-mono text-sm outline-none transition focus:border-[var(--accent)] focus:bg-white"
+            className="mt-4 w-full resize-y rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 font-mono text-sm outline-none transition focus:border-[var(--accent)] focus:bg-[var(--surface)]"
           />
 
           {parsed.length > 0 && (
@@ -423,9 +475,9 @@ export default function BulkStudentAdd({
           )}
 
           {preview && (
-            <div className="mt-4 max-h-56 overflow-y-auto rounded-2xl border border-slate-200">
+            <div className="mt-4 max-h-56 overflow-y-auto rounded-2xl border border-[var(--border)]">
               <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <thead className="sticky top-0 bg-[var(--surface-alt)] text-xs uppercase tracking-wide text-[var(--muted)]">
                   <tr>
                     <th className="px-3 py-2">Student</th>
                     <th className="px-3 py-2">What will happen</th>
@@ -433,12 +485,12 @@ export default function BulkStudentAdd({
                 </thead>
                 <tbody>
                   {preview.map((row) => (
-                    <tr key={`${row.row}-${row.email}`} className="border-t border-slate-100">
+                    <tr key={`${row.row}-${row.email}`} className="border-t border-[var(--border)]">
                       <td className="px-3 py-2">
-                        <span className="font-medium text-slate-800">{row.name}</span>
-                        <span className="block text-xs text-slate-500">{row.email}</span>
+                        <span className="font-medium text-[var(--foreground)]">{row.name}</span>
+                        <span className="block text-xs text-[var(--muted)]">{row.email}</span>
                       </td>
-                      <td className="px-3 py-2 text-slate-600">{row.note}</td>
+                      <td className="px-3 py-2 text-[var(--muted)]">{row.note}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -450,7 +502,7 @@ export default function BulkStudentAdd({
             <button
               onClick={() => run(true)}
               disabled={busy || valid.length === 0}
-              className="rounded-full border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)] disabled:opacity-40"
             >
               {busy ? "Checking…" : "Preview"}
             </button>

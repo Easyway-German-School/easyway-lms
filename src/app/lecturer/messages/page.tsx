@@ -6,8 +6,28 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import LecturerShell from "@/components/LecturerShell";
-import { MailIcon } from "@/components/icons";
+import { ArrowLeftIcon, InboxIcon, MailIcon, SendIcon } from "@/components/icons";
 import BrandLoader from "@/components/BrandLoader";
+
+type InboxTicket = {
+  id: string;
+  subject: string;
+  status: string;
+  unread: boolean;
+  messageCount: number;
+  studentName: string | null;
+  level: string | null;
+  lastMessageAt: string;
+};
+
+type ThreadMessage = {
+  id: string;
+  body: string;
+  authorRole: string;
+  authorName: string | null;
+  mine: boolean;
+  createdAt: string;
+};
 
 type SentMessage = {
   key: string;
@@ -42,7 +62,68 @@ export default function LecturerMessagesPage() {
 
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [studentId, setStudentId] = useState("");
+  const [audience, setAudience] = useState<"cohort" | "student">("cohort");
+  const [studentIds, setStudentIds] = useState<string[]>([]);
+
+  // The "Ask my tutor" side — students writing IN, not the tutor broadcasting
+  // out. A separate inbox from `sent` because it is a different conversation
+  // shape: threaded and two-way, not fire-and-forget.
+  const [inbox, setInbox] = useState<InboxTicket[]>([]);
+  const [inboxUnread, setInboxUnread] = useState(0);
+  const [activeTicket, setActiveTicket] = useState<string | null>(null);
+  const [activeSubject, setActiveSubject] = useState("");
+  const [thread, setThread] = useState<ThreadMessage[]>([]);
+  const [reply, setReply] = useState("");
+  const [threadBusy, setThreadBusy] = useState(false);
+
+  const loadInbox = useCallback(async () => {
+    try {
+      const res = await fetch("/api/lecturer/inbox", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setInbox(data.tickets ?? []);
+      setInboxUnread(data.unread ?? 0);
+    } catch {
+      // Same rule as the announcements list below: a failed poll leaves the
+      // last known inbox on screen rather than clearing it out from under
+      // someone mid-read.
+    }
+  }, []);
+
+  const openThread = useCallback(async (id: string, subject: string) => {
+    setActiveTicket(id);
+    setActiveSubject(subject);
+    setThread([]);
+    try {
+      const res = await fetch(`/api/support/tickets/${id}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setThread(data.messages ?? []);
+      setInbox((current) => current.map((t) => (t.id === id ? { ...t, unread: false } : t)));
+      setInboxUnread((n) => Math.max(0, n - 1));
+    } catch {
+      // The list is still there; the student can just click it again.
+    }
+  }, []);
+
+  async function sendReply() {
+    if (!reply.trim() || !activeTicket) return;
+    setThreadBusy(true);
+    try {
+      const res = await fetch(`/api/support/tickets/${activeTicket}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: reply }),
+      });
+      if (res.ok) {
+        setReply("");
+        await openThread(activeTicket, activeSubject);
+        await loadInbox();
+      }
+    } finally {
+      setThreadBusy(false);
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -71,6 +152,23 @@ export default function LecturerMessagesPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    loadInbox();
+    const timer = window.setInterval(loadInbox, 90_000);
+    return () => window.clearInterval(timer);
+  }, [loadInbox]);
+
+  /**
+   * `?ticket=<id>` — where the "a student messaged you" notification lands.
+   * Read off `window.location` rather than `useSearchParams`, same reasoning
+   * as HelpLauncher: a query param used once should not opt this whole page
+   * into client-side rendering behind a Suspense boundary.
+   */
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("ticket");
+    if (id) void openThread(id, "");
+  }, [openThread]);
+
   async function send(event: React.FormEvent) {
     event.preventDefault();
     setSending(true);
@@ -80,7 +178,7 @@ export default function LecturerMessagesPage() {
       const res = await fetch("/api/lecturer/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, message, studentId: studentId || undefined }),
+        body: JSON.stringify({ title, message, studentIds: audience === "student" ? studentIds : undefined }),
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(payload.error || "Could not send your message");
@@ -88,7 +186,8 @@ export default function LecturerMessagesPage() {
       setNotice(`Sent to ${payload.recipients} student${payload.recipients === 1 ? "" : "s"}.`);
       setTitle("");
       setMessage("");
-      setStudentId("");
+      setAudience("cohort");
+      setStudentIds([]);
       await load();
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Could not send your message");
@@ -143,18 +242,65 @@ export default function LecturerMessagesPage() {
               </div>
 
               <div>
-                <label htmlFor="to" className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Send to</label>
-                <select
-                  id="to"
-                  value={studentId}
-                  onChange={(event) => setStudentId(event.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-[var(--foreground)]"
-                >
-                  <option value="">Everyone in my class ({cohortSize})</option>
-                  {recipients.map((recipient) => (
-                    <option key={recipient.id} value={recipient.id}>{recipient.name}</option>
+                <label className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Send to</label>
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      { value: "cohort", label: `Everyone in my class (${cohortSize})` },
+                      { value: "student", label: "Pick students" },
+                    ] as const
+                  ).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setAudience(option.value)}
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                        audience === option.value
+                          ? "bg-[var(--accent)] text-white"
+                          : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
                   ))}
-                </select>
+                </div>
+
+                {/*
+                  A student picked to message here can also be a private-class
+                  student who happens to show up in this same cohort list — the
+                  problem this replaces was that "everyone" was the ONLY way to
+                  reach the group, so a private student always got swept in too.
+                  Checkboxes let a tutor leave them unchecked instead.
+                */}
+                {audience === "student" && (
+                  <div className="mt-3 max-h-56 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
+                    {recipients.length === 0 ? (
+                      <p className="p-3 text-sm text-[var(--muted)]">No students in your class yet.</p>
+                    ) : (
+                      recipients.map((recipient) => {
+                        const checked = studentIds.includes(recipient.id);
+                        return (
+                          <label
+                            key={recipient.id}
+                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition hover:bg-[var(--background)]"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                setStudentIds((current) =>
+                                  checked ? current.filter((id) => id !== recipient.id) : [...current, recipient.id],
+                                )
+                              }
+                              className="h-4 w-4 accent-[var(--accent)]"
+                            />
+                            <span className="flex-1 font-medium text-[var(--foreground)]">{recipient.name}</span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -184,13 +330,117 @@ export default function LecturerMessagesPage() {
 
               <button
                 type="submit"
-                disabled={sending || !title.trim() || !message.trim()}
+                disabled={sending || !title.trim() || !message.trim() || (audience === "student" && studentIds.length === 0)}
                 className="rounded-lg bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {sending ? "Sending…" : studentId ? "Send to this student" : `Send to all ${cohortSize}`}
+                {sending
+                  ? "Sending…"
+                  : audience === "student"
+                    ? `Send to ${studentIds.length} student${studentIds.length === 1 ? "" : "s"}`
+                    : `Send to all ${cohortSize}`}
               </button>
             </form>
           )}
+
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
+            {activeTicket ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setActiveTicket(null)}
+                    aria-label="Back to your students' questions"
+                    className="rounded-lg p-1 text-[var(--muted)] transition hover:text-[var(--foreground)]"
+                  >
+                    <ArrowLeftIcon className="h-4 w-4" />
+                  </button>
+                  <h2 className="min-w-0 flex-1 truncate text-lg font-bold text-[var(--foreground)]">
+                    {activeSubject || "A student's question"}
+                  </h2>
+                </div>
+
+                <div className="mt-4 max-h-[26rem] space-y-3 overflow-y-auto">
+                  {thread.map((entry) => (
+                    <div key={entry.id} className={`flex flex-col ${entry.mine ? "items-end" : "items-start"}`}>
+                      <span className="px-1 text-[10px] font-medium text-[var(--muted)]">
+                        {entry.mine ? "You" : entry.authorName ?? "Student"}
+                      </span>
+                      <div
+                        className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
+                          entry.mine
+                            ? "bg-[var(--accent)] text-white"
+                            : "bg-[var(--background)] text-[var(--foreground)]"
+                        }`}
+                      >
+                        {entry.body}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 flex items-end gap-2">
+                  <textarea
+                    value={reply}
+                    onChange={(event) => setReply(event.target.value.slice(0, 4000))}
+                    rows={1}
+                    placeholder="Reply…"
+                    className="max-h-24 min-h-[2.5rem] flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
+                  />
+                  <button
+                    onClick={sendReply}
+                    disabled={threadBusy || !reply.trim()}
+                    aria-label="Send reply"
+                    className="shrink-0 rounded-xl bg-[var(--accent)] p-2.5 text-white transition hover:brightness-110 disabled:opacity-40"
+                  >
+                    <SendIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="flex items-center gap-2 text-lg font-bold text-[var(--foreground)]">
+                    <InboxIcon className="h-5 w-5 text-[var(--accent)]" />
+                    Your students&apos; questions
+                  </h2>
+                  {inboxUnread > 0 ? (
+                    <span className="rounded-full bg-[var(--accent)] px-2.5 py-0.5 text-xs font-bold text-white">
+                      {inboxUnread} new
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  When a student asks their tutor something directly, it lands here — not in the office queue.
+                </p>
+
+                {inbox.length === 0 ? (
+                  <p className="mt-4 text-sm text-[var(--muted)]">No questions yet.</p>
+                ) : (
+                  <div className="mt-4 space-y-2">
+                    {inbox.map((ticket) => (
+                      <button
+                        key={ticket.id}
+                        onClick={() => openThread(ticket.id, ticket.subject)}
+                        className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] p-3 text-left transition hover:border-[var(--border-strong)]"
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--foreground)]">
+                            {ticket.studentName ?? "A student"} — {ticket.subject}
+                          </span>
+                          {ticket.unread ? (
+                            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />
+                          ) : null}
+                        </div>
+                        <span className="mt-1 block text-xs text-[var(--muted)]">
+                          {ticket.level ? `${ticket.level} · ` : ""}
+                          {new Date(ticket.lastMessageAt).toLocaleString()}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
 
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
             <h2 className="text-lg font-bold text-[var(--foreground)]">Sent</h2>

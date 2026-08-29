@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { isPlayableVideo, toPlayableUrl, type LibraryVideo, type VideoKind } from "@/lib/video-library";
+import { isEmbeddedVideo, needsIframe, parseEmbed } from "@/lib/media-embed";
+import { reconcileRecordingsSoon } from "@/lib/class-recorder";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,8 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   try {
-    const session = (await getServerSession(authOptions as any)) as any;
+    const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -31,6 +34,18 @@ export async function GET() {
     if (!student) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
+
+    /**
+     * Opening the shelf is the cue to go and collect anything still in the post.
+     *
+     * Fire-and-forget and throttled — see `reconcileRecordingsSoon`. The class
+     * this student just left finishes encoding a few minutes after the room
+     * empties, and this is the exact moment they come looking for it. Awaiting
+     * it would make every student pay LiveKit's latency for one student's
+     * missing tape, so we do not: the worst case is that it lands on the next
+     * refresh instead of this one.
+     */
+    reconcileRecordingsSoon();
 
     const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const totalPaid = student.payments
@@ -54,16 +69,22 @@ export async function GET() {
     }
 
     // A video belongs to this student if it is tagged with their level, or it
-    // hangs off a course at their level. Both, because a class recording has a
-    // level but often no course, while an older lesson video has the reverse.
+    // hangs off a course at their level, or — a private recording, which
+    // deliberately carries NO level (see class-recorder.ts) — it was booked
+    // for them specifically via the `privateClasses` relation.
     const records = await prisma.material.findMany({
       where: {
         kind: { in: ["video", "recording"] },
-        OR: [{ level: student.level }, { course: { level: student.level } }],
+        OR: [
+          { level: student.level },
+          { course: { level: student.level } },
+          { privateClasses: { some: { studentId: student.id } } },
+        ],
       },
       include: {
         course: { select: { title: true, level: true } },
         lecturer: { select: { user: { select: { name: true } } } },
+        recording: { select: { privateClassId: true } },
       },
       orderBy: [{ recordedAt: "desc" }, { createdAt: "desc" }],
     });
@@ -79,6 +100,10 @@ export async function GET() {
       .filter((record) => isPlayableVideo(record.fileType))
       .map((record) => {
         const progress = progressByMaterial.get(record.id);
+        // A linked video carries its URL in filePath; the player needs the
+        // provider embed form instead, which is a different string.
+        const embed = isEmbeddedVideo(record.fileType) ? parseEmbed(record.filePath) : null;
+        const iframed = embed && needsIframe(embed.provider) ? embed : null;
         return {
           id: record.id,
           title: record.title,
@@ -96,6 +121,9 @@ export async function GET() {
           createdAt: record.createdAt.toISOString(),
           positionSeconds: progress?.positionSeconds ?? 0,
           completed: progress?.completed ?? false,
+          embedUrl: iframed?.embedUrl ?? null,
+          embedLabel: embed?.label ?? null,
+          isPrivate: Boolean(record.recording?.privateClassId),
         };
       });
 

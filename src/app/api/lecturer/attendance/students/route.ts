@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { dayKey } from "@/lib/class-sessions";
 import {
-  matchesBatch,
+  belongsToLecturer,
   readAssignment,
-  studentWhereForAssignment,
+  studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +26,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
     if (!session || String(session.user?.role ?? "").toLowerCase() !== "lecturer") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -46,7 +45,7 @@ export async function GET(req: NextRequest) {
     const date = dayKey(dateParam);
 
     const assignment = readAssignment(lecturer);
-    const where = studentWhereForAssignment(assignment);
+    const where = studentWhereForLecturer(assignment, lecturer.id);
     if (!where) {
       // An empty list rather than an error: the page renders it as "no class
       // assigned yet", which is the truth and is actionable.
@@ -78,13 +77,14 @@ export async function GET(req: NextRequest) {
         sessionSlot: true,
         studentCode: true,
         admission: true,
+        tutorId: true,
         branch: { select: { name: true } },
         user: { select: { name: true, email: true } },
       },
       orderBy: { createdAt: "asc" },
     });
 
-    const roster = students.filter((student) => matchesBatch(assignment, student.admission));
+    const roster = students.filter((student) => belongsToLecturer(assignment, lecturer.id, student));
 
     // Attendance is keyed on (studentId, date) — one mark per student per day,
     // whichever class recorded it — so today's state is read that way too.

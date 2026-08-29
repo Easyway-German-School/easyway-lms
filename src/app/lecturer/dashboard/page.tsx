@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
 import { AttendanceIcon, BookOpenIcon, GradebookIcon } from '@/components/icons';
 import BrandLoader from "@/components/BrandLoader";
+import TutorLivePanel from "@/components/live/TutorLivePanel";
 
 function StatIcon({ children }: { children: React.ReactNode }) {
   return <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] shadow-sm">{children}</span>;
@@ -115,20 +117,14 @@ const ACTIVITY_ICON: Record<string, (props: { className?: string }) => React.Rea
   cancelled: (props) => <AttendanceIcon {...props} />,
 };
 
-function getActivityRoute(kind: string): string {
-  switch (kind) {
-    case 'material':
-    case 'recording':
-      return '/lecturer/materials';
-    case 'grade':
-      return '/lecturer/grades';
-    case 'postponed':
-    case 'cancelled':
-      return '/lecturer/attendance';
-    default:
-      return '/lecturer/dashboard';
-  }
-}
+/** Where each kind of event actually lives, so the feed can be opened. */
+const ACTIVITY_HREF: Record<string, string> = {
+  material: "/lecturer/materials",
+  recording: "/lecturer/recordings",
+  grade: "/lecturer/gradebook",
+  postponed: "/lecturer/timetable",
+  cancelled: "/lecturer/timetable",
+};
 
 export default function LecturerDashboard() {
   const { data: session, status } = useSession();
@@ -191,6 +187,13 @@ export default function LecturerDashboard() {
           </div>
         </div>
 
+        {/* First thing a tutor sees, and only while it is true: their own live
+            class, the code to read out, and who has actually turned up. Renders
+            nothing when no class is running. */}
+        <div className="max-w-7xl mx-auto px-6 pt-6">
+          <TutorLivePanel />
+        </div>
+
         {/* Stats Grid */}
         {error ? (
           <div className="max-w-7xl mx-auto p-6">
@@ -200,142 +203,88 @@ export default function LecturerDashboard() {
           </div>
         ) : stats ? (
           <div className="max-w-7xl mx-auto p-6">
+            {/* Each figure opens the page it was counted from. They were four
+                dead panels: a tutor could read "23 students" and had no way to
+                get from the number to the twenty-three people. */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Total Classes */}
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={() => router.push('/lecturer/classes')}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    router.push('/lecturer/classes');
-                  }
-                }}
-                className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow cursor-pointer"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-[var(--muted)] text-sm">Total Classes</p>
-                    <h3 className="text-3xl font-bold text-[var(--foreground)] mt-2">
-                      {stats.totalClasses}
-                    </h3>
+              {[
+                {
+                  label: "Total Classes",
+                  value: String(stats.totalClasses),
+                  hint: "Classes assigned",
+                  href: "/lecturer/classes",
+                  icon: <StudentsIcon className="h-5 w-5" />,
+                },
+                {
+                  label: "Total Students",
+                  value: String(stats.totalStudents),
+                  hint: "Enrolled students",
+                  href: "/lecturer/students",
+                  icon: <DashboardCardIcon className="h-5 w-5" />,
+                },
+                {
+                  label: "Materials Uploaded",
+                  value: String(stats.totalMaterials),
+                  hint: "Available resources",
+                  href: "/lecturer/materials",
+                  icon: <MaterialsIcon className="h-5 w-5" />,
+                },
+                {
+                  label: "Avg Attendance",
+                  value: stats.averageAttendance === null ? "—" : `${stats.averageAttendance}%`,
+                  hint: stats.averageAttendance === null ? "No register taken yet" : "Student average",
+                  href: "/lecturer/attendance",
+                  icon: <AttendanceRateIcon className="h-5 w-5" />,
+                },
+              ].map((card) => (
+                <Link
+                  key={card.href}
+                  href={card.href}
+                  className="group bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 transition hover:-translate-y-0.5 hover:border-[var(--accent)]/40 hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[var(--muted)] text-sm">{card.label}</p>
+                      <h3 className="text-3xl font-bold text-[var(--foreground)] mt-2">{card.value}</h3>
+                    </div>
+                    <StatIcon>{card.icon}</StatIcon>
                   </div>
-                  <StatIcon><StudentsIcon className="h-5 w-5" /></StatIcon>
-                </div>
-                <p className="text-xs text-[var(--muted)] mt-3">Classes assigned</p>
-              </div>
-
-              {/* Total Students */}
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={() => router.push('/lecturer/students')}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    router.push('/lecturer/students');
-                  }
-                }}
-                className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow cursor-pointer"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-[var(--muted)] text-sm">Total Students</p>
-                    <h3 className="text-3xl font-bold text-[var(--foreground)] mt-2">
-                      {stats.totalStudents}
-                    </h3>
-                  </div>
-                  <StatIcon><DashboardCardIcon className="h-5 w-5" /></StatIcon>
-                </div>
-                <p className="text-xs text-[var(--muted)] mt-3">Enrolled students</p>
-              </div>
-
-              {/* Materials */}
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={() => router.push('/lecturer/materials')}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    router.push('/lecturer/materials');
-                  }
-                }}
-                className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow cursor-pointer"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-[var(--muted)] text-sm">Materials Uploaded</p>
-                    <h3 className="text-3xl font-bold text-[var(--foreground)] mt-2">
-                      {stats.totalMaterials}
-                    </h3>
-                  </div>
-                  <StatIcon><MaterialsIcon className="h-5 w-5" /></StatIcon>
-                </div>
-                <p className="text-xs text-[var(--muted)] mt-3">Available resources</p>
-              </div>
-
-              {/* Attendance Rate */}
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={() => router.push('/lecturer/attendance')}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    router.push('/lecturer/attendance');
-                  }
-                }}
-                className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 hover:shadow-md transition-shadow cursor-pointer"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-[var(--muted)] text-sm">Avg Attendance</p>
-                    <h3 className="text-3xl font-bold text-[var(--foreground)] mt-2">
-                      {stats.averageAttendance === null ? "—" : `${stats.averageAttendance}%`}
-                    </h3>
-                  </div>
-                  <StatIcon><AttendanceRateIcon className="h-5 w-5" /></StatIcon>
-                </div>
-                <p className="text-xs text-[var(--muted)] mt-3">
-                  {stats.averageAttendance === null ? "No register taken yet" : "Student average"}
-                </p>
-              </div>
+                  <p className="text-xs text-[var(--muted)] mt-3">{card.hint}</p>
+                  <p className="mt-1 text-[11px] font-bold text-[var(--accent)] opacity-0 transition group-hover:opacity-100">
+                    Open →
+                  </p>
+                </Link>
+              ))}
             </div>
 
-            {/* Quick Actions */}
+            {/*
+              QUICK ACTIONS.
+
+              All four of these were `onClick={() => {}}`. Not broken links —
+              no links at all: four buttons that took a click, showed a hover
+              state and did nothing, on the first screen a tutor sees. Every
+              one of them named a page that already existed and was already in
+              the sidebar, so the whole feature was four hrefs that had never
+              been filled in.
+            */}
             <div className="mt-8">
               <h2 className="text-xl font-bold text-[var(--foreground)] mb-4">Quick Actions</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <button
-                  onClick={() => router.push('/lecturer/attendance')}
-                  className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 hover:bg-[var(--surface-alt)] transition-colors text-center"
-                >
-                  <div className="mb-2 flex justify-center text-[var(--accent)]"><AttendanceRateIcon className="h-5 w-5" /></div>
-                  <p className="font-semibold text-sm text-[var(--foreground)]">Mark Attendance</p>
-                </button>
-                <button
-                  onClick={() => router.push('/lecturer/materials')}
-                  className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 hover:bg-[var(--surface-alt)] transition-colors text-center"
-                >
-                  <div className="mb-2 flex justify-center text-[var(--accent)]"><MaterialsIcon className="h-5 w-5" /></div>
-                  <p className="font-semibold text-sm text-[var(--foreground)]">Upload Material</p>
-                </button>
-                <button
-                  onClick={() => router.push('/lecturer/grades')}
-                  className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 hover:bg-[var(--surface-alt)] transition-colors text-center"
-                >
-                  <div className="mb-2 flex justify-center text-[var(--accent)]"><GradeIcon className="h-5 w-5" /></div>
-                  <p className="font-semibold text-sm text-[var(--foreground)]">Enter Grades</p>
-                </button>
-                <button
-                  onClick={() => router.push('/lecturer/messages')}
-                  className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 hover:bg-[var(--surface-alt)] transition-colors text-center"
-                >
-                  <div className="mb-2 flex justify-center text-[var(--accent)]"><MessageIcon className="h-5 w-5" /></div>
-                  <p className="font-semibold text-sm text-[var(--foreground)]">Send Message</p>
-                </button>
+                {[
+                  { label: "Mark Attendance", href: "/lecturer/attendance", icon: <AttendanceRateIcon className="h-5 w-5" /> },
+                  { label: "Upload Material", href: "/lecturer/materials", icon: <MaterialsIcon className="h-5 w-5" /> },
+                  { label: "Enter Grades", href: "/lecturer/gradebook", icon: <GradeIcon className="h-5 w-5" /> },
+                  { label: "Send Message", href: "/lecturer/messages", icon: <MessageIcon className="h-5 w-5" /> },
+                ].map((action) => (
+                  <Link
+                    key={action.href}
+                    href={action.href}
+                    className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 hover:border-[var(--accent)]/40 hover:bg-[var(--surface-alt)] transition-colors text-center"
+                  >
+                    <div className="mb-2 flex justify-center text-[var(--accent)]">{action.icon}</div>
+                    <p className="font-semibold text-sm text-[var(--foreground)]">{action.label}</p>
+                  </Link>
+                ))}
               </div>
             </div>
 
@@ -358,23 +307,28 @@ export default function LecturerDashboard() {
                   <div className="space-y-4">
                     {stats.activity.map((entry, index) => {
                       const Icon = ACTIVITY_ICON[entry.kind] ?? BookOpenIcon;
+                      // Each kind of event has one page it belongs to. A feed
+                      // you can only read is half a feed.
+                      const href = ACTIVITY_HREF[entry.kind] ?? "/lecturer/materials";
                       return (
-                        <button
+                        <Link
                           key={entry.id}
-                          type="button"
-                          onClick={() => router.push(getActivityRoute(entry.kind))}
-                          className={`flex w-full items-start gap-3 text-left ${
+                          href={href}
+                          className={`group -mx-2 flex items-start gap-3 rounded-xl px-2 py-1 transition hover:bg-[var(--accent)]/5 ${
                             index < stats.activity.length - 1 ? "border-b border-[var(--border)] pb-4" : ""
                           }`}
                         >
                           <Icon className="h-6 w-6 shrink-0 text-[var(--accent)]" />
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="font-semibold text-[var(--foreground)]">{entry.title}</p>
                             <p className="truncate text-sm text-[var(--muted)]">
                               {entry.detail} — {timeAgo(entry.at)}
                             </p>
                           </div>
-                        </div>
+                          <span className="shrink-0 text-xs font-semibold text-[var(--muted)] opacity-0 transition group-hover:opacity-100">
+                            Open →
+                          </span>
+                        </Link>
                       );
                     })}
                   </div>

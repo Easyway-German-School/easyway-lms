@@ -73,19 +73,32 @@ const FEE_TABLE: Record<FeeTier, Record<string, number>> = {
 export const ONLINE_PRICES_ARE_PLACEHOLDER = true;
 
 /**
- * PRIVATE (one-to-one) TUITION — PLACEHOLDER MULTIPLIER.
+ * PRIVATE (one-to-one) TUITION — ONE FLAT PRICE, PLACEHOLDER FIGURE.
  *
- * A private student takes a tutor's whole session rather than a seat in it, so
- * the fee is a multiple of the group price at the same branch and level rather
- * than its own table — one number to change when a group price moves, instead
- * of six per branch tier that quietly drift apart.
+ * ₦300,000 whatever the branch and whatever the level, quoted by the school
+ * pending a real table. Change this constant and the upsell card, the paywall's
+ * second option, the checkout, the webhook and the receivables ledger all
+ * follow — it is the single number private tuition is worth anywhere in the app.
  *
- * 2× is a placeholder, NOT a decision. Nobody has signed off on it. Change the
- * constant here and every quote in the app follows.
+ * ---------------------------------------------------------------------------
+ * THIS REPLACED A 2x MULTIPLIER, and the two could not coexist.
+ *
+ * `tuitionFeeFor` used to price private tuition at twice the group fee for that
+ * branch and level, which is ₦300,000 in Lagos but ₦360,000 in Abuja and up to
+ * ₦480,000 at C2. The upsell advertised a flat ₦300,000 and the checkout
+ * charged it. So an Abuja student paid exactly what they were shown and the
+ * ledger still recorded them ₦60,000 short: a permanent outstanding balance
+ * they could not clear, fee-chaser emails they did not deserve, and a
+ * PROVISIONAL stamp on their certificate — because that stamp reads the live
+ * balance.
+ *
+ * A quoted price and a billed price that disagree is not a pricing question,
+ * it is a bug that only appears at one branch. One number now serves both.
+ * ---------------------------------------------------------------------------
  */
-export const PRIVATE_CLASS_MULTIPLIER = 2;
+export const PRIVATE_CLASS_UPGRADE_PRICE = 300000;
 
-/** True while private tuition is still carrying the placeholder multiplier. */
+/** True while private tuition is still carrying the placeholder figure above. */
 export const PRIVATE_PRICES_ARE_PLACEHOLDER = true;
 
 /**
@@ -135,9 +148,13 @@ export function isPrivateClassType(classType?: string | null): boolean {
 }
 
 export function tuitionFeeFor({ level, branch, classType }: FeeLookup): number {
+  // One flat price for one-to-one, at every branch and every level — the same
+  // figure the upsell quotes and the checkout charges. See the note on
+  // PRIVATE_CLASS_UPGRADE_PRICE for why these must not be computed separately.
+  if (isPrivateClassType(classType)) return PRIVATE_CLASS_UPGRADE_PRICE;
+
   const tier = FEE_TABLE[feeTierForBranch(branch)];
-  const base = tier[normaliseLevel(level)] ?? tier.A1;
-  return isPrivateClassType(classType) ? base * PRIVATE_CLASS_MULTIPLIER : base;
+  return tier[normaliseLevel(level)] ?? tier.A1;
 }
 
 export function requiredDepositFor(lookup: FeeLookup): number {
@@ -147,9 +164,10 @@ export function requiredDepositFor(lookup: FeeLookup): number {
 /** Every level and its price at one branch — for checkout and admin price lists. */
 export function priceListForBranch(branchName?: string | null, classType?: string | null) {
   const tier = feeTierForBranch(branchName);
-  const multiplier = isPrivateClassType(classType) ? PRIVATE_CLASS_MULTIPLIER : 1;
+  const isPrivate = isPrivateClassType(classType);
   return Object.entries(FEE_TABLE[tier]).map(([level, groupFee]) => {
-    const fee = groupFee * multiplier;
+    // Private is one flat price per level, not a scaled group fee.
+    const fee = isPrivate ? PRIVATE_CLASS_UPGRADE_PRICE : groupFee;
     return {
       level,
       tuitionFee: fee,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateMissionPracticeFeedback } from "@/lib/ai";
 import { requireAiUser } from "@/lib/ai-guard";
+import { reserveStudentAiRequest } from "@/lib/ai-limits";
 
 export async function POST(req: Request) {
   // A student feature, so any signed-in account — but not the whole internet.
@@ -24,6 +25,11 @@ export async function POST(req: Request) {
       );
     }
 
+    const quota = await reserveStudentAiRequest(gate.userId, "missionPractice");
+    if (!quota.allowed) {
+      return NextResponse.json({ error: "Daily mission practice limit reached. Try again tomorrow." }, { status: 429 });
+    }
+
     const result = await generateMissionPracticeFeedback({
       title: missionTitle,
       description: missionDescription,
@@ -36,3 +42,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Mission practice failed" }, { status: 500 });
   }
 }
+
+// Long-running: model calls / bulk work. Set here (not vercel.json) so it
+// travels with the route regardless of where the app is built from.
+export const maxDuration = 60;

@@ -47,6 +47,8 @@ type CohortMember = {
   levelCompletedFor: string | null;
   paymentStatus: string;
   outstanding: number;
+  heldBackAt: string | null;
+  heldBackReason: string | null;
 };
 
 type Summary = {
@@ -142,9 +144,55 @@ export default function AdminJourneyPage() {
   );
 
   const eligible = useMemo(
-    () => cohort.filter((row) => row.levelCompletedFor !== row.level),
+    () => cohort.filter((row) => row.levelCompletedFor !== row.level && !row.heldBackAt),
     [cohort],
   );
+
+  const [holdBusy, setHoldBusy] = useState<string | null>(null);
+
+  const holdBack = async (studentId: string) => {
+    const reason = window.prompt("Why is this student being held back? (shown to other admins, not the student)");
+    if (reason === null) return;
+    if (!reason.trim()) {
+      setError("A reason is required to hold a student back");
+      return;
+    }
+    setHoldBusy(studentId);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/journey", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId, heldBack: true, reason: reason.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Unable to hold this student back");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to hold this student back");
+    } finally {
+      setHoldBusy(null);
+    }
+  };
+
+  const clearHold = async (studentId: string) => {
+    setHoldBusy(studentId);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/journey", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId, heldBack: false }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Unable to clear this hold");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to clear this hold");
+    } finally {
+      setHoldBusy(null);
+    }
+  };
 
   const signOff = async () => {
     if (selectedIds.length === 0) return;
@@ -287,7 +335,7 @@ export default function AdminJourneyPage() {
               {neverStarted.slice(0, 12).map((row) => (
                 <div
                   key={row.studentId}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/80 px-4 py-3"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[var(--surface-soft)] px-4 py-3"
                 >
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-[var(--foreground)]">{row.name}</p>
@@ -299,7 +347,7 @@ export default function AdminJourneyPage() {
                     <span className="rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-800">
                       {row.notStartedReason ? REASON_LABEL[row.notStartedReason] ?? row.notStartedReason : "Never answered"}
                     </span>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700">
+                    <span className="rounded-full bg-[var(--surface-alt)] px-2.5 py-1 font-semibold text-[var(--foreground-soft)]">
                       asked {row.notStartedCount}×
                     </span>
                     {row.outstanding > 0 ? (
@@ -358,6 +406,7 @@ export default function AdminJourneyPage() {
                   <th className="px-4 py-3">Through</th>
                   <th className="px-4 py-3">Fees</th>
                   <th className="px-4 py-3">Signed off</th>
+                  <th className="px-4 py-3">Hold</th>
                 </tr>
               </thead>
               <tbody>
@@ -420,7 +469,7 @@ export default function AdminJourneyPage() {
                       <td className="px-4 py-3">
                         <span
                           className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            PAYMENT_TONE[row.paymentStatus] ?? "bg-slate-100 text-slate-700"
+                            PAYMENT_TONE[row.paymentStatus] ?? "bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
                           }`}
                         >
                           {row.paymentStatus}
@@ -434,6 +483,36 @@ export default function AdminJourneyPage() {
                           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
                             <CheckCircleIcon className="h-3.5 w-3.5" /> {row.levelCompletedFor}
                           </span>
+                        ) : row.heldBackAt ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700"
+                            title={row.heldBackReason ?? undefined}
+                          >
+                            <AlertIcon className="h-3.5 w-3.5" /> Held back
+                          </span>
+                        ) : (
+                          <span className="text-xs text-[var(--muted)]">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {row.heldBackAt ? (
+                          <button
+                            type="button"
+                            onClick={() => clearHold(row.studentId)}
+                            disabled={holdBusy === row.studentId}
+                            className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)] hover:bg-[var(--surface-alt)] disabled:opacity-40"
+                          >
+                            {holdBusy === row.studentId ? "…" : "Clear hold"}
+                          </button>
+                        ) : !done ? (
+                          <button
+                            type="button"
+                            onClick={() => holdBack(row.studentId)}
+                            disabled={holdBusy === row.studentId}
+                            className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)] hover:bg-[var(--surface-alt)] disabled:opacity-40"
+                          >
+                            {holdBusy === row.studentId ? "…" : "Hold back"}
+                          </button>
                         ) : (
                           <span className="text-xs text-[var(--muted)]">—</span>
                         )}
@@ -443,7 +522,7 @@ export default function AdminJourneyPage() {
                 })}
                 {!loading && cohort.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-[var(--muted)]">
+                    <td colSpan={9} className="px-4 py-10 text-center text-[var(--muted)]">
                       No students match these filters.
                     </td>
                   </tr>

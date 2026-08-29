@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { resolveAdmin } from "@/lib/admin-roles";
+import { requireAdmin, type AdminContext } from "@/lib/admin-roles";
 import { shouldRequireMfa, isEnforced, verifyLogin } from "@/lib/mfa";
 import { writeAudit } from "@/lib/prisma-guard";
 import { unguardedPrisma } from "@/lib/prisma";
@@ -20,9 +18,9 @@ import { unguardedPrisma } from "@/lib/prisma";
  * procedure with a human in it, written up in docs/SECURITY.md, not a button.
  */
 
-async function currentAdmin() {
-  const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
-  return resolveAdmin(session?.user?.id);
+async function currentAdmin(): Promise<AdminContext | null> {
+  const auth = await requireAdmin();
+  return auth.ok ? auth.admin : null;
 }
 
 /** Is two-factor on for me, and does my role call for it? */

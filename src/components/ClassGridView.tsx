@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AttachmentIcon, LockIcon } from "@/components/icons";
+import MaterialQuestPanel from "@/components/materials/MaterialQuestPanel";
 import {
   type ClassNode,
   type Month,
@@ -29,8 +30,26 @@ import {
  * a student scanning a month of small boxes has only the colour to go on.
  * Neither is struck through — a postponed class still happens.
  */
+/**
+ * Green means "you were there", and nothing else.
+ *
+ * It used to mean "this date has passed", which is how a student who joined
+ * yesterday opened their calendar to a wall of green. The three states below it
+ * are the ones that were missing:
+ *
+ *   before  the class ran before they enrolled. Faded to almost nothing — it is
+ *           context for the month, not something they failed to attend.
+ *   held    it happened and nobody marked the register. Neutral on purpose:
+ *           colouring it green flatters, colouring it red accuses, and the
+ *           truth is that the school does not know.
+ *   missed  they were marked absent. This is the only state that should ever
+ *           look like bad news, and now it is earned rather than assumed.
+ */
 const STATE_STYLE: Record<string, string> = {
   done: "bg-emerald-500 text-white border-emerald-600",
+  missed: "bg-rose-100 text-rose-700 border-rose-300",
+  held: "bg-[var(--surface-alt)] text-[var(--foreground)] border-[var(--border-strong)]",
+  before: "bg-transparent text-[var(--muted)]/50 border-transparent",
   today: "bg-amber-400 text-white border-amber-500 ring-4 ring-amber-200",
   locked: "bg-[var(--border)] text-[var(--muted)] border-[var(--border-strong)]",
   postponed: "bg-pink-200 text-pink-800 border-pink-400",
@@ -60,7 +79,17 @@ function anchorFor(col: number): { box: string; arrow: string } {
   return { box: "left-1/2 -translate-x-1/2", arrow: "left-1/2 -translate-x-1/2" };
 }
 
-function DayPopover({ node, below, col }: { node: ClassNode; below: boolean; col: number }) {
+function DayPopover({
+  node,
+  below,
+  col,
+  onOpenQuests,
+}: {
+  node: ClassNode;
+  below: boolean;
+  col: number;
+  onOpenQuests: (material: { id: string; title: string }) => void;
+}) {
   const s = nodeSummary(node);
   const anchor = anchorFor(col);
   return (
@@ -71,7 +100,7 @@ function DayPopover({ node, below, col }: { node: ClassNode; below: boolean; col
       transition={{ duration: 0.14 }}
       // Opens downward for cells in the top row, otherwise upward — a popover
       // above a first-row cell is clipped off the top of the card.
-      className={`absolute z-30 w-56 max-w-[calc(100vw-3rem)] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left shadow-xl ${anchor.box} ${
+      className={`absolute z-30 w-56 max-w-[calc(100vw-3rem)] rounded-2xl cinematic-card p-3 text-left shadow-xl ${anchor.box} ${
         below ? "top-full mt-2" : "bottom-full mb-2"
       }`}
       role="tooltip"
@@ -146,10 +175,14 @@ function DayPopover({ node, below, col }: { node: ClassNode; below: boolean; col
               rather than fourteen pages. Named as a count so it reads as an
               amount of work, not as another document. */}
           {Boolean(s.materialAlways.aiQuestCount) && (
-            <p className="mt-1 text-[11px] font-semibold text-[var(--accent)]">
+            <button
+              type="button"
+              onClick={() => onOpenQuests({ id: s.materialAlways!.id, title: s.materialAlways!.title })}
+              className="mt-1 text-[11px] font-semibold text-[var(--accent)] underline underline-offset-2"
+            >
               {s.materialAlways.aiQuestCount} quick quest
               {s.materialAlways.aiQuestCount === 1 ? "" : "s"} from this — about 5 minutes each
-            </p>
+            </button>
           )}
         </div>
       )}
@@ -169,6 +202,7 @@ function DayPopover({ node, below, col }: { node: ClassNode; below: boolean; col
 export default function ClassGridView({ months, nodes }: { months: Month[]; nodes: ClassNode[] }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const [questMaterial, setQuestMaterial] = useState<{ id: string; title: string } | null>(null);
 
   // Index classes by calendar day so a grid cell can find its class in O(1).
   const byDay = new Map<string, ClassNode>();
@@ -249,7 +283,9 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
                     </button>
 
                     <AnimatePresence>
-                      {showing && <DayPopover node={node} below={inTopRow} col={col} />}
+                      {showing && (
+                        <DayPopover node={node} below={inTopRow} col={col} onOpenQuests={setQuestMaterial} />
+                      )}
                     </AnimatePresence>
                   </div>
                 );
@@ -266,6 +302,8 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
           </div>
         );
       })}
+
+      <MaterialQuestPanel material={questMaterial} onClose={() => setQuestMaterial(null)} />
     </div>
   );
 }

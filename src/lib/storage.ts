@@ -80,6 +80,52 @@ export function storageConfigured(): boolean {
   return objectStorage() !== null;
 }
 
+/** Recording object keys all start here. See `recordingObjectKey()`. */
+export const RECORDING_PREFIX = "recordings/";
+
+/**
+ * Credentials for the recordings bucket.
+ *
+ * The mirror image of `objectStorage()`: here `RECORDING_S3_*` wins and
+ * `STORAGE_S3_*` is the fallback. That asymmetry is the whole point. Recordings
+ * are the one thing in this system carrying no personal documents, so a school
+ * may well want them in their own bucket — different key, different lifecycle
+ * rules, possibly public — while student photographs and passport scans stay in
+ * the private one. With the precedence the other way round, setting
+ * `RECORDING_S3_BUCKET` did nothing at all as long as `STORAGE_S3_BUCKET` was
+ * set, and recordings silently landed in the private bucket anyway.
+ */
+export function recordingObjectStorage(): ObjectStorage | null {
+  const bucket = process.env.RECORDING_S3_BUCKET || process.env.STORAGE_S3_BUCKET;
+  const accessKey = process.env.RECORDING_S3_ACCESS_KEY || process.env.STORAGE_S3_ACCESS_KEY;
+  const secret = process.env.RECORDING_S3_SECRET || process.env.STORAGE_S3_SECRET;
+  if (!bucket || !accessKey || !secret) return null;
+
+  return {
+    bucket,
+    region: process.env.RECORDING_S3_REGION || process.env.STORAGE_S3_REGION || "auto",
+    endpoint: normalizeStorageEndpoint(process.env.RECORDING_S3_ENDPOINT || process.env.STORAGE_S3_ENDPOINT),
+    accessKey,
+    secret,
+    // Deliberately NOT falling back to STORAGE_PUBLIC_BASE_URL. Once these are
+    // two different buckets, serving one from the other's hostname produces a
+    // URL that 404s at best and leaks the wrong bucket at worst.
+    publicBaseUrl: process.env.RECORDING_PUBLIC_BASE_URL || undefined,
+  };
+}
+
+/**
+ * Which bucket a given key lives in.
+ *
+ * Decidable from the key alone, which is what makes it usable: `/api/files`
+ * receives nothing but a key, and has no idea whether it is being asked for a
+ * passport scan or last Tuesday's A1 lesson.
+ */
+export function storageForKey(key: string): ObjectStorage | null {
+  if (key.startsWith(RECORDING_PREFIX)) return recordingObjectStorage() ?? objectStorage();
+  return objectStorage();
+}
+
 /** The bucket's own address for an object, used for signing. */
 function objectUrl(key: string, storage: ObjectStorage): string {
   const endpoint = normalizeStorageEndpoint(storage.endpoint);
@@ -129,7 +175,7 @@ export async function putFile(input: {
   body: Buffer;
   contentType?: string;
 }): Promise<string> {
-  const storage = objectStorage();
+  const storage = storageForKey(input.key);
 
   if (!storage) {
     if (process.env.NODE_ENV === "production") {
@@ -205,7 +251,8 @@ export function keyFromUrl(url: string | null | undefined): string | null {
  * on mobile data is the difference between usable and not.
  */
 export async function getFile(key: string, range?: string | null): Promise<Response | null> {
-  const storage = objectStorage();
+  // Recordings may be in a bucket of their own, so the key picks the bucket.
+  const storage = storageForKey(key);
   if (!storage) return null;
 
   const aws = await signer(storage);

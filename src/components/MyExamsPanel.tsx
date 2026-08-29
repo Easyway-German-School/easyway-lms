@@ -1,7 +1,8 @@
 "use client";
-import { CalendarIcon } from "@/components/icons";
+import { CalendarIcon, ExternalLinkIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useState } from "react";
+import ExamBodyComingSoon from "@/components/ExamBodyComingSoon";
 
 /**
  * Everything the signed-in person has booked — Easyway tests and ÖSD centre
@@ -24,7 +25,14 @@ type MyExam = {
   fee: number | null;
   seatNumber: string | null;
   branchName: string | null;
-  result: { score: number; grade: string | null; feedback: string | null } | null;
+  result: {
+    score: number;
+    grade: string | null;
+    feedback: string | null;
+    skills: { reading: number; listening: number; writing: number; speaking: number } | null;
+    passThreshold: number | null;
+    passed: boolean | null;
+  } | null;
 };
 
 type Available = {
@@ -90,6 +98,15 @@ export default function MyExamsPanel() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [payingId, setPayingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<ExamFilter>("all");
+  /**
+   * Goethe registration happens entirely on goethe.de — EasyWay never touches
+   * the booking or the fee, so this is a plain outbound link rather than an
+   * exam body in our own booking flow. Tenant-configurable: a school that
+   * isn't teaching German has no Goethe sitting to point students at, so a
+   * `null` from the server hides the card entirely rather than defaulting to
+   * EasyWay's own link.
+   */
+  const [goetheUrl, setGoetheUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -99,6 +116,7 @@ export default function MyExamsPanel() {
       setUpcoming(data.upcoming ?? []);
       setPast(data.past ?? []);
       setAvailable(data.available ?? []);
+      setGoetheUrl(data.goetheReferralUrl ?? null);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -148,12 +166,18 @@ export default function MyExamsPanel() {
   }
 
   if (loading) {
-    return <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="h-28 animate-pulse rounded-3xl bg-slate-200/60" />)}</div>;
+    return <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="h-28 animate-pulse rounded-3xl bg-[var(--surface-alt)]/60" />)}</div>;
   }
 
   const shownUpcoming = upcoming.filter((exam) => matchesFilter(filter, exam.examBody));
   const shownPast = past.filter((exam) => matchesFilter(filter, exam.examBody));
+  // `available` is already filtered server-side to bodies this tenant has
+  // live (see /api/my-exams) — no client-side re-filtering by body needed,
+  // only by the display tab.
   const shownAvailable = available.filter((exam) => matchesFilter(filter, exam.examBody));
+  // Whether ANY external-body sitting made it through the server-side gate —
+  // if so, the osd tab shows the real list instead of the sealed preview.
+  const hasLiveExternal = available.some((exam) => !isEasywayExam(exam.examBody));
 
   const counts: Record<ExamFilter, number> = {
     all: upcoming.length,
@@ -167,7 +191,7 @@ export default function MyExamsPanel() {
 
       {/* Two labels, as the school asked for, plus the combined view they both
           came from — so nobody has to guess which tab a booking landed in. */}
-      <div className="inline-flex flex-wrap gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1">
+      <div className="inline-flex flex-wrap gap-1 rounded-full cinematic-card p-1">
         {(["all", "easyway", "osd"] as ExamFilter[]).map((option) => (
           <button
             key={option}
@@ -189,10 +213,30 @@ export default function MyExamsPanel() {
         ))}
       </div>
 
+      {goetheUrl && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl cinematic-card p-5">
+          <div className="min-w-0">
+            <h3 className="font-semibold">Prefer to sit Goethe instead?</h3>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Registration and fees for the Goethe-Zertifikat are handled entirely by the Goethe-Institut, not EasyWay —
+              this takes you straight to their official booking page.
+            </p>
+          </div>
+          <a
+            href={goetheUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex shrink-0 items-center gap-2 rounded-full btn-glow px-5 py-2.5 text-sm font-semibold text-white"
+          >
+            Register on goethe.de <ExternalLinkIcon className="h-4 w-4" />
+          </a>
+        </div>
+      )}
+
       <section>
         <h2 className="text-lg font-bold">Coming up</h2>
         {shownUpcoming.length === 0 ? (
-          <div className="mt-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+          <div className="mt-3 rounded-3xl cinematic-card p-8 text-center">
             <CalendarIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
             <p className="mt-3 text-sm font-semibold">
               {filter === "all" ? "No exams booked" : `No ${FILTER_LABELS[filter].toLowerCase()} booked`}
@@ -210,7 +254,7 @@ export default function MyExamsPanel() {
             {shownUpcoming.map((e) => {
               const days = daysUntil(e.examDate);
               return (
-                <div key={e.registrationId} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                <div key={e.registrationId} className="rounded-3xl cinematic-card p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -241,11 +285,19 @@ export default function MyExamsPanel() {
                           <button
                             onClick={() => payFee(e.registrationId)}
                             disabled={payingId === e.registrationId}
-                            className="mt-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                            className="mt-2 rounded-full btn-glow px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
                           >
                             {payingId === e.registrationId ? "Opening checkout…" : `Pay ₦${e.fee.toLocaleString()}`}
                           </button>
                         </div>
+                      )}
+                      {(e.paymentStatus === "paid" || e.paymentStatus === "waived") && (
+                        <a
+                          href={`/exams/hall-ticket/${e.registrationId}`}
+                          className="mt-3 inline-block rounded-full border border-[var(--border)] px-4 py-2 text-xs font-semibold text-[var(--foreground)] hover:bg-[var(--surface-alt)]"
+                        >
+                          Print hall ticket
+                        </a>
                       )}
                     </div>
 
@@ -263,42 +315,46 @@ export default function MyExamsPanel() {
         )}
       </section>
 
-      {shownAvailable.length > 0 && (
-        <section>
-          <h2 className="text-lg font-bold">Open for registration</h2>
-          <div className="mt-3 space-y-3">
-            {shownAvailable.map((e) => (
-              <div key={e.id} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${BODY_TONE[e.examBody] ?? BODY_TONE.internal}`}>
-                        {e.examBody}
-                      </span>
-                      {e.level && <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{e.level}</span>}
+      {filter === "osd" && !hasLiveExternal ? (
+        <ExamBodyComingSoon onExploreInternal={() => setFilter("easyway")} />
+      ) : (
+        shownAvailable.length > 0 && (
+          <section>
+            <h2 className="text-lg font-bold">Open for registration</h2>
+            <div className="mt-3 space-y-3">
+              {shownAvailable.map((e) => (
+                <div key={e.id} className="rounded-3xl cinematic-card p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${BODY_TONE[e.examBody] ?? BODY_TONE.internal}`}>
+                          {e.examBody}
+                        </span>
+                        {e.level && <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{e.level}</span>}
+                      </div>
+                      <h3 className="mt-2 font-semibold">{e.name}</h3>
+                      <p className="mt-1 text-sm text-[var(--muted)]">
+                        {new Date(e.examDate).toDateString()}
+                        {e.branch && ` · ${e.branch.name}`}
+                        {e.capacity !== null && ` · ${e.remaining} of ${e.capacity} seats left`}
+                      </p>
                     </div>
-                    <h3 className="mt-2 font-semibold">{e.name}</h3>
-                    <p className="mt-1 text-sm text-[var(--muted)]">
-                      {new Date(e.examDate).toDateString()}
-                      {e.branch && ` · ${e.branch.name}`}
-                      {e.capacity !== null && ` · ${e.remaining} of ${e.capacity} seats left`}
-                    </p>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    {e.fee !== null && <p className="text-lg font-bold">₦{e.fee.toLocaleString()}</p>}
-                    <button
-                      onClick={() => book(e.id)}
-                      disabled={busyId === e.id || e.full || e.deadlinePassed}
-                      className="mt-2 rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                    >
-                      {e.full ? "Full" : busyId === e.id ? "Booking…" : "Register"}
-                    </button>
+                    <div className="shrink-0 text-right">
+                      {e.fee !== null && <p className="text-lg font-bold">₦{e.fee.toLocaleString()}</p>}
+                      <button
+                        onClick={() => book(e.id)}
+                        disabled={busyId === e.id || e.full || e.deadlinePassed}
+                        className="mt-2 rounded-full btn-glow px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                      >
+                        {e.full ? "Full" : busyId === e.id ? "Booking…" : "Register"}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </section>
+              ))}
+            </div>
+          </section>
+        )
       )}
 
       {shownPast.length > 0 && (
@@ -314,6 +370,12 @@ export default function MyExamsPanel() {
                       {new Date(e.examDate).toDateString()}
                       {e.seatNumber && ` · seat ${e.seatNumber}`}
                     </p>
+                    {e.result?.skills && (
+                      <p className="mt-2 text-xs text-[var(--muted)]">
+                        Lesen {e.result.skills.reading} · Hören {e.result.skills.listening} · Schreiben{" "}
+                        {e.result.skills.writing} · Sprechen {e.result.skills.speaking}
+                      </p>
+                    )}
                     {e.result?.feedback && (
                       <p className="mt-2 text-sm text-[var(--muted)]">{e.result.feedback}</p>
                     )}
@@ -322,7 +384,17 @@ export default function MyExamsPanel() {
                     {e.result ? (
                       <>
                         <p className="text-2xl font-bold">{e.result.score}</p>
-                        <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">score</p>
+                        {e.result.passed !== null ? (
+                          <p
+                            className={`text-[10px] font-bold uppercase tracking-wide ${
+                              e.result.passed ? "text-[var(--success)]" : "text-red-600"
+                            }`}
+                          >
+                            {e.result.passed ? "Passed" : "Not yet"}
+                          </p>
+                        ) : (
+                          <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">score</p>
+                        )}
                       </>
                     ) : (
                       <p className="text-xs text-[var(--muted)]">Result pending</p>

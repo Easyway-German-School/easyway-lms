@@ -1,38 +1,61 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
+
+/**
+ * AMOUNTS ARE WHOLE NAIRA.
+ *
+ * `Payment.amount` is written in naira — the Paystack boundary in
+ * src/lib/paystack-verify.ts divides kobo by 100 before it is stored, and the
+ * fee table quotes naira. This table divided by 100 again and printed the
+ * result next to the row's currency code, so a ₦150,000 tuition payment showed
+ * as "1500 USD": wrong by two orders of magnitude and in the wrong currency, on
+ * the one screen whose entire job is to state what a student paid.
+ */
+function naira(amount: number) {
+  return `₦${Math.round(amount).toLocaleString("en-NG")}`;
+}
 
 type PaymentRecord = {
   id: string;
+  studentId?: string;
   amount: number;
   currency: string;
   status: string;
   method: string;
   description?: string | null;
-  student: { user: { name?: string | null; email: string } };
+  student: { classType?: string; user: { name?: string | null; email: string } };
   invoice?: { id: string } | null;
   createdAt: string;
 };
 
 type StudentOption = { id: string; user: { name?: string | null; email: string } };
 
-export default function AdminPaymentsPage() {
+function PaymentsLedger() {
+  const params = useSearchParams();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [studentId, setStudentId] = useState("");
   const [amount, setAmount] = useState(0);
-  const [currency, setCurrency] = useState("usd");
-  const [method, setMethod] = useState("card");
+  // NGN, not USD. The school prices in naira, charges in naira through
+  // Paystack and stores naira; a form defaulting to dollars only ever produced
+  // rows whose currency code contradicted their own amount.
+  const [currency, setCurrency] = useState("ngn");
+  const [method, setMethod] = useState("bank_transfer");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState("pending");
   const [formError, setFormError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<string>("");
-  const [filterMethod, setFilterMethod] = useState<string>("");
-  const [search, setSearch] = useState<string>("");
+  // Seeded from the URL: the finance workspace links straight to the pending
+  // and failed transactions, and to one payment method at a time.
+  const [filterStatus, setFilterStatus] = useState<string>(params.get("status") ?? "");
+  const [filterMethod, setFilterMethod] = useState<string>(params.get("method") ?? "");
+  const [filterClassType, setFilterClassType] = useState<string>(params.get("classType") ?? "");
+  const [search, setSearch] = useState<string>(params.get("search") ?? "");
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(20);
   const [totalCount, setTotalCount] = useState(0);
@@ -43,6 +66,7 @@ export default function AdminPaymentsPage() {
       const url = new URL("/api/admin/payments-list", window.location.origin);
       if (filterStatus) url.searchParams.set("status", filterStatus);
       if (filterMethod) url.searchParams.set("method", filterMethod);
+      if (filterClassType) url.searchParams.set("classType", filterClassType);
       if (search) url.searchParams.set("search", search);
       if (page) url.searchParams.set("page", String(page));
       if (pageSize) url.searchParams.set("pageSize", String(pageSize));
@@ -86,11 +110,11 @@ export default function AdminPaymentsPage() {
   useEffect(() => {
     loadPaymentsList();
     loadStudents();
-  }, [filterStatus, filterMethod, search, page, pageSize]);
+  }, [filterStatus, filterMethod, filterClassType, search, page, pageSize]);
 
   useEffect(() => {
     setPage(1);
-  }, [filterStatus, filterMethod, search, pageSize]);
+  }, [filterStatus, filterMethod, filterClassType, search, pageSize]);
 
   async function handleStatusUpdate(paymentId: string, newStatus: string) {
     formError && setFormError("");
@@ -106,6 +130,12 @@ export default function AdminPaymentsPage() {
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Unable to update payment status");
     }
+  }
+
+  function openPaymentForm(student: StudentOption) {
+    setStudents((current) => current.some((item) => item.id === student.id) ? current : [student, ...current]);
+    setStudentId(student.id);
+    setShowForm(true);
   }
 
   async function handleCreatePayment() {
@@ -194,6 +224,20 @@ export default function AdminPaymentsPage() {
               <option value="completed">Completed</option>
               <option value="pending">Pending</option>
               <option value="failed">Failed</option>
+              <option value="not_paid">Not paid</option>
+            </select>
+          </div>
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+            <label htmlFor="classTypeFilter" className="block text-sm font-semibold text-[var(--muted)]">Membership</label>
+            <select
+              id="classTypeFilter"
+              value={filterClassType}
+              onChange={(event) => setFilterClassType(event.target.value)}
+              className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+            >
+              <option value="">All memberships</option>
+              <option value="private">Private membership</option>
+              <option value="group">Group class</option>
             </select>
           </div>
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
@@ -250,6 +294,7 @@ export default function AdminPaymentsPage() {
                   onChange={(event) => setCurrency(event.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
+                  <option value="ngn">NGN (₦)</option>
                   <option value="usd">USD</option>
                   <option value="eur">EUR</option>
                 </select>
@@ -261,9 +306,11 @@ export default function AdminPaymentsPage() {
                   onChange={(event) => setMethod(event.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="card">Card</option>
                   <option value="bank_transfer">Bank transfer</option>
                   <option value="cash">Cash</option>
+                  <option value="pos">POS</option>
+                  <option value="card">Card</option>
+                  <option value="paystack">Paystack</option>
                 </select>
               </label>
               <label className="space-y-2 text-sm md:col-span-2">
@@ -299,7 +346,7 @@ export default function AdminPaymentsPage() {
                 type="button"
                 onClick={() => setShowForm(false)}
                 disabled={formBusy}
-                className="rounded-lg border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold text-slate-700"
+                className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--foreground-soft)]"
               >
                 Cancel
               </button>
@@ -335,15 +382,22 @@ export default function AdminPaymentsPage() {
                   payments.map((payment) => (
                     <tr key={payment.id}>
                       <td className="px-4 py-3">
-                        {payment.student.user.name || payment.student.user.email}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span>{payment.student.user.name || payment.student.user.email}</span>
+                          {payment.student.classType === "private" ? (
+                            <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800" title="Private membership">
+                              Private membership
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
-                      <td className="px-4 py-3">{payment.amount / 100} {payment.currency.toUpperCase()}</td>
+                      <td className="px-4 py-3 font-semibold">{naira(payment.amount)}</td>
                       <td className="px-4 py-3 capitalize">{payment.method}</td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
                           payment.status === "completed" ? "bg-green-100 text-green-700" :
                           payment.status === "pending" ? "bg-yellow-100 text-yellow-700" :
-                          payment.status === "failed" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-700"
+                          payment.status === "failed" ? "bg-red-100 text-red-700" : "bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
                         }`}>
                           {payment.status}
                         </span>
@@ -351,12 +405,28 @@ export default function AdminPaymentsPage() {
                       <td className="px-4 py-3">{payment.description ?? "—"}</td>
                       <td className="px-4 py-3">{new Date(payment.createdAt).toLocaleDateString()}</td>
                       <td className="px-4 py-3 flex flex-wrap gap-2">
-                        {payment.status !== "completed" && (
+                        {payment.status === "not_paid" && payment.studentId ? (
+                          <button
+                            className="rounded-lg border border-[var(--accent)] text-[var(--accent)] px-2 py-1 text-xs"
+                            onClick={() => openPaymentForm({ id: payment.studentId!, user: payment.student.user })}
+                          >
+                            Record payment
+                          </button>
+                        ) : null}
+                        {payment.status !== "completed" && payment.status !== "not_paid" && (
                           <button
                             className="rounded-lg border border-green-500 text-green-600 px-2 py-1 text-xs"
                             onClick={() => handleStatusUpdate(payment.id, "completed")}
                           >
                             Complete
+                          </button>
+                        )}
+                        {payment.status !== "failed" && (
+                          <button
+                            className="rounded-lg border border-red-500 text-red-600 px-2 py-1 text-xs"
+                            onClick={() => handleStatusUpdate(payment.id, "failed")}
+                          >
+                            Fail
                           </button>
                         )}
                       </td>
@@ -395,5 +465,20 @@ export default function AdminPaymentsPage() {
         </div>
       </div>
     </AdminShell>
+  );
+}
+
+export default function AdminPaymentsPage() {
+  // useSearchParams needs a Suspense boundary above it.
+  return (
+    <Suspense
+      fallback={
+        <AdminShell>
+          <p className="p-6 text-sm text-[var(--muted)]">Loading payments…</p>
+        </AdminShell>
+      }
+    >
+      <PaymentsLedger />
+    </Suspense>
   );
 }

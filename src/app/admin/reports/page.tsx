@@ -42,15 +42,15 @@ export default function AdminReportsPage() {
 
         <div className="grid gap-4 md:grid-cols-3 mb-6">
           <div className="rounded-lg border p-4">
-            <p className="text-sm text-gray-500">Total exam registrations</p>
+            <p className="text-sm text-[var(--muted)]">Total exam registrations</p>
             <p className="mt-2 text-2xl font-bold">{totalExams}</p>
           </div>
           <div className="rounded-lg border p-4">
-            <p className="text-sm text-gray-500">Total attendance records</p>
+            <p className="text-sm text-[var(--muted)]">Total attendance records</p>
             <p className="mt-2 text-2xl font-bold">{attendanceSummary.total}</p>
           </div>
           <div className="rounded-lg border p-4">
-            <p className="text-sm text-gray-500">Courses tracked</p>
+            <p className="text-sm text-[var(--muted)]">Courses tracked</p>
             <p className="mt-2 text-2xl font-bold">{coursesTracked}</p>
           </div>
         </div>
@@ -84,7 +84,7 @@ export default function AdminReportsPage() {
         <div className="mt-6 rounded-lg border p-4">
           <h2 className="text-lg font-semibold mb-3">Average progress by course</h2>
           <table className="w-full text-left text-sm">
-            <thead className="text-xs text-gray-500">
+            <thead className="text-xs text-[var(--muted)]">
               <tr>
                 <th className="py-2">Course</th>
                 <th className="py-2">Avg %</th>

@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   certificateEligibility,
@@ -9,6 +9,7 @@ import {
   toCertificateView,
 } from "@/lib/certificates";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { parseCertificateTemplate } from "@/lib/certificate-template";
 
 /**
  * A student's certificates, issuing the current level's on the way through.
@@ -22,7 +23,8 @@ import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -79,10 +81,16 @@ export async function GET() {
     orderBy: { issuedAt: "desc" },
   });
 
+  // The school's own wording and signatories. Sent with the certificates so
+  // the page renders the same document the office approved in the editor,
+  // rather than the built-in defaults it used to be hardcoded to.
+  const templateRow = await prisma.certificateTemplate.findFirst({ where: { key: "default" } });
+
   return NextResponse.json({
     level: student.level,
     outstanding,
     pending: eligibility.eligible ? null : eligibility.reason,
+    template: parseCertificateTemplate(templateRow?.settings),
     certificates: rows.map((row) => toCertificateView(row, outstanding)),
     // Everything the sealed preview needs to render the student's OWN
     // certificate before they have earned it.

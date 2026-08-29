@@ -1,51 +1,81 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from '@/components/BrandLogo';
 import NotificationCenter from '@/components/NotificationCenter';
+import ThemeToggle, { useHideFloatingThemeToggle } from '@/components/ThemeToggle';
+import PortalUpdates from '@/components/PortalUpdates';
+import SignOutButton from '@/components/SignOutButton';
 import {
+  AlertIcon,
   AttendanceIcon,
   BellIcon,
   SlidersIcon,
   BookOpenIcon,
   BranchIcon,
+  CalendarIcon,
+  CertificateIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CommunityIcon,
+  CompassIcon,
   CrossIcon,
   DashboardIcon,
-  ExamCentreIcon,
   ExamIcon,
+  FamilyIcon,
   InboxIcon,
   IntegrationIcon,
   LecturerIcon,
   LessonBuilderIcon,
   LevelUpIcon,
+  LinkIcon,
   MailIcon,
   MapIcon,
   MenuIcon,
+  PackageIcon,
   PaletteIcon,
   PaymentIcon,
+  PencilIcon,
+  PulseIcon,
   RobotIcon,
-  RosterIcon,
   SendIcon,
   ShieldIcon,
+  TicketIcon,
   KeyIcon,
   TrendingUpIcon,
   UserPlusIcon,
   UsersIcon,
   WalletIcon,
 } from '@/components/icons';
+import { capabilityForAdminPath } from '@/lib/admin-routes';
 
 type NavItem = {
-  capability?: string;
   label: string;
   href: string;
   icon: ReactNode;
   group?: string;
+  /**
+   * Shown only to a platform operator — somebody who runs the system the
+   * schools sit on, rather than any one school. Separate from `capability`
+   * because no school can grant it: it is a column set from a shell, and the
+   * routes behind these entries answer 404 to everybody else.
+   */
+  platformOnly?: boolean;
 };
+
+/**
+ * The capability each entry sits behind is no longer written here.
+ *
+ * It used to be a field on every nav item, which made this file one of two
+ * places that knew which admin page needs which capability — and the other
+ * place, the dashboard, had no such table at all, so its tiles linked wherever
+ * seemed reasonable and could land a reader on "Not your area". Both now read
+ * src/lib/admin-routes.ts, so a new page is classified once.
+ */
+const capabilityOf = (item: NavItem) => capabilityForAdminPath(item.href);
 
 // One icon per destination. Four of the Academics entries used to share the
 // same pair-of-people glyph and all three Exams entries the same page, so the
@@ -53,51 +83,83 @@ type NavItem = {
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: <DashboardIcon />, group: 'Main' },
 
-  { label: 'Students', href: '/admin/students', capability: 'students' as const, icon: <UsersIcon />, group: 'Academics' },
-  { label: 'Import students', href: '/admin/students/import', capability: 'students' as const, icon: <UserPlusIcon />, group: 'Academics' },
-  { label: 'Enquiries', href: '/admin/leads', capability: 'students' as const, icon: <InboxIcon />, group: 'Academics' },
-  { label: 'Branches', href: '/admin/branches', capability: 'branches' as const, icon: <BranchIcon />, group: 'Academics' },
-  { label: 'Tutors', href: '/admin/lecturer-invite', capability: 'staff' as const, icon: <LecturerIcon />, group: 'Academics' },
-  { label: 'Attendance', href: '/admin/attendance', capability: 'attendance' as const, icon: <AttendanceIcon />, group: 'Academics' },
-  { label: 'Cohort sign-off', href: '/admin/journey', capability: 'students' as const, icon: <MapIcon />, group: 'Academics' },
-  { label: 'Promotions', href: '/admin/promotions', capability: 'students' as const, icon: <LevelUpIcon />, group: 'Academics' },
+  { label: 'Students', href: '/admin/students', icon: <UsersIcon />, group: 'Academics' },
+  { label: 'Import students', href: '/admin/students/import', icon: <UserPlusIcon />, group: 'Academics' },
+  { label: 'Parents', href: '/admin/parents', icon: <FamilyIcon />, group: 'Academics' },
+  // Two different things that both used to be called "Enquiries". A ticket is
+  // a student who is already here and stuck; a lead is a stranger the school is
+  // trying to enrol. One label for both is how a help request ends up counted
+  // as a conversion opportunity.
+  { label: 'Enquiries', href: '/admin/enquiries', icon: <InboxIcon />, group: 'Academics' },
+  { label: 'Lead funnel', href: '/admin/leads', icon: <TicketIcon />, group: 'Academics' },
+  { label: 'Branches', href: '/admin/branches', icon: <BranchIcon />, group: 'Academics' },
+  { label: 'Tutors', href: '/admin/lecturer-invite', icon: <LecturerIcon />, group: 'Academics' },
+  { label: 'Attendance', href: '/admin/attendance', icon: <AttendanceIcon />, group: 'Academics' },
+  { label: 'All schedules', href: '/admin/schedule', icon: <CalendarIcon />, group: 'Academics' },
+  { label: 'Live classes', href: '/admin/live', icon: <PulseIcon />, group: 'Academics' },
+  { label: 'Full timetable', href: '/lecturer/timetable', icon: <CalendarIcon />, group: 'Academics' },
+  { label: 'Cohort sign-off', href: '/admin/journey', icon: <MapIcon />, group: 'Academics' },
+  { label: 'Promotions', href: '/admin/promotions', icon: <LevelUpIcon />, group: 'Academics' },
+  { label: 'Certificates', href: '/admin/certificates', icon: <CertificateIcon />, group: 'Academics' },
 
-  { label: 'Exams', href: '/admin/exams', capability: 'exams' as const, icon: <ExamIcon />, group: 'Exams' },
-  { label: 'Exam centre', href: '/admin/exam-centre', capability: 'exams' as const, icon: <ExamCentreIcon />, group: 'Exams' },
-  { label: 'Exam Registrations', href: '/admin/exam-registrations', capability: 'exams' as const, icon: <RosterIcon />, group: 'Exams' },
+  { label: 'Exams', href: '/admin/exams', icon: <ExamIcon />, group: 'Exams' },
+  // The dashboard has counted unmarked work since it was built and had nowhere
+  // to send anybody. This is that somewhere.
+  { label: 'Marking queue', href: '/admin/marking', icon: <PencilIcon />, group: 'Exams' },
 
   // Course create/delete/import used to be on the demo page at `/lecturer`,
   // an admin screen sitting in the tutor portal. It lives here now, above the
   // Materials page that reads what it produces.
-  { label: 'Courses', href: '/admin/courses', capability: 'materials' as const, icon: <LessonBuilderIcon />, group: 'Content' },
-  { label: 'Materials', href: '/admin/materials', capability: 'materials' as const, icon: <BookOpenIcon />, group: 'Content' },
-  { label: 'Community', href: '/admin/community', capability: 'community' as const, icon: <CommunityIcon />, group: 'Content' },
+  { label: 'Courses', href: '/admin/courses', icon: <LessonBuilderIcon />, group: 'Content' },
+  { label: 'Materials', href: '/admin/materials', icon: <BookOpenIcon />, group: 'Content' },
+  { label: 'Community', href: '/admin/community', icon: <CommunityIcon />, group: 'Content' },
 
-  { label: 'Payments', href: '/admin/payments', capability: 'payments' as const, icon: <PaymentIcon />, group: 'Billing' },
-  // These three pages existed and were reachable from nowhere — built, then
-  // never added to the sidebar, so nobody in the office knew they were there.
-  { label: 'Finance overview', href: '/admin/finance', capability: 'payments' as const, icon: <WalletIcon />, group: 'Billing' },
-  { label: 'Reports', href: '/admin/reports', capability: 'reports' as const, icon: <TrendingUpIcon />, group: 'Billing' },
+  // Finance first: for an Accountant this is the whole portal, and the
+  // transaction list is what you open from it rather than the other way round.
+  { label: 'Finance', href: '/admin/finance', icon: <WalletIcon />, group: 'Billing' },
+  { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon />, group: 'Billing' },
+  { label: 'Legal & refunds', href: '/admin/legal', icon: <AlertIcon />, group: 'Billing' },
+  { label: 'Reports', href: '/admin/reports', icon: <TrendingUpIcon />, group: 'Billing' },
+  // The other direction of money: what this school owes for running on the
+  // platform, itemised by meter. It had been built and reachable only by typing
+  // the URL, which meant the one screen that justifies the invoice was the one
+  // screen the person paying it could not find.
+  { label: 'Platform usage', href: '/admin/billing', icon: <PulseIcon />, group: 'Billing' },
 
+  // What the school's students actually DO, read as patterns rather than as a
+  // list of page views. First in this group because it is the one screen here
+  // that answers a question about students rather than about the software.
+  { label: 'Learner patterns', href: '/admin/intelligence', icon: <CompassIcon />, group: 'Intelligence' },
   { label: 'Assistant', href: '/admin/assistant', icon: <RobotIcon />, group: 'Intelligence' },
+  { label: 'AI usage', href: '/admin/ai-usage', icon: <PulseIcon />, group: 'Intelligence' },
+  { label: 'Beta lab', href: '/admin/beta', icon: <PulseIcon />, group: 'Intelligence' },
+  // Sat under Settings, where nobody looking for analytics would ever find
+  // it, and titled with a word that told you nothing about what it showed.
+  { label: 'Study plan health', href: '/admin/personalization', icon: <PaletteIcon />, group: 'Intelligence' },
 
-  { label: 'Email centre', href: '/admin/emails', capability: 'emails' as const, icon: <MailIcon />, group: 'Settings' },
-  { label: 'Compose email', href: '/admin/emails/compose', capability: 'emails' as const, icon: <SendIcon />, group: 'Settings' },
-  { label: 'Notifications', href: '/admin/notifications', capability: 'emails' as const, icon: <BellIcon />, group: 'Settings' },
-  { label: 'Notification rules', href: '/admin/notification-settings', capability: 'emails' as const, icon: <SlidersIcon />, group: 'Settings' },
-  { label: 'Class sessions', href: '/admin/class-sessions', capability: 'classes' as const, icon: <SlidersIcon />, group: 'Settings' },
-  { label: 'Admin roles', href: '/admin/staff', capability: 'staff' as const, icon: <ShieldIcon />, group: 'Settings' },
-  { label: 'Security & recovery', href: '/admin/security', capability: 'security' as const, icon: <KeyIcon />, group: 'Settings' },
-  { label: 'Integrations', href: '/admin/integrations', capability: 'integrations' as const, icon: <IntegrationIcon />, group: 'Settings' },
-  // Matches the capability its API now requires. A nav entry that leads
-  // somewhere its own endpoint refuses is worse than no nav entry.
-  { label: 'Personalization', href: '/admin/personalization', capability: 'reports' as const, icon: <PaletteIcon />, group: 'Settings' },
+  { label: 'General settings', href: '/admin/settings', icon: <SlidersIcon />, group: 'Settings' },
+  { label: 'Email centre', href: '/admin/emails', icon: <MailIcon />, group: 'Settings' },
+  { label: 'Compose email', href: '/admin/emails/compose', icon: <SendIcon />, group: 'Settings' },
+  { label: 'Notifications', href: '/admin/notifications', icon: <BellIcon />, group: 'Settings' },
+  { label: 'Notification rules', href: '/admin/notification-settings', icon: <SlidersIcon />, group: 'Settings' },
+  { label: 'Admin roles', href: '/admin/staff', icon: <ShieldIcon />, group: 'Settings' },
+  { label: 'Security & recovery', href: '/admin/security', icon: <KeyIcon />, group: 'Settings' },
+  { label: 'Integrations', href: '/admin/integrations', icon: <IntegrationIcon />, group: 'Settings' },
+  // Built with the platform layer and reachable only by POSTing JSON by hand
+  // until now. The office that needs to notice an endpoint has gone quiet is
+  // not the office that will open a terminal to check.
+  { label: 'Webhooks', href: '/admin/webhooks', icon: <LinkIcon />, group: 'Settings' },
+
+  // Last, and its own group, because it is not part of running a school. This
+  // is the console for the business that sells the software to schools.
+  { label: 'Schools & API keys', href: '/platform', icon: <PackageIcon />, group: 'Platform', platformOnly: true },
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { data: session, status } = useSession();
+  useHideFloatingThemeToggle();
   const [collapsed, setCollapsed] = useState(false);
   // Below lg the sidebar is a drawer. The admin area is used from a phone at
   // the front desk more often than the desktop-only layout assumed.
@@ -106,6 +168,15 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   // items away on first paint.
   const [capabilities, setCapabilities] = useState<string[] | null>(null);
   const [adminRoleLabel, setAdminRoleLabel] = useState<string | null>(null);
+  /**
+   * Note the opposite default to `capabilities`. Unknown capabilities show
+   * everything, so a failed lookup never blanks out somebody's own portal.
+   * Unknown platform role shows nothing, because this door leads out of the
+   * school entirely and almost nobody holds it.
+   */
+  const [platformOperator, setPlatformOperator] = useState(false);
+  /** Help requests nobody in the office has opened yet. Drives the ping. */
+  const [unreadEnquiries, setUnreadEnquiries] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +187,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         const data = await res.json();
         setCapabilities(data.capabilities ?? null);
         setAdminRoleLabel(data.label ?? null);
+        setPlatformOperator(Boolean(data.platformOperator));
       } catch {
         /* Leave the sidebar fully visible; the routes still enforce access. */
       }
@@ -123,11 +195,35 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     return () => { cancelled = true; };
   }, []);
 
-  const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings'];
-
+  /**
+   * THE PING.
+   *
+   * A help desk that has to be visited to be checked is a help desk that gets
+   * checked on Fridays. `?count=1` is two indexed counts and no rows, which is
+   * cheap enough to ask for on a two-minute clock from every admin page — and
+   * the route refuses anybody without the `students` capability, so an
+   * accountant is neither shown the badge nor charged the query.
+   */
   useEffect(() => {
-    setDrawerOpen(false);
-  }, [pathname]);
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/admin/enquiries?count=1', { cache: 'no-store' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        setUnreadEnquiries(Number(data.unread) || 0);
+      } catch {
+        /* A missing badge is not worth a console full of noise. */
+      }
+    };
+
+    poll();
+    const timer = window.setInterval(poll, 120_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+
+  const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings', 'Platform'];
 
   useEffect(() => {
     if (status === 'unauthenticated' || (status === 'authenticated' && session?.user?.role?.toLowerCase() !== 'admin')) {
@@ -136,11 +232,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   }, [router, session?.user?.role, status]);
 
   if (status === 'loading') {
-    return <div className="flex min-h-screen items-center justify-center bg-[#fffbf8] text-slate-700">Loading admin portal...</div>;
+    return <div className="app-canvas flex min-h-screen items-center justify-center text-[var(--foreground-soft)]">Loading admin portal...</div>;
   }
 
   if (status === 'unauthenticated' || session?.user?.role?.toLowerCase() !== 'admin') {
-    return <div className="flex min-h-screen items-center justify-center bg-[#fffbf8] text-slate-700">Redirecting to admin sign-in...</div>;
+    return <div className="app-canvas flex min-h-screen items-center justify-center text-[var(--foreground-soft)]">Redirecting to admin sign-in...</div>;
   }
 
   /**
@@ -175,14 +271,13 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     .filter((item) => pathname === item.href || pathname.startsWith(item.href + '/'))
     .sort((a, b) => b.href.length - a.href.length)[0];
 
+  const currentCapability = currentArea ? capabilityOf(currentArea) : null;
   const blocked = Boolean(
-    currentArea?.capability &&
-      capabilities !== null &&
-      !capabilities.includes(currentArea.capability),
+    currentCapability && capabilities !== null && !capabilities.includes(currentCapability),
   );
 
   return (
-    <div className="flex min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.08),_transparent_40%),linear-gradient(135deg,_#f9f7f5_0%,_#fffbf8_100%)] text-[var(--foreground)]">
+    <div className="app-canvas flex min-h-screen text-[var(--foreground)]">
       {drawerOpen && (
         <button
           aria-label="Close menu"
@@ -193,17 +288,19 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
       {/* Sidebar */}
       <aside
-        className={`fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-white/60 bg-white/95 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:bg-white/85 lg:transition-all ${
+        className={`sidebar-glass fixed left-0 top-0 z-50 flex h-dvh flex-col border-r border-[var(--border)] transition-transform duration-300 lg:z-40 lg:translate-x-0 lg:transition-all ${
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         } w-[17rem] ${collapsed ? 'lg:w-20' : 'lg:w-72'}`}
       >
         {/* Header */}
-        <div className="border-b border-slate-200/70 p-4">
+        <div className="border-b border-[var(--border)] p-4">
           <div className="flex items-center justify-between gap-3">
             {/* The real logo, not an "AW" placeholder — the school has artwork
                 and every other portal was already using it. */}
             <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
-              <BrandLogo variant="wordmark" className="h-8" />
+              <Link href="/admin" aria-label="Go to dashboard">
+                <BrandLogo variant="wordmark" className="h-8" />
+              </Link>
               <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]">
                 Admin portal
               </p>
@@ -211,19 +308,23 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 <p className="text-[11px] font-medium text-[var(--accent)]">{adminRoleLabel}</p>
               )}
             </div>
-            {collapsed && <BrandLogo variant="mark" className="hidden h-10 w-10 lg:block" />}
+            {collapsed && (
+              <Link href="/admin" aria-label="Go to dashboard" className="hidden lg:block">
+                <BrandLogo variant="mark" className="h-10 w-10" />
+              </Link>
+            )}
 
             <button
               onClick={() => setCollapsed(!collapsed)}
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              className="hidden rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:block"
+              className="hidden rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:block"
             >
               {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
             </button>
             <button
               onClick={() => setDrawerOpen(false)}
               aria-label="Close menu"
-              className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-[var(--accent)] lg:hidden"
+              className="rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:hidden"
             >
               <CrossIcon className="h-5 w-5" />
             </button>
@@ -235,39 +336,57 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           {groups.map((group) => {
             // Hide areas this admin's sub-role does not cover. The routes
             // enforce it too — this only avoids showing doors that 403.
-            const groupItems = navItems.filter(
-              (item) =>
-                item.group === group &&
-                (!item.capability || capabilities === null || capabilities.includes(item.capability)),
-            );
+            const groupItems = navItems.filter((item) => {
+              if (item.group !== group) return false;
+              if (item.platformOnly && !platformOperator) return false;
+              const capability = capabilityOf(item);
+              return !capability || capabilities === null || capabilities.includes(capability);
+            });
             if (groupItems.length === 0) return null;
             return (
               <div key={group} className="mb-6">
                 {!collapsed && (
-                  <p className="mb-3 px-3 text-xs font-bold uppercase tracking-[0.3em] text-slate-500">{group}</p>
+                  <p className="mb-3 px-3 text-xs font-bold uppercase tracking-[0.3em] text-[var(--muted)]">{group}</p>
                 )}
                 <div className="space-y-1">
                   {groupItems.map((item) => {
                     const active = pathname === item.href || pathname.startsWith(item.href + '/');
+                    // One badge in the whole sidebar, and it is on the one
+                    // entry where a number means "somebody is waiting".
+                    const badge = item.href === '/admin/enquiries' ? unreadEnquiries : 0;
                     return (
                       <button
                         key={item.href}
-                        onClick={() => router.push(item.href)}
+                        onClick={() => {
+                          setDrawerOpen(false);
+                          router.push(item.href);
+                        }}
                         title={collapsed ? item.label : ''}
                         className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition-all duration-200 ${
                           active
                             ? 'bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_8px_24px_rgba(255,102,0,0.12)]'
-                            : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+                            : 'text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]'
                         }`}
                       >
                         <span
-                          className={`flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-base shadow-sm transition ${
-                            active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-slate-300'
+                          className={`relative flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${
+                            active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'
                           }`}
                         >
                           {item.icon}
+                          {/* Collapsed, the label is gone and the count with
+                              it — so the icon itself carries a dot, which is
+                              the only thing that still fits. */}
+                          {badge > 0 && collapsed ? (
+                            <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--surface-alt)] lg:block" />
+                          ) : null}
                         </span>
-                        {!collapsed && <span className="font-medium">{item.label}</span>}
+                        {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
+                        {!collapsed && badge > 0 ? (
+                          <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-bold text-white">
+                            {badge > 99 ? '99+' : badge}
+                          </span>
+                        ) : null}
                       </button>
                     );
                   })}
@@ -278,8 +397,14 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         </nav>
 
         {/* Footer */}
-        <div className={`border-t border-slate-200/70 p-4 ${collapsed ? 'text-center' : ''}`}>
-          <p className="text-xs text-slate-500">{collapsed ? 'v1' : 'Professional admin panel'}</p>
+        <div className="border-t border-[var(--border)] p-3">
+          {/* Of the three portals this is the one that most needs a way out —
+              an admin left signed in on an office machine exposes every
+              student record, payment and staff account in the school. */}
+          <SignOutButton callbackUrl="/auth/admin" collapsed={collapsed} tone="slate" portalLabel="the admin portal" />
+          <p className={`mt-2 px-3 text-xs text-[var(--muted)] ${collapsed ? 'lg:text-center' : ''}`}>
+            {collapsed ? 'v1' : 'Professional admin panel'}
+          </p>
         </div>
       </aside>
 
@@ -290,44 +415,47 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           letting the page scroll to it. The admin area is the worst case for
           this — it is nothing but wide tables of emails and amounts. */}
       <main className={`min-w-0 flex-1 overflow-x-clip transition-all duration-300 ${collapsed ? 'lg:ml-20' : 'lg:ml-72'}`}>
-        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-white/60 bg-white/80 px-3 py-2 backdrop-blur-xl sm:px-6">
+        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-soft)] px-3 py-2 backdrop-blur-xl sm:px-6">
           <button
             onClick={() => setDrawerOpen(true)}
             aria-label="Open menu"
-            className="grid h-10 w-10 place-items-center rounded-xl text-slate-600 transition hover:bg-slate-100 lg:hidden"
+            className="grid h-10 w-10 place-items-center rounded-xl text-[var(--muted)] transition hover:bg-[var(--surface-alt)] lg:hidden"
           >
             <MenuIcon className="h-5 w-5" />
           </button>
 
           <div className="min-w-0 flex-1 lg:hidden">
-            <BrandLogo variant="wordmark" className="h-7" />
+            <Link href="/admin" aria-label="Go to dashboard">
+              <BrandLogo variant="wordmark" className="h-7" />
+            </Link>
           </div>
 
-          <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-slate-700 lg:block">
+          <p className="hidden min-w-0 flex-1 truncate text-sm font-semibold text-[var(--foreground-soft)] lg:block">
             {navItems.find((item) => pathname === item.href)?.label ?? 'Admin'}
           </p>
 
+          <ThemeToggle variant="compact" />
           <NotificationCenter />
         </header>
 
-        <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,102,0,0.08),_transparent_40%),linear-gradient(135deg,_#f9f7f5_0%,_#fffbf8_100%)] p-4 sm:p-6 lg:p-8">
+        <div className="app-canvas min-h-screen p-4 sm:p-6 lg:p-8">
           <div className="mx-auto max-w-7xl">
             {blocked ? (
-              <div className="mx-auto mt-10 max-w-lg rounded-[28px] border border-slate-200 bg-white p-8 text-center shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
+              <div className="mx-auto mt-10 max-w-lg rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-8 text-center shadow-[var(--shadow)]">
                 <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
                   <ShieldIcon className="h-7 w-7" />
                 </span>
-                <h1 className="mt-4 text-xl font-bold text-slate-900">Not your area</h1>
+                <h1 className="mt-4 text-xl font-bold text-[var(--foreground)]">Not your area</h1>
                 {/* Not `${label}s do not cover` — that renders "Secretarys",
                     and a permissions screen that cannot spell the role is not
                     one anybody trusts. The label goes in parentheses instead,
                     which works for every role name including future ones. */}
-                <p className="mt-2 text-sm leading-6 text-slate-600">
+                <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
                   Your admin role{adminRoleLabel ? ` (${adminRoleLabel})` : ''} does not cover{' '}
-                  <strong className="font-semibold text-slate-800">{currentArea?.label}</strong>. Nothing is broken —
+                  <strong className="font-semibold text-[var(--foreground)]">{currentArea?.label}</strong>. Nothing is broken —
                   this is simply not part of your role.
                 </p>
-                <p className="mt-3 text-xs leading-5 text-slate-500">
+                <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
                   A super admin can hand you this one from Admin roles, without changing anybody else&rsquo;s access.
                 </p>
                 <button
@@ -343,7 +471,16 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             )}
           </div>
         </div>
+
       </main>
+
+      {/*
+        Message popups, mounted once per shell so they follow the reader onto
+        every page rather than living on the community screen they are about.
+        See PortalUpdates for why the card carries the real message text.
+      */}
+      <PortalUpdates />
+
     </div>
   );
 }

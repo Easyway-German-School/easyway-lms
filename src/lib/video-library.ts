@@ -29,6 +29,17 @@ export type LibraryVideo = {
   /** Where this student stopped, if they have started it. */
   positionSeconds: number;
   completed: boolean;
+  /**
+   * Set when the tutor linked the video rather than uploading it, and the
+   * player must use an iframe. Null for anything we host ourselves — including
+   * a linked bare .mp4, which is a real file and stays in a <video> so it keeps
+   * scrubbing, speed control and the resume position. See lib/media-embed.ts.
+   */
+  embedUrl: string | null;
+  /** "YouTube", "Vimeo"… — shown on the tile so the shelf is honest about it. */
+  embedLabel: string | null;
+  /** A private one-to-one capture — see class-recorder.ts. Splits the shelf and unlocks the premium notes panel. */
+  isPrivate: boolean;
 };
 
 export type VideoShelf = {
@@ -80,6 +91,16 @@ export function formatDuration(seconds?: number | null): string {
   return minutes > 0 ? `${minutes}m` : `${secs}s`;
 }
 
+/** "4:07" or "1:02:33" — the clock readout in the player chrome, not the tile. */
+export function formatClock(seconds?: number | null): string {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  return `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
 /** 0–100, for the red progress bar under a thumbnail. */
 export function watchPercent(video: Pick<LibraryVideo, "positionSeconds" | "durationSeconds" | "completed">): number {
   if (video.completed) return 100;
@@ -129,7 +150,22 @@ export function buildShelves(videos: LibraryVideo[], level?: string | null): Vid
     });
   }
 
-  const recordings = videos.filter((video) => video.kind === "recording").sort(byNewest);
+  // Private sessions get their own shelf rather than sitting inside the
+  // cohort's — a class/status division on purpose: a level-wide "class
+  // recordings" shelf and "these are yours alone" read very differently, and
+  // a private student paying for one-to-one time should see that reflected,
+  // not buried among group tapes that were never theirs to begin with.
+  const privateRecordings = videos.filter((video) => video.kind === "recording" && video.isPrivate).sort(byNewest);
+  if (privateRecordings.length > 0) {
+    shelves.push({
+      id: "private-sessions",
+      title: "Your private sessions",
+      subtitle: "One-to-one lessons, with corrections and progress notes only you can see.",
+      videos: privateRecordings,
+    });
+  }
+
+  const recordings = videos.filter((video) => video.kind === "recording" && !video.isPrivate).sort(byNewest);
   if (recordings.length > 0) {
     shelves.push({
       id: "recordings",

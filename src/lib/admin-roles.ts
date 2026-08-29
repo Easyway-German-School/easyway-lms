@@ -1,4 +1,7 @@
+import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { beginRequestScope } from "@/lib/tenant/context";
+import { beginAuditScope } from "@/lib/audit-context";
 
 /**
  * Admin sub-roles.
@@ -12,12 +15,13 @@ import { prisma } from "@/lib/prisma";
  * matching how the office is actually staffed rather than per-endpoint.
  */
 
-export const ADMIN_ROLES = ["super", "secretary", "data_comm"] as const;
+export const ADMIN_ROLES = ["super", "secretary", "accountant", "data_comm"] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   super: "Super Admin",
   secretary: "Secretary",
+  accountant: "Accountant",
   data_comm: "Data & Communications Manager",
 };
 
@@ -39,18 +43,24 @@ export const CAPABILITIES = [
 export type Capability = (typeof CAPABILITIES)[number];
 
 /**
- * PAYMENTS IS SUPER-ONLY, and is not in any other preset.
+ * PAYMENTS BELONGS TO WHOEVER RUNS THE SCHOOL — AND TO THE ACCOUNTANT.
  *
- * It was on `data_comm` on the reasoning that whoever owns the reporting owns
- * the numbers. The school's decision is that the payment dashboard — every
- * student's balance, every transaction, the collected totals — belongs to the
- * person who runs the school and nobody else. `reports` still gives the data
- * manager the shape of things without the money in it.
+ * The earlier rule was that no preset carried `payments` at all: it had been on
+ * `data_comm` on the reasoning that whoever owns the reporting owns the
+ * numbers, and the school pulled it back so that every student's balance, every
+ * transaction and the collected totals sat with one person. That was the right
+ * call while there was nobody else whose job was the money.
  *
- * It can still be handed to a named person one at a time through the
- * per-person `grant` override below. That is a deliberate act by a super admin
- * against one account, which is a different thing from a whole preset carrying
- * it by default.
+ * There is now. An accountant who has to be hand-granted `payments` one account
+ * at a time is a preset that lies about how the office is staffed, and the
+ * likely outcome is the school stops bothering and signs the accountant in as a
+ * super admin — which hands over the student records, the staff list and the
+ * audit trail to close a gap that was only ever about the fee book. So the role
+ * exists, it carries the money and nothing else, and `secretary` and
+ * `data_comm` still do not.
+ *
+ * `security` stays out of every preset. See SUPER_ONLY_CAPABILITIES below: it
+ * has a separate reason that this change does not touch.
  */
 const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   // Runs the school: everything, including who else is an admin.
@@ -60,22 +70,37 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   // to money, staffing or bulk communications.
   secretary: ["students", "attendance", "classes", "exams", "materials", "branches"],
 
+  /**
+   * The fee book and what explains it. Narrow on purpose.
+   *
+   * `payments` is the job. `reports` comes with it because an accountant asked
+   * "why did Abuja collect less this month" needs the enrolment and attendance
+   * shape to answer, and refusing it would send them to ask a super admin for a
+   * screenshot. `students` is deliberately absent — the receivables screens
+   * name students and show their balances, which is the accountant's business,
+   * but editing a student record, moving them between branches or graduating
+   * them is not.
+   */
+  accountant: ["payments", "reports"],
+
   // Owns communications and the numbers, not the student records or the money.
   data_comm: ["community", "emails", "reports", "integrations"],
 };
 
 /**
- * Capabilities no preset may carry, however the presets are edited later.
- * Reaching one takes a deliberate per-person grant from a super admin.
- */
-/**
- * `security` sits beside `payments` here for a different reason.
+ * The capabilities that demand a second factor.
  *
- * The audit trail is how you find out what an admin did, and the restore
- * screen can put back a record somebody deleted on purpose. Both are ordinary
- * tools right up until the person being investigated is the one holding them.
- * It stays with whoever runs the school, and is granted one person at a time
- * or not at all.
+ * Read by `shouldRequireMfa` in src/lib/mfa.ts and by nothing else — it is not
+ * a restriction on the presets above, and since the Accountant role landed it
+ * is no longer true that only a super admin can hold one of these. The name is
+ * kept because the shape of the rule has not changed: whoever holds the money
+ * or the audit trail signs in with an authenticator, whatever their job title.
+ *
+ * `security` is here for its own reason. The audit trail is how you find out
+ * what an admin did, and the restore screen can put back a record somebody
+ * deleted on purpose. Both are ordinary tools right up until the person being
+ * investigated is the one holding them, so it stays out of every preset and is
+ * granted one person at a time or not at all.
  */
 export const SUPER_ONLY_CAPABILITIES: Capability[] = ["payments", "security"];
 
@@ -143,6 +168,43 @@ export function capabilitiesForUser(adminRole: unknown, overrides: unknown): Cap
 }
 
 /**
+ * Which branches this admin may see/manage, or `null` for unrestricted.
+ *
+ * Stored on User.adminBranchIds as a plain JSON array of branch ids — not a
+ * grant/revoke diff like capabilities, because there is no preset to diff
+ * against: "which branches" has no school-wide default beyond "all of them".
+ *
+ * Null AND an empty array both mean unrestricted. Empty is treated the same
+ * as null rather than as "access to nothing" because a superadmin unticking
+ * every box in the UI is indistinguishable from never having restricted this
+ * person at all, and the safer reading of that ambiguity is the wider one —
+ * the same reasoning `parseOverrides` above uses for a capability that is
+ * both granted and revoked, just pointed the other way: there, an
+ * unresolvable conflict picks the narrower access; here, an empty selection
+ * is not a conflict; it is nobody having deliberately drawn a boundary yet.
+ */
+export function parseBranchIds(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const ids = raw.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+  const unique = Array.from(new Set(ids));
+  return unique.length > 0 ? unique : null;
+}
+
+/**
+ * The branch filter a route should apply for this admin: `null` means every
+ * branch (today's behaviour, and every admin until restricted by hand), an
+ * array means exactly those branch ids.
+ *
+ *   const gate = await requireCapability("students");
+ *   if (!gate.ok) return gate.response;
+ *   const branchIds = scopedBranchIds(gate.admin);
+ *   if (branchIds) whereClause.branchId = { in: branchIds };
+ */
+export function scopedBranchIds(admin: Pick<AdminContext, "branchIds">): string[] | null {
+  return admin.branchIds;
+}
+
+/**
  * Convenience for route handlers that already established the user is an
  * admin and just need to check one capability by user id.
  */
@@ -164,52 +226,72 @@ export async function adminHasCapability(userId: string, capability: Capability)
  * sub-roles decorative on every one of them: a Secretary with no `payments`
  * capability could still read the fee book straight off the API.
  */
+/**
+ * Name the actor for everything this request goes on to write.
+ *
+ * The admin gates are the single door every admin route passes through, so
+ * attaching identity here means the audit trail covers routes nobody
+ * remembered to instrument — including the ones written after this. Set
+ * before any capability check rather than after, so that a refused attempt is
+ * still attributable: somebody probing endpoints they cannot reach is exactly
+ * the pattern worth having on record.
+ *
+ * SHARED BY BOTH GATES, AND IT DID NOT USED TO BE. This lived inline in
+ * `requireCapability` only, so every route reached through `requireAdmin` —
+ * the ones that do their own `admin.can(...)` check — wrote audit entries with
+ * nobody's name on them. An audit line that cannot say who did the thing
+ * answers the one question an audit trail exists to answer with a shrug.
+ */
+async function nameAuditActor(admin: AdminContext | null): Promise<void> {
+  if (!admin) return;
+  const { setAuditActor, actorFromRequest } = await import("@/lib/audit-context");
+  const { headers } = await import("next/headers");
+  let request: { ip?: string; userAgent?: string; route?: string; requestId?: string } = {};
+  try {
+    const headerList = await headers();
+    request = actorFromRequest({ headers: headerList });
+  } catch {
+    // Called outside a request scope (a script, a build-time render). The
+    // actor is still worth recording without the network details.
+  }
+  setAuditActor({
+    userId: admin.userId,
+    email: admin.email,
+    role: `admin:${admin.adminRole}`,
+    source: "app",
+    ...request,
+  });
+}
+
 export async function requireCapability(
   capability: Capability,
-): Promise<{ ok: true; admin: AdminContext } | { ok: false; response: Response }> {
+): Promise<{ ok: true; admin: AdminContext; session: Session } | { ok: false; response: Response }> {
+  /**
+   * FIRST STATEMENT, BEFORE ANY AWAIT — including before the dynamic imports
+   * below, which are awaits like any other. This installs the scope holder in
+   * the calling route's context; requireAuthSession fills it in. See
+   * src/lib/tenant/context.ts for why the order is load-bearing.
+   */
+  beginRequestScope();
+  // Same rule, same reason: synchronously, before the first await, so the
+  // holder reaches the route handler. See beginAuditScope.
+  beginAuditScope();
+
   // Imported here rather than at the top: this module is pulled into client
   // bundles for its label maps, and next-auth's server entry must not follow.
-  const { getServerSession } = await import("next-auth");
-  const { authOptions } = await import("@/lib/auth");
+  const { requireAuthSession } = await import("@/lib/auth");
   const { NextResponse } = await import("next/server");
 
-  const session = (await getServerSession(authOptions as never)) as { user?: { id?: string } } | null;
-  const admin = await resolveAdmin(session?.user?.id);
-
-  /**
-   * Name the actor for everything this request goes on to write.
-   *
-   * This gate is the single door every admin route already passes through, so
-   * attaching identity here means the audit trail covers routes nobody
-   * remembered to instrument — including the ones written after this. Set
-   * before the capability check rather than after, so that a refused attempt
-   * is still attributable: somebody probing endpoints they cannot reach is
-   * exactly the pattern worth having on record.
-   */
-  if (admin) {
-    const { setAuditActor, actorFromRequest } = await import("@/lib/audit-context");
-    const { headers } = await import("next/headers");
-    let request: {
-      ip?: string;
-      userAgent?: string;
-      route?: string;
-      requestId?: string;
-    } = {};
-    try {
-      const headerList = await headers();
-      request = actorFromRequest({ headers: headerList });
-    } catch {
-      // Called outside a request scope (a script, a build-time render). The
-      // actor is still worth recording without the network details.
-    }
-    setAuditActor({
-      userId: admin.userId,
-      email: admin.email,
-      role: `admin:${admin.adminRole}`,
-      source: "app",
-      ...request,
-    });
+  const session = await requireAuthSession();
+  if (!session) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
   }
+
+  const admin = await resolveAdmin(session.user.id);
+  await nameAuditActor(admin);
 
   if (!admin) {
     return {
@@ -228,7 +310,38 @@ export async function requireCapability(
     };
   }
 
-  return { ok: true, admin };
+  return { ok: true, admin, session };
+}
+
+export async function requireAdmin(): Promise<
+  | { ok: true; admin: AdminContext; session: Session }
+  | { ok: false; response: Response }
+> {
+  beginRequestScope();
+  beginAuditScope();
+
+  const { requireAuthSession } = await import("@/lib/auth");
+  const { NextResponse } = await import("next/server");
+
+  const session = await requireAuthSession();
+  if (!session) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+
+  const admin = await resolveAdmin(session.user.id);
+  await nameAuditActor(admin);
+
+  if (!admin) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Admin access required" }, { status: 403 }),
+    };
+  }
+
+  return { ok: true, admin, session };
 }
 
 export type AdminContext = {
@@ -239,6 +352,8 @@ export type AdminContext = {
   /** What this person can actually reach: preset plus their own overrides. */
   capabilities: Capability[];
   can: (capability: Capability) => boolean;
+  /** Null means every branch. See scopedBranchIds() above for how to use this. */
+  branchIds: string[] | null;
 };
 
 /**
@@ -250,7 +365,14 @@ export async function resolveAdmin(userId: string | undefined): Promise<AdminCon
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, role: true, adminRole: true, adminCapabilities: true },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      adminRole: true,
+      adminCapabilities: true,
+      adminBranchIds: true,
+    },
   });
 
   if (!user || String(user.role).toLowerCase() !== "admin") return null;
@@ -263,5 +385,6 @@ export async function resolveAdmin(userId: string | undefined): Promise<AdminCon
     adminRole,
     capabilities,
     can: (capability: Capability) => capabilities.includes(capability),
+    branchIds: parseBranchIds(user.adminBranchIds),
   };
 }

@@ -261,7 +261,7 @@ export default function AdminEmailManagementPage() {
                 <p className="text-xs text-blue-700">
                   <strong>Setup:</strong> Add this cron job to your server (daily):
                 </p>
-                <code className="block mt-2 p-2 bg-white border border-blue-300 rounded text-xs overflow-x-auto">
+                <code className="block mt-2 p-2 bg-[var(--surface)] border border-blue-300 rounded text-xs overflow-x-auto">
                   curl -H &quot;Authorization: Bearer YOUR_CRON_SECRET&quot; {process.env.NEXTAUTH_URL}/api/cron/fee-reminders
                 </code>
               </div>

@@ -30,26 +30,53 @@
  * `livekit-server-sdk` (server-only) or `livekit-client` (browser-only).
  */
 
-/** Which backend the room will actually use. */
-export type LiveProvider = "livekit" | "jitsi";
+/** Which backend the room will actually use. There is now only one. */
+export type LiveProvider = "livekit";
 
 /**
- * LiveKit needs three environment variables:
+ * The three variables a classroom cannot open without:
  *   LIVEKIT_URL         wss://your-project.livekit.cloud   (or your own server)
  *   LIVEKIT_API_KEY
  *   LIVEKIT_API_SECRET
- *
- * Until they are set the classroom falls back to the Jitsi embed that was here
- * before. That fallback is deliberate: a half-configured deployment must still
- * be able to hold a class, and "the video page is broken" is a much worse
- * failure than "the video page is on the old provider".
  */
+const REQUIRED_VARS = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"] as const;
+
+/**
+ * WHY THERE IS NO LONGER A FALLBACK PROVIDER.
+ *
+ * There used to be one, and the reasoning read well: a half-configured
+ * deployment should still be able to hold a class, so a missing variable
+ * quietly swapped the room for a `meet.jit.si` iframe. "The video page is on
+ * the old provider" sounds obviously better than "the video page is broken".
+ *
+ * It is not, and the first live demo proved it. Production had
+ * LIVEKIT_API_KEY and LIVEKIT_API_SECRET but no LIVEKIT_URL, so every class
+ * silently landed on the fallback — and the fallback could not work, because
+ * this app sends `Permissions-Policy: camera=(self), microphone=(self)`, which
+ * grants those features to THIS origin and to no cross-origin frame. Jitsi's
+ * chat and hand-raise are data, so they worked perfectly; its camera, its
+ * microphone and its screen share were dead on arrival. The result was the
+ * worst possible failure mode: a room that says "connected", looks like a
+ * normal video call, has none of the school's branding, records nothing, and
+ * cannot see or hear anybody. Nobody watching that could tell it was a missing
+ * environment variable.
+ *
+ * A silent downgrade to a path nobody tests is not resilience. It is a way of
+ * turning a five-second configuration fix into an unexplainable product
+ * failure in front of real students. So a misconfigured deployment now says
+ * exactly which variable is missing and refuses to pretend, which is the
+ * behaviour that would have made the demo a two-minute fix.
+ */
+export function missingLiveKitConfig(): string[] {
+  return REQUIRED_VARS.filter((name) => !String(process.env[name] ?? "").trim());
+}
+
 export function liveKitConfigured(): boolean {
-  return Boolean(process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET);
+  return missingLiveKitConfig().length === 0;
 }
 
 export function liveProvider(): LiveProvider {
-  return liveKitConfigured() ? "livekit" : "jitsi";
+  return "livekit";
 }
 
 function slug(value: string): string {
@@ -165,6 +192,35 @@ export const QUALITY_MODES: QualityModeSpec[] = [
 
 export function qualitySpec(mode: QualityMode): QualityModeSpec {
   return QUALITY_MODES.find((spec) => spec.value === mode) ?? QUALITY_MODES[1];
+}
+
+/**
+ * Which rungs this person is offered.
+ *
+ * **A tutor gets one: Sharp.** Not a restriction for its own sake — the tutor is
+ * the only publisher the whole room is subscribed to, so a tutor who drops to
+ * Data saver hands every student in the class a 180p lesson to save one person's
+ * bandwidth. That is the wrong trade in every direction, and it is the kind of
+ * setting somebody changes once "to test something" and never changes back.
+ *
+ * Students keep all four. They are the ones on mobile data, they are the ones
+ * whose own downlink is the constraint, and turning their own tile down costs
+ * nobody else anything.
+ *
+ * The tutor still is not stuck with a frozen picture: `adaptiveStream` and
+ * `dynacast` keep negotiating underneath, and the layer a student actually
+ * receives is still chosen per-student by the server. This governs the menu, not
+ * the transport.
+ */
+export function qualityModesFor(role: RoomRole): QualityModeSpec[] {
+  if (role === "tutor") return QUALITY_MODES.filter((spec) => spec.value === "high");
+  return QUALITY_MODES;
+}
+
+/** Where this person's classroom opens. A tutor always opens Sharp. */
+export function initialQualityFor(role: RoomRole, preferred: QualityMode): QualityMode {
+  const allowed = qualityModesFor(role);
+  return allowed.some((spec) => spec.value === preferred) ? preferred : allowed[0].value;
 }
 
 /**

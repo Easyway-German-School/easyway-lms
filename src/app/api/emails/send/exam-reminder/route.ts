@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendEmail } from "@/lib/mailer";
-import { examReminderEmailTemplate } from "@/lib/email-templates";
+import { sendExamReminder } from "@/lib/exam-reminders";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 
 /**
  * POST /api/emails/send/exam-reminder
@@ -12,7 +11,7 @@ import { authOptions } from "@/lib/auth";
  */
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
     
     if (!session || (session.user.role !== "ADMIN" && session.user.role !== "SYSTEM")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -83,34 +82,7 @@ export async function POST(request: Request) {
 
     for (const registration of examRegistrations) {
       try {
-        const student = registration.student;
-        const exam = registration.exam;
-        // External candidates sit exams here too and have no Student row.
-        const studentEmail = student?.user?.email ?? registration.candidateEmail;
-        const studentName = student?.user?.name ?? registration.candidateName;
-        const tutorName = exam?.lecturer?.user?.name;
-
-        if (!studentEmail) continue;
-
-        const template = examReminderEmailTemplate(studentName || "Student", exam?.name || "Exam", exam?.examDate || new Date(), tutorName || undefined);
-
-        await sendEmail({
-          to: studentEmail,
-          subject: template.subject,
-          html: template.html,
-        });
-
-        await prisma.emailLog.create({
-          data: {
-            studentId: student?.id ?? null,
-            recipientEmail: studentEmail,
-            type: "exam_reminder",
-            subject: template.subject,
-            status: "sent",
-          },
-        });
-
-        sentCount++;
+        if (await sendExamReminder(registration)) sentCount++;
       } catch (error) {
         errors.push(`Failed to send reminder to registration ${registration.id}: ${error}`);
       }

@@ -90,8 +90,8 @@ function LessonContent() {
           <h1 className="text-4xl font-bold">{lesson.title}</h1>
           <p className="mt-2 text-slate-200">{lesson.description}</p>
           <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-100">
-            <span className="rounded-full bg-white/15 px-3 py-1">{lesson.type}</span>
-            <span className="rounded-full bg-white/15 px-3 py-1">{lesson.duration} mins</span>
+            <span className="rounded-full bg-[var(--surface-alt)] px-3 py-1">{lesson.type}</span>
+            <span className="rounded-full bg-[var(--surface-alt)] px-3 py-1">{lesson.duration} mins</span>
             <span className="rounded-full bg-amber-400/20 px-3 py-1 font-semibold text-amber-100">Reward: +{Math.max(25, lesson.duration)} XP</span>
             {completion?.status === "completed" && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/25 px-3 py-1 text-emerald-100"><CheckIcon className="h-3.5 w-3.5" /> Completed</span>
@@ -99,7 +99,7 @@ function LessonContent() {
           </div>
         </header>
 
-        <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-800 shadow-sm">
+        <div className="rounded-3xl border border-emerald-200 bg-emerald-500/10 p-5 text-emerald-800 shadow-sm">
           <p className="text-sm font-semibold uppercase tracking-[0.2em]">Quest mission</p>
           <p className="mt-2 text-lg font-semibold">Complete this lesson to unlock your next power-up and keep the streak alive.</p>
         </div>
@@ -129,8 +129,8 @@ function LessonContent() {
 
         {/* Action */}
         {!completion?.completedAt && (
-          <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm space-y-4">
-            <h3 className="text-xl font-semibold text-slate-950">
+          <div className="rounded-3xl bg-emerald-500/10 p-8 shadow-sm space-y-4">
+            <h3 className="text-xl font-semibold text-[var(--foreground)]">
               {lesson?.type === "assignment" ? "Submit Assignment" : "Complete this lesson"}
             </h3>
             {lesson?.type === "assignment" ? (
@@ -153,7 +153,7 @@ function LessonContent() {
         )}
 
         {completion?.completedAt && (
-          <div className="rounded-3xl bg-emerald-50 p-8 shadow-sm border border-emerald-200">
+          <div className="rounded-3xl bg-emerald-500/10 p-8 shadow-sm border border-emerald-200">
             <p className="flex items-center gap-2 text-[var(--success)] font-semibold"><CheckCircleIcon className="h-5 w-5" /> You&apos;ve completed this lesson!</p>
             <p className="text-sm text-emerald-600 mt-2">Great progress. Move on to the next lesson.</p>
             {personalizedPlan ? (

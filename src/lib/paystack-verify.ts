@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { classifyPaymentTransaction } from "@/lib/payment";
+import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { safeJson } from "@/lib/safe-json";
 
 function getPaymentDescription(paymentType: string, pathwayName: string) {
@@ -95,6 +96,10 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
       }).catch(() => null);
     }
 
+    await promoteIfNextLevelPayment(studentId, metadata).catch((error) => {
+      console.error("Paystack verify: next-level promotion failed", { studentId, reference, error });
+    });
+
     return;
   }
 
@@ -138,6 +143,10 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
   });
 
   await enrollIfPathwayExists({ studentId, pathwayId, reference });
+
+  await promoteIfNextLevelPayment(studentId, metadata).catch((error) => {
+    console.error("Paystack verify: next-level promotion failed", { studentId, reference, error });
+  });
 }
 
 /**

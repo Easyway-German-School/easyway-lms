@@ -23,6 +23,7 @@ type ImportResult = {
   corrections?: string[];
   password?: string;
   studentCode?: string | null;
+  emailed?: boolean;
 };
 
 const TEMPLATE_HEADERS = ["name", "email", "phone", "branch", "level", "batch", "session", "amount_paid"];
@@ -76,7 +77,27 @@ function parseCsv(text: string): Record<string, string>[] {
 
   const [header, ...body] = rows.filter((entry) => entry.some((cell) => cell.trim()));
   if (!header) return [];
-  const keys = header.map((cell) => cell.trim().toLowerCase().replace(/\s+/g, "_"));
+  const aliases: Record<string, string> = {
+    name: "name",
+    names: "name",
+    student: "name",
+    student_name: "name",
+    student_names: "name",
+    full_name: "name",
+    fullname: "name",
+    name_of_student: "name",
+    name_of_students: "name",
+    email: "email",
+    email_address: "email",
+    email_id: "email",
+    email_address_of_student: "email",
+    mail: "email",
+    e_mail: "email",
+  };
+  const keys = header.map((cell) => {
+    const normalized = cell.replace(/^\uFEFF/, "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    return aliases[normalized] ?? normalized;
+  });
   return body.map((cells) =>
     Object.fromEntries(keys.map((key, index) => [key, (cells[index] ?? "").trim()])),
   );
@@ -85,7 +106,7 @@ function parseCsv(text: string): Record<string, string>[] {
 const STATUS_STYLES: Record<ImportResult["status"], string> = {
   ready: "bg-sky-500/10 text-sky-700",
   created: "bg-emerald-500/10 text-emerald-700",
-  skipped: "bg-slate-500/10 text-slate-600",
+  skipped: "bg-[var(--surface-alt)]0/10 text-[var(--muted)]",
   error: "bg-rose-500/10 text-rose-700",
 };
 
@@ -97,8 +118,13 @@ export default function ImportStudentsPage() {
   const [imported, setImported] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [sendState, setSendState] = useState<"idle" | "sending" | "done">("idle");
 
   const rows = useMemo(() => parseCsv(csv), [csv]);
+
+  const importHeaderWarning = csv.trim() && rows.length > 0 && rows.every((row) => !row.name || !row.email)
+    ? "We could not confidently identify both a student-name and email column. Rename the headers to Name and Email, or use the supported aliases below."
+    : "";
 
   async function run(dryRun: boolean) {
     setBusy(true);
@@ -114,11 +140,37 @@ export default function ImportStudentsPage() {
       setResults(payload.results || []);
       setCounts(payload.counts || {});
       setPreviewed(true);
-      if (!dryRun) setImported(true);
+      if (!dryRun) {
+        setImported(true);
+        setSendState("idle");
+      }
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Import failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** The CSV importer's version of the "send it now?" prompt. */
+  async function sendLogins() {
+    const toSend = results.filter((r) => r.status === "created" && r.password);
+    if (toSend.length === 0) return;
+    setSendState("sending");
+    try {
+      const response = await fetch("/api/admin/students/send-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          students: toSend.map((r) => ({ name: r.name, email: r.email, password: r.password, studentCode: r.studentCode })),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      const emailedByAddress = new Set(
+        (data.results ?? []).filter((r: { email: string; emailed: boolean }) => r.emailed).map((r: { email: string }) => r.email),
+      );
+      setResults((rows) => rows.map((row) => (emailedByAddress.has(row.email) ? { ...row, emailed: true } : row)));
+    } finally {
+      setSendState("done");
     }
   }
 
@@ -211,9 +263,10 @@ export default function ImportStudentsPage() {
           </div>
 
           <p className="mt-2 text-xs text-[var(--muted)]">
-            Columns: <code>{TEMPLATE_HEADERS.join(", ")}</code>. Only name and email are required; everything else
-            improves what the account can do. An .xlsx file is read from its first sheet and shown below as text, so
-            you can check it before anything is written.
+            Columns: <code>{TEMPLATE_HEADERS.join(", ")}</code>. The importer also understands common headers such as
+            <code> Name of Students</code>, <code>Student Name</code>, <code>Full Name</code>, and <code>Email Address</code>.
+            Only name and email are required; everything else improves what the account can do. An .xlsx file is read
+            from its first sheet and shown below as text, so you can check it before anything is written.
           </p>
 
           <textarea
@@ -226,6 +279,8 @@ export default function ImportStudentsPage() {
             placeholder={SAMPLE}
             className="mt-4 min-h-[180px] w-full rounded-lg border border-[var(--border)] bg-[var(--background)] p-4 font-mono text-xs text-[var(--foreground)] placeholder-[var(--muted)]"
           />
+
+          {importHeaderWarning ? <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">{importHeaderWarning}</p> : null}
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
@@ -274,12 +329,30 @@ export default function ImportStudentsPage() {
                   Temporary passwords are shown once and never stored in readable form. Students should change theirs on
                   first sign-in.
                 </p>
-                <button
-                  onClick={downloadPasswords}
-                  className="mt-3 rounded-full bg-emerald-600 px-5 py-2 text-xs font-semibold text-white"
-                >
-                  Download logins CSV
-                </button>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={downloadPasswords}
+                    className="rounded-full bg-emerald-600 px-5 py-2 text-xs font-semibold text-white"
+                  >
+                    Download logins CSV
+                  </button>
+                  <button
+                    onClick={() => void sendLogins()}
+                    disabled={sendState === "sending"}
+                    className="rounded-full border border-emerald-600 px-5 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                  >
+                    {sendState === "sending"
+                      ? "Sending…"
+                      : sendState === "done"
+                        ? "Send login emails again"
+                        : "Send everyone their login emails now?"}
+                  </button>
+                  {sendState === "done" ? (
+                    <span className="text-xs text-emerald-800">
+                      {results.filter((r) => r.status === "created" && r.emailed).length} of {counts.created ?? 0} emailed.
+                    </span>
+                  ) : null}
+                </div>
               </div>
             ) : null}
 

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { getToken } from "next-auth/jwt";
 
 /**
  * The outermost layer: headers on every response, and a brake on the routes
@@ -8,6 +9,124 @@ import { NextResponse, type NextRequest } from "next/server";
  * the right place for rules that must not depend on a route remembering to
  * apply them.
  */
+
+/* -------------------------------------------------------------------------- */
+/* Portal gating                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Until this, "no middleware.ts exists" meant every portal's protection was
+ * whatever its Shell component happened to do client-side: a `useSession()`
+ * check that runs after the page has already shipped its JS, or — for
+ * `/admin/**`, which has no shell-level check at all — nothing before the
+ * page renders, with only the `/api/admin/*` handlers underneath ever
+ * refusing an unauthorised visitor. This closes that at the edge, for the
+ * three portals that live under one clean URL prefix each.
+ *
+ * `/student` deliberately has no entry here. Its pages are shared top-level
+ * routes (`/dashboard`, `/calendar`, `/community`, `/live`, ...) also used by
+ * other roles via `PortalShell`'s own dispatch, so there is no single prefix
+ * or role list to gate here without duplicating that dispatch logic. That
+ * portal keeps its existing page-level check for now.
+ *
+ * This is a fast-path reject, not the authority. Every route still calls
+ * `requireAuthSession()` (or the Shell's own `useSession()`), and that
+ * remains the source of truth — it does the DB-backed tenant scoping this
+ * edge check cannot do, and it is the only place that catches a lecturer
+ * revoked mid-session: that downgrade happens in the `session` callback
+ * (a Prisma lookup keyed off the *raw* role), not in the JWT this reads, so
+ * an inactive tutor's token still says "lecturer" here and clears this gate.
+ * Nothing downstream regresses — `requireAuthSession()` and every Shell's
+ * `useSession()` still see the downgraded role and refuse them exactly as
+ * before. What this gate reliably stops at the edge is the cheaper, more
+ * common case: no session at all, or a session for the wrong portal.
+ */
+type PortalRule = {
+  pagePattern: RegExp;
+  apiPattern: RegExp;
+  allowedRoles: string[];
+  signInPath: string;
+};
+
+const PORTALS: PortalRule[] = [
+  { pagePattern: /^\/admin(\/|$)/, apiPattern: /^\/api\/admin(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
+  {
+    pagePattern: /^\/lecturer(\/|$)/,
+    apiPattern: /^\/api\/lecturer(\/|$)/,
+    allowedRoles: ["lecturer", "tutor", "admin"],
+    signInPath: "/auth/lecturer/signin",
+  },
+  { pagePattern: /^\/parent(\/|$)/, apiPattern: /^\/api\/parent(\/|$)/, allowedRoles: ["parent"], signInPath: "/auth/parent/signin" },
+  /**
+   * The operator console. Its own prefix, outside `/admin/**`, and — unlike
+   * `/api/admin/**` — `/api/platform/**` previously had no edge gate at all;
+   * every route relied solely on requirePlatformOperator() inside the
+   * handler. `allowedRoles` only checks the coarse "admin" role here, same as
+   * `/admin` above; requirePlatformOperator() remains the one that checks the
+   * actual platformRole column and 404s a non-operator admin.
+   */
+  { pagePattern: /^\/platform(\/|$)/, apiPattern: /^\/api\/platform(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
+];
+
+// Mirrors lib/auth.ts's normalizeRole(). Not imported from there: that file
+// pulls in Prisma and bcrypt, which have no place in an edge bundle.
+const normalizeRole = (value: unknown) => String(value || "student").toLowerCase();
+
+/**
+ * The one legitimate call to `/api/admin/**` made with a non-admin token:
+ * ending an act-as-student session restores the admin's own cookie, and by
+ * construction it is called while that cookie holds the STUDENT's token (see
+ * src/lib/impersonation.ts). It authenticates itself — decoding the cookie
+ * and requiring a valid `impersonatorToken` claim — so it does not need, and
+ * must not receive, the role check below.
+ */
+const IMPERSONATION_END_PATH = "/api/admin/impersonate/end";
+
+async function guardPortal(request: NextRequest, path: string): Promise<NextResponse | null> {
+  if (path === IMPERSONATION_END_PATH) return null;
+
+  const portal = PORTALS.find((p) => p.pagePattern.test(path) || p.apiPattern.test(path));
+  if (!portal) return null;
+
+  /**
+   * secureCookie must be forced, not inferred.
+   *
+   * getToken() defaults to checking whether NEXTAUTH_URL starts with
+   * "https://" to decide which cookie name to read — but NEXTAUTH_URL is
+   * marked Sensitive in Vercel, and Sensitive env vars are not exposed to
+   * the Edge Middleware runtime this file runs in. So that check silently
+   * saw `undefined` here and looked for the plain "next-auth.session-token"
+   * cookie, while every real sign-in (a Node.js serverless function, where
+   * the var IS visible) issues the browser "__Secure-next-auth.session-
+   * token". The result: a session that /api/auth/session reports as valid
+   * was rejected at this gate on every single request — every admin and
+   * lecturer sign-in bounced straight back to the sign-in page it just came
+   * from. Deriving it from the request's own protocol instead of an env var
+   * makes it correct regardless of what NEXTAUTH_URL is set to or which
+   * runtime can see it.
+   */
+  const token = await getToken({
+    req: request,
+    secret: process.env.NEXTAUTH_SECRET,
+    secureCookie: request.nextUrl.protocol === "https:",
+  });
+  const role = normalizeRole(token?.role);
+  // A revoked or admin-locked token carries whatever role it had at issue
+  // time; treat it the same way the session callback does — unauthorised,
+  // not "whatever role it used to be".
+  const authorized =
+    Boolean(token?.id) && !token?.revoked && !(token?.adminLocked && role === "admin") && portal.allowedRoles.includes(role);
+
+  if (authorized) return null;
+
+  if (portal.apiPattern.test(path)) {
+    return applySecurityHeaders(NextResponse.json({ error: "Not authenticated." }, { status: 401 }));
+  }
+
+  const signInUrl = new URL(portal.signInPath, request.url);
+  signInUrl.searchParams.set("callbackUrl", path);
+  return applySecurityHeaders(NextResponse.redirect(signInUrl));
+}
 
 /* -------------------------------------------------------------------------- */
 /* Rate limiting                                                               */
@@ -160,10 +279,31 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
   // Send the origin but never the path to third parties. Paths in this app
   // contain student ids, and referrers leak to every image and script host.
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  /**
+   * Camera, microphone and screen share stay allowed for THIS ORIGIN: the live
+   * classroom and the signup photo capture both need them. Everything else is
+   * off.
+   *
+   * READ THIS BEFORE EMBEDDING ANY THIRD-PARTY VIDEO OR CAPTURE TOOL.
+   *
+   * `(self)` means this origin and nothing else. A cross-origin iframe gets no
+   * delegation from it — and crucially, the iframe's own `allow="camera;
+   * microphone"` attribute cannot grant what the parent policy never gave. The
+   * child's getUserMedia then rejects, silently, while everything in that
+   * iframe that is only data keeps working perfectly.
+   *
+   * That is not hypothetical. It is exactly how the first live demo failed: a
+   * missing LIVEKIT_URL dropped the school onto an embedded `meet.jit.si`
+   * room, this header killed its camera, microphone and screen share, and the
+   * chat and hand-raise carried on working — which made it look like a broken
+   * video product rather than a two-line configuration error.
+   *
+   * If a cross-origin embed ever genuinely needs media, name its origin here
+   * explicitly, e.g. `camera=(self "https://meet.example.com")`. Do not widen
+   * it to `*`.
+   */
   headers.set(
     "Permissions-Policy",
-    // Camera and microphone stay allowed for this origin: the live classroom
-    // and the signup photo capture both need them. Everything else is off.
     "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=(), interest-cohort=()",
   );
   headers.set("X-DNS-Prefetch-Control", "off");
@@ -197,8 +337,11 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
  * one at every boot; the behaviour is identical, and following the rename now
  * means it does not become a broken deploy on a future upgrade.
  */
-export default function proxy(request: NextRequest) {
+export default async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
+
+  const portalRejection = await guardPortal(request, path);
+  if (portalRejection) return portalRejection;
 
   const rule = RULES.find((candidate) => candidate.pattern.test(path));
   if (rule) {

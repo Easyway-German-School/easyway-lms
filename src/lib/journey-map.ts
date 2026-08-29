@@ -10,8 +10,11 @@
  * ---------------------------------------------------------------------------
  * TO SWITCH THIS ON: drop the artwork into `public/journey/` named by level —
  *
- *     public/journey/A1.png   public/journey/B1.png   public/journey/C1.png
- *     public/journey/A2.png   public/journey/B2.png   public/journey/C2.png
+ *     public/journey/A1.png   public/journey/B1.png
+ *     public/journey/A2.png   public/journey/B2.png
+ *
+ * C1 and C2 are not drawn — see JOURNEY_LEVELS in src/lib/levels.ts. Artwork
+ * for them is ignored rather than missing.
  *
  * and nothing else needs changing. Any format the browser renders works; only
  * the basename matters. A level with no file simply shows nothing rather than
@@ -20,7 +23,12 @@
  * ---------------------------------------------------------------------------
  */
 
-export const JOURNEY_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
+/**
+ * Re-exported from src/lib/levels.ts so the poster, the Germany road and the
+ * gamified ladder cannot drift apart about where the journey ends.
+ */
+export { JOURNEY_LEVELS } from "@/lib/levels";
+import { JOURNEY_LEVELS } from "@/lib/levels";
 
 /**
  * Where a level's poster lives. Returns a path, not a promise that the file is

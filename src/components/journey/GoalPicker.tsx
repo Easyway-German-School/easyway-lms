@@ -47,7 +47,7 @@ import {
   ToolboxIcon,
 } from "@/components/icons";
 import GermanFlag from "@/components/journey/GermanFlag";
-import TuitionMascot from "@/components/TuitionMascot";
+import Mascot from "@/components/Mascot";
 import { CUSTOM_GOAL, GERMANY_GOALS, type GermanyGoal, type GoalIconKey } from "@/lib/germany-goals";
 
 const ICONS: Record<GoalIconKey, (props: { className?: string }) => React.ReactElement> = {
@@ -161,7 +161,12 @@ export default function GoalPicker({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 14, scale: 0.98 }}
         transition={{ type: "spring", stiffness: 240, damping: 26 }}
-        className="my-auto w-full max-w-2xl overflow-hidden rounded-[30px] bg-[var(--background)] shadow-2xl"
+        // `bg-[var(--background)]` compiles to `background-color`, which drops
+        // a gradient value and leaves the card transparent (see the note in
+        // globals.css) — this is why the body of this modal was rendering
+        // straight through to the dark backdrop, swallowing the card text.
+        style={{ background: "var(--background)" }}
+        className="my-auto w-full max-w-2xl overflow-hidden rounded-[30px] shadow-2xl"
       >
         {/* The header is the flag, because the question is about Germany and
             because the flag is the image this whole feature walks towards. */}
@@ -175,7 +180,7 @@ export default function GoalPicker({
               type="button"
               onClick={onDismiss}
               aria-label="Close"
-              className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full bg-white/15 text-white backdrop-blur transition hover:bg-white/25"
+              className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-alt)] text-[var(--foreground)] backdrop-blur transition hover:bg-[var(--surface)]/25"
             >
               <CrossIcon className="h-4 w-4" />
             </button>
@@ -252,7 +257,9 @@ export default function GoalPicker({
                 exit={{ opacity: 0 }}
                 className="mt-4 flex gap-3 rounded-2xl border border-[var(--accent)]/35 bg-[var(--accent-soft)] p-4"
               >
-                <TuitionMascot pointing className="hidden h-16 w-14 shrink-0 sm:block" />
+                {/* Quietly approving. The student has just said out loud why they want
+                    this, and the reply to that is warmth, not a sales pitch. */}
+                <Mascot mood="smiling" className="hidden h-16 w-14 shrink-0 sm:block" />
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-[var(--foreground)]">
                     &ldquo;{picked.dream}&rdquo;

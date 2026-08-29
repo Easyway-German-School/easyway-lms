@@ -1,287 +1,454 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import AdminShell from "@/components/AdminShell";
-import { type StudentWithUser } from "@/types/admin";
+export const dynamic = "force-dynamic";
 
-type ExamWithStudent = {
-  id: string;
+import { useCallback, useEffect, useState } from "react";
+import AdminShell from "@/components/AdminShell";
+import StatCard from "@/components/StatCard";
+import { LEVELS } from "@/lib/levels";
+import { ExamCentreIcon, UsersIcon, TrophyIcon, AlertIcon } from "@/components/icons";
+
+/**
+ * The one exam admin page.
+ *
+ * Replaces three earlier pages (`/admin/exams`, `/admin/exam-centre`,
+ * `/admin/exam-registrations`) that duplicated each other — two of which
+ * wrote registrations with no link to an `Exam` row at all, silently
+ * skipping seat capacity, payment tracking and publish gating. This is the
+ * only one that was ever correct, built out with per-skill results entry.
+ */
+
+const SKILLS = [
+  { key: "reading", label: "Lesen (Reading)" },
+  { key: "listening", label: "Hören (Listening)" },
+  { key: "writing", label: "Schreiben (Writing)" },
+  { key: "speaking", label: "Sprechen (Speaking)" },
+] as const;
+type SkillKey = (typeof SKILLS)[number]["key"];
+
+type Grade = {
   studentId: string;
-  student: StudentWithUser;
-  examName: string;
-  examDate: string;
-  status: string;
-  notes?: string | null;
-  createdAt: string;
+  score: number;
+  grade: string | null;
+  readingScore: number | null;
+  listeningScore: number | null;
+  writingScore: number | null;
+  speakingScore: number | null;
 };
 
+type Registration = {
+  id: string;
+  studentId: string | null;
+  seatNumber: string | null;
+  status: string;
+  paymentStatus: string;
+  candidateName: string | null;
+  candidateEmail: string | null;
+  student: { studentCode: string | null; user: { name: string | null; email: string } } | null;
+  grade: Grade | null;
+};
+
+type Exam = {
+  id: string;
+  name: string;
+  examBody: string;
+  level: string | null;
+  examDate: string;
+  registrationDeadline: string | null;
+  fee: number | null;
+  capacity: number | null;
+  published: boolean;
+  passThreshold: number;
+  branch: { id: string; name: string } | null;
+  registrations: Registration[];
+  taken: number;
+  remaining: number | null;
+};
+
+type Stats = {
+  published: number;
+  booked: number;
+  noShows: number;
+  passRate: number | null;
+  avgReading: number | null;
+  avgListening: number | null;
+  avgWriting: number | null;
+  avgSpeaking: number | null;
+};
+
+function isInternal(body: string) {
+  return body === "internal";
+}
+
 export default function AdminExamsPage() {
-  const [exams, setExams] = useState<ExamWithStudent[]>([]);
-  const [students, setStudents] = useState<StudentWithUser[]>([]);
+  const [exams, setExams] = useState<Exam[]>([]);
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [bodies, setBodies] = useState<string[]>([]);
+  const [liveBodies, setLiveBodies] = useState<string[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [editingExamId, setEditingExamId] = useState<string | null>(null);
-  const [studentId, setStudentId] = useState("");
-  const [examName, setExamName] = useState("");
-  const [examDate, setExamDate] = useState("");
-  const [status, setStatus] = useState("registered");
-  const [notes, setNotes] = useState("");
-  const [examError, setExamError] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [grading, setGrading] = useState<string | null>(null);
+  const [scoreDrafts, setScoreDrafts] = useState<Record<SkillKey, string>>({
+    reading: "", listening: "", writing: "", speaking: "",
+  });
 
-  async function loadStudents() {
-    const res = await fetch("/api/admin/students");
-    if (res.ok) {
+  const [form, setForm] = useState({
+    name: "", description: "", examDate: "", registrationDeadline: "",
+    examBody: "internal", level: "B1", branchId: "", fee: "", capacity: "", passThreshold: "60", published: true,
+  });
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/exams", { cache: "no-store" });
       const data = await res.json();
-      setStudents(data.students || []);
+      if (!res.ok) throw new Error(data.error ?? "Unable to load");
+      setExams(data.exams ?? []);
+      setBranches(data.branches ?? []);
+      setBodies(data.bodies ?? []);
+      setLiveBodies(data.liveBodies ?? []);
+      setStats(data.stats ?? null);
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setLoading(false);
     }
-  }
-
-  async function loadExams() {
-    setLoading(true);
-    const res = await fetch("/api/admin/exams");
-    if (res.ok) {
-      const data = await res.json();
-      setExams(data.exams || []);
-    }
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    loadStudents();
-    loadExams();
   }, []);
 
-  async function handleSaveExam() {
-    setExamError("");
-    if (!studentId.trim() || !examName.trim() || !examDate.trim()) {
-      setExamError("Student, exam name, and date are required.");
-      return;
-    }
+  useEffect(() => { load(); }, [load]);
 
-    const payload = {
-      studentId: studentId.trim(),
-      examName: examName.trim(),
-      examDate: examDate.trim(),
-      status,
-      notes: notes.trim() || null,
-    } as const;
+  async function create() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/exams", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not create");
+      setOpen(false);
+      setForm({ ...form, name: "", description: "", examDate: "", registrationDeadline: "", fee: "", capacity: "" });
+      await load();
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create");
+    } finally { setBusy(false); }
+  }
 
-    const res = await fetch("/api/admin/exams", {
-      method: editingExamId ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editingExamId ? { examId: editingExamId, ...payload } : payload),
+  async function patch(body: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/exams", {
+        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not update");
+      await load();
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update");
+    } finally { setBusy(false); }
+  }
+
+  function startGrading(reg: Registration) {
+    setGrading(reg.id);
+    setScoreDrafts({
+      reading: reg.grade?.readingScore?.toString() ?? "",
+      listening: reg.grade?.listeningScore?.toString() ?? "",
+      writing: reg.grade?.writingScore?.toString() ?? "",
+      speaking: reg.grade?.speakingScore?.toString() ?? "",
     });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setExamError(data?.error || "Unable to save exam registration.");
-      return;
-    }
-
-    setEditingExamId(null);
-    setStudentId("");
-    setExamName("");
-    setExamDate("");
-    setStatus("registered");
-    setNotes("");
-    setShowForm(false);
-    loadExams();
   }
 
-  function startEditingExam(exam: ExamWithStudent) {
-    setEditingExamId(exam.id);
-    setStudentId(exam.studentId);
-    setExamName(exam.examName);
-    setExamDate(exam.examDate.split("T")[0]);
-    setStatus(exam.status || "registered");
-    setNotes(exam.notes || "");
-    setExamError("");
-    setShowForm(true);
-  }
-
-  function cancelEditingExam() {
-    setEditingExamId(null);
-    setStudentId("");
-    setExamName("");
-    setExamDate("");
-    setStatus("registered");
-    setNotes("");
-    setExamError("");
-    setShowForm(false);
-  }
-
-  async function handleDeleteExam(examId: string) {
-    if (!confirm("Delete this exam registration? This cannot be undone.")) {
-      return;
+  async function saveResults(registrationId: string) {
+    const results: Record<string, number> = {};
+    for (const { key } of SKILLS) {
+      const n = Number(scoreDrafts[key]);
+      if (!scoreDrafts[key] || Number.isNaN(n) || n < 0 || n > 100) {
+        setError(`Enter every skill score as a number 0-100.`);
+        return;
+      }
+      results[key] = n;
     }
-
-    const res = await fetch("/api/admin/exams", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ examId }),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setExamError(data?.error || "Unable to delete exam registration.");
-      return;
-    }
-
-    if (editingExamId === examId) {
-      cancelEditingExam();
-    }
-
-    loadExams();
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/exams", {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ registrationId, results }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not save results");
+      setGrading(null);
+      await load();
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save results");
+    } finally { setBusy(false); }
   }
 
   return (
     <AdminShell>
-      <div className="space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="p-8">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Admin</p>
-            <h1 className="text-3xl font-bold">Exam Registrations</h1>
-            <p className="mt-2 text-sm text-[var(--muted)]">Register and manage student exams.</p>
+            <h1 className="text-3xl font-bold">Exams</h1>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Schedule sittings, manage seats and enter results. Published internal sittings appear to students;
+              ÖSD/telc sittings stay off student booking until the school switches that on.
+            </p>
           </div>
-          <button
-            type="button"
-            className="rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white"
-            onClick={() => setShowForm((current) => !current)}
-          >
-            {showForm ? "Close form" : "Register exam"}
+          <button onClick={() => setOpen((v) => !v)} className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white">
+            {open ? "Cancel" : "New sitting"}
           </button>
         </div>
 
-        {showForm ? (
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Student</span>
-                <select
-                  value={studentId}
-                  onChange={(event) => setStudentId(event.target.value)}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                >
-                  <option value="">Select a student</option>
-                  {students.map((student) => (
-                    <option key={student.id} value={student.id}>
-                      {student.user.name} ({student.user.email})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Exam name</span>
-                <input
-                  value={examName}
-                  onChange={(event) => setExamName(event.target.value)}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                  placeholder="e.g., B2 End-of-Level Exam"
-                />
-              </label>
-              <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Exam date</span>
-                <input
-                  type="date"
-                  value={examDate}
-                  onChange={(event) => setExamDate(event.target.value)}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="space-y-2 text-sm">
-                <span className="font-semibold text-[var(--muted)]">Status</span>
-                <select
-                  value={status}
-                  onChange={(event) => setStatus(event.target.value)}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                >
-                  <option value="registered">Registered</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </label>
-              <label className="space-y-2 text-sm md:col-span-2">
-                <span className="font-semibold text-[var(--muted)]">Notes</span>
-                <textarea
-                  value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                  placeholder="Optional notes about this exam"
-                  rows={3}
-                />
-              </label>
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleSaveExam}
-                className="rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white"
-              >
-                {editingExamId ? "Update exam" : "Register exam"}
+        {stats && (
+          <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <StatCard label="Published sittings" value={String(stats.published)} icon={<ExamCentreIcon />} />
+            <StatCard label="Seats booked" value={String(stats.booked)} icon={<UsersIcon />} accent="bg-gradient-to-br from-blue-500 to-blue-700" />
+            <StatCard
+              label="Internal pass rate"
+              value={stats.passRate === null ? "—" : `${stats.passRate}%`}
+              icon={<TrophyIcon />}
+              accent="bg-gradient-to-br from-emerald-500 to-emerald-700"
+            />
+            <StatCard label="No-shows" value={String(stats.noShows)} icon={<AlertIcon />} accent="bg-gradient-to-br from-amber-500 to-amber-700" />
+          </div>
+        )}
+
+        {stats && stats.passRate !== null && (
+          <p className="mb-6 text-xs text-[var(--muted)]">
+            Skill averages (internal, graded sittings) — Lesen {stats.avgReading} · Hören {stats.avgListening} ·
+            Schreiben {stats.avgWriting} · Sprechen {stats.avgSpeaking}
+          </p>
+        )}
+
+        {error && <div className="mb-4 rounded bg-red-100 p-4 text-red-700">{error}</div>}
+
+        {open && (
+          <div className="mb-8 grid gap-3 rounded-xl border bg-[var(--surface)] p-6 sm:grid-cols-2">
+            <label className="sm:col-span-2">
+              <span className="text-xs font-medium text-[var(--muted)]">Name</span>
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="EasyWay B1 end-of-level test" className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+            </label>
+            <label className="sm:col-span-2">
+              <span className="text-xs font-medium text-[var(--muted)]">Description</span>
+              <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
+                rows={2} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+            </label>
+            <label>
+              <span className="text-xs font-medium text-[var(--muted)]">Awarding body</span>
+              <select value={form.examBody} onChange={(e) => setForm({ ...form, examBody: e.target.value })}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
+                {bodies.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+              {!isInternal(form.examBody) && !liveBodies.includes(form.examBody) && (
+                <span className="mt-1 block text-[11px] text-amber-700">
+                  Hidden from student booking — this awarding body isn&apos;t live for this school yet.
+                </span>
+              )}
+            </label>
+            <label>
+              <span className="text-xs font-medium text-[var(--muted)]">Level</span>
+              <select value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value })}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
+                {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="text-xs font-medium text-[var(--muted)]">Exam date</span>
+              <input type="datetime-local" value={form.examDate} onChange={(e) => setForm({ ...form, examDate: e.target.value })}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+            </label>
+            <label>
+              <span className="text-xs font-medium text-[var(--muted)]">Registration deadline</span>
+              <input type="datetime-local" value={form.registrationDeadline} onChange={(e) => setForm({ ...form, registrationDeadline: e.target.value })}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+            </label>
+            <label>
+              <span className="text-xs font-medium text-[var(--muted)]">Fee (₦) — blank for none</span>
+              <input type="number" value={form.fee} onChange={(e) => setForm({ ...form, fee: e.target.value })}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+            </label>
+            <label>
+              <span className="text-xs font-medium text-[var(--muted)]">Seats — blank for unlimited</span>
+              <input type="number" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+            </label>
+            <label>
+              <span className="text-xs font-medium text-[var(--muted)]">Pass threshold per skill (0-100)</span>
+              <input type="number" value={form.passThreshold} onChange={(e) => setForm({ ...form, passThreshold: e.target.value })}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+            </label>
+            <label>
+              <span className="text-xs font-medium text-[var(--muted)]">Centre</span>
+              <select value={form.branchId} onChange={(e) => setForm({ ...form, branchId: e.target.value })}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
+                <option value="">Any branch</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 pt-6">
+              <input type="checkbox" checked={form.published} onChange={(e) => setForm({ ...form, published: e.target.checked })} />
+              <span className="text-sm">Publish immediately</span>
+            </label>
+            <div className="sm:col-span-2">
+              <button onClick={create} disabled={busy || !form.name.trim() || !form.examDate}
+                className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+                {busy ? "Creating…" : "Create sitting"}
               </button>
-              {editingExamId ? (
-                <button
-                  type="button"
-                  onClick={cancelEditingExam}
-                  className="rounded-lg border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold text-slate-700"
-                >
-                  Cancel
-                </button>
-              ) : null}
-              {examError ? <p className="text-sm text-red-500">{examError}</p> : null}
             </div>
           </div>
-        ) : null}
+        )}
 
-        <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] shadow-sm">
-          <table className="min-w-full divide-y divide-[var(--border)]">
-            <thead className="bg-[var(--surface)] text-left text-sm uppercase tracking-[0.16em] text-[var(--muted)]">
-              <tr>
-                <th className="px-6 py-4">Student</th>
-                <th className="px-6 py-4">Exam</th>
-                <th className="px-6 py-4">Date</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--border)] bg-[var(--background)]">
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-10 text-center text-sm text-[var(--muted)]">Loading exams…</td>
-                </tr>
-              ) : exams.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-10 text-center text-sm text-[var(--muted)]">No exam registrations yet.</td>
-                </tr>
-              ) : (
-                exams.map((exam) => (
-                  <tr key={exam.id}>
-                    <td className="px-6 py-4">{exam.student.user.name}</td>
-                    <td className="px-6 py-4">{exam.examName}</td>
-                    <td className="px-6 py-4">{new Date(exam.examDate).toLocaleDateString()}</td>
-                    <td className="px-6 py-4">{exam.status}</td>
-                    <td className="px-6 py-4 flex gap-2">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
-                        onClick={() => startEditingExam(exam)}
-                      >
-                        Edit
+        {loading ? (
+          <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
+        ) : exams.length === 0 ? (
+          <div className="py-12 text-center text-[var(--muted)]">No sittings scheduled.</div>
+        ) : (
+          <div className="space-y-3">
+            {exams.map((exam) => (
+              <div key={exam.id} className="rounded-xl border bg-[var(--surface)] p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{exam.examBody}</span>
+                      {exam.level && <span className="rounded bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-bold">{exam.level}</span>}
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${exam.published ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                        {exam.published ? "PUBLISHED" : "DRAFT"}
+                      </span>
+                      {!isInternal(exam.examBody) && (
+                        <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-white">HIDDEN FROM STUDENTS</span>
+                      )}
+                    </div>
+                    <h3 className="mt-1.5 font-semibold">{exam.name}</h3>
+                    <p className="text-sm text-[var(--muted)]">
+                      {new Date(exam.examDate).toDateString()}
+                      {exam.branch && ` · ${exam.branch.name}`}
+                      {exam.fee !== null && ` · ₦${exam.fee.toLocaleString()}`}
+                      {isInternal(exam.examBody) && ` · pass ≥ ${exam.passThreshold}/skill`}
+                    </p>
+                  </div>
+
+                  <div className="text-right">
+                    <p className="text-sm font-semibold">
+                      {exam.taken}{exam.capacity !== null && ` / ${exam.capacity}`} booked
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <button onClick={() => patch({ examId: exam.id, published: !exam.published })} disabled={busy}
+                        className="rounded border px-3 py-1 text-xs font-semibold">
+                        {exam.published ? "Unpublish" : "Publish"}
                       </button>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-red-500 text-red-600 px-3 py-2 text-sm"
-                        onClick={() => handleDeleteExam(exam.id)}
-                      >
-                        Delete
+                      <button onClick={() => setExpanded(expanded === exam.id ? null : exam.id)}
+                        className="rounded border px-3 py-1 text-xs font-semibold">
+                        {expanded === exam.id ? "Hide" : `Candidates (${exam.registrations.length})`}
                       </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                    </div>
+                  </div>
+                </div>
+
+                {expanded === exam.id && (
+                  <div className="mt-4 space-y-2 border-t pt-4">
+                    {exam.registrations.length === 0 ? (
+                      <p className="text-sm text-[var(--muted)]">Nobody has booked yet.</p>
+                    ) : exam.registrations.map((r) => (
+                      <div key={r.id} className="rounded bg-[var(--surface-alt)] p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">
+                              {r.student?.user.name ?? r.candidateName ?? "—"}
+                              {!r.student && (
+                                <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">EXTERNAL</span>
+                              )}
+                            </p>
+                            <p className="text-xs text-[var(--muted)]">
+                              {r.student?.user.email ?? r.candidateEmail}
+                              {r.seatNumber && ` · seat ${r.seatNumber}`}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${r.paymentStatus === "paid" ? "bg-emerald-100 text-emerald-700" : r.paymentStatus === "waived" ? "bg-[var(--surface-alt)] text-[var(--muted)]" : "bg-red-100 text-red-700"}`}>
+                              {r.paymentStatus}
+                            </span>
+                            {r.paymentStatus === "unpaid" && (
+                              <button onClick={() => patch({ registrationId: r.id, paymentStatus: "paid", status: "confirmed" })}
+                                disabled={busy} className="rounded border px-2 py-1 text-xs font-semibold">
+                                Mark paid
+                              </button>
+                            )}
+                            {isInternal(exam.examBody) && r.studentId && r.status !== "cancelled" && (
+                              <>
+                                {r.grade ? (() => {
+                                  const skills = [r.grade.readingScore, r.grade.listeningScore, r.grade.writingScore, r.grade.speakingScore];
+                                  // Grades entered before per-skill scoring existed have a score but
+                                  // no skill breakdown — showing FAILED for those would be inventing a
+                                  // verdict this record was never given.
+                                  const hasSkills = skills.every((s) => s !== null);
+                                  const passed = hasSkills && skills.every((s) => (s as number) >= exam.passThreshold);
+                                  return (
+                                    <span
+                                      className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                                        !hasSkills
+                                          ? "bg-[var(--surface-alt)] text-[var(--muted)]"
+                                          : passed
+                                            ? "bg-emerald-100 text-emerald-700"
+                                            : "bg-red-100 text-red-700"
+                                      }`}
+                                    >
+                                      {!hasSkills ? "GRADED" : passed ? "PASSED" : "FAILED"} · {r.grade.score}
+                                    </span>
+                                  );
+                                })() : null}
+                                <button onClick={() => startGrading(r)} className="rounded border px-2 py-1 text-xs font-semibold">
+                                  {r.grade ? "Edit results" : "Enter results"}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {grading === r.id && (
+                          <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-4">
+                            {SKILLS.map(({ key, label }) => (
+                              <label key={key}>
+                                <span className="text-[11px] font-medium text-[var(--muted)]">{label}</span>
+                                <input
+                                  type="number" min={0} max={100}
+                                  value={scoreDrafts[key]}
+                                  onChange={(e) => setScoreDrafts({ ...scoreDrafts, [key]: e.target.value })}
+                                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                                />
+                              </label>
+                            ))}
+                            <div className="flex items-end gap-2 sm:col-span-4">
+                              <button onClick={() => saveResults(r.id)} disabled={busy}
+                                className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">
+                                {busy ? "Saving…" : "Save results"}
+                              </button>
+                              <button onClick={() => setGrading(null)} className="rounded-lg border px-4 py-2 text-xs font-semibold">
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {r.grade && grading !== r.id && r.grade.readingScore !== null && (
+                          <p className="mt-2 text-[11px] text-[var(--muted)]">
+                            Lesen {r.grade.readingScore} · Hören {r.grade.listeningScore} · Schreiben {r.grade.writingScore} · Sprechen {r.grade.speakingScore}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </AdminShell>
   );

@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { monthsSinceBatchStart } from "@/lib/promotion";
 import { nextLevelAfter, SESSION_MONTHS, WEEKS_OF_TEACHING } from "@/lib/levels";
 import { isLevelSellable, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { ADVANCE_PERKS, perWeekCost, type LevelAdvanceOffer } from "@/lib/level-advance";
+import { buildCountdown } from "@/lib/germany-journey";
+import { KIND, notify } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +37,8 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   try {
-    const session = (await getServerSession(authOptions as any)) as any;
+    const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -140,6 +143,46 @@ export async function GET() {
         notified = true;
       } catch (notifyError) {
         console.error("Level-advance notification failed", notifyError);
+      }
+    } else if (!eligible && nextLevel && student.classesStartedAt) {
+      // Escalating heads-up in the weeks before the level's own clock runs
+      // out — separate from the offer above, which only exists once the
+      // office has actually signed the level off. This is in-app only, never
+      // a modal: the moment queue deliberately keeps commerce out of anything
+      // that interrupts (see lib/moment-queue.tsx), and a countdown nudge is
+      // exactly that kind of interruption if it pops up over whatever the
+      // student opened the dashboard to do.
+      try {
+        const { daysLeft } = buildCountdown(currentLevel, student.classesStartedAt, { now: new Date() });
+
+        // Three tiers, one dedupeKey shape each — notify()'s own dedupeKey is
+        // the idempotency mechanism (see lib/notify.ts), so no new Student
+        // column is needed to track which nudge already fired.
+        let dedupeKey: string | null = null;
+        if (daysLeft <= 7) {
+          dedupeKey = `level-nudge:${student.id}:${currentLevel}:daily:${new Date().toISOString().slice(0, 10)}`;
+        } else if (daysLeft <= 14) {
+          dedupeKey = `level-nudge:${student.id}:${currentLevel}:3d:${Math.floor(daysLeft / 3)}`;
+        } else if (daysLeft <= 21) {
+          dedupeKey = `level-nudge:${student.id}:${currentLevel}:heads-up`;
+        }
+
+        if (dedupeKey) {
+          await notify({
+            to: { studentIds: [student.id] },
+            kind: KIND.levelAdvance,
+            severity: "info",
+            title: `${daysLeft} day${daysLeft === 1 ? "" : "s"} left on ${currentLevel}`,
+            message:
+              daysLeft <= 1
+                ? `${currentLevel} wraps up today. Ask your branch about ${nextLevel} so there is no gap before you continue.`
+                : `${daysLeft} days left on ${currentLevel}. Worth thinking about ${nextLevel} now, before the batch fills without you.`,
+            link: "/dashboard",
+            dedupeKey,
+          });
+        }
+      } catch (nudgeError) {
+        console.error("Level-clock nudge failed", nudgeError);
       }
     }
 

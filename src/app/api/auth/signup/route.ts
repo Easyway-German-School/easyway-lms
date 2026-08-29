@@ -1,17 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { assignStudentCode } from "@/lib/student-code";
 import { notifyAdminsOfRegistration } from "@/lib/admin-alerts";
+import { sendRegistrationConfirmation } from "@/lib/registration-email";
+import { sendParentAccountCreatedEmail } from "@/lib/parent-account-email";
 import { linkLeadOnSignup } from "@/lib/leads";
 import { isOnlineBranch } from "@/lib/online-branch";
+import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
+import { currentTenantId, setTenantScope } from "@/lib/tenant/context";
+import { resolveTenantId } from "@/lib/tenant/resolve";
+import { OFFERED_LEVELS } from "@/lib/levels";
+import { TIME_SLOTS } from "@/lib/class-times";
+import { TERMS_CONTEXT, TERMS_VERSION } from "@/lib/terms";
 
+/**
+ * Whether there is a Branch table to select from.
+ *
+ * This used to ask `sqlite_master`, from back when the database was SQLite and
+ * a fresh checkout might not have the table yet. After the move to Postgres
+ * that query does not merely return nothing — `sqlite_master` does not exist,
+ * so it THROWS, the catch swallowed it, and this returned false every single
+ * time in production. The branch-required check below is guarded by it, which
+ * means that check has silently not run since the migration: a student could
+ * register with no branch at all, and branch is what decides their tuition
+ * price, their timetable and whose roster they appear on.
+ *
+ * Counting rows through Prisma asks the same question in a way that does not
+ * depend on which engine is underneath.
+ */
 async function branchTableExists() {
   try {
-    const rows = await prisma.$queryRaw<Array<{ name: string }>>`
-      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'Branch'
-    `;
-    return rows.some((row) => row.name === "Branch");
+    await prisma.branch.count();
+    return true;
   } catch {
     return false;
   }
@@ -33,6 +55,37 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    /**
+     * Which school this person is registering at, decided by the hostname they
+     * arrived on. Set before anything else in the handler so that the User, the
+     * Student, the student code and the office alert are all written against
+     * the same tenant — a signup that half-lands in one school and half in
+     * another is worse than one that fails.
+     */
+    setTenantScope(await resolveTenantId(request));
+
+    /**
+     * Registration is open to the public, so it is metered by IP.
+     *
+     * Ten an hour is generous for the real case — a family or a cyber café
+     * enrolling several students in one sitting stays well inside it — and
+     * ruinous for a script, because each account that gets through writes a
+     * User, a Student, a student code and an alert email to the office.
+     */
+    const ip = clientIp(request.headers);
+    const limit = checkRateLimit(`signup:ip:${ip}`, {
+      windowMs: 60 * 60 * 1000,
+      max: 10,
+    });
+
+    if (!limit.ok) {
+      return rateLimitResponse(
+        limit,
+        "Too many registration attempts from this connection. Please try again later.",
+        buildCorsHeaders(request),
+      );
+    }
+
     const body = await request.json().catch(() => null);
     const {
       email,
@@ -67,6 +120,7 @@ export async function POST(request: NextRequest) {
       idProofFileName,
       photoFileName,
       parentIdProofFileName,
+      termsAccepted,
       // previous school
       prevSchoolName,
       prevSchoolAddress,
@@ -92,6 +146,10 @@ export async function POST(request: NextRequest) {
       allowParentLogin,
       transportRoute,
       heardFrom,
+      // The optional 4th step of the signup wizard: a parent/guardian account
+      // to create and link alongside this student's, in the same submit. See
+      // the parent-account block near the end of this handler.
+      parent,
     } = body || {};
 
     const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
@@ -112,15 +170,30 @@ export async function POST(request: NextRequest) {
     }
     const normalizedRole = "STUDENT" as const;
     const normalizedBranchId = typeof branchId === "string" && branchId.trim() ? branchId : null;
-    const normalizedLevel = typeof level === "string" && level.trim() ? level : "A1";
+    // Level used to fall back to "A1" whenever this was missing or garbled,
+    // which meant a student who never touched the level dropdown was silently
+    // enrolled as a beginner instead of being told the field mattered. It is
+    // validated below (against the same OFFERED_LEVELS the rest of the app
+    // draws its level lists from) and the request is rejected rather than
+    // defaulted when it is missing or not a real level.
+    const normalizedLevel = typeof level === "string" ? level.trim().toUpperCase() : "";
+    const levelValid = (OFFERED_LEVELS as readonly string[]).includes(normalizedLevel);
     const normalizedPathway = typeof pathway === "string" && pathway.trim() ? pathway : "Language training";
     const normalizedBatch = typeof batch === "string" && batch.trim() ? batch : "";
-    const normalizedSessionSlot = ["morning", "afternoon", "evening"].includes(
-      String(sessionSlot ?? "").toLowerCase(),
-    )
-      ? String(sessionSlot).toLowerCase()
-      : "morning";
     const normalizedClassType = String(classType ?? "").toLowerCase() === "private" ? "private" : "group";
+    // Same story as level: this used to fall back to "morning" for any missing
+    // or invalid value, so a student who never opened the session dropdown got
+    // enrolled into a slot they never chose. A private student genuinely has
+    // nothing to choose here — they book their own times with their tutor, the
+    // signup form hides the field for them — so validation below is skipped
+    // only for classType "private". The DB column is a non-nullable
+    // String @default("morning") that other code (the timetable, the
+    // community room a student lands in) matches against directly, so a
+    // private signup still needs *some* valid slot in storage; it lands on
+    // "morning" rather than an empty string nothing downstream expects.
+    const rawSessionSlot = typeof sessionSlot === "string" ? sessionSlot.trim().toLowerCase() : "";
+    const sessionSlotValid = (TIME_SLOTS as readonly string[]).includes(rawSessionSlot);
+    const normalizedSessionSlot = sessionSlotValid ? rawSessionSlot : "morning";
 
     /**
      * How this student attends: physical | hybrid | online.
@@ -134,7 +207,7 @@ export async function POST(request: NextRequest) {
     const branchRow = normalizedBranchId
       ? await prisma.branch.findUnique({
           where: { id: normalizedBranchId },
-          select: { name: true, mode: true, tenantId: true },
+          select: { name: true, mode: true },
         })
       : null;
     const requestedDeliveryMode = String(deliveryMode ?? "").toLowerCase();
@@ -229,6 +302,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (normalizedRole === "STUDENT" && !levelValid) {
+      return NextResponse.json(
+        { error: "Please select a valid level" },
+        { status: 400 }
+      );
+    }
+
+    // Group students pick one of the house sittings; a private student agrees
+    // their own times with their tutor and never sees this question, so it is
+    // not required for them.
+    if (normalizedRole === "STUDENT" && normalizedClassType !== "private" && !sessionSlotValid) {
+      return NextResponse.json(
+        { error: "Please select a session" },
+        { status: 400 }
+      );
+    }
+
     if (normalizedPathway === "Ausbildung (vocational training)" && !normalizedAdmission.profession) {
       return NextResponse.json(
         { error: "Please select an Ausbildung focus for vocational training" },
@@ -239,6 +329,18 @@ export async function POST(request: NextRequest) {
     if (normalizedPassword.length < 8) {
       return NextResponse.json(
         { error: "Password must be at least 8 characters" },
+        { status: 400 }
+      );
+    }
+
+    // The client-side gate (TermsGate on the signup form) is a UX courtesy,
+    // not the enforcement — a crafted request that skips it must still be
+    // refused, the same way a crafted request cannot skip the level check
+    // above. `=== true` on purpose: anything else (missing, "yes", 1) is not
+    // acceptance.
+    if (normalizedRole === "STUDENT" && termsAccepted !== true) {
+      return NextResponse.json(
+        { error: "Please accept the Terms and Conditions to create your account." },
         { status: 400 }
       );
     }
@@ -265,7 +367,11 @@ export async function POST(request: NextRequest) {
           name: normalizedName,
           password: hashedPassword,
           role: normalizedRole,
-          tenantId: branchRow?.tenantId ?? undefined,
+          // `User` is a global model, so nothing stamps this for us — see the
+          // note on the same line in the admin tutor route. Without it a
+          // student signs up successfully and then holds a session with no
+          // tenant, which locks them out of their own portal.
+          tenantId: currentTenantId(),
           student: {
             create: ({
               level: normalizedLevel,
@@ -295,6 +401,10 @@ export async function POST(request: NextRequest) {
     // outside the create call: a failure here must not cost someone their
     // account, and the backfill script can repair a missing code later.
     let studentCode: string | null = null;
+    // Kept outside the try so the office alert can deep-link to this exact
+    // person rather than dropping whoever it is on the roster to be searched
+    // for. Null when the lookup failed, and the alert falls back to the list.
+    let studentId: string | null = null;
     if (normalizedRole === "STUDENT") {
       try {
         const created = await prisma.student.findUnique({
@@ -302,9 +412,12 @@ export async function POST(request: NextRequest) {
           select: { id: true },
         });
         if (created) {
+          studentId = created.id;
           studentCode = await assignStudentCode(created.id, {
             level: normalizedLevel,
             batch: (normalizedAdmission as any)?.batch,
+            branch: branchRow,
+            classType: normalizedClassType,
           });
           // Close the enquiry this signup came from, so the office stops
           // chasing someone who has already enrolled.
@@ -314,11 +427,31 @@ export async function POST(request: NextRequest) {
         console.error("Student code assignment failed:", codeError);
       }
 
+      // The legal record of this exact moment: what they agreed to, and the
+      // wording as it stood then. Best-effort, like the code assignment above
+      // — a signup that already succeeded must not be undone by this failing,
+      // but losing it silently would defeat the reason it is written at all.
+      try {
+        await prisma.termsAcceptance.create({
+          data: {
+            userId: user.id,
+            studentId,
+            context: TERMS_CONTEXT.signup,
+            version: TERMS_VERSION,
+            ip: clientIp(request.headers),
+            userAgent: request.headers.get("user-agent") || undefined,
+          },
+        });
+      } catch (termsError) {
+        console.error("Terms acceptance recording failed:", termsError);
+      }
+
       // The office needs to know a registration landed. Queued, not sent
       // inline, so a slow mail provider cannot delay the signup response.
       const branchName = branchRow?.name ?? null;
 
       await notifyAdminsOfRegistration({
+        studentId,
         studentName: normalizedName,
         studentEmail: normalizedEmail,
         studentCode,
@@ -328,6 +461,113 @@ export async function POST(request: NextRequest) {
         branchName,
         classType: normalizedClassType,
       });
+
+      /**
+       * And the student, who until now was told nothing at all.
+       *
+       * Last of the three side effects and, like the other two, unable to fail
+       * the signup: the account exists, the code is issued and the office has
+       * been told. Anything that goes wrong here is a courtesy that did not
+       * arrive, not a registration that did not happen.
+       */
+      await sendRegistrationConfirmation({
+        studentName: normalizedName,
+        studentEmail: normalizedEmail,
+        studentCode,
+        level: normalizedLevel,
+        sessionSlot: normalizedSessionSlot,
+        pathway: normalizedPathway,
+        branchName,
+        classType: normalizedClassType,
+        deliveryMode: normalizedDeliveryMode,
+      });
+
+      /**
+       * The optional 4th step: "add a parent/guardian to monitor this
+       * account." Entirely skippable — most signups carry no `parent` at
+       * all — and, like the two side effects above, unable to fail the
+       * signup that already succeeded.
+       *
+       * Two shapes:
+       *   - the parent's email is new: a second, linked account is created
+       *     with a generated password, mailed to them.
+       *   - the parent's email already belongs to a PARENT account with no
+       *     child linked yet: that account is linked rather than duplicated
+       *     — `Parent.userId` is unique, so one login cannot own two Parent
+       *     rows. An email that already belongs to anything else (a
+       *     student, an admin, or a parent already watching a different
+       *     child) is left alone; this form is not how somebody else's
+       *     account gets claimed or reassigned.
+       */
+      if (studentId && parent && typeof parent === "object") {
+        try {
+          const parentName = typeof (parent as any).name === "string" ? (parent as any).name.trim() : "";
+          const parentEmail =
+            typeof (parent as any).email === "string" ? (parent as any).email.trim().toLowerCase() : "";
+          const parentPhone = typeof (parent as any).phone === "string" ? (parent as any).phone.trim() : "";
+
+          if (parentName && parentEmail && parentEmail !== normalizedEmail) {
+            const existingParentUser = await prisma.user.findUnique({
+              where: { email: parentEmail },
+              include: { parent: true },
+            });
+
+            if (!existingParentUser) {
+              const temporaryPassword = crypto.randomBytes(9).toString("base64url");
+              const hashedParentPassword = await bcryptjs.hash(temporaryPassword, 10);
+
+              await prisma.user.create({
+                data: {
+                  email: parentEmail,
+                  name: parentName,
+                  password: hashedParentPassword,
+                  role: "PARENT",
+                  tenantId: currentTenantId(),
+                  parent: {
+                    create: {
+                      phone: parentPhone || null,
+                      childName: normalizedName,
+                      childEmail: normalizedEmail,
+                      children: {
+                        create: {
+                          studentId,
+                          tenantId: currentTenantId(),
+                        },
+                      },
+                    },
+                  },
+                },
+              });
+
+              await sendParentAccountCreatedEmail({
+                parentName,
+                parentEmail,
+                temporaryPassword,
+                studentName: normalizedName,
+              });
+            } else if (existingParentUser.role === "PARENT" && existingParentUser.parent) {
+              await prisma.parent.update({
+                where: { userId: existingParentUser.id },
+                data: {
+                  childName: normalizedName,
+                  childEmail: normalizedEmail,
+                  children: {
+                    connectOrCreate: {
+                      where: { parentId_studentId: { parentId: existingParentUser.parent.id, studentId } },
+                      create: { studentId, tenantId: currentTenantId() },
+                    },
+                  },
+                },
+              });
+            }
+            // Any other existing-account shape (a student, an admin, or a
+            // parent already linked elsewhere) is left untouched — see the
+            // doc-comment above.
+          }
+        } catch (parentError) {
+          console.error("Linked parent account creation failed:", parentError);
+        }
+      }
     }
 
     return NextResponse.json(

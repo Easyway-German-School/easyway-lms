@@ -1,12 +1,14 @@
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { toPlayableUrl } from "@/lib/video-library";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions as any) as any;
+    const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -45,11 +47,28 @@ export async function GET() {
       );
     }
 
+    /**
+     * MATCH ON THE MATERIAL'S OWN LEVEL AS WELL AS ITS COURSE'S.
+     *
+     * This used to be `course: { level: student.level }` alone, and that is a
+     * relation filter on a NULLABLE relation — so it silently excluded every
+     * material with no course at all. `Material.courseId` became optional when
+     * class recordings arrived (a recording belongs to a level and a date, not
+     * to a course), and the lecturer upload route deliberately allows a null
+     * course for anything that is not a document.
+     *
+     * The result: a tutor uploaded a class video, the row was written with
+     * `level = "A1"` and no course, and it appeared for nobody. On this
+     * database that was four of the eight A1 materials — half of everything at
+     * the level, invisible, with no error anywhere to explain it.
+     *
+     * `/api/student/videos` had this right all along, which is what made the
+     * bug so confusing to look at: the same upload showed on the Watch shelf
+     * and not in Materials. The two queries now agree.
+     */
     const records = await prisma.material.findMany({
       where: {
-        course: {
-          level: student.level,
-        },
+        OR: [{ level: student.level }, { course: { level: student.level } }],
       },
       include: {
         course: {
@@ -59,11 +78,18 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
-    // The client reads `fileUrl`; the column is `filePath`. Expose both so the
-    // download link resolves instead of rendering as undefined.
+    /**
+     * The client reads `fileUrl`; the column is `filePath`. Expose both so the
+     * download link resolves instead of rendering as undefined.
+     *
+     * Through `toPlayableUrl` rather than a bare `startsWith("/")` test: a
+     * bucket-hosted recording and a tutor's pasted YouTube link are both stored
+     * as absolute URLs, and prefixing those with a slash produced
+     * `/https://…`, a link that can only 404.
+     */
     const materials = records.map((material) => ({
       ...material,
-      fileUrl: material.filePath.startsWith("/") ? material.filePath : `/${material.filePath}`,
+      fileUrl: toPlayableUrl(material.filePath),
     }));
 
     return NextResponse.json({ materials, locked: false, totalPaid, tuitionFee });

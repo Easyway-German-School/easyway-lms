@@ -29,7 +29,6 @@ export async function POST(request: Request) {
     // Must be the raw body — any reparsing changes the bytes the signature
     // was computed over.
     const body = await request.text();
-    console.debug && console.debug('LiveKit webhook body length', body.length);
     const authorization = request.headers.get("authorization");
     if (!authorization) {
       return NextResponse.json({ error: "Unsigned" }, { status: 401 });
@@ -38,14 +37,60 @@ export async function POST(request: Request) {
     const receiver = new WebhookReceiver(apiKey, apiSecret);
     const event = await receiver.receive(body, authorization);
 
+    /**
+     * The live-classroom meter, taken from LiveKit's own accounting.
+     *
+     * `participant_left` carries how long that person was actually connected,
+     * which is exactly the unit LiveKit bills us in: a tutor and nine students
+     * for an hour is 600 participant-minutes, not 60. Metering on the
+     * participant rather than the room is the difference between passing the
+     * real bill through and inventing a number that happens to look like it.
+     *
+     * The room name identifies the school, so the tenant is resolved from the
+     * live session rather than from any request context — a provider webhook
+     * has none.
+     */
+    if (event.event === "participant_left" && event.participant && event.room) {
+      const joinedAt = Number(event.participant.joinedAt ?? 0);
+      const seconds = joinedAt > 0 ? Math.max(0, Math.floor(Date.now() / 1000) - joinedAt) : 0;
+      const minutes = Math.ceil(seconds / 60);
+
+      if (minutes > 0) {
+        const { recordUsage } = await import("@/lib/usage/record");
+        const { guardedPrisma } = await import("@/lib/prisma");
+
+        const session = await guardedPrisma.liveClassSession.findFirst({
+          where: { roomName: event.room.name },
+          select: { tenantId: true },
+          orderBy: { startedAt: "desc" },
+        });
+
+        if (session?.tenantId) {
+          await recordUsage({
+            tenantId: session.tenantId,
+            meter: "live.participant_minutes",
+            quantity: minutes,
+            /**
+             * Room plus identity plus join time. LiveKit retries this webhook,
+             * and the same person rejoining later is a genuinely new billable
+             * stretch — so the join time has to be in the key, and it comes
+             * from the event rather than from our clock.
+             */
+            sourceId: `livekit:${event.room.name}:${event.participant.identity}:${joinedAt}`,
+            metadata: { room: event.room.name, identity: event.participant.identity, seconds },
+          });
+        }
+      }
+      return NextResponse.json({ ok: true, metered: minutes });
+    }
+
     if (event.event === "egress_ended" && event.egressInfo) {
-      console.info('LiveKit egress_ended received', { egressId: event.egressInfo.egressId });
       const info = event.egressInfo;
       
       // The webhook has no request context, so we must find the tenant from the recording.
       // Use unguardedPrisma to find the classRecording without tenant scope.
       const { unguardedPrisma } = await import("@/lib/prisma");
-      const { runWithTenant, maybeUnscoped } = await import("@/lib/tenant/context");
+      const { runWithTenant } = await import("@/lib/tenant/context");
       
       const recording =
         (await unguardedPrisma.classRecording.findUnique({ 
@@ -59,40 +104,20 @@ export async function POST(request: Request) {
             })
           : null);
 
-      if (!recording) {
-        console.error("Could not find classRecording for egress", { egressId: info.egressId, filename: info.fileResults?.[0]?.filename });
+      if (!recording?.tenantId) {
+        console.error("Could not find tenant for recording", { egressId: info.egressId });
         return NextResponse.json({ ok: true, outcome: "unknown" });
       }
 
-      // Run finaliseRecording within the tenant context if we have one, otherwise unscoped
-      // This ensures finalization happens even if tenantId was not captured (e.g., in single-tenant setups)
-      let outcome: "created" | "already" | "failed" | "unknown";
-      
-      if (recording.tenantId) {
-        console.debug('Running finalization with tenantId', { tenantId: recording.tenantId, egressId: info.egressId });
-        outcome = await runWithTenant(recording.tenantId, async () =>
-          finaliseRecording({
-            egressId: info.egressId,
-            status: info.status,
-            error: info.error,
-            fileResults: info.fileResults,
-          })
-        );
-      } else {
-        console.debug('Running finalization without tenant context (single-tenant or context missing)', { egressId: info.egressId });
-        outcome = await maybeUnscoped(
-          false,
-          "recording webhook has no tenant context, attempting finalization anyway",
-          async () =>
-            finaliseRecording({
-              egressId: info.egressId,
-              status: info.status,
-              error: info.error,
-              fileResults: info.fileResults,
-            })
-        );
-      }
-      console.info('finaliseRecording outcome', { egressId: info.egressId, outcome });
+      // Now run finaliseRecording within the tenant context
+      const outcome = await runWithTenant(recording.tenantId, async () =>
+        finaliseRecording({
+          egressId: info.egressId,
+          status: info.status,
+          error: info.error,
+          fileResults: info.fileResults,
+        })
+      );
       return NextResponse.json({ ok: true, outcome });
     }
 

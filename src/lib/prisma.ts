@@ -1,12 +1,16 @@
 import { PrismaClient } from "@prisma/client";
 import { createGuardExtension } from "@/lib/prisma-guard";
+import { createTenantExtension } from "@/lib/tenant/extension";
+import { currentScope } from "@/lib/tenant/context";
+import { createColdStartRetryExtension } from "@/lib/prisma-cold-start-retry";
 
 const globalForPrisma = global as unknown as {
   prismaBase: PrismaClient | undefined;
+  prismaGuarded: ReturnType<typeof buildGuarded> | undefined;
   prisma: ReturnType<typeof buildClient> | undefined;
 };
 
-function buildClient() {
+function buildGuarded() {
   const base =
     globalForPrisma.prismaBase ||
     new PrismaClient({
@@ -18,6 +22,15 @@ function buildClient() {
   globalForPrisma.prismaBase = base;
 
   /**
+   * OUTERMOST, so it covers every query below it too: the guard, the tenant
+   * filter, all of it. Neon suspends this database after a few idle minutes,
+   * and the first query to wake it can hit a closed door before the compute
+   * has finished starting — see src/lib/prisma-cold-start-retry.ts for why a
+   * short retry here, rather than a keep-alive ping, is the fix.
+   */
+  const woken = base.$extends(createColdStartRetryExtension());
+
+  /**
    * Every query in the application goes through the guard.
    *
    * Wiring it here rather than at the call sites is the whole point. A rule
@@ -25,8 +38,28 @@ function buildClient() {
    * somebody adds in a hurry, and the routes most likely to be written in a
    * hurry are the ones that delete things. See src/lib/prisma-guard.ts.
    */
-  return base.$extends(createGuardExtension(base));
+  return woken.$extends(createGuardExtension(base));
 }
+
+function buildClient() {
+  /**
+   * And every query goes through the tenant filter, for the same reason one
+   * layer up: the routes that leak across tenants are not the ones anybody
+   * reviews, they are the ones written quickly and forgotten. The scope comes
+   * from async context, which the auth seam sets — see src/lib/tenant/context.ts.
+   */
+  return guardedPrisma.$extends(createTenantExtension(currentScope));
+}
+
+/**
+ * Guarded but NOT tenant-scoped.
+ *
+ * The building block the scoped clients are made from, and the client the
+ * deliberate cross-tenant jobs use. Reach for `prisma` unless you can say in a
+ * sentence why this request is allowed to see every school at once.
+ */
+export const guardedPrisma = globalForPrisma.prismaGuarded || buildGuarded();
+globalForPrisma.prismaGuarded = guardedPrisma;
 
 export const prisma = globalForPrisma.prisma || buildClient();
 

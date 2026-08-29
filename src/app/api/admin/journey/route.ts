@@ -1,38 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { resolveAdmin } from "@/lib/admin-roles";
-import { completeLevelForStudents, listCohort } from "@/lib/germany-journey-server";
+import { requireCapability } from "@/lib/admin-roles";
+import { completeLevelForStudents, listCohort, setHeldBack } from "@/lib/germany-journey-server";
 
 export const dynamic = "force-dynamic";
 
 /**
  * The cohort console.
  *
- * GET  — everybody in a batch and how far each of them has actually got.
- * POST — "this batch has finished", which is the ONLY thing that makes the
- *        student-facing "your level is complete" offer appear.
+ * GET   — everybody in a batch and how far each of them has actually got.
+ * POST  — "this batch has finished", which is the ONLY thing that makes the
+ *         student-facing "your level is complete" offer appear.
+ * PATCH — hold a student back from sign-off (or clear the hold), so a
+ *         failed-assessment or unresolved-dispute name stops reappearing in
+ *         every batch's "select all not signed off".
  *
  * Signing a level off changes what a student is told about their own progress
  * and opens a sale, so it sits behind the `students` capability rather than
  * being readable by anybody with an admin cookie.
  */
 async function requireStudentsAdmin() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  const admin = await resolveAdmin(session?.user?.id);
-
-  if (!admin) {
-    return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
-  }
-  if (!admin.can("students")) {
-    return { error: NextResponse.json({ error: "Your admin role cannot sign off levels" }, { status: 403 }) };
-  }
-  return { admin };
+  return requireCapability("students");
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireStudentsAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireStudentsAdmin();
+  if (!gate.ok) return gate.response;
 
   try {
     const params = req.nextUrl.searchParams;
@@ -52,6 +44,7 @@ export async function GET(req: NextRequest) {
         stalled: cohort.filter((row) => !row.classesStartedAt && row.notStartedCount >= 3).length,
         signedOff: cohort.filter((row) => row.levelCompletedFor === row.level).length,
         owing: cohort.filter((row) => row.outstanding > 0).length,
+        heldBack: cohort.filter((row) => row.heldBackAt).length,
       },
     });
   } catch (error) {
@@ -61,8 +54,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireStudentsAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireStudentsAdmin();
+  if (!gate.ok) return gate.response;
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -79,5 +72,28 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Level sign-off failed", error);
     return NextResponse.json({ error: "Unable to sign these students off" }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  const gate = await requireStudentsAdmin();
+  if (!gate.ok) return gate.response;
+
+  try {
+    const body = await req.json().catch(() => ({}));
+    const studentId = typeof body?.studentId === "string" ? body.studentId : "";
+    const heldBack = Boolean(body?.heldBack);
+    const reason = typeof body?.reason === "string" ? body.reason : "";
+
+    if (!studentId) {
+      return NextResponse.json({ error: "A student is required" }, { status: 400 });
+    }
+
+    await setHeldBack(studentId, { heldBack, reason });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("Hold-back update failed", error);
+    const message = error instanceof Error ? error.message : "Unable to update this student's hold";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

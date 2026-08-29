@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { LECTURER_STATUS_META, readLecturerStatus } from "@/lib/lecturer-status";
+import { lecturerFeatures } from "@/lib/lecturer-features";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +16,7 @@ export const dynamic = "force-dynamic";
  * because it runs on every navigation inside the portal.
  */
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as
-    | { user?: { id?: string; role?: string } }
-    | null;
+  const session = await requireAuthSession();
 
   const userId = session?.user?.id;
   const role = String(session?.user?.role ?? "").toLowerCase();
@@ -32,7 +30,11 @@ export async function GET() {
 
   const lecturer = await prisma.lecturer.findUnique({
     where: { userId },
-    select: { status: true, statusNote: true },
+    // `features` rides along rather than getting its own endpoint: the shell
+    // already calls this on every navigation, so the sidebar can be filtered
+    // for free. A second request would double the portal's chattiest call to
+    // answer a question this one is already in the right place to answer.
+    select: { status: true, statusNote: true, features: true },
   });
 
   // No Lecturer row is a data problem, not a revocation — the individual
@@ -44,5 +46,8 @@ export async function GET() {
     status,
     statusNote: lecturer?.statusNote ?? null,
     active: LECTURER_STATUS_META[status].canSignIn,
+    // Null column means every area, so a tutor who predates this field keeps
+    // the portal they had. See src/lib/lecturer-features.ts.
+    features: lecturerFeatures(lecturer?.features),
   });
 }

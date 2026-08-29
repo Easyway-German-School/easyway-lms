@@ -42,6 +42,17 @@ type QuestionBase = {
    * achievement, and scoring them equally flatters the wrong student.
    */
   points: number;
+  /**
+   * A picture the question is about — "was ist das?" over a photograph, a
+   * street sign to read, a scene to describe. For a language school this is
+   * not decoration: naming a thing you can see is a different and easier
+   * recall task than translating a word, and it is most of what a beginner
+   * lesson actually does.
+   *
+   * Always a path from our own storage, never an arbitrary URL. See
+   * `asImageUrl` for why that is enforced rather than trusted.
+   */
+  imageUrl?: string;
 };
 
 export type ChoiceQuestion = QuestionBase & {
@@ -93,13 +104,19 @@ export type Question =
   | ShortQuestion
   | ParagraphQuestion;
 
-/** What a student is allowed to see: the question minus any answer key. */
+/**
+ * What a student is allowed to see: the question minus any answer key.
+ *
+ * `imageUrl` crosses over, unlike every other optional field here — it is the
+ * question, not a key to it. A picture the student cannot see makes "was ist
+ * das?" unanswerable.
+ */
 export type PublicQuestion =
-  | { type: "choice"; prompt: string; points: number; options: string[] }
-  | { type: "multi"; prompt: string; points: number; options: string[] }
-  | { type: "boolean"; prompt: string; points: number }
-  | { type: "short"; prompt: string; points: number }
-  | { type: "paragraph"; prompt: string; points: number };
+  | { type: "choice"; prompt: string; points: number; options: string[]; imageUrl?: string }
+  | { type: "multi"; prompt: string; points: number; options: string[]; imageUrl?: string }
+  | { type: "boolean"; prompt: string; points: number; imageUrl?: string }
+  | { type: "short"; prompt: string; points: number; imageUrl?: string }
+  | { type: "paragraph"; prompt: string; points: number; imageUrl?: string };
 
 /* -------------------------------------------------------------------------- */
 /* Parsing                                                                    */
@@ -107,6 +124,29 @@ export type PublicQuestion =
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map((entry) => String(entry ?? "")) : [];
+}
+
+/**
+ * Accept only a picture WE stored.
+ *
+ * `uploadFile` returns `/api/files/<key>` when a bucket is configured and
+ * `/uploads/<key>` when one is not, so those two prefixes are the complete set
+ * of things this app has ever handed out. Anything else is refused rather than
+ * rendered.
+ *
+ * Not paranoia about tutors. An `<img src>` from stored JSON is a request the
+ * student's browser makes to whatever host is named, which leaks every player's
+ * IP and referrer to a third party, breaks the moment that host goes down or
+ * rotates the file, and on an http:// URL trips mixed-content blocking so the
+ * picture silently fails for the whole class. A relative path has none of those
+ * properties. Rejected values drop the picture and keep the question.
+ */
+function asImageUrl(value: unknown): string | undefined {
+  const url = String(value ?? "").trim();
+  if (!url) return undefined;
+  if (url.includes("..")) return undefined;
+  if (!url.startsWith("/api/files/") && !url.startsWith("/uploads/")) return undefined;
+  return url;
 }
 
 function asPoints(value: unknown): number {
@@ -141,6 +181,8 @@ export function parseQuestions(value: unknown): Question[] {
     if (!prompt) continue;
 
     const points = asPoints(q.points);
+    const imageUrl = asImageUrl(q.imageUrl);
+    const picture = imageUrl ? { imageUrl } : {};
     const declared = String(q.type ?? "").trim();
     const type = (QUESTION_TYPES as readonly string[]).includes(declared) ? declared : "choice";
 
@@ -149,7 +191,7 @@ export function parseQuestions(value: unknown): Question[] {
       if (options.length < 2) continue;
       const answerIndex = Number.isInteger(q.answerIndex) ? Number(q.answerIndex) : -1;
       if (answerIndex < 0 || answerIndex >= options.length) continue;
-      out.push({ type: "choice", prompt, points, options, answerIndex });
+      out.push({ type: "choice", prompt, points, options, answerIndex, ...picture });
       continue;
     }
 
@@ -167,12 +209,13 @@ export function parseQuestions(value: unknown): Question[] {
         options,
         answerIndexes: [...new Set(answerIndexes)].sort((a, b) => a - b),
         partialCredit: q.partialCredit !== false,
+        ...picture,
       });
       continue;
     }
 
     if (type === "boolean") {
-      out.push({ type: "boolean", prompt, points, answer: q.answer === true });
+      out.push({ type: "boolean", prompt, points, answer: q.answer === true, ...picture });
       continue;
     }
 
@@ -188,13 +231,14 @@ export function parseQuestions(value: unknown): Question[] {
         accepted,
         caseSensitive: q.caseSensitive === true,
         allowTypos: q.allowTypos === true,
+        ...picture,
       });
       continue;
     }
 
     if (type === "paragraph") {
       const guidance = String(q.guidance ?? "").trim();
-      out.push({ type: "paragraph", prompt, points, ...(guidance ? { guidance } : {}) });
+      out.push({ type: "paragraph", prompt, points, ...(guidance ? { guidance } : {}), ...picture });
     }
   }
 
@@ -211,17 +255,20 @@ export function parseQuestions(value: unknown): Question[] {
  */
 export function toPublicQuestions(questions: Question[]): PublicQuestion[] {
   return questions.map((question) => {
+    // Named once so a new type added below cannot forget it. The picture IS the
+    // question — see the note on PublicQuestion.
+    const picture = question.imageUrl ? { imageUrl: question.imageUrl } : {};
     switch (question.type) {
       case "choice":
-        return { type: "choice", prompt: question.prompt, points: question.points, options: question.options };
+        return { type: "choice", prompt: question.prompt, points: question.points, options: question.options, ...picture };
       case "multi":
-        return { type: "multi", prompt: question.prompt, points: question.points, options: question.options };
+        return { type: "multi", prompt: question.prompt, points: question.points, options: question.options, ...picture };
       case "boolean":
-        return { type: "boolean", prompt: question.prompt, points: question.points };
+        return { type: "boolean", prompt: question.prompt, points: question.points, ...picture };
       case "short":
-        return { type: "short", prompt: question.prompt, points: question.points };
+        return { type: "short", prompt: question.prompt, points: question.points, ...picture };
       case "paragraph":
-        return { type: "paragraph", prompt: question.prompt, points: question.points };
+        return { type: "paragraph", prompt: question.prompt, points: question.points, ...picture };
     }
   });
 }
@@ -243,7 +290,7 @@ export function toPublicQuestions(questions: Question[]): PublicQuestion[] {
  * without umlauts — ue, oe, ae, ss. A student typing `schoen` has spelled it
  * correctly. A student typing `schon` has not.
  */
-function germanNormalise(value: string, caseSensitive: boolean): string {
+export function germanNormalise(value: string, caseSensitive: boolean): string {
   const collapsed = value.trim().replace(/\s+/g, " ");
   const cased = caseSensitive ? collapsed : collapsed.toLowerCase();
   return cased

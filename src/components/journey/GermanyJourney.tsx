@@ -89,10 +89,10 @@ type Journey = {
 /* The banner at the top of the map                                           */
 /* -------------------------------------------------------------------------- */
 
-function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeGoal: () => void }) {
+function ProgressRibbon({ journey, onChangeGoal, premium }: { journey: Journey; onChangeGoal: () => void; premium?: boolean }) {
   return (
     <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] px-5 py-5 text-white sm:px-7 sm:py-6">
-      <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
+      <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-[var(--surface-alt)] blur-3xl" />
       {/* The real flag, flying, rather than a flag-shaped icon. It is the
           picture at the end of the road and it belongs at the top of the card
           about that road. */}
@@ -101,12 +101,12 @@ function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeG
       </div>
 
       <div className="relative flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--foreground)] backdrop-blur">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--surface-alt)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--foreground)] backdrop-blur">
           <MapIcon className="h-3.5 w-3.5" />
-          Your road to Germany
+          {premium ? `${journey.currentLevel} private coaching journey` : "Your road to Germany"}
         </span>
         {journey.tribe ? (
-          <span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--foreground)] backdrop-blur">
+          <span className="rounded-full bg-[var(--surface-alt)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--foreground)] backdrop-blur">
             {journey.tribe}
           </span>
         ) : null}
@@ -121,7 +121,7 @@ function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeG
       <button
         type="button"
         onClick={onChangeGoal}
-        className="relative mt-3 inline-flex max-w-full items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-left text-[11px] font-bold backdrop-blur transition hover:bg-white/20"
+        className="relative mt-3 inline-flex max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-1.5 text-left text-[11px] font-bold backdrop-blur transition hover:bg-[var(--surface-alt)]"
       >
         <CompassIcon className="h-3.5 w-3.5 shrink-0" />
         <span className="truncate">
@@ -137,7 +137,7 @@ function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeG
       ) : null}
 
       <div className="relative mt-4">
-        <div className="h-3 overflow-hidden rounded-full bg-white/20">
+        <div className="h-3 overflow-hidden rounded-full bg-[var(--surface-alt)]">
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${journey.percentToGermany}%` }}
@@ -160,6 +160,7 @@ function ProgressRibbon({ journey, onChangeGoal }: { journey: Journey; onChangeG
 
 function ArrivalCard({ journey }: { journey: Journey }) {
   if (!journey.arrival.label) return null;
+  const { arrival, targetLevel } = journey;
 
   return (
     <div className="rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -167,17 +168,23 @@ function ArrivalCard({ journey }: { journey: Journey }) {
         <TrendingUpIcon className="h-4 w-4" />
         <p className="text-[10px] font-bold uppercase tracking-[0.22em]">If you keep this pace</p>
       </div>
-      <p className="mt-2 text-2xl font-bold text-[var(--foreground)]">{journey.arrival.label}</p>
+      {/* This date has to be the one that matches the sentence under it —
+          "N levels · N months of teaching" — not a date that has quietly also
+          counted months of visa paperwork nobody mentioned above the fold. */}
+      <p className="mt-2 text-2xl font-bold text-[var(--foreground)]">{arrival.levelLabel}</p>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        {journey.arrival.levelsRemaining} {journey.arrival.levelsRemaining === 1 ? "level" : "levels"} to{" "}
-        {journey.targetLevel} · about {journey.arrival.monthsOfTeaching} months of teaching left.
+        {arrival.levelsRemaining} {arrival.levelsRemaining === 1 ? "level" : "levels"} to{" "}
+        {targetLevel} · about {arrival.monthsOfTeaching} months of teaching left.
       </p>
-      {/* The caveat travels with the number rather than being a prop the UI can
-          forget. A projected date is the most motivating thing on this screen
-          and the easiest to turn into a lie. */}
-      <p className="mt-3 border-t border-[var(--border)] pt-3 text-[11px] leading-5 text-[var(--muted)]">
-        {journey.arrival.caveat}
-      </p>
+
+      {/* Germany itself is a separate, later date — teaching plus this goal's
+          paperwork allowance — and it stays visible, just never merged into
+          the number above it. */}
+      <div className="mt-4 border-t border-[var(--border)] pt-3">
+        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--muted)]">Then, Germany itself</p>
+        <p className="mt-1 text-lg font-bold text-[var(--foreground)]">{arrival.label}</p>
+        <p className="mt-2 text-[11px] leading-5 text-[var(--muted)]">{arrival.caveat}</p>
+      </div>
     </div>
   );
 }
@@ -210,6 +217,7 @@ function JourneyBody({
   onClaim,
   claimingStage,
   onChangeGoal,
+  premium,
 }: {
   journey: Journey;
   busy: boolean;
@@ -218,6 +226,7 @@ function JourneyBody({
   onClaim: (stage: JourneyStage, undo: boolean) => void;
   claimingStage: string | null;
   onChangeGoal: () => void;
+  premium?: boolean;
 }) {
   /**
    * The map, or the list.
@@ -232,7 +241,7 @@ function JourneyBody({
 
   return (
     <div className="space-y-4">
-      <ProgressRibbon journey={journey} onChangeGoal={onChangeGoal} />
+      <ProgressRibbon journey={journey} onChangeGoal={onChangeGoal} premium={premium} />
 
       {journey.previewOnly ? (
         <div className="rounded-[28px] border border-[var(--accent)]/40 bg-[var(--accent-soft)] p-5">
@@ -444,9 +453,11 @@ export default function GermanyJourney({
    *   pitch.
    */
   variant = "launcher",
+  premium = false,
 }: {
   className?: string;
   variant?: "launcher" | "inline";
+  premium?: boolean;
 }) {
   const [journey, setJourney] = useState<Journey | null>(null);
   const [busy, setBusy] = useState(false);
@@ -601,15 +612,19 @@ export default function GermanyJourney({
   if (!journey) return null;
 
   const body = (
-    <JourneyBody
-      journey={journey}
-      busy={busy}
-      reply={reply}
-      onAnswer={answer}
-      onClaim={claim}
-      claimingStage={claimingStage}
-      onChangeGoal={() => setChangingGoal(true)}
-    />
+    <div className={premium ? "rounded-[32px] border border-[#D4AF37]/40 bg-[#090909] p-3 shadow-2xl sm:p-5" : ""}>
+      {premium ? <div className="mb-4 flex items-center justify-between px-2"><span className="text-xs font-bold uppercase tracking-[0.28em] text-[#E8C766]">Private coaching atelier</span><span className="rounded-full border border-[#D4AF37]/50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#E8C766]">{journey.currentLevel} · 1:1</span></div> : null}
+      <JourneyBody
+        journey={journey}
+        busy={busy}
+        reply={reply}
+        onAnswer={answer}
+        onClaim={claim}
+        claimingStage={claimingStage}
+        onChangeGoal={() => setChangingGoal(true)}
+        premium={premium}
+      />
+    </div>
   );
 
   return (

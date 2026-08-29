@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
-  isAssigned,
+  belongsToLecturer,
   readAssignment,
-  studentWhereForAssignment,
+  studentWhereForLecturer,
   type AssignmentSource,
 } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
+
+type LecturerMessagesAuth = { error: NextResponse } | { lecturer: { id: string; status: string; branchId: string | null; level: string | null; sessionSlot: string | null; user: { name: string | null; email: string } } };
 
 /**
  * Announcements from a tutor to the cohort they teach.
@@ -24,15 +25,16 @@ export const dynamic = "force-dynamic";
  * special-casing.
  */
 
-async function requireLecturer() {
-  const session = (await getServerSession(authOptions as any)) as any;
+async function requireLecturer(): Promise<LecturerMessagesAuth> {
+  const session = await requireAuthSession();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   if (!session?.user?.id) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
   const lecturer = await prisma.lecturer.findUnique({
     where: { userId: session.user.id },
-    include: { user: { select: { name: true } }, branch: { select: { id: true, name: true } } },
+    include: { user: { select: { name: true, email: true } }, branch: { select: { id: true, name: true } } },
   });
 
   if (!lecturer) {
@@ -58,21 +60,28 @@ async function requireLecturer() {
  * turn up to a locked room. Nothing errored, so nobody would have found it
  * until somebody complained.
  */
-async function cohortStudents(lecturer: AssignmentSource) {
+async function cohortStudents(lecturer: AssignmentSource & { id: string }) {
   const assignment = readAssignment(lecturer);
-  const where = studentWhereForAssignment(assignment);
-  if (!where || !isAssigned(assignment)) return [];
+  const where = studentWhereForLecturer(assignment, lecturer.id);
+  if (!where) return [];
 
-  return prisma.student.findMany({
+  const rows = await prisma.student.findMany({
     where: { ...(where as Record<string, unknown>), status: "active" } as never,
-    select: { id: true, user: { select: { name: true, email: true } } },
+    select: {
+      id: true,
+      admission: true,
+      tutorId: true,
+      user: { select: { name: true, email: true } },
+    },
   });
+
+  return rows.filter((student) => belongsToLecturer(assignment, lecturer.id, student));
 }
 
 /** GET — what this tutor has already sent, newest first, grouped per send. */
 export async function GET() {
   const auth = await requireLecturer();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
   const { lecturer } = auth;
 
   const students = await cohortStudents(lecturer);
@@ -80,7 +89,18 @@ export async function GET() {
 
   const notifications = studentIds.length
     ? await prisma.notification.findMany({
-        where: { studentId: { in: studentIds }, channel: "in-app" },
+        /**
+         * `kind: "general"` is not a stylistic filter — it is the one thing
+         * that actually distinguishes an announcement the POST below wrote
+         * from every other reason one of these students might have a
+         * Notification row: a grade, an attendance mark, a support-ticket
+         * reply, a game starting in their chat. The POST writes raw rows with
+         * no `kind`, so they all land on the schema default, "general" — the
+         * same default every one of those OTHER notify() calls deliberately
+         * avoids by naming a real kind. Before this filter, every one of them
+         * showed up here as if the tutor had personally composed and sent it.
+         */
+        where: { studentId: { in: studentIds }, channel: "in-app", kind: "general" },
         orderBy: { createdAt: "desc" },
         take: 300,
         select: {
@@ -132,17 +152,23 @@ export async function GET() {
   });
 }
 
-/** POST — send to the whole cohort, or to one student. */
+/** POST — send to the whole cohort, or to a chosen subset of it. */
 export async function POST(request: NextRequest) {
   const auth = await requireLecturer();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
   const { lecturer } = auth;
 
   try {
     const body = await request.json().catch(() => ({}));
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const message = typeof body.message === "string" ? body.message.trim() : "";
-    const studentId = typeof body.studentId === "string" ? body.studentId.trim() : "";
+    // Back-compat with the old single-student payload alongside the new
+    // multi-select one, so nothing on the client has to change in lockstep.
+    const studentIds = Array.isArray(body.studentIds)
+      ? body.studentIds.filter((id: unknown): id is string => typeof id === "string" && id.trim().length > 0)
+      : typeof body.studentId === "string" && body.studentId.trim()
+        ? [body.studentId.trim()]
+        : [];
 
     if (!title || !message) {
       return NextResponse.json({ error: "A subject and a message are both required" }, { status: 400 });
@@ -156,11 +182,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Sending to one student is still restricted to the tutor's own cohort —
-    // a tutor should not be able to message the whole school by guessing ids.
-    const targets = studentId ? students.filter((student) => student.id === studentId) : students;
+    // Picking a subset is still restricted to the tutor's own cohort — a
+    // tutor should not be able to message the whole school by guessing ids.
+    // This is also what keeps a private student out of a message meant only
+    // for the group class: the tutor simply leaves them unchecked.
+    const targets = studentIds.length > 0 ? students.filter((student) => studentIds.includes(student.id)) : students;
     if (targets.length === 0) {
-      return NextResponse.json({ error: "That student is not in your class" }, { status: 403 });
+      return NextResponse.json({ error: "None of the selected students are in your class" }, { status: 403 });
     }
 
     const sentAt = new Date();

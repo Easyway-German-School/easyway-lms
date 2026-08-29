@@ -1,7 +1,8 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { notify, KIND } from "@/lib/notify";
+import { recordSkillOutcome } from "@/lib/skill-mastery";
 import {
   parseQuestions,
   finaliseScore,
@@ -22,8 +23,11 @@ import {
 
 export const dynamic = "force-dynamic";
 
-async function requireStaff() {
-  const session = (await getServerSession(authOptions as any)) as any;
+type LecturerStaffAuth = { error: NextResponse } | { userId: string; lecturerId: string | null };
+
+async function requireStaff(): Promise<LecturerStaffAuth> {
+  const session = await requireAuthSession();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   if (!session?.user?.id) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
@@ -40,7 +44,7 @@ async function requireStaff() {
 
 export async function GET(req: NextRequest) {
   const auth = await requireStaff();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   const assignmentId = req.nextUrl.searchParams.get("assignmentId");
 
@@ -94,7 +98,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const auth = await requireStaff();
-  if (auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
 
   try {
     const { submissionId, marks, feedback } = await req.json();
@@ -159,9 +163,24 @@ export async function POST(req: NextRequest) {
           feedback: updated.feedback,
         },
       });
+      void recordSkillOutcome({ studentId: submission.studentId, skill: "grammar", score: final.score });
     } catch (error) {
       console.warn("Could not record marked quiz grade:", error);
     }
+
+    // The one grading path that used to leave the student finding out by
+    // opening the page and checking — see gradebook/route.ts and
+    // grades/roster/route.ts, which already do this on every score change.
+    await notify({
+      to: { studentIds: [submission.studentId] },
+      kind: KIND.resultPublished,
+      severity: "info",
+      title: "Your submission has been marked",
+      message: "Your tutor finished marking your work. Open your results to see it.",
+      link: "/results",
+      dedupeKey: `submission-marked:${submission.id}`,
+      push: true,
+    }).catch((error) => console.error("Marking notification failed", error));
 
     return NextResponse.json({ score: final.score, earned: final.earned, possible: final.possible });
   } catch (error) {

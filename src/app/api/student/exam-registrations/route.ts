@@ -1,13 +1,15 @@
 import { getServerSession, type Session } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { deriveStudentAccess } from "@/lib/access";
+import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { NextResponse } from "next/server";
 
 const DEFAULT_EXAM_CAPACITY = 30;
 
 export async function GET() {
   try {
-    const session = (await getServerSession(authOptions)) as Session | null;
+    const session = await requireAuthSession();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -48,7 +50,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = (await getServerSession(authOptions)) as Session | null;
+    const session = await requireAuthSession();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -62,10 +64,31 @@ export async function POST(request: Request) {
 
     const student = await prisma.student.findUnique({
       where: { userId: session.user.id },
+      include: { payments: true, branch: { select: { name: true } } },
     });
 
     if (!student) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
+
+    // Same gate as the video library and the live classroom: a student who
+    // has not met their deposit cannot register for an exam either. Checked
+    // here, at registration, rather than only at the exam centre later —
+    // finding out the day of is the failure mode this closes.
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+    const totalPaid = student.payments
+      .filter((payment) => payment.status === "completed")
+      .reduce((sum, payment) => sum + payment.amount, 0);
+    const access = deriveStudentAccess({
+      totalPaid,
+      tuitionFee: tuitionFeeFor(feeLookup),
+      requiredDeposit: requiredDepositFor(feeLookup),
+    });
+    if (!access.hasAccess) {
+      return NextResponse.json(
+        { error: `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} before registering for an exam.` },
+        { status: 402 },
+      );
     }
 
     const exam = await prisma.exam.findUnique({

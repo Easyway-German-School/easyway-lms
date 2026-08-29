@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useBranding } from "@/components/BrandingProvider";
 
 /**
  * The school's loading state, built around the emblem.
@@ -18,7 +19,8 @@ import { useEffect, useState } from "react";
  * too, since moving text is the part that actually causes trouble.
  */
 
-const MARK_SRC = "/logo-mark.png";
+/** Fallback only — the tenant's own mark comes from BrandingProvider. */
+const DEFAULT_MARK_SRC = "/logo-mark.png";
 
 /**
  * The school's name is NOT repeated under the emblem.
@@ -66,6 +68,8 @@ function usePrefersReducedMotion(): boolean {
  */
 export function BrandLoaderMark({ size = "md" }: { size?: Size }) {
   const { box, ring } = SIZES[size];
+  const branding = useBranding();
+  const markSrc = branding.markUrl || DEFAULT_MARK_SRC;
 
   return (
     <div className="relative flex shrink-0 items-center justify-center" style={{ width: ring, height: ring }}>
@@ -117,7 +121,7 @@ export function BrandLoaderMark({ size = "md" }: { size?: Size }) {
       <div className="ew-breathe relative" style={{ width: box, height: box }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={MARK_SRC}
+          src={markSrc}
           alt=""
           width={box}
           height={box}

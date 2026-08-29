@@ -1,9 +1,11 @@
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { myExams, isCandidateRole } from "@/lib/candidates";
 import { listOpenExams } from "@/lib/exam-centre";
+import { isExamBodyLive } from "@/lib/tenant/features";
+import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
 
 /**
  * Everything the signed-in person has booked, plus what they could still book.
@@ -15,7 +17,8 @@ import { listOpenExams } from "@/lib/exam-centre";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -31,7 +34,7 @@ export async function GET() {
       select: { level: true, branchId: true, studentCode: true },
     });
 
-    const [registered, available] = await Promise.all([
+    const [registered, available, features] = await Promise.all([
       myExams(session.user.id),
       // Deliberately NOT filtered to the student's own branch. An exam centre
       // is not a classroom: someone at the Abuja branch may well sit an ÖSD
@@ -39,6 +42,7 @@ export async function GET() {
       // school offers no exams. Each sitting shows its centre so the choice
       // is theirs.
       listOpenExams(),
+      featuresForCurrentTenant(),
     ]);
 
     const bookedExamIds = new Set(registered.map((r) => r.examId).filter(Boolean));
@@ -51,8 +55,12 @@ export async function GET() {
       level: student?.level ?? null,
       upcoming: registered.filter((r) => !r.isPast),
       past: registered.filter((r) => r.isPast),
-      // Never offer a sitting they already hold a seat for.
-      available: available.filter((e) => !bookedExamIds.has(e.id)),
+      // Never offer a sitting they already hold a seat for, and never offer
+      // one whose awarding body isn't live for this tenant — the server-side
+      // half of the gate; MyExamsPanel used to do this filtering alone, which
+      // left the booking endpoint itself wide open.
+      available: available.filter((e) => !bookedExamIds.has(e.id) && isExamBodyLive(features, e.examBody)),
+      goetheReferralUrl: features.examCentre.goetheReferralUrl,
     });
   } catch (error) {
     console.error("my-exams failed:", error);

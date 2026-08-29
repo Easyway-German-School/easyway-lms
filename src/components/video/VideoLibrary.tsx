@@ -24,7 +24,25 @@ import {
  * rounded edge of this panel.
  */
 
-function ShelfRow({ shelf, previewOnHover }: { shelf: VideoShelf; previewOnHover: boolean }) {
+/**
+ * Where a tile leads. The student portal and the tutor portal have separate
+ * players — a tutor has no Student row, so no watch position and no progress
+ * to write — and this used to be hardcoded to the student one, which is why the
+ * component could not be reused as it stood.
+ */
+export type WatchHref = (videoId: string) => string;
+
+const DEFAULT_WATCH_HREF: WatchHref = (id) => `/materials/watch/${id}`;
+
+function ShelfRow({
+  shelf,
+  previewOnHover,
+  watchHref,
+}: {
+  shelf: VideoShelf;
+  previewOnHover: boolean;
+  watchHref: WatchHref;
+}) {
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   const scrollBy = (direction: 1 | -1) => {
@@ -67,7 +85,7 @@ function ShelfRow({ shelf, previewOnHover }: { shelf: VideoShelf; previewOnHover
           return (
             <Link
               key={`${shelf.id}-${video.id}`}
-              href={`/materials/watch/${video.id}`}
+              href={watchHref(video.id)}
               className="group relative w-52 shrink-0 sm:w-64"
             >
               <div className="relative aspect-video overflow-hidden rounded-xl bg-slate-800 ring-1 ring-white/10 transition duration-200 group-hover:scale-[1.04] group-hover:ring-white/40">
@@ -110,7 +128,15 @@ function ShelfRow({ shelf, previewOnHover }: { shelf: VideoShelf; previewOnHover
   );
 }
 
-export default function VideoLibrary({ videos, level }: { videos: LibraryVideo[]; level?: string | null }) {
+export default function VideoLibrary({
+  videos,
+  level,
+  watchHref = DEFAULT_WATCH_HREF,
+}: {
+  videos: LibraryVideo[];
+  level?: string | null;
+  watchHref?: WatchHref;
+}) {
   const [query, setQuery] = useState("");
   // Off by default, and labelled honestly. Netflix autoplays previews because
   // bandwidth is free for its audience; here it is the scarce thing the rest
@@ -174,7 +200,7 @@ export default function VideoLibrary({ videos, level }: { videos: LibraryVideo[]
 
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 <Link
-                  href={`/materials/watch/${billboard.id}`}
+                  href={watchHref(billboard.id)}
                   className="inline-flex items-center gap-2 rounded-lg bg-white px-7 py-2.5 text-sm font-bold text-slate-900 transition hover:bg-white/85"
                 >
                   <PlayIcon className="h-5 w-5" /> {billboard.positionSeconds > 30 ? "Resume" : "Play"}
@@ -210,7 +236,9 @@ export default function VideoLibrary({ videos, level }: { videos: LibraryVideo[]
         {shelves.length === 0 ? (
           <p className="py-10 text-center text-sm text-slate-400">Nothing matches “{query}”.</p>
         ) : (
-          shelves.map((shelf) => <ShelfRow key={shelf.id} shelf={shelf} previewOnHover={previewOnHover} />)
+          shelves.map((shelf) => (
+            <ShelfRow key={shelf.id} shelf={shelf} previewOnHover={previewOnHover} watchHref={watchHref} />
+          ))
         )}
       </div>
     </div>

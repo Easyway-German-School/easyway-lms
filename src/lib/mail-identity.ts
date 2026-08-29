@@ -104,6 +104,12 @@ const IDENTITY_BY_KIND: Partial<Record<string, MailIdentityKey>> = {
   [KIND.gatewayError]: "support",
   [KIND.leadCaptured]: "support",
   [KIND.levelAdvance]: "support",
+  // Both sides of a help-desk thread. `support` is the whole point: a student
+  // who hits reply on the office's answer must reach the office, not a
+  // mailbox nobody opens — which is the exact failure that sent them to
+  // WhatsApp in the first place.
+  [KIND.supportTicket]: "support",
+  [KIND.supportReply]: "support",
 
   // Emitted by the system. Receipts and confirmations.
   [KIND.paymentReceived]: "noreply",
@@ -162,12 +168,17 @@ export const KIND_LABELS: Record<string, string> = {
   [KIND.examRegistered]: "Exam registration confirmed",
   [KIND.levelAdvance]: "Level finished — next level offer",
   [KIND.materialPublished]: "New material published",
+  [KIND.classNotesReady]: "Class notes ready (summary, vocabulary, transcript)",
   [KIND.assignmentDue]: "Assignment due",
   [KIND.resultPublished]: "A result is released",
+  [KIND.certificateIssued]: "Certificate issued",
   [KIND.classStarting]: "Class starting soon",
   [KIND.lecturerMessage]: "Message from a tutor",
   [KIND.leadCaptured]: "New enquiry",
+  [KIND.supportTicket]: "Help request from a student",
+  [KIND.supportReply]: "The office answered your question",
   [KIND.announcement]: "Announcement from the office",
+  [KIND.studentAtRisk]: "A tutor's student may be going quiet",
   [KIND.general]: "General",
 };
 
@@ -179,14 +190,23 @@ export const KIND_GROUPS: Array<{ group: string; kinds: string[] }> = [
   },
   {
     group: "Classes and calendar",
-    kinds: [KIND.classStarting, KIND.assignmentDue, KIND.materialPublished, KIND.lecturerMessage],
+    kinds: [KIND.classStarting, KIND.assignmentDue, KIND.materialPublished, KIND.classNotesReady, KIND.lecturerMessage],
   },
   {
     group: "Progress",
-    kinds: [KIND.resultPublished, KIND.examRegistered, KIND.levelAdvance],
+    kinds: [KIND.resultPublished, KIND.certificateIssued, KIND.examRegistered, KIND.levelAdvance],
   },
   {
     group: "Office",
-    kinds: [KIND.announcement, KIND.studentRegistered, KIND.studentImported, KIND.leadCaptured, KIND.general],
+    kinds: [
+      KIND.announcement,
+      KIND.supportTicket,
+      KIND.supportReply,
+      KIND.studentRegistered,
+      KIND.studentImported,
+      KIND.leadCaptured,
+      KIND.studentAtRisk,
+      KIND.general,
+    ],
   },
 ];

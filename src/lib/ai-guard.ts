@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { beginRequestScope, setTenantScope } from "@/lib/tenant/context";
 
 /**
  * The door in front of every AI endpoint.
@@ -34,6 +35,17 @@ export type AiGate =
   | { ok: false; response: NextResponse };
 
 async function resolve(): Promise<{ userId: string; role: string } | null> {
+  // Every other auth entry point goes through `requireAuthSession()`, which
+  // opens the tenant scope for the whole request before touching the
+  // database (see `beginRequestScope`/`setTenantScope` in lib/auth.ts). This
+  // gate calls `getServerSession` directly instead and never did that —
+  // harmless as long as nothing downstream queries a tenant-owned model
+  // (Lecturer, Student, PrivateClass, ...) without its own scoping, but the
+  // moment a route built on this gate does, it is running unscoped. Mirrored
+  // here so every AI-gated route gets the same tenant safety as everywhere
+  // else, not just the ones that happened to avoid a tenant-owned query.
+  beginRequestScope();
+
   const session = (await getServerSession(authOptions as never)) as
     | { user?: { id?: string } }
     | null;
@@ -44,9 +56,11 @@ async function resolve(): Promise<{ userId: string; role: string } | null> {
   // routes are the ones with a cost attached.
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { id: true, role: true },
+    select: { id: true, role: true, tenantId: true },
   });
   if (!user) return null;
+
+  setTenantScope(user.tenantId ?? null);
 
   return { userId: user.id, role: String(user.role ?? "").toUpperCase() };
 }

@@ -23,6 +23,11 @@ import {
   type EmploymentType,
   type LecturerStatus,
 } from "@/lib/lecturer-status";
+import {
+  LECTURER_FEATURES,
+  LECTURER_FEATURE_HINTS,
+  LECTURER_FEATURE_LABELS,
+} from "@/lib/lecturer-features";
 
 /**
  * Tutors.
@@ -54,26 +59,33 @@ type Tutor = {
   assignment: LecturerAssignment;
   assignmentLabel: string;
   studentCount: number;
+  /** Which optional areas of the portal this tutor may open. */
+  features: string[];
 };
 
-type PrivateStudent = {
+type RosterStudent = {
   id: string;
   name: string;
   email: string;
   studentCode: string | null;
   level: string;
+  sessionSlot: string;
+  classType: string;
+  deliveryMode: string;
   branchName: string | null;
   totalPaid: number;
   tuitionFee: number;
   hasPaid: boolean;
   currentTutorId: string | null;
   currentTutorName: string | null;
+  namedByOffice: boolean;
 };
 
 const EMPTY_ASSIGNMENT: LecturerAssignment = {
   branchIds: [],
   levels: [],
   sessionSlots: [],
+  groups: [],
   classTypes: [],
   batches: [],
 };
@@ -100,6 +112,14 @@ function AssignmentFields({
 }) {
   const set = <K extends keyof LecturerAssignment>(key: K, next: string[]) =>
     onChange({ ...value, [key]: next });
+  const [groupBranch, setGroupBranch] = useState(value.branchIds[0] ?? "");
+  const [groupLevel, setGroupLevel] = useState(value.levels[0] ?? "A1");
+  const [groupSlot, setGroupSlot] = useState(value.sessionSlots[0] ?? "morning");
+
+  function addGroup() {
+    if (!groupBranch || value.groups.some((group) => group.branchId === groupBranch && group.level === groupLevel && group.sessionSlot === groupSlot)) return;
+    onChange({ ...value, groups: [...value.groups, { branchId: groupBranch, level: groupLevel, sessionSlot: groupSlot }], branchIds: [...new Set([...value.branchIds, groupBranch])], levels: [...new Set([...value.levels, groupLevel])], sessionSlots: [...new Set([...value.sessionSlots, groupSlot])] });
+  }
 
   return (
     <div className="space-y-5">
@@ -115,25 +135,17 @@ function AssignmentFields({
         emptyMeans="No branch selected — this tutor will have no students until one is."
       />
 
-      <AssignmentPicker
-        label="Assign a level"
-        required
-        options={COURSE_LEVELS.map((level) => ({ value: level, label: level }))}
-        selected={value.levels}
-        onChange={(next) => set("levels", next)}
-        emptyMeans="No level selected — this tutor will have no students until one is."
-      />
-
-      <AssignmentPicker
-        label="Assign a class session"
-        options={SESSION_SLOTS.map((slot) => ({
-          value: slot,
-          label: slot.charAt(0).toUpperCase() + slot.slice(1),
-        }))}
-        selected={value.sessionSlots}
-        onChange={(next) => set("sessionSlots", next)}
-        emptyMeans="Nothing selected — this tutor takes every sitting of the levels above."
-      />
+      <div className="rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4">
+        <p className="text-sm font-bold text-[var(--foreground)]">Teaching groups</p>
+        <p className="mt-1 text-xs text-[var(--muted)]">Pair each level with its own sitting. A tutor can teach A1 in the morning and B2 in the afternoon.</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_0.7fr_1fr_auto]">
+          <select value={groupBranch} onChange={(event) => setGroupBranch(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"><option value="">Choose branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
+          <select value={groupLevel} onChange={(event) => setGroupLevel(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">{COURSE_LEVELS.map((level) => <option key={level}>{level}</option>)}</select>
+          <select value={groupSlot} onChange={(event) => setGroupSlot(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">{SESSION_SLOTS.map((slot) => <option key={slot} value={slot}>{slot.charAt(0).toUpperCase() + slot.slice(1)}</option>)}</select>
+          <button type="button" onClick={addGroup} className="rounded-xl bg-[var(--accent-strong)] px-4 py-2 text-sm font-bold text-white">Add</button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">{value.groups.map((group) => <button key={`${group.branchId}-${group.level}-${group.sessionSlot}`} type="button" onClick={() => onChange({ ...value, groups: value.groups.filter((item) => item !== group) })} className="rounded-full border border-[var(--accent)]/40 bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)]">{branches.find((branch) => branch.id === group.branchId)?.name ?? "Branch"} · {group.level} · {group.sessionSlot} ×</button>)}</div>
+      </div>
 
       <AssignmentPicker
         label="Assign a class type"
@@ -150,6 +162,74 @@ function AssignmentFields({
         onChange={(next) => set("batches", next)}
         emptyMeans="Nothing selected — this tutor takes every batch."
       />
+    </div>
+  );
+}
+
+/**
+ * WHAT THIS TUTOR CAN OPEN — a different question from what they teach.
+ *
+ * Deliberately its own block, below the assignment and visually separated,
+ * because the two get confused otherwise. "Assign a class type: online" says
+ * this tutor's students take online classes. It does not say this tutor is the
+ * person who runs the video call, and in most schools it is one or two people
+ * who do — everybody else prepares material and marks work.
+ *
+ * Note the inverted empty rule against every picker above it. Elsewhere on this
+ * form, nothing selected means "everything", because an unset assignment should
+ * not silently narrow a tutor's roster. Here nothing selected means nothing,
+ * because an access list that grows when you clear it is a trap.
+ */
+function PortalAccessFields({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <p className="text-sm font-bold text-[var(--foreground)]">Portal access</p>
+      <p className="mt-1 text-xs text-[var(--muted)]">
+        Not every tutor takes live or private classes. Tick only what this one should see — the sidebar entry
+        disappears for the rest, and the pages refuse them if they follow an old link.
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {LECTURER_FEATURES.map((feature) => {
+          const on = value.includes(feature);
+          return (
+            <button
+              key={feature}
+              type="button"
+              onClick={() => onChange(on ? value.filter((entry) => entry !== feature) : [...value, feature])}
+              className={`rounded-2xl border p-3 text-left transition ${
+                on
+                  ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                  : "border-[var(--border)] bg-[var(--background)] hover:border-[var(--border-strong)]"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  className={`grid h-4 w-4 shrink-0 place-items-center rounded border text-[10px] font-black ${
+                    on ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--border-strong)]"
+                  }`}
+                >
+                  {on ? "✓" : ""}
+                </span>
+                <span className="text-sm font-semibold">{LECTURER_FEATURE_LABELS[feature]}</span>
+              </span>
+              <span className="mt-1.5 block text-[11px] leading-4 text-[var(--muted)]">
+                {LECTURER_FEATURE_HINTS[feature]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {value.length === 0 && (
+        <p className="mt-2 text-xs font-semibold text-amber-700">
+          Nothing ticked — this tutor gets none of these three areas.
+        </p>
+      )}
     </div>
   );
 }
@@ -302,127 +382,219 @@ function StatusPanel({
   );
 }
 
+/** One student, drawn the same way in the roster and in the search results. */
+function StudentLine({
+  student,
+  right,
+}: {
+  student: RosterStudent;
+  right: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-[var(--foreground)]">{student.name}</p>
+        <p className="truncate text-xs text-[var(--muted)]">
+          {student.studentCode || student.email} · {student.level} · {student.sessionSlot}
+          {student.branchName ? ` · ${student.branchName}` : ""}
+          {student.classType === "private" ? " · private" : ""}
+        </p>
+      </div>
+
+      <span
+        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+          student.hasPaid ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/15 text-amber-800"
+        }`}
+      >
+        {student.hasPaid ? "Paid" : `${naira(Math.max(0, student.tuitionFee - student.totalPaid))} owing`}
+      </span>
+
+      {right}
+    </div>
+  );
+}
+
 /**
- * The private-class pairing panel.
+ * Who this tutor teaches, and the one place to change it.
  *
- * Only appears once "Private" is one of the class types, because that is the
- * only case where a student needs naming individually — every other kind of
- * class finds its students from branch + level automatically.
+ * REPLACES A PRIVATE-ONLY PANEL THAT WAS HIDDEN MOST OF THE TIME. The old
+ * version only appeared once "Private" was ticked in the class types, on the
+ * theory that a one-to-one student is the only kind who needs naming. That
+ * theory is wrong the first time a real class does not line up with its
+ * description — an online A2 student whose only tutor takes the afternoon
+ * sitting is in nobody's class, and the office had no way to say otherwise.
+ *
+ * So it is always shown, it lists the class as it actually stands, and it
+ * marks which students arrived by which route: matched by the class
+ * description above, or named here. Naming is reversible from the same line,
+ * which is the part that makes it safe to use.
  */
-function PrivateStudentSearch({ lecturerId, tutorName }: { lecturerId: string; tutorName: string }) {
+function ClassRoster({
+  lecturerId,
+  tutorName,
+  onChanged,
+}: {
+  lecturerId: string;
+  tutorName: string;
+  onChanged: () => void;
+}) {
   const [query, setQuery] = useState("");
-  const [students, setStudents] = useState<PrivateStudent[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [assigningId, setAssigningId] = useState("");
+  const [roster, setRoster] = useState<RosterStudent[]>([]);
+  const [results, setResults] = useState<RosterStudent[]>([]);
+  const [hasClassAssignment, setHasClassAssignment] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
 
-  const search = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/lecturers/private-students?q=${encodeURIComponent(query)}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/admin/lecturers/students?lecturerId=${encodeURIComponent(lecturerId)}&q=${encodeURIComponent(query)}`,
+        { cache: "no-store" },
+      );
       const data = await res.json().catch(() => ({}));
-      setStudents(data.students || []);
+      setRoster(data.roster || []);
+      setResults(data.results || []);
+      setHasClassAssignment(Boolean(data.hasClassAssignment));
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [lecturerId, query]);
 
   useEffect(() => {
     // Debounced so typing a name does not fire a request per keystroke.
-    const timer = window.setTimeout(search, 250);
+    const timer = window.setTimeout(load, 250);
     return () => window.clearTimeout(timer);
-  }, [search]);
+  }, [load]);
 
-  async function assign(student: PrivateStudent) {
-    setAssigningId(student.id);
+  async function pair(student: RosterStudent, lecturer: string | null) {
+    setBusyId(student.id);
     setMessage("");
     try {
-      const res = await fetch("/api/admin/lecturers/private-students", {
+      const res = await fetch("/api/admin/lecturers/students", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId: student.id, lecturerId }),
+        body: JSON.stringify({ studentId: student.id, lecturerId: lecturer }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not assign this student");
-      setMessage(`${student.name} has been assigned to ${tutorName} and notified.`);
-      await search();
+      if (!res.ok) throw new Error(data.error || "Could not change this student's tutor");
+      setMessage(
+        lecturer
+          ? `${student.name} is now assigned to ${tutorName}. Both have been notified.`
+          : `${student.name} has been removed from ${tutorName}'s class.`,
+      );
+      await load();
+      // The tutor card above shows a student count, and it is now wrong.
+      onChanged();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not assign this student");
+      setMessage(error instanceof Error ? error.message : "Could not change this student's tutor");
     } finally {
-      setAssigningId("");
+      setBusyId("");
     }
   }
 
+  const named = roster.filter((student) => student.namedByOffice);
+  const matched = roster.filter((student) => !student.namedByOffice);
+  const rosterIds = new Set(roster.map((student) => student.id));
+
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
-      <p className="text-sm font-semibold text-[var(--foreground)]">Private students</p>
+      <p className="text-sm font-semibold text-[var(--foreground)]">Students in this tutor&apos;s class</p>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        Search students on a private package and pair one with this tutor. They are notified with the tutor&apos;s name.
+        Students matching the class above are added automatically. Anyone else can be named here — use it for a student
+        whose sitting or branch does not line up, for one-to-one students, and for cover.
       </p>
 
-      <input
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search by name, email or student code…"
-        className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
-      />
+      {loading && !roster.length ? <p className="mt-3 text-xs text-[var(--muted)]">Loading the class…</p> : null}
 
       {message ? (
         <p className="mt-3 rounded-xl bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-800">{message}</p>
       ) : null}
 
+      <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
+        <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[var(--accent)]">
+          {matched.length} from the class description
+        </span>
+        <span className="rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)]">
+          {named.length} named individually
+        </span>
+      </div>
+
+      {!hasClassAssignment && !named.length ? (
+        <p className="mt-3 rounded-xl bg-amber-500/10 px-4 py-2.5 text-xs text-amber-800">
+          This tutor has no branch and level set above, and nobody named below — so their portal will tell them they
+          have no class. Set the class, name a student, or both.
+        </p>
+      ) : null}
+
+      {roster.length ? (
+        <div className="mt-4 space-y-2">
+          {roster.map((student) => (
+            <StudentLine
+              key={student.id}
+              student={student}
+              right={
+                student.namedByOffice ? (
+                  <button
+                    type="button"
+                    onClick={() => pair(student, null)}
+                    disabled={busyId === student.id}
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)] disabled:opacity-60"
+                  >
+                    {busyId === student.id ? "Removing…" : "Remove"}
+                  </button>
+                ) : (
+                  <span
+                    className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-semibold text-[var(--accent)]"
+                    title="In this class because they match the branch, level and sitting set above."
+                  >
+                    Matched
+                  </span>
+                )
+              }
+            />
+          ))}
+        </div>
+      ) : null}
+
+      <p className="mt-5 text-sm font-semibold text-[var(--foreground)]">Add a student</p>
+      <input
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search the whole school by name, email or student code…"
+        className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
+      />
+
       <div className="mt-3 space-y-2">
-        {loading ? <p className="text-xs text-[var(--muted)]">Searching…</p> : null}
-        {!loading && students.length === 0 ? (
+        {results.filter((student) => !rosterIds.has(student.id)).length === 0 ? (
           <p className="text-xs text-[var(--muted)]">
-            No students on a private package match. A student gets one by choosing the private-class package at signup or
-            checkout.
+            {query ? "Nobody else matches that search." : "Search to find a student to add."}
           </p>
         ) : null}
 
-        {students.map((student) => (
-          <div
-            key={student.id}
-            className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-[var(--foreground)]">{student.name}</p>
-              <p className="truncate text-xs text-[var(--muted)]">
-                {student.studentCode || student.email} · {student.level}
-                {student.branchName ? ` · ${student.branchName}` : ""}
-              </p>
-            </div>
-
-            <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                student.hasPaid ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/15 text-amber-800"
-              }`}
-            >
-              {student.hasPaid ? "Paid" : `${naira(student.tuitionFee - student.totalPaid)} owing`}
-            </span>
-
-            {student.currentTutorId === lecturerId ? (
-              <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-semibold text-[var(--accent)]">
-                Assigned
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => assign(student)}
-                disabled={assigningId === student.id}
-                className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-              >
-                {assigningId === student.id
-                  ? "Assigning…"
-                  : student.currentTutorName
-                    ? `Move from ${student.currentTutorName}`
-                    : "Assign"}
-              </button>
-            )}
-          </div>
-        ))}
+        {results
+          .filter((student) => !rosterIds.has(student.id))
+          .map((student) => (
+            <StudentLine
+              key={student.id}
+              student={student}
+              right={
+                <button
+                  type="button"
+                  onClick={() => pair(student, lecturerId)}
+                  disabled={busyId === student.id}
+                  className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {busyId === student.id
+                    ? "Assigning…"
+                    : student.currentTutorName
+                      ? `Move from ${student.currentTutorName}`
+                      : "Add to class"}
+                </button>
+              }
+            />
+          ))}
       </div>
     </div>
   );
@@ -447,6 +619,9 @@ export default function AdminTutorsPage() {
     startedAt: "",
   });
   const [newAssignment, setNewAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
+  // A new tutor starts with everything, matching what every tutor created
+  // before this field had. The office takes areas away deliberately.
+  const [newFeatures, setNewFeatures] = useState<string[]>([...LECTURER_FEATURES]);
   const [creating, setCreating] = useState(false);
   const [createPhotoFile, setCreatePhotoFile] = useState<File | null>(null);
   const [createPhotoUrl, setCreatePhotoUrl] = useState<string | null>(null);
@@ -457,8 +632,8 @@ export default function AdminTutorsPage() {
   const [editPhotoUrl, setEditPhotoUrl] = useState<string | null>(null);
   const [uploadingEditPhoto, setUploadingEditPhoto] = useState(false);
   const [editAssignment, setEditAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
+  const [editFeatures, setEditFeatures] = useState<string[]>([...LECTURER_FEATURES]);
   const [savingEdit, setSavingEdit] = useState(false);
-  const [selectedTutorIds, setSelectedTutorIds] = useState<Set<string>>(new Set());
 
   /**
    * Defaults to the people who currently teach. Somebody who left two years
@@ -467,6 +642,7 @@ export default function AdminTutorsPage() {
    * of a status is that the record survives.
    */
   const [statusFilter, setStatusFilter] = useState<LecturerStatus | "all" | "current">("current");
+  const [selectedTutorIds, setSelectedTutorIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -504,11 +680,10 @@ export default function AdminTutorsPage() {
     return counts;
   }, [tutors]);
 
-  async function deleteTutors(ids: string[]) {
+  async function deleteSelectedTutors() {
+    const ids = [...selectedTutorIds];
     if (!ids.length) return;
-    const label = ids.length === 1 ? "this tutor" : `${ids.length} tutors`;
-    if (!confirm(`Are you sure you want to delete ${label}? This action is not reversible from the portal and will log them out everywhere.`)) return;
-    setError("");
+    if (!confirm(`Are you sure you want to delete ${ids.length} tutors? This action is not reversible from the portal and will log them out everywhere.`)) return;
     const res = await fetch("/api/admin/lecturers", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -516,12 +691,10 @@ export default function AdminTutorsPage() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setError(data.error || "Could not delete tutors");
+      setError(data.error || "Could not delete selected tutors");
       return;
     }
     setSelectedTutorIds(new Set());
-    setEditingId("");
-    setSuccess(`${data.deleted ?? ids.length} tutor account${ids.length === 1 ? "" : "s"} deleted.`);
     await load();
   }
 
@@ -573,7 +746,13 @@ export default function AdminTutorsPage() {
       const res = await fetch("/api/admin/lecturers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, ...newAssignment, photoUrl: uploadedPhotoUrl ?? undefined }),
+        body: JSON.stringify({
+          ...form,
+          ...newAssignment,
+          assignmentGroups: newAssignment.groups,
+          features: newFeatures,
+          photoUrl: uploadedPhotoUrl ?? undefined,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not create the tutor account");
@@ -619,7 +798,13 @@ export default function AdminTutorsPage() {
       const res = await fetch("/api/admin/lecturers", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lecturerId: editingId, ...editAssignment, photoUrl: uploadedPhotoUrl ?? undefined }),
+        body: JSON.stringify({
+          lecturerId: editingId,
+          ...editAssignment,
+          assignmentGroups: editAssignment.groups,
+          features: editFeatures,
+          photoUrl: uploadedPhotoUrl ?? undefined,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save the assignment");
@@ -707,11 +892,9 @@ export default function AdminTutorsPage() {
 
           <div className="mt-5 space-y-3">
             {selectedTutorIds.size > 0 ? (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
                 <span>{selectedTutorIds.size} tutor{selectedTutorIds.size === 1 ? "" : "s"} selected</span>
-                <button type="button" onClick={() => deleteTutors([...selectedTutorIds])} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">
-                  Delete selected
-                </button>
+                <button type="button" onClick={deleteSelectedTutors} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">Delete selected</button>
               </div>
             ) : null}
             {!loading && tutors.length === 0 ? (
@@ -776,17 +959,11 @@ export default function AdminTutorsPage() {
                         onClick={() => {
                           setEditingId(isEditing ? "" : tutor.id);
                           setEditAssignment(tutor.assignment);
+                          setEditFeatures(tutor.features ?? [...LECTURER_FEATURES]);
                         }}
                         className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold text-[var(--foreground)]"
                       >
                         {isEditing ? "Close" : "Edit tutor"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteTutors([tutor.id])}
-                        className="rounded-lg border border-red-500 px-4 py-2 text-xs font-semibold text-red-600"
-                      >
-                        Delete tutor
                       </button>
                     </div>
                   </div>
@@ -845,12 +1022,19 @@ export default function AdminTutorsPage() {
 
                       <AssignmentFields branches={branches} value={editAssignment} onChange={setEditAssignment} />
 
-                      {editAssignment.classTypes.includes("private") ? (
-                        <PrivateStudentSearch
-                          lecturerId={tutor.id}
-                          tutorName={tutor.user.name || tutor.user.email}
-                        />
-                      ) : null}
+                      <div className="mt-5">
+                        <PortalAccessFields value={editFeatures} onChange={setEditFeatures} />
+                      </div>
+
+                      {/* Always shown. The pairing screen used to be hidden
+                          behind the "Private" class type, so the one mechanism
+                          that fixes a class the description cannot express was
+                          invisible to the people who needed it. */}
+                      <ClassRoster
+                        lecturerId={tutor.id}
+                        tutorName={tutor.user.name || tutor.user.email}
+                        onChanged={load}
+                      />
 
                       <div className="flex flex-wrap gap-3">
                         <button
@@ -990,6 +1174,10 @@ export default function AdminTutorsPage() {
               level. Nobody adds them by hand.
             </p>
             <AssignmentFields branches={branches} value={newAssignment} onChange={setNewAssignment} />
+
+            <div className="mt-5">
+              <PortalAccessFields value={newFeatures} onChange={setNewFeatures} />
+            </div>
           </div>
 
           <button

@@ -23,6 +23,37 @@ export type UploadedFile = {
 /** Which prefix the file lands under. Must be one the presign route allows. */
 export type UploadFolder = "files" | "materials" | "photos";
 
+type Heic2Any = (options: { blob: Blob; toType?: string; quality?: number }) => Promise<Blob | Blob[]>;
+
+/**
+ * iPhones default to saving photos as HEIC/HEIF, which almost nothing outside
+ * Apple's own software can decode — a HEIC avatar renders as an empty circle
+ * on Android, on Windows, in Chrome and Firefox everywhere. Converted here,
+ * once, before the bytes go anywhere, so every one of the dozen pickers that
+ * call `uploadFile` gets the fix without knowing it happened.
+ *
+ * A blank `file.type` with a `.heic`/`.heif` name covers Android and some
+ * older Safari builds, which hand the browser a photo with no MIME type at
+ * all rather than a wrong one.
+ */
+async function convertHeicIfNeeded(file: File): Promise<File> {
+  const looksHeic =
+    file.type === "image/heic" ||
+    file.type === "image/heif" ||
+    (!file.type && /\.(heic|heif)$/i.test(file.name));
+  if (!looksHeic) return file;
+
+  try {
+    const heic2any = ((await import("heic2any")).default as unknown) as Heic2Any;
+    const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+    const blob = Array.isArray(converted) ? converted[0] : converted;
+    const name = file.name.replace(/\.(heic|heif)$/i, "") + ".jpg";
+    return new File([blob], name, { type: "image/jpeg" });
+  } catch {
+    throw new Error("This photo format can't be processed automatically — please choose a JPG or PNG.");
+  }
+}
+
 async function readAsBase64(file: File): Promise<string> {
   const reader = new FileReader();
   const result = await new Promise<string | ArrayBuffer | null>((resolve, reject) => {
@@ -37,7 +68,8 @@ async function readAsBase64(file: File): Promise<string> {
   return result.split(",")[1];
 }
 
-export async function uploadFile(file: File, folder: UploadFolder = "files"): Promise<UploadedFile> {
+export async function uploadFile(rawFile: File, folder: UploadFolder = "files"): Promise<UploadedFile> {
+  const file = await convertHeicIfNeeded(rawFile);
   const contentType = file.type || "application/octet-stream";
 
   const presign = await fetch("/api/media/presign", {
@@ -123,11 +155,28 @@ export async function uploadImage(file: File): Promise<string> {
   return uploaded.url;
 }
 
+/**
+ * Turn an upload failure into a sentence the person can act on.
+ *
+ * A `File` is a handle to something the OS owns, not the bytes themselves, and
+ * phones invalidate that handle: iOS when the photo is still in iCloud or
+ * Safari gets backgrounded, Android when the picker app is killed and its
+ * `content://` URI is revoked. The browser then throws `NotReadableError`,
+ * whose own message — "typically due to permission problems that have occurred
+ * after a reference to a file was acquired" — means nothing to somebody halfway
+ * through signing up, and reads like the site is broken rather than like the
+ * photo needs picking again.
+ */
+export function uploadErrorMessage(error: unknown, fallback = "Upload failed"): string {
+  const name = error instanceof DOMException ? error.name : "";
+  if (name === "NotReadableError" || name === "NotFoundError") {
+    return "Your device released that photo before it finished uploading. Please select it again.";
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
 /** Guard shared by every avatar picker in the app. */
-export function validateImageFile(file: File, maxBytes = 3 * 1024 * 1024): string | null {
-  // Photos are uploaded through the proxy route when object storage is not
-  // configured, so keep the browser payload small enough to fit Vercel's body
-  // size limits for this flow.
+export function validateImageFile(file: File, maxBytes = 5 * 1024 * 1024): string | null {
   if (!file.type.startsWith("image/")) return "Please choose an image file.";
   if (file.size > maxBytes) return `Images must be under ${Math.round(maxBytes / 1024 / 1024)}MB.`;
   return null;

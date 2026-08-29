@@ -59,7 +59,7 @@ export default function TuitionNudge({ className = "" }: { className?: string })
 
         <div className="flex-1 basis-full sm:basis-auto">
           {/* The bar is deliberately left visibly short of the end. */}
-          <div className="h-2.5 w-full overflow-hidden rounded-full bg-white/10">
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--surface-alt)]">
             <div
               className="h-full rounded-full bg-[#c8a24a] transition-[width] duration-1000"
               style={{ width: `${offer.progressPercent}%` }}

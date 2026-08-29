@@ -10,6 +10,7 @@ import { signOut } from "next-auth/react";
 import LecturerShell from "@/components/LecturerShell";
 import { SettingsIcon } from "@/components/icons";
 import BrandLoader from "@/components/BrandLoader";
+import NotificationPreferences from "@/components/NotificationPreferences";
 import PasswordInput from "@/components/PasswordInput";
 
 /**
@@ -314,6 +315,11 @@ export default function LecturerSettingsPage() {
               {savingPassword ? "Changing…" : "Change my password"}
             </button>
           </form>
+
+          {/* The one preference a tutor genuinely owns. Which class they teach
+              is not a preference and lives on its own page — see the note at
+              the top of this file. */}
+          <NotificationPreferences endpoint="/api/lecturer/notification-prefs" />
 
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
             <h2 className="text-lg font-bold text-[var(--foreground)]">Session</h2>

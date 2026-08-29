@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { verifyClaimToken } from "@/lib/candidates";
+import { withUnscoped } from "@/lib/tenant/context";
 
 /**
  * Sets the first password on an account created by an exam booking.
@@ -14,8 +15,9 @@ import { verifyClaimToken } from "@/lib/candidates";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
+
     const { email, token, password } = await req.json();
 
     if (!email || !token || !password) {
@@ -53,3 +55,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unable to set that password" }, { status: 500 });
   }
 }
+
+/**
+ * Wrapped rather than marked inside the body: the scope has to be
+ * established before the handler runs, not on its first line. See
+ * withUnscoped in src/lib/tenant/context.ts.
+ */
+export const POST = withUnscoped(
+  "claiming an exam-booked account, whose tenant is not known until it is found",
+  handlePOST,
+);

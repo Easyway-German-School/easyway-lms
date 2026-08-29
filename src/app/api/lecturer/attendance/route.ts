@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { dayKey } from '@/lib/class-sessions';
-import { readAssignment, studentWhereForAssignment } from '@/lib/lecturer-assignment';
+import {
+  belongsToLecturer,
+  readAssignment,
+  studentWhereForLecturer,
+} from '@/lib/lecturer-assignment';
+import { KIND, notifyInBackground } from '@/lib/notify';
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
 
     if (!session || session.user.role !== 'lecturer') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -19,7 +23,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
     }
 
-    // Get lecturer's classes with attendance sessions
+    // Keep class options for narrowing the register, even when attendance was
+    // recorded without a legacy Class row.
     const classes = await prisma.class.findMany({
       where: { lecturerId },
       include: {
@@ -53,7 +58,44 @@ export async function GET(req: NextRequest) {
       })
     );
 
-    return NextResponse.json({ sessions });
+    const lecturer = await prisma.lecturer.findUnique({ where: { id: lecturerId } });
+    const assignment = readAssignment(lecturer);
+    const where = studentWhereForLecturer(assignment, lecturerId);
+    const assignedStudents = where
+      ? await prisma.student.findMany({
+          where: { ...(where as Record<string, unknown>), status: 'active' } as any,
+          select: { id: true, tutorId: true, admission: true },
+        })
+      : [];
+    const roster = assignedStudents.filter((student) =>
+      belongsToLecturer(assignment, lecturerId, student),
+    );
+    const records = roster.length
+      ? await prisma.attendance.findMany({
+          where: { studentId: { in: roster.map((student) => student.id) } },
+          select: { date: true, present: true, status: true },
+          orderBy: { date: 'desc' },
+        })
+      : [];
+    const historyByDate = new Map<string, { date: string; totalStudents: number; presentStudents: number; lateStudents: number }>();
+    for (const record of records) {
+      const date = record.date.toISOString().slice(0, 10);
+      const entry = historyByDate.get(date) ?? {
+        date,
+        totalStudents: 0,
+        presentStudents: 0,
+        lateStudents: 0,
+      };
+      entry.totalStudents += 1;
+      if (record.present) entry.presentStudents += 1;
+      if (record.status === 'late') entry.lateStudents += 1;
+      historyByDate.set(date, entry);
+    }
+
+    return NextResponse.json({
+      sessions,
+      history: [...historyByDate.values()].slice(0, 60),
+    });
   } catch (error) {
     console.error('Attendance GET error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -62,7 +104,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
 
     if (!session || String(session.user?.role ?? '').toLowerCase() !== 'lecturer') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -102,7 +144,7 @@ export async function POST(req: NextRequest) {
      * attendance for the whole school.
      */
     const lecturer = await prisma.lecturer.findUnique({ where: { id: lecturerId } });
-    const where = studentWhereForAssignment(readAssignment(lecturer));
+    const where = studentWhereForLecturer(readAssignment(lecturer), lecturerId);
     if (!where) {
       return NextResponse.json(
         { error: 'You have no class assigned yet. The school office sets this.' },
@@ -110,16 +152,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const assignedStudents = await prisma.student.findMany({
+      where: { ...(where as Record<string, unknown>), status: 'active' } as any,
+      select: { id: true, tutorId: true, admission: true },
+    });
     const permitted = new Set(
-      (
-        await prisma.student.findMany({
-          where: where as any,
-          select: { id: true },
-        })
-      ).map((student) => student.id),
+      assignedStudents
+        .filter((student) => belongsToLecturer(readAssignment(lecturer), lecturerId, student))
+        .map((student) => student.id),
     );
 
-    const rows = attendance.filter((entry) =>
+      const rows = attendance.filter((entry) =>
       typeof entry?.studentId === 'string' && permitted.has(entry.studentId),
     );
 
@@ -132,19 +175,53 @@ export async function POST(req: NextRequest) {
 
     let saved = 0;
     for (const entry of rows) {
-      const present = Boolean(entry.present);
+      const status = entry.status === 'late' ? 'late' : entry.present ? 'present' : 'absent';
+      const present = status === 'present' || status === 'late';
       await prisma.attendance.upsert({
         where: { studentId_date: { studentId: entry.studentId, date: day } },
-        update: { present, status: present ? 'present' : 'absent', classId: cls?.id ?? undefined },
+        update: { present, status, classId: cls?.id ?? undefined },
         create: {
           studentId: entry.studentId,
           date: day,
           present,
-          status: present ? 'present' : 'absent',
+          status,
           classId: cls?.id ?? null,
         },
       });
       saved += 1;
+
+      /**
+       * Only the absent mark is worth a notification. A register is dozens of
+       * students at once, nearly all of them present — buzzing every one of
+       * them every single class day is the alert-fatigue mistake the gradebook
+       * route already avoids by only notifying when a score actually moved.
+       * Being marked absent is the one outcome a student would want to catch
+       * quickly, in case it is wrong. `dedupeKey` includes the mark itself, so
+       * re-saving the same register does not re-notify, but a correction that
+       * flips somebody TO absent still reaches them.
+       */
+      if (!present) {
+        notifyInBackground({
+          to: { studentIds: [entry.studentId] },
+          kind: KIND.attendanceMarked,
+          severity: "info",
+          title: "Marked absent today",
+          message: "Your tutor recorded you as absent for today's class. If that's wrong, let them know.",
+          link: "/attendance",
+          dedupeKey: `attendance-marked:${entry.studentId}:${day.toISOString()}:absent`,
+        });
+        // Same fact, a parent's own copy — a linked guardian would rather
+        // hear this from the school than notice a gap later.
+        notifyInBackground({
+          to: { parentsOfStudentIds: [entry.studentId] },
+          kind: KIND.attendanceMarked,
+          severity: "info",
+          title: "Marked absent today",
+          message: "Your child's tutor recorded them as absent for today's class.",
+          link: "/parent/attendance",
+          dedupeKey: `attendance-marked:${entry.studentId}:${day.toISOString()}:absent:parent`,
+        });
+      }
     }
 
     return NextResponse.json({ count: saved });

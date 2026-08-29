@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { assertDevOnly } from "@/lib/dev-only";
+import { withUnscoped } from "@/lib/tenant/context";
 
 const courseStructure: Record<string, Array<{
   title: string;
@@ -81,7 +82,8 @@ const courseStructure: Record<string, Array<{
   ]
 };
 
-export async function GET() {
+async function handleGET() {
+
   /**
    * Closed in production, and not a moment too soon.
    *
@@ -268,3 +270,13 @@ export async function GET() {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+/**
+ * Wrapped rather than marked inside the body: the scope has to be
+ * established before the handler runs, not on its first line. See
+ * withUnscoped in src/lib/tenant/context.ts.
+ */
+export const GET = withUnscoped(
+  "development seed writes the fixture data every tenant check is later run against",
+  handleGET,
+);

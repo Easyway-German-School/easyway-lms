@@ -1,20 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-import { adminHasCapability } from "@/lib/admin-roles";
-import { requireTenantSession, tenantScopeForStudent, tenantScopeForBranch } from "@/lib/tenant-access";
+import { requireCapability } from "@/lib/admin-roles";
 
-async function isAdmin(userId: string) {
-  // Admin AND cleared for this area — see src/lib/admin-roles.ts.
-  return adminHasCapability(userId, "reports");
+async function requireReportsAdmin() {
+  return requireCapability("reports");
 }
 
 export async function GET() {
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
-
-  if (!(await isAdmin(auth.session.user.id))) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const gate = await requireReportsAdmin();
+  if (!gate.ok) return gate.response;
 
   try {
     // Exams by status
@@ -24,46 +18,26 @@ export async function GET() {
       examsByStatus[s] = await prisma.examRegistration.count({ where: { status: s } });
     }));
 
-    const studentWhere = tenantScopeForStudent(auth.tenantId);
-
     // Attendance summary
     const attendanceStatuses = ["present", "absent", "late", "excused"];
     const attendanceSummary: Record<string, number> = { total: 0 };
-    const totalAttendance = await prisma.attendance.count({
-      where: {
-        student: studentWhere,
-      },
-    });
+    const totalAttendance = await prisma.attendance.count();
     attendanceSummary.total = totalAttendance;
     await Promise.all(attendanceStatuses.map(async (s) => {
-      attendanceSummary[s] = await prisma.attendance.count({
-        where: {
-          status: s,
-          student: studentWhere,
-        },
-      });
+      attendanceSummary[s] = await prisma.attendance.count({ where: { status: s } });
     }));
 
     // Average progress per course
     const courses = await prisma.course.findMany({ select: { id: true, title: true } });
     const avgProgressByCourse = await Promise.all(courses.map(async (c) => {
-      const agg = await prisma.progress.aggregate({
-        where: {
-          courseId: c.id,
-          student: studentWhere,
-        },
-        _avg: { percentComplete: true },
-      });
+      const agg = await prisma.progress.aggregate({ where: { courseId: c.id }, _avg: { percentComplete: true } });
       return { courseId: c.id, title: c.title, avgPercent: agg._avg.percentComplete ?? 0 };
     }));
 
     // Students by branch
-    const branches = await prisma.branch.findMany({
-      where: tenantScopeForBranch(auth.tenantId),
-      select: { id: true, name: true },
-    });
+    const branches = await prisma.branch.findMany({ select: { id: true, name: true } });
     const studentsByBranch = await Promise.all(branches.map(async (b) => {
-      const count = await prisma.student.count({ where: { ...studentWhere, branchId: b.id } });
+      const count = await prisma.student.count({ where: { branchId: b.id } });
       return { branchId: b.id, name: b.name, count };
     }));
 

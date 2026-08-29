@@ -22,23 +22,31 @@ export default function SignInForm() {
     setError(null);
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      role: "student",
-      redirect: false,
-    });
+    try {
+      const result = await signIn("credentials", {
+        email,
+        password,
+        role: "student",
+        redirect: false,
+      });
 
-    if (!result?.ok) {
-      setError(result?.error || "Unable to sign in. Check your email and password.");
+      if (!result?.ok) {
+        setError(result?.error || "Unable to sign in. Check your email and password.");
+        setLoading(false);
+        return;
+      }
+
+      // Candidates have no student portal to land in.
+      const me = await fetch("/api/auth/session", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+      const role = String(me?.user?.role ?? "").toLowerCase();
+      router.push(role === "candidate" ? "/candidate" : "/dashboard");
+    } catch {
+      // A network hiccup, a slow serverless function, or a non-JSON response
+      // from a timed-out request all land here. Without this catch the loader
+      // above never clears and the page looks hung forever.
+      setError("Sign-in is taking too long or the connection dropped. Please try again.");
       setLoading(false);
-      return;
     }
-
-    // Candidates have no student portal to land in.
-    const me = await fetch("/api/auth/session", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
-    const role = String(me?.user?.role ?? "").toLowerCase();
-    router.push(role === "candidate" ? "/candidate" : "/dashboard");
   };
 
   if (loading) {
@@ -106,7 +114,15 @@ export default function SignInForm() {
               </div>
 
               <div>
-                <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Password</label>
+                <div className="mb-1.5 flex items-baseline justify-between gap-3">
+                  <label htmlFor="password" className="block text-sm font-medium text-[var(--foreground)]">Password</label>
+                  {/* Beside the field rather than below the button: somebody who
+                      cannot remember their password realises it here, not after
+                      failing to sign in. */}
+                  <Link href="/auth/forgot" className="text-xs font-medium text-[var(--accent)] hover:underline">
+                    Forgot password?
+                  </Link>
+                </div>
                 <PasswordInput
                   id="password"
                   value={password}
@@ -131,6 +147,7 @@ export default function SignInForm() {
                 Don’t have an account? <Link href="/auth/signup" className="font-semibold text-[var(--accent)] hover:text-[var(--accent-strong)]">Sign up</Link>
               </p>
               <p className="mt-2">Lecturer? <Link href="/auth/lecturer/signin" className="font-semibold text-[var(--accent)] hover:text-[var(--accent-strong)]">Sign in here</Link></p>
+              <p className="mt-2">Parent or guardian? <Link href="/auth/parent/signin" className="font-semibold text-[var(--accent)] hover:text-[var(--accent-strong)]">Sign in here</Link></p>
             </div>
           </div>
         </div>

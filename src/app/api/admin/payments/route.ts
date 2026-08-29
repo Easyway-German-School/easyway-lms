@@ -1,25 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { adminHasCapability } from "@/lib/admin-roles";
-import { requireTenantSession, tenantScopeForPayment } from "@/lib/tenant-access";
-
-async function isAdmin(userId: string) {
-  // Admin AND cleared for this area — see src/lib/admin-roles.ts.
-  return adminHasCapability(userId, "payments");
-}
+import { requireCapability } from "@/lib/admin-roles";
 
 export async function GET() {
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
-
-  if (!await isAdmin(auth.session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
-
-  const where = tenantScopeForPayment(auth.tenantId);
+  const gate = await requireCapability("payments");
+  if (!gate.ok) return gate.response;
 
   const payments = await prisma.payment.findMany({
-    where,
     orderBy: { createdAt: "desc" },
     include: {
       student: {
@@ -33,12 +20,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
-
-  if (!await isAdmin(auth.session.user.id)) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const gate = await requireCapability("payments");
+  if (!gate.ok) return gate.response;
 
   const body = await request.json().catch(() => ({}));
   const studentId = typeof body.studentId === "string" && body.studentId.trim() ? body.studentId : "";
@@ -54,15 +37,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-      select: { user: { select: { tenantId: true } } },
-    });
-
-    if (auth.tenantId && (!student || student.user.tenantId !== auth.tenantId)) {
-      return NextResponse.json({ error: "Student not found" }, { status: 404 });
-    }
-
     const payment = await prisma.payment.create({
       data: {
         studentId,

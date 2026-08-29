@@ -52,6 +52,7 @@ export type LecturerAssignment = {
   branchIds: string[];
   levels: string[];
   sessionSlots: string[];
+  groups: Array<{ branchId: string; level: string; sessionSlot: string }>;
   classTypes: string[];
   batches: string[];
 };
@@ -64,6 +65,7 @@ export type AssignmentSource = {
   branchIds?: unknown;
   levels?: unknown;
   sessionSlots?: unknown;
+  assignmentGroups?: unknown;
   classTypes?: unknown;
   batches?: unknown;
 };
@@ -110,12 +112,22 @@ function readList(raw: unknown, allowed?: readonly string[]): string[] {
  */
 export function readAssignment(source: AssignmentSource | null | undefined): LecturerAssignment {
   if (!source) {
-    return { branchIds: [], levels: [], sessionSlots: [], classTypes: [], batches: [] };
+    return { branchIds: [], levels: [], sessionSlots: [], groups: [], classTypes: [], batches: [] };
   }
 
   const branchIds = readList(source.branchIds);
   const levels = readList(source.levels, COURSE_LEVELS);
   const sessionSlots = readList(source.sessionSlots, SESSION_SLOTS);
+  const groups = Array.isArray(source.assignmentGroups)
+    ? source.assignmentGroups.flatMap((group) => {
+        if (!group || typeof group !== "object") return [];
+        const value = group as Record<string, unknown>;
+        const branchId = typeof value.branchId === "string" ? value.branchId.trim() : "";
+        const level = readList([value.level], COURSE_LEVELS)[0];
+        const sessionSlot = readList([value.sessionSlot], SESSION_SLOTS)[0];
+        return branchId && level && sessionSlot ? [{ branchId, level, sessionSlot }] : [];
+      })
+    : [];
 
   return {
     branchIds: branchIds.length ? branchIds : source.branchId ? [source.branchId] : [],
@@ -125,6 +137,7 @@ export function readAssignment(source: AssignmentSource | null | undefined): Lec
       : source.sessionSlot
         ? readList([source.sessionSlot], SESSION_SLOTS)
         : [],
+      groups,
     classTypes: readList(source.classTypes, CLASS_TYPES),
     batches: readList(source.batches, BATCHES),
   };
@@ -150,12 +163,11 @@ export function isAssigned(assignment: LecturerAssignment): boolean {
 export function studentWhereForAssignment(assignment: LecturerAssignment): Record<string, unknown> | null {
   if (!isAssigned(assignment)) return null;
 
-  const where: Record<string, unknown> = {
-    branchId: { in: assignment.branchIds },
-    level: { in: assignment.levels },
-  };
+  const where: Record<string, unknown> = assignment.groups.length
+    ? { OR: assignment.groups.map((group) => ({ branchId: group.branchId, level: group.level, sessionSlot: group.sessionSlot })) }
+    : { branchId: { in: assignment.branchIds }, level: { in: assignment.levels } };
 
-  if (assignment.sessionSlots.length) {
+  if (!assignment.groups.length && assignment.sessionSlots.length) {
     where.sessionSlot = { in: assignment.sessionSlots };
   }
 
@@ -173,6 +185,154 @@ export function studentWhereForAssignment(assignment: LecturerAssignment): Recor
   }
 
   return where;
+}
+
+/**
+ * Turn an assignment into the Prisma `where` that finds the community rooms it
+ * covers. A `Space` only carries branch + level + session, so this is a
+ * narrower cousin of `studentWhereForAssignment` — no classType/batch clauses,
+ * because a room is not one of those things. Same "empty list = no
+ * restriction, empty branch/level = unassigned" rule, for the same reason: a
+ * tutor left with no sitting chosen still only teaches Lagos A1, all sittings.
+ */
+export function spaceWhereForAssignment(assignment: LecturerAssignment): Record<string, unknown> | null {
+  if (!isAssigned(assignment)) return null;
+
+  const where: Record<string, unknown> = assignment.groups.length
+    ? { OR: assignment.groups.map((group) => ({ branchId: group.branchId, level: group.level, sessionSlot: group.sessionSlot })) }
+    : { branchId: { in: assignment.branchIds }, level: { in: assignment.levels } };
+
+  if (!assignment.groups.length && assignment.sessionSlots.length) {
+    where.sessionSlot = { in: assignment.sessionSlots };
+  }
+
+  return where;
+}
+
+/**
+ * The whole roster: the class an admin described, PLUS anybody the office put
+ * on this tutor by name.
+ *
+ * WHY THERE ARE TWO ROUTES IN. The assignment above describes a class — Lagos,
+ * A2, morning — and finds its students by matching. That is right for the
+ * ordinary case and wrong for every exception: a student who moved sitting
+ * mid-term, an online student in a cohort nobody else takes, a one-to-one
+ * pairing, a tutor covering one named person while a colleague is away. None
+ * of those can be expressed as a rule over branch + level, and before this the
+ * office had no way to say them at all — a tutor created for one student saw
+ * an empty roster and concluded the portal was broken.
+ *
+ * `Student.tutorId` is that second route. It was already in the schema, and
+ * already written by the private-class pairing screen, but nothing on the
+ * reading side ever looked at it: the column set a tutor who could not see
+ * them. This is the join that makes it mean something.
+ *
+ * A named student is IN, whatever the assignment says. The office naming
+ * somebody is a deliberate act and outranks a pattern match — a rule that let
+ * the branch filter overrule it would silently drop precisely the students who
+ * needed naming in the first place.
+ */
+export function studentWhereForLecturer(
+  assignment: LecturerAssignment,
+  lecturerId?: string | null,
+): Record<string, unknown> | null {
+  const cohort = studentWhereForAssignment(assignment);
+  const named = lecturerId ? { tutorId: lecturerId } : null;
+
+  if (cohort && named) return { OR: [cohort, named] };
+  return cohort ?? named;
+}
+
+/**
+ * Narrow the tutor's roster further to a single level and sitting when the UI or
+ * assignment screen asks for it.
+ *
+ * This is intentionally stricter than the broad assignment view: a tutor can see
+ * the whole cohort in their dashboard, but an assignment picker must only offer
+ * the students for the exact level/session they are creating for. A tutor who
+ * teaches morning and afternoon A1 classes must never see an afternoon student
+ * when they pick the morning-only filter.
+ */
+export function studentWhereForLecturerScope(
+  assignment: LecturerAssignment,
+  lecturerId?: string | null,
+  options?: { level?: string | null; sessionSlot?: string | null; branchId?: string | null },
+): Record<string, unknown> | null {
+  const level = options?.level ? String(options.level).trim().toUpperCase() : null;
+  const sessionSlot = options?.sessionSlot ? String(options.sessionSlot).trim().toLowerCase() : null;
+  const branchId = options?.branchId ? String(options.branchId) : null;
+
+  const named: Record<string, unknown> = lecturerId ? { tutorId: lecturerId } : {};
+  if (level) named.level = level;
+  if (sessionSlot) named.sessionSlot = sessionSlot;
+  if (branchId) named.branchId = branchId;
+
+  const cohortWhere = studentWhereForAssignment(assignment);
+  if (!cohortWhere) return Object.keys(named).length ? named : null;
+
+  const narrowed: Record<string, unknown> = { ...cohortWhere };
+
+  if (level) {
+    if (Array.isArray((cohortWhere as { OR?: unknown[] }).OR)) {
+      narrowed.OR = (cohortWhere as { OR: Record<string, unknown>[] }).OR.map((clause) => ({
+        ...(clause as Record<string, unknown>),
+        level,
+        ...(branchId ? { branchId } : {}),
+        ...(sessionSlot ? { sessionSlot } : {}),
+      }));
+    } else {
+      narrowed.level = level;
+      if (branchId) narrowed.branchId = branchId;
+      if (sessionSlot) narrowed.sessionSlot = sessionSlot;
+    }
+  }
+
+  if (!level && sessionSlot) {
+    if (Array.isArray((cohortWhere as { OR?: unknown[] }).OR)) {
+      narrowed.OR = (cohortWhere as { OR: Record<string, unknown>[] }).OR.map((clause) => ({
+        ...(clause as Record<string, unknown>),
+        ...(branchId ? { branchId } : {}),
+        sessionSlot,
+      }));
+    } else {
+      narrowed.sessionSlot = sessionSlot;
+      if (branchId) narrowed.branchId = branchId;
+    }
+  }
+
+  if (!level && !sessionSlot && branchId) {
+    if (Array.isArray((cohortWhere as { OR?: unknown[] }).OR)) {
+      narrowed.OR = (cohortWhere as { OR: Record<string, unknown>[] }).OR.map((clause) => ({
+        ...(clause as Record<string, unknown>),
+        branchId,
+      }));
+    } else {
+      narrowed.branchId = branchId;
+    }
+  }
+
+  if (Object.keys(named).length) {
+    return { OR: [narrowed, named] };
+  }
+
+  return narrowed;
+}
+
+/**
+ * The in-memory half of the same question, applied after the rows come back.
+ *
+ * Batch cannot be filtered in SQL (it lives in the admission JSON), so it runs
+ * here — and a named student must skip that filter too, for the same reason
+ * they skip the branch one. Callers must select `tutorId` for this to work;
+ * without it every named student silently falls through to the batch check.
+ */
+export function belongsToLecturer(
+  assignment: LecturerAssignment,
+  lecturerId: string | null | undefined,
+  student: { tutorId?: string | null; admission?: unknown },
+): boolean {
+  if (lecturerId && student.tutorId && student.tutorId === lecturerId) return true;
+  return matchesBatch(assignment, student.admission);
 }
 
 /** Batch lives in the admission JSON, so it is filtered in memory. */
@@ -195,12 +355,23 @@ export function assignmentToData(input: {
   branchIds?: unknown;
   levels?: unknown;
   sessionSlots?: unknown;
+  assignmentGroups?: unknown;
   classTypes?: unknown;
   batches?: unknown;
 }) {
   const branchIds = readList(input.branchIds);
   const levels = readList(input.levels, COURSE_LEVELS);
   const sessionSlots = readList(input.sessionSlots, SESSION_SLOTS);
+  const assignmentGroups = Array.isArray(input.assignmentGroups)
+    ? input.assignmentGroups.flatMap((group) => {
+        if (!group || typeof group !== "object") return [];
+        const value = group as Record<string, unknown>;
+        const branchId = typeof value.branchId === "string" ? value.branchId.trim() : "";
+        const level = readList([value.level], COURSE_LEVELS)[0];
+        const sessionSlot = readList([value.sessionSlot], SESSION_SLOTS)[0];
+        return branchId && level && sessionSlot ? [{ branchId, level, sessionSlot }] : [];
+      })
+    : [];
   const classTypes = readList(input.classTypes, CLASS_TYPES);
   const batches = readList(input.batches, BATCHES);
 
@@ -208,6 +379,7 @@ export function assignmentToData(input: {
     branchIds,
     levels,
     sessionSlots,
+    assignmentGroups,
     classTypes,
     batches,
     branchId: branchIds[0] ?? null,

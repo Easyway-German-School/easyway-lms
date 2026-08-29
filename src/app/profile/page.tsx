@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import Link from "next/link";
 import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import { useGamification } from "@/lib/useGamification";
@@ -25,6 +26,15 @@ import {
   StarIcon,
   TargetIcon,
 } from "@/components/icons";
+
+type TermsStatus = {
+  accepted: boolean;
+  version?: string;
+  acceptedAt?: string;
+  currentVersionLabel: string;
+  upToDate?: boolean;
+  fallbackNotice?: string;
+};
 
 /** The badge list is built server-side and names its icon; this resolves it. */
 const BADGE_ICONS: Record<BadgeIcon, typeof FlameIcon> = {
@@ -129,7 +139,7 @@ function StatPill({
       // `min-w-0` so a pill can shrink inside the flex row from `sm` up; the
       // grid handles the phone. Without it the row is un-shrinkable again and
       // the clipping comes straight back on a narrow tablet.
-      className="min-w-0 flex-1 rounded-3xl border border-white/10 bg-white/[0.06] px-3 py-4 text-center backdrop-blur-xl sm:px-4"
+      className="min-w-0 flex-1 rounded-3xl border border-[var(--border)] bg-[var(--surface)]/[0.06] px-3 py-4 text-center backdrop-blur-xl sm:px-4"
     >
       <p className="flex justify-center text-white/80">{icon}</p>
       <p className="mt-1 text-2xl font-bold text-white sm:text-3xl">
@@ -139,7 +149,7 @@ function StatPill({
       {/* Tracking that wide turns "Attendance" into an overflow on a 160px
           pill. It keeps the look where there is room and gives it up where
           there is not. */}
-      <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] sm:tracking-[0.22em]">
+      <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-white/60 sm:tracking-[0.22em]">
         {label}
       </p>
     </motion.div>
@@ -209,12 +219,52 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // A photo whose URL 404s or whose format the browser can't decode (an old
+  // HEIC upload from before the conversion fix) falls back to initials rather
+  // than the browser's broken-image icon. Reset whenever the photo changes,
+  // so a freshly uploaded replacement gets a fair shot at loading.
+  const [photoBroken, setPhotoBroken] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   const [formState, setFormState] = useState(EMPTY_FORM);
+  const [terms, setTerms] = useState<TermsStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { game } = useGamification();
   const queryClient = useQueryClient();
+
+  async function changePassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPasswordMessage("");
+    setPasswordError("");
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError("The new passwords do not match.");
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      const response = await fetch("/api/student/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(passwordForm),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || "Unable to change your password.");
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setPasswordMessage(data.message || "Your password has been changed.");
+    } catch (passwordChangeError) {
+      setPasswordError(passwordChangeError instanceof Error ? passwordChangeError.message : "Unable to change your password.");
+    } finally {
+      setPasswordSaving(false);
+    }
+  }
+
+  useEffect(() => {
+    setPhotoBroken(false);
+  }, [profile?.photoUrl]);
 
   useEffect(() => {
     let active = true;
@@ -270,6 +320,23 @@ export default function ProfilePage() {
         });
       } catch (loadError) {
         if (active) setError(loadError instanceof Error ? loadError.message : "Could not load your profile");
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/student/terms", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (active) setTerms(data);
+      } catch {
+        // The legal card just stays hidden — not worth an error banner over.
       }
     })();
     return () => {
@@ -420,7 +487,7 @@ export default function ProfilePage() {
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="shrink-0 whitespace-nowrap rounded-full border border-white/25 bg-white/10 px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-white backdrop-blur transition hover:bg-white/20 sm:px-4 sm:text-xs sm:tracking-[0.18em]"
+              className="shrink-0 whitespace-nowrap rounded-full border border-white/20 bg-white/10 px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-white backdrop-blur transition hover:bg-white/20 sm:px-4 sm:text-xs sm:tracking-[0.18em]"
             >
               Edit profile
             </button>
@@ -430,15 +497,20 @@ export default function ProfilePage() {
         {/* ---------- Identity + stats, overlapping the cover ---------- */}
         <div className="relative -mt-24 px-6 sm:px-10">
           <div className="mx-auto max-w-6xl">
-            <div className="rounded-[36px] border border-white/10 bg-[linear-gradient(160deg,_rgba(2,15,20,0.96),_rgba(6,25,32,0.92))] p-6 shadow-[0_40px_100px_rgba(2,6,23,0.4)] backdrop-blur-2xl sm:p-8">
+            <div className="rounded-[36px] border border-[var(--border)] bg-[linear-gradient(160deg,_rgba(2,15,20,0.96),_rgba(6,25,32,0.92))] p-6 shadow-[0_40px_100px_rgba(2,6,23,0.4)] backdrop-blur-2xl sm:p-8">
               <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-end">
                 {/* Avatar with a tier-coloured story ring */}
                 <div className="relative shrink-0">
                   <div className="rounded-full p-[3px]" style={{ background: ring }}>
                     <div className="rounded-full border-[3px] border-[#04141a] bg-[#04141a] p-0.5">
                       <div className="relative h-28 w-28 overflow-hidden rounded-full sm:h-32 sm:w-32">
-                        {profile.photoUrl ? (
-                          <img src={profile.photoUrl} alt={profile.fullName} className="h-full w-full object-cover" />
+                        {profile.photoUrl && !photoBroken ? (
+                          <img
+                            src={profile.photoUrl}
+                            alt={profile.fullName}
+                            className="h-full w-full object-cover"
+                            onError={() => setPhotoBroken(true)}
+                          />
                         ) : (
                           <div
                             className="flex h-full w-full items-center justify-center text-3xl font-black text-white"
@@ -457,7 +529,7 @@ export default function ProfilePage() {
                               className="absolute inset-0 flex items-center justify-center bg-black/60"
                             >
                               <motion.span
-                                className="h-7 w-7 rounded-full border-2 border-white/30 border-t-white"
+                                className="h-7 w-7 rounded-full border-2 border-[var(--border)] border-t-white"
                                 animate={{ rotate: 360 }}
                                 transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
                               />
@@ -510,7 +582,7 @@ export default function ProfilePage() {
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 font-mono text-sm text-[var(--muted)]">@{profile.studentCode}</p>
+                  <p className="mt-1 font-mono text-sm text-white/60">@{profile.studentCode}</p>
 
                   <div className="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
                     <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
@@ -553,7 +625,7 @@ export default function ProfilePage() {
               {/* XP bar */}
               {game && (
                 <div className="mt-6">
-                  <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+                  <div className="flex items-center justify-between text-xs font-semibold text-white/60">
                     <span>
                       Level {game.level} → {game.level + 1}
                     </span>
@@ -579,7 +651,7 @@ export default function ProfilePage() {
             </div>
 
             {/* ---------- Tabs ---------- */}
-            <div className="mt-8 flex gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1.5">
+            <div className="mt-8 flex gap-1 rounded-full cinematic-card p-1.5">
               {TABS.map((item) => (
                 <button
                   key={item}
@@ -613,7 +685,7 @@ export default function ProfilePage() {
                 >
                   {tab === "Overview" && (
                     <div className="grid gap-5 lg:grid-cols-3">
-                      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 lg:col-span-2">
+                      <div className="rounded-3xl cinematic-card p-6 lg:col-span-2">
                         <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
                           Learning snapshot
                         </p>
@@ -638,7 +710,7 @@ export default function ProfilePage() {
                       </div>
 
                       <div className="space-y-5">
-                        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                        <div className="rounded-3xl cinematic-card p-6">
                           <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
                             Exam readiness
                           </p>
@@ -654,7 +726,7 @@ export default function ProfilePage() {
                             />
                           </div>
                         </div>
-                        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                        <div className="rounded-3xl cinematic-card p-6">
                           <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
                             Member since
                           </p>
@@ -706,6 +778,59 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      <section className="mx-auto mt-6 w-full max-w-5xl rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7">
+        <div className="max-w-2xl">
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--accent)]">Account security</p>
+          <h2 className="mt-2 text-2xl font-black text-[var(--foreground)]">Change your password</h2>
+          <p className="mt-2 text-sm text-[var(--muted)]">Use your current password to choose a new one. Your password is stored securely and is never visible to school staff.</p>
+        </div>
+        <form onSubmit={changePassword} className="mt-5 grid max-w-2xl gap-4 sm:grid-cols-3">
+          {[
+            ["Current password", "currentPassword"],
+            ["New password", "newPassword"],
+            ["Confirm new password", "confirmPassword"],
+          ].map(([label, key]) => (
+            <label key={key}>
+              <span className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--muted)]">{label}</span>
+              <input
+                type="password"
+                autoComplete={key === "currentPassword" ? "current-password" : "new-password"}
+                value={passwordForm[key as keyof typeof passwordForm]}
+                onChange={(event) => setPasswordForm((previous) => ({ ...previous, [key]: event.target.value }))}
+                className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
+              />
+            </label>
+          ))}
+          <div className="sm:col-span-3">
+            <button type="submit" disabled={passwordSaving} className="rounded-full bg-[var(--accent-strong)] px-6 py-3 text-sm font-bold text-white disabled:opacity-60">
+              {passwordSaving ? "Changing password…" : "Change password"}
+            </button>
+            {passwordMessage && <p className="mt-3 text-sm font-semibold text-emerald-600">{passwordMessage}</p>}
+            {passwordError && <p className="mt-3 text-sm font-semibold text-red-600">{passwordError}</p>}
+          </div>
+        </form>
+      </section>
+
+      <section className="mx-auto mt-6 w-full max-w-5xl rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7">
+        <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--accent)]">Legal</p>
+        <h2 className="mt-2 text-2xl font-black text-[var(--foreground)]">Terms and Conditions</h2>
+        {terms?.accepted ? (
+          <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
+            You accepted version {terms.version} on {terms.acceptedAt ? new Date(terms.acceptedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "—"}.
+            {terms.upToDate === false ? " The school has updated the Terms since then — please review the current version." : ""}
+          </p>
+        ) : terms ? (
+          <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">{terms.fallbackNotice}</p>
+        ) : null}
+        <Link
+          href="/terms"
+          target="_blank"
+          className="mt-4 inline-flex items-center rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-bold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+        >
+          Read the Terms and Conditions
+        </Link>
+      </section>
+
       {/* ---------- Edit sheet ---------- */}
       <AnimatePresence>
         {editing && (
@@ -743,8 +868,13 @@ export default function ProfilePage() {
 
               <div className="mt-6 flex items-center gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
                 <div className="h-16 w-16 overflow-hidden rounded-full" style={{ background: ring }}>
-                  {profile.photoUrl ? (
-                    <img src={profile.photoUrl} alt="" className="h-full w-full object-cover" />
+                  {profile.photoUrl && !photoBroken ? (
+                    <img
+                      src={profile.photoUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      onError={() => setPhotoBroken(true)}
+                    />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center font-black text-white">
                       {initialsOf(profile.fullName) || "EW"}
@@ -756,7 +886,7 @@ export default function ProfilePage() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading}
-                    className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-60"
+                    className="rounded-full btn-glow px-4 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-60"
                   >
                     {uploading ? "Uploading…" : "Change photo"}
                   </button>
@@ -841,6 +971,7 @@ export default function ProfilePage() {
                     <option value="Not decided yet">Not decided yet</option>
                     <option value="Internal Easyway exam">Internal Easyway exam</option>
                     <option value="OSD">OSD</option>
+                    <option value="telc">telc</option>
                   </select>
                 </label>
               </div>
@@ -852,7 +983,7 @@ export default function ProfilePage() {
                   type="button"
                   onClick={handleSave}
                   disabled={saving}
-                  className="rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[var(--accent)]/25 transition hover:brightness-110 disabled:opacity-60"
+                  className="rounded-full btn-glow px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[var(--accent)]/25 transition hover:brightness-110 disabled:opacity-60"
                 >
                   {saving ? "Saving…" : "Save changes"}
                 </button>

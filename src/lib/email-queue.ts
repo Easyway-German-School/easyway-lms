@@ -23,6 +23,56 @@ import crypto from "crypto";
 const BACKOFF_MINUTES = [1, 5, 30, 120];
 export const MAX_ATTEMPTS = BACKOFF_MINUTES.length;
 
+/**
+ * How many a single post-response kick will send.
+ *
+ * Small on purpose. This runs after the response on the SAME serverless
+ * invocation, against a function timeout — so it exists to get the message
+ * that was just queued out of the door, not to clear a backlog. The nightly
+ * cron still drains in bulk, and anything this misses is simply picked up by
+ * the next kick or the next cron.
+ */
+const KICK_LIMIT = 10;
+
+/**
+ * Send what was just queued, right after the response goes out.
+ *
+ * WHY THIS EXISTS. `queueEmail` writes a row and nothing else; the only thing
+ * that ever sent it was `/api/cron/tick`, which vercel.json runs at 06:00
+ * daily. So a tutor announcing "no class today, we move to 4pm" got the bell
+ * and the push instantly and the EMAIL the following morning — a notification
+ * arriving after the event it describes. Everything else about the queue was
+ * right; it just had no prompt dispatcher.
+ *
+ * `after()` is the fix rather than a more frequent cron because it works on
+ * every Vercel plan. Sub-daily crons need Pro, and a vercel.json the plan
+ * rejects fails the deploy — so the cheap-looking config change is the one
+ * that could take the site down.
+ *
+ * Deliberately fire-and-forget and deliberately swallowing:
+ *
+ *   - `after` throws outside a request scope. Scripts, the cron route itself
+ *     and the test suite all call queueEmail perfectly legitimately, and none
+ *     of them should fail because a convenience could not be scheduled.
+ *   - A send failure inside the kick must not surface. The row is already
+ *     safely queued with backoff and retry; the kick is an optimisation, and
+ *     an optimisation may not fail the thing it was optimising.
+ */
+async function kickQueue(): Promise<void> {
+  try {
+    const { after } = await import("next/server");
+    after(async () => {
+      try {
+        await drainQueue(KICK_LIMIT);
+      } catch (error) {
+        console.warn("email queue: post-response drain failed", error);
+      }
+    });
+  } catch {
+    /* No request scope — the cron will get it. */
+  }
+}
+
 export type QueueInput = {
   to: string;
   subject: string;
@@ -72,6 +122,33 @@ export async function isSuppressed(email: string): Promise<boolean> {
 
 /** Queue one message. Suppressed addresses are recorded, not silently dropped. */
 export async function queueEmail(input: QueueInput) {
+  const row = await writeQueueRow(input);
+
+  /**
+   * The kick lives HERE rather than at the eight call sites that queue mail,
+   * so a future one cannot forget it and quietly reintroduce the day-long
+   * delay. Not awaited: it schedules work for after the response and must add
+   * nothing to the latency of the request that queued the message.
+   *
+   * Scheduled-for-later mail is left to the cron — kicking the queue for
+   * something not yet due would just claim it and put it straight back.
+   */
+  if (!input.scheduledFor || input.scheduledFor <= new Date()) {
+    void kickQueue();
+  }
+
+  return row;
+}
+
+/**
+ * The write on its own, with no kick.
+ *
+ * Split out for `queueCampaign`, which queues in a loop: routing that through
+ * `queueEmail` would schedule one post-response drain PER RECIPIENT, so a
+ * two-hundred student announcement would register two hundred callbacks that
+ * each try to claim the same ten rows. It queues once and kicks once instead.
+ */
+async function writeQueueRow(input: QueueInput) {
   const to = input.to.trim().toLowerCase();
 
   if (await isSuppressed(to)) {
@@ -119,10 +196,13 @@ export async function queueCampaign(messages: QueueInput[], campaignId: string) 
     if (already.has(to)) { duplicate++; continue; }
     already.add(to);
 
-    const row = await queueEmail({ ...message, to, campaignId });
+    const row = await writeQueueRow({ ...message, to, campaignId });
     if (row.status === "suppressed") suppressed++;
     else queued++;
   }
+
+  // Once for the whole campaign, not once per recipient.
+  if (queued > 0) void kickQueue();
 
   return { campaignId, queued, suppressed, duplicate, total: messages.length };
 }

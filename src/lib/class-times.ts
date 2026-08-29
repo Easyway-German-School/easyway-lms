@@ -21,7 +21,7 @@ export const TIME_SLOTS = ["morning", "afternoon", "evening"] as const;
 export type TimeSlot = (typeof TIME_SLOTS)[number];
 
 export const SLOT_DEFAULTS: Record<TimeSlot, { startTime: string; endTime: string; label: string }> = {
-  morning: { startTime: "09:00", endTime: "11:00", label: "Morning" },
+  morning: { startTime: "10:00", endTime: "13:00", label: "Morning" },
   afternoon: { startTime: "13:00", endTime: "15:00", label: "Afternoon" },
   evening: { startTime: "17:00", endTime: "19:00", label: "Evening" },
 };

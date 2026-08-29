@@ -1,7 +1,8 @@
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { notify, KIND } from "@/lib/notify";
 import {
   parseQuestions,
   toPublicQuestions,
@@ -27,7 +28,7 @@ async function currentStudent(userId: string | undefined) {
   if (!userId) return null;
   return prisma.student.findUnique({
     where: { userId },
-    select: { id: true, level: true, branchId: true },
+    select: { id: true, level: true, branchId: true, sessionSlot: true },
   });
 }
 
@@ -41,14 +42,27 @@ async function currentStudent(userId: string | undefined) {
  * The targeting rule: an assignment with NO targets goes to the whole level,
  * which is how every assignment behaved before targeting existed. One or more
  * targets narrows it to exactly those students.
+ *
+ * The sitting works the same way as the branch: NULL means every sitting, so
+ * nothing set before sessions became a boundary changes who it reaches. It
+ * matters because one branch runs the same level three times a day under three
+ * different tutors, and homework from the morning lesson appearing on the
+ * evening class's dashboard is work they were never given.
  */
-function visibleTo(student: { id: string; level: string; branchId: string | null }) {
+function visibleTo(student: {
+  id: string;
+  level: string;
+  branchId: string | null;
+  sessionSlot: string | null;
+}) {
   return {
     published: true,
     level: student.level,
     AND: [
       // Branch-specific assignments plus school-wide ones.
       { OR: [{ branchId: student.branchId }, { branchId: null }] },
+      // This sitting's work plus anything set for the whole level.
+      { OR: [{ sessionSlot: student.sessionSlot }, { sessionSlot: null }] },
       // Untargeted (everyone) or targeted at me.
       { OR: [{ targets: { none: {} } }, { targets: { some: { studentId: student.id } } }] },
     ],
@@ -57,7 +71,8 @@ function visibleTo(student: { id: string; level: string; branchId: string | null
 
 /** GET — list assignments for this student's level and branch. */
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const student = await currentStudent(session?.user?.id);
   if (!student) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -114,7 +129,8 @@ export async function GET() {
  *   { assignmentId, action: "submit", answers?, text?, filePath?, fileName? }
  */
 export async function POST(req: NextRequest) {
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const student = await currentStudent(session?.user?.id);
   if (!student) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -134,6 +150,7 @@ export async function POST(req: NextRequest) {
      */
     const assignment = await prisma.assignment.findFirst({
       where: { id: String(assignmentId), ...visibleTo(student) },
+      include: { lecturer: { select: { userId: true } } },
     });
     if (!assignment) {
       return NextResponse.json({ error: "Assignment not found" }, { status: 404 });
@@ -242,6 +259,25 @@ export async function POST(req: NextRequest) {
         } catch (err) {
           console.warn("Could not record quiz grade:", err);
         }
+      }
+
+      /**
+       * Tell the tutor who set it — not the whole school. Only possible when
+       * this assignment has a named owner; one handed out school-wide with no
+       * lecturerId has no single tutor waiting on it, and guessing who to buzz
+       * would be worse than staying quiet.
+       */
+      if (assignment.lecturer?.userId) {
+        await notify({
+          to: { userIds: [assignment.lecturer.userId] },
+          kind: KIND.assignmentSubmitted,
+          severity: "info",
+          title: needsReview ? "A submission needs marking" : "A submission came in",
+          message: `${session.user?.name ?? "A student"} handed in "${assignment.title}".`,
+          link: "/lecturer/assignments/mark",
+          dedupeKey: `assignment-submitted:${assignmentId}:${student.id}`,
+          push: true,
+        }).catch((error) => console.error("Assignment submission notification failed", error));
       }
 
       return NextResponse.json({

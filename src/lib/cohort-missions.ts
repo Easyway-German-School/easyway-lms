@@ -18,11 +18,35 @@ import { parseModelJson } from "@/lib/safe-json";
  * the framing, and that is the part done deterministically.
  */
 
+/**
+ * What a mission asks for, in terms the server can actually check.
+ *
+ * A model asked to write a mission will happily write "practise your
+ * pronunciation" — that reads fine and cannot be verified against anything.
+ * Constraining it to one of these seven, and mapping each to a real query in
+ * mission-detection.ts, is what lets "done" mean something instead of being
+ * whatever the last thing the student tapped was.
+ */
+export const DETECT_TYPES = [
+  "lesson",
+  "assignment",
+  "quiz",
+  "attendance",
+  "voice",
+  "essay",
+  "generic",
+  /** A personalized story-episode beat — see storySeriesFor() and mission-detection.ts. */
+  "scene",
+] as const;
+export type DetectType = (typeof DETECT_TYPES)[number];
+
 export type Mission = {
   title: string;
   description: string;
   reward: string;
   category?: string;
+  /** Which real activity marks this done. See mission-detection.ts. */
+  detectType: DetectType;
 };
 
 /**
@@ -66,7 +90,13 @@ function buildPrompt(level: string, band: Band, materialTitles: string[]): strin
     "Write exactly 3 missions. Each finishable in under 15 minutes, on a phone.",
     "Be concrete: name the words, the tense, or the situation. Never 'practise your German'.",
     "",
-    'Reply with ONLY a JSON array: [{"title":"…","description":"…","reward":"+20 XP"}]',
+    `Each mission's "type" must be exactly one of: ${DETECT_TYPES.join(", ")} — `,
+    "lesson = finish a lesson, assignment = hand in set work, quiz = play a live quiz game,",
+    "attendance = show up to a class, voice = a speaking/pronunciation task, essay = a writing task,",
+    "generic = anything else that can't be checked automatically. Pick the one that actually matches",
+    "what the mission asks the student to do — this is how their progress gets verified.",
+    "",
+    'Reply with ONLY a JSON array: [{"title":"…","description":"…","reward":"+20 XP","type":"lesson"}]',
   ].join("\n");
 }
 
@@ -78,10 +108,19 @@ function coerce(raw: unknown): Mission[] | null {
       const value = entry as Record<string, unknown>;
       const title = String(value.title ?? "").trim();
       if (!title) return null;
+      const rawType = String(value.type ?? "").trim().toLowerCase();
+      // A model that ignores the instruction (or invents a type outside the
+      // list) falls back to "generic" rather than dropping the mission — an
+      // unverifiable mission is still a real mission, just one whose "done"
+      // will need something to have happened at all that day.
+      const detectType = (DETECT_TYPES as readonly string[]).includes(rawType)
+        ? (rawType as DetectType)
+        : "generic";
       return {
         title,
         description: String(value.description ?? "").trim(),
         reward: String(value.reward ?? "+20 XP").trim(),
+        detectType,
       } satisfies Mission;
     })
     .filter((mission): mission is Mission => mission !== null)
@@ -122,7 +161,7 @@ export async function missionsForCohort(
   return cached<Mission[]>(
     "cohort_missions",
     `${day}:${level}:${band}:${titles.join("|")}`,
-    async () => coerce(parseModelJson(await callModel(buildPrompt(level, band, titles), 700))),
+    async () => coerce(parseModelJson(await callModel(buildPrompt(level, band, titles), 700, "student"))),
     { model: activeModelName() },
   );
 }

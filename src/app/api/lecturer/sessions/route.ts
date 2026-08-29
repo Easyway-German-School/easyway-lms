@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getMergedSchedule, dayKey, normalizeSlot, TIME_SLOTS } from "@/lib/class-sessions";
 import { NextRequest, NextResponse } from "next/server";
@@ -35,7 +34,8 @@ type Staff = {
 };
 
 async function requireStaff(): Promise<{ error: NextResponse } | { staff: Staff }> {
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   if (!session?.user?.id) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
@@ -73,6 +73,11 @@ function mayEdit(staff: Staff, branchId: string, level: string, slot: string): b
   if (staff.role === "admin") return true;
   const assignment = staff.assignment;
   if (!assignment || !isAssigned(assignment)) return false;
+  if (assignment.groups.length) {
+    return assignment.groups.some(
+      (group) => group.branchId === branchId && group.level.toUpperCase() === level.toUpperCase() && group.sessionSlot === slot,
+    );
+  }
   if (!assignment.branchIds.includes(branchId)) return false;
   if (!assignment.levels.some((item) => item.toUpperCase() === level.toUpperCase())) return false;
   if (assignment.sessionSlots.length && !assignment.sessionSlots.includes(slot)) return false;
@@ -88,9 +93,28 @@ export async function GET(req: NextRequest) {
   try {
     const assignment = staff.assignment;
 
+    // Everything the editor needs to populate its dropdowns. A tutor is offered
+    // only the branches and levels they were assigned; an admin gets the lot.
+    const [branches, materials] = await Promise.all([
+      prisma.branch.findMany({
+        where: staff.role === "admin" ? {} : { id: { in: assignment?.branchIds ?? [] } },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, mode: true },
+      }),
+      prisma.material.findMany({
+        orderBy: { title: "asc" },
+        select: { id: true, title: true, fileType: true, course: { select: { level: true } } },
+      }),
+    ]);
+
     // A tutor gets their own class by default rather than having to find it.
+    // An admin has no assignment to fall back on, so they get whatever branch
+    // sorts first — the dropdowns let them switch from there.
     const branchId =
-      req.nextUrl.searchParams.get("branchId") ?? assignment?.branchIds[0] ?? null;
+      req.nextUrl.searchParams.get("branchId") ??
+      assignment?.branchIds[0] ??
+      (staff.role === "admin" ? branches[0]?.id : null) ??
+      null;
     const level = req.nextUrl.searchParams.get("level") ?? assignment?.levels[0] ?? "A1";
     const batch = req.nextUrl.searchParams.get("batch");
     // Which sitting is being edited. A branch can run the same level morning
@@ -103,7 +127,7 @@ export async function GET(req: NextRequest) {
           error:
             staff.role === "lecturer"
               ? "You have not been assigned a class yet. The school office sets this."
-              : "branchId is required",
+              : "No branches have been set up yet.",
         },
         { status: 400 },
       );
@@ -121,20 +145,6 @@ export async function GET(req: NextRequest) {
       now: new Date(),
       months: 2,
     });
-
-    // Everything the editor needs to populate its dropdowns. A tutor is offered
-    // only the branches and levels they were assigned; an admin gets the lot.
-    const [branches, materials] = await Promise.all([
-      prisma.branch.findMany({
-        where: staff.role === "admin" ? {} : { id: { in: assignment?.branchIds ?? [] } },
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, mode: true },
-      }),
-      prisma.material.findMany({
-        orderBy: { title: "asc" },
-        select: { id: true, title: true, fileType: true, course: { select: { level: true } } },
-      }),
-    ]);
 
     return NextResponse.json({
       ...schedule,
@@ -330,6 +340,7 @@ async function announceChange(args: {
     title,
     message,
     link: "/calendar",
+    push: true,
     // One announcement per day per state. A tutor who saves the same
     // postponement twice does not send it twice.
     dedupeKey: `session:${branchId}:${level}:${day.toISOString()}:${saved.status}:${saved.postponedTo?.toISOString() ?? ""}:${saved.materialId ?? ""}`,

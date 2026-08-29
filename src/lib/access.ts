@@ -26,7 +26,6 @@ export function isTuitionFreeRoute(pathname: string): boolean {
   );
 }
 
-/** The inverse, for readability at call sites that gate rather than allow. */
 export function isTuitionGatedRoute(pathname: string): boolean {
   return !isTuitionFreeRoute(pathname);
 }
@@ -49,8 +48,31 @@ export function normaliseDeliveryMode(value: unknown): DeliveryMode {
   return mode === "online" || mode === "hybrid" ? mode : "physical";
 }
 
-/** Whether the live classroom means anything to this student. */
-export function canAttendLive(mode: unknown): boolean {
+/** group | private — a private student books their tutor, not a seat. */
+export type ClassType = "group" | "private";
+
+export function normaliseClassType(value: unknown): ClassType {
+  return String(value ?? "").toLowerCase() === "private" ? "private" : "group";
+}
+
+/**
+ * Whether the live classroom means anything to this student.
+ *
+ * CLASS TYPE IS THE SECOND HALF OF THIS QUESTION, and leaving it out was a bug
+ * with a very confusing shape. A private student takes their class wherever
+ * their tutor books it, including over video, so `/api/live/session` and
+ * `/api/live/state` have always granted them a room regardless of delivery
+ * mode — each writing `!canAttendLive(mode) && classType !== "private"` by
+ * hand. The portal did not: it asked this function with the mode alone, so a
+ * private student registered at a campus had the Live class entry hidden from
+ * the sidebar AND was shown "This is an online-class page" if they typed the
+ * URL. The server would have let them in; the app would not take them there.
+ *
+ * Both halves now live here, and the two server call sites read the same rule
+ * as the sidebar instead of re-deriving it.
+ */
+export function canAttendLive(mode: unknown, classType?: unknown): boolean {
+  if (normaliseClassType(classType) === "private") return true;
   return normaliseDeliveryMode(mode) !== "physical";
 }
 
@@ -69,6 +91,13 @@ export function isLiveOnlyRoute(pathname: string): boolean {
 export type StudentAccess = {
   /** physical | hybrid | online — see DeliveryMode. */
   deliveryMode: DeliveryMode;
+  /**
+   * group | private. The portal needs this as well as the delivery mode to
+   * decide whether the live classroom exists for this student — see
+   * canAttendLive. It was already being read from the database to price the
+   * tuition and then thrown away here, which is why the client could not.
+   */
+  classType: ClassType;
   /** False while a registration-only student still owes the deposit. */
   hasAccess: boolean;
   /** True once anything at all has been paid — the registration fee. */
@@ -92,11 +121,13 @@ export function deriveStudentAccess({
   tuitionFee,
   requiredDeposit,
   deliveryMode,
+  classType,
 }: {
   totalPaid: number;
   tuitionFee: number;
   requiredDeposit: number;
   deliveryMode?: unknown;
+  classType?: unknown;
 }): StudentAccess {
   const paid = Math.max(0, Math.round(Number(totalPaid) || 0));
   const fee = Math.max(0, Math.round(Number(tuitionFee) || 0));
@@ -104,6 +135,7 @@ export function deriveStudentAccess({
 
   return {
     deliveryMode: normaliseDeliveryMode(deliveryMode),
+    classType: normaliseClassType(classType),
     hasAccess: deposit > 0 ? paid >= deposit : paid >= fee,
     registrationPaid: paid > 0,
     totalPaid: paid,

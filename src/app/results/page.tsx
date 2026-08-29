@@ -101,9 +101,9 @@ function label(type: string) {
 
 function gradeTone(grade: string) {
   if (grade === "A" || grade === "B") return "bg-[var(--success-soft)] text-[var(--success)]";
-  if (grade === "C") return "bg-amber-100 text-amber-700";
+  if (grade === "C") return "bg-amber-500/15 text-amber-700";
   if (grade === "D") return "bg-orange-100 text-orange-700";
-  return "bg-red-100 text-red-700";
+  return "bg-rose-500/15 text-red-700";
 }
 
 function barTone(score: number, passMark: number) {
@@ -125,7 +125,7 @@ function ScoreBar({ score, passMark }: { score: number; passMark: number }) {
       />
       {/* The pass mark, so a score reads as pass or fail at a glance. */}
       <div
-        className="absolute inset-y-0 w-px bg-slate-500/70"
+        className="absolute inset-y-0 w-px bg-[var(--border-strong)]"
         style={{ left: `${passMark}%` }}
         aria-hidden="true"
       />
@@ -277,9 +277,9 @@ export default function ResultsPage() {
             ))}
           </div>
         ) : error ? (
-          <div className="rounded-2xl bg-red-50 p-4 text-sm text-red-700">{error}</div>
+          <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-600">{error}</div>
         ) : !data || data.totalResults === 0 ? (
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center sm:p-10">
+          <div className="rounded-3xl cinematic-card p-8 text-center sm:p-10">
             <EmptyIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
             <p className="mt-3 text-sm font-semibold">No results yet</p>
             <p className="mt-1 text-sm text-[var(--muted)]">
@@ -290,7 +290,7 @@ export default function ResultsPage() {
           <div className="space-y-4 sm:space-y-6">
             {/* ---- Headline figures ------------------------------------ */}
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <div className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:rounded-3xl sm:p-6">
+              <div className="min-w-0 rounded-2xl cinematic-card p-4 sm:rounded-3xl sm:p-6">
                 <p className="truncate text-[10px] uppercase tracking-[0.2em] text-[var(--muted)] sm:text-xs sm:tracking-[0.24em]">
                   Overall
                 </p>
@@ -307,7 +307,7 @@ export default function ResultsPage() {
                 </p>
               </div>
 
-              <div className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:rounded-3xl sm:p-6">
+              <div className="min-w-0 rounded-2xl cinematic-card p-4 sm:rounded-3xl sm:p-6">
                 <p className="truncate text-[10px] uppercase tracking-[0.2em] text-[var(--muted)] sm:text-xs sm:tracking-[0.24em]">
                   Exams passed
                 </p>
@@ -318,7 +318,7 @@ export default function ResultsPage() {
                 <p className="mt-2 truncate text-xs text-[var(--muted)]">Pass mark is {data.passMark}</p>
               </div>
 
-              <div className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:rounded-3xl sm:p-6">
+              <div className="min-w-0 rounded-2xl cinematic-card p-4 sm:rounded-3xl sm:p-6">
                 <p className="truncate text-[10px] uppercase tracking-[0.2em] text-[var(--muted)] sm:text-xs sm:tracking-[0.24em]">
                   Attendance
                 </p>
@@ -332,7 +332,7 @@ export default function ResultsPage() {
                 </p>
               </div>
 
-              <div className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:rounded-3xl sm:p-6">
+              <div className="min-w-0 rounded-2xl cinematic-card p-4 sm:rounded-3xl sm:p-6">
                 <p className="truncate text-[10px] uppercase tracking-[0.2em] text-[var(--muted)] sm:text-xs sm:tracking-[0.24em]">
                   In your class
                 </p>
@@ -370,7 +370,7 @@ export default function ResultsPage() {
 
             {/* ---- Skills ---------------------------------------------- */}
             {data.skills.length > 0 && (
-              <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:rounded-3xl sm:p-6">
+              <section className="rounded-2xl cinematic-card p-4 sm:rounded-3xl sm:p-6">
                 <h2 className="text-base font-semibold sm:text-lg">Your skills</h2>
                 <p className="mt-1 text-xs text-[var(--muted)]">
                   Each one averaged across every time it has been marked.
@@ -404,7 +404,7 @@ export default function ResultsPage() {
                           style={{ width: `${Math.min(100, skill.average)}%` }}
                         />
                         <div
-                          className="absolute inset-y-0 w-px bg-slate-500/70"
+                          className="absolute inset-y-0 w-px bg-[var(--border-strong)]"
                           style={{ left: `${data.passMark}%` }}
                           aria-hidden
                         />
@@ -421,7 +421,7 @@ export default function ResultsPage() {
             )}
 
             {/* ---- Trend ----------------------------------------------- */}
-            <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:rounded-3xl sm:p-6">
+            <section className="rounded-2xl cinematic-card p-4 sm:rounded-3xl sm:p-6">
               <h2 className="flex items-center gap-2 text-base font-semibold sm:text-lg">
                 <TrendingUpIcon className="h-4 w-4 shrink-0 text-[var(--accent)]" />
                 How you are moving
@@ -438,7 +438,7 @@ export default function ResultsPage() {
             {data.courses.map((course) => (
               <section
                 key={course.courseId}
-                className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:rounded-3xl sm:p-6"
+                className="rounded-2xl cinematic-card p-4 sm:rounded-3xl sm:p-6"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -491,7 +491,7 @@ export default function ResultsPage() {
 
             {/* ---- Everything not tied to an exam ---------------------- */}
             {data.coursework.length > 0 && (
-              <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:rounded-3xl sm:p-6">
+              <section className="rounded-2xl cinematic-card p-4 sm:rounded-3xl sm:p-6">
                 <h2 className="text-base font-semibold sm:text-lg">Every mark, one by one</h2>
                 <p className="mt-1 text-xs text-[var(--muted)]">
                   Classwork and practice, which sit outside your exam averages.

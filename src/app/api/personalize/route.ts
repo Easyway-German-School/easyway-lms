@@ -1,12 +1,15 @@
+import { getStudentMastery } from '@/lib/skill-mastery';
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse, NextRequest } from "next/server";
 import { generatePersonalizedPlan } from "@/lib/ai";
 import { mayAutoCreateStudent } from "@/lib/candidates";
+import { KIND, notify } from "@/lib/notify";
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions as any) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const fallbackPlan = {
@@ -44,9 +47,13 @@ export async function GET(request: NextRequest) {
       return lessons;
     };
 
+    const uploadedCoursesForLevel = lecturerPathway?.courses.filter((course) => {
+      const courseLevel = String(course.level || "").toUpperCase();
+      return !courseLevel || courseLevel === String(student.level || "").toUpperCase() || courseLevel === "A1-C2";
+    }) || [];
     const candidateLessons = [
       ...flattenLessons(pathway?.courses || []),
-      ...flattenLessons(lecturerPathway?.courses || []),
+      ...flattenLessons(uploadedCoursesForLevel),
     ];
 
     // Build a richer student profile: completions, recent grades, performance
@@ -54,16 +61,20 @@ export async function GET(request: NextRequest) {
     const completedLessons = completions.map((c) => c.lessonId);
 
     const recentGrades = await prisma.grade.findMany({ where: { studentId: student.id }, orderBy: { createdAt: 'desc' }, take: 10 });
+      const skillMastery = await getStudentMastery(student.id);
     const averageScore = recentGrades.length ? Math.round(recentGrades.reduce((s, g) => s + (g.score || 0), 0) / recentGrades.length) : null;
 
     const profile = {
       id: student.id,
       level: student.level,
       pathway: student.pathway,
+      germanyGoal: student.germanyGoal,
+      germanyGoalNote: student.germanyGoalNote,
       examReadiness: student.examReadiness,
       completedLessons,
       recentPerformance: recentGrades.map((g) => ({ type: g.type, score: g.score, createdAt: g.createdAt })),
       averageScore,
+      skillMastery,
     };
 
     // Enrich candidate lessons with summary and simple tags
@@ -80,7 +91,8 @@ export async function GET(request: NextRequest) {
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
     const cachedPlan = await prisma.personalizedPlan.findUnique({ where: { studentId: student.id } });
 
-    if (cachedPlan && cachedPlan.updatedAt > oneHourAgo) {
+    const newestCourse = await prisma.course.findFirst({ orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+    if (cachedPlan && cachedPlan.updatedAt > oneHourAgo && (!newestCourse || cachedPlan.updatedAt >= newestCourse.createdAt)) {
       try {
         const plan = JSON.parse(cachedPlan.plan);
         return NextResponse.json({ plan, source: 'cache' });
@@ -113,6 +125,21 @@ export async function GET(request: NextRequest) {
     } catch (err) {
       console.error('Failed to cache personalized plan', err);
     }
+
+    const firstLesson = Array.isArray(primaryPlan.lessons) ? primaryPlan.lessons[0] : null;
+    void notify({
+      to: { studentIds: [student.id] },
+      kind: KIND.general,
+      severity: "info",
+      title: "Your learning plan is ready",
+      message: firstLesson?.title
+        ? `Your next recommended step is ${String(firstLesson.title).slice(0, 100)}.`
+        : "Your personalized learning plan has been refreshed.",
+      link: "/lesson",
+      dedupeKey: `personalized-plan:${student.id}:${new Date().toISOString().slice(0, 10)}`,
+      push: false,
+      email: false,
+    }).catch((error) => console.error("Personalized plan notification failed", error));
 
     return NextResponse.json({ plan: primaryPlan, source: 'regenerated', comparison, strategy: requestedStrategy, compare: compareStrategies });
   } catch (error) {

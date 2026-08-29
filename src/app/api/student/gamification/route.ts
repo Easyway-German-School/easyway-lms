@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateStreak, deriveBadges, summarizeGamification } from "@/lib/gamification";
 
@@ -13,7 +13,8 @@ import { calculateStreak, deriveBadges, summarizeGamification } from "@/lib/gami
  * sync, so these numbers cannot disagree with the student's actual history.
  */
 export async function GET() {
-  const session = (await getServerSession(authOptions as any)) as any;
+  const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -39,8 +40,28 @@ export async function GET() {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const missionsCompleted = await prisma.missionProgress.count({
-    where: { userId, done: true },
+  // Old self-reported rows plus new server-verified ones (see
+  // src/lib/mission-detection.ts) — summed rather than switched over, so a
+  // badge already earned under the old honour system is never taken back.
+  const [legacyMissionsCompleted, verifiedMissionsCompleted] = await Promise.all([
+    prisma.missionProgress.count({ where: { userId, done: true } }),
+    prisma.dailyMission.count({ where: { userId, done: true } }),
+  ]);
+  const missionsCompleted = legacyMissionsCompleted + verifiedMissionsCompleted;
+
+  /**
+   * Live quiz games this student played to the end.
+   *
+   * Only finished games count. A game still in progress would tick XP up mid-
+   * lesson and then need taking back if the tutor abandoned it, and a game the
+   * laptop was closed on is not something the student did wrong.
+   */
+  const quizGamesPlayed = await prisma.quizGamePlayer.count({
+    where: { studentId: student.id, game: { phase: "ended" }, answered: { gt: 0 } },
+  });
+
+  const materialQuestsCompleted = await prisma.materialQuestAttempt.count({
+    where: { studentId: student.id, correct: true },
   });
 
   const presentDays = student.attendances.filter(
@@ -62,6 +83,8 @@ export async function GET() {
     submissions: student.assignmentSubmissions.length,
     sessionsAttended,
     missionsCompleted,
+    quizGamesPlayed,
+    materialQuestsCompleted,
   });
 
   const badges = deriveBadges({
@@ -91,6 +114,8 @@ export async function GET() {
       averageGrade,
       examsRegistered: student.examRegistrations.length,
       missionsCompleted,
+      quizGamesPlayed,
+      materialQuestsCompleted,
       examReadiness: student.examReadiness ?? 0,
       memberSince: student.createdAt.toISOString(),
     },

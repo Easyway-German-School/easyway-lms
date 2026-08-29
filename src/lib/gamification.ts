@@ -25,6 +25,17 @@ export type XpInputs = {
   sessionsAttended?: number;
   /** Daily missions ticked off. */
   missionsCompleted?: number;
+  /**
+   * Finished live quiz games this student actually played in.
+   *
+   * Counted rather than scored on purpose. The game already ranks the room on
+   * speed, and paying XP by score would rank it twice — the student who is
+   * slowest in German gains least from the format and would then earn least
+   * from it as well. Turning up and playing is the behaviour worth rewarding.
+   */
+  quizGamesPlayed?: number;
+  /** Self-marked correct on a quest generated from a tutor's material. */
+  materialQuestsCompleted?: number;
 };
 
 export type GamificationSummary = {
@@ -73,6 +84,12 @@ export function calculateXp(inputs: XpInputs): number {
     (inputs.submissions ?? 0) * 30 +
     (inputs.sessionsAttended ?? 0) * 15 +
     (inputs.missionsCompleted ?? 0) * 20 +
+    // Between a mission and a submission: more than ticking a box, less than
+    // handing in written work, which is what a revision game is worth.
+    (inputs.quizGamesPlayed ?? 0) * 25 +
+    // Same weight as a mission tick — a five-minute self-marked task, not a
+    // graded artifact like a submission.
+    (inputs.materialQuestsCompleted ?? 0) * 20 +
     gradeBonus;
 
   return Math.max(XP_FLOOR, raw);
@@ -235,4 +252,20 @@ export function calculateStreak(dates: Array<Date | string>): number {
     offset += 1;
   }
   return streak;
+}
+
+/**
+ * Whether any of these dates falls on today's UTC calendar day.
+ *
+ * Same day-key formatting `calculateStreak` uses internally, exported so a
+ * "has this student already kept their streak alive today?" check (streak
+ * reminders) never drifts from what the streak count itself considers today.
+ */
+export function hasActivityToday(dates: Array<Date | string>): boolean {
+  const today = new Date();
+  const todayKey = `${today.getUTCFullYear()}-${today.getUTCMonth()}-${today.getUTCDate()}`;
+  return dates.some((date) => {
+    const value = new Date(date);
+    return `${value.getUTCFullYear()}-${value.getUTCMonth()}-${value.getUTCDate()}` === todayKey;
+  });
 }

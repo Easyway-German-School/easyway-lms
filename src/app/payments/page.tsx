@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import StudentShell from "@/components/StudentShell";
 import TuitionNudge from "@/components/TuitionNudge";
+import RefundModal from "@/components/RefundModal";
 import { CheckIcon } from "@/components/icons";
 
 type PaymentRecord = {
@@ -20,6 +21,7 @@ export default function PaymentsPage() {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refundOpen, setRefundOpen] = useState(false);
   // Tuition varies by level (A1 150k … C2 220k), so the figures have to come
   // from the server rather than a constant on this page.
   const [summary, setSummary] = useState<{
@@ -96,7 +98,7 @@ export default function PaymentsPage() {
         <div className="mx-auto max-w-7xl px-6 py-10">
           {/* Renders nothing once tuition is settled. */}
           <TuitionNudge className="mb-6" />
-          <div className="rounded-[32px] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow)]">
+          <div className="rounded-[32px] cinematic-card p-8 shadow-[var(--shadow)]">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-[var(--muted)]">Payments</p>
@@ -110,18 +112,29 @@ export default function PaymentsPage() {
                 live Pay button invites a duplicate payment that then has to be
                 refunded by hand.
               */}
-              {fullPaid ? (
-                <span
-                  aria-disabled="true"
-                  className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-6 py-3 text-sm font-semibold text-emerald-700"
-                >
-                  <CheckIcon className="h-4 w-4" /> Tuition fully paid
-                </span>
-              ) : (
-                <Link href="/programs" className="inline-flex items-center justify-center rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-110">
-                  Make a payment
-                </Link>
-              )}
+              <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                {fullPaid ? (
+                  <span
+                    aria-disabled="true"
+                    className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-6 py-3 text-sm font-semibold text-emerald-600"
+                  >
+                    <CheckIcon className="h-4 w-4" /> Tuition fully paid
+                  </span>
+                ) : (
+                  <Link href="/programs" className="inline-flex items-center justify-center rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-110">
+                    Make a payment
+                  </Link>
+                )}
+                {payments.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setRefundOpen(true)}
+                    className="text-xs font-semibold text-[var(--muted)] underline underline-offset-2 hover:text-[var(--foreground)]"
+                  >
+                    Request for a refund?
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             <div className="mt-10 grid gap-6 lg:grid-cols-3">
@@ -152,20 +165,20 @@ export default function PaymentsPage() {
 
               <div className="space-y-3 px-6 py-6 text-sm text-[var(--foreground)]">
                 {loading ? (
-                  <div className="rounded-3xl border border-[var(--border)] bg-white px-6 py-8 text-center text-sm text-[var(--muted)]">
+                  <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-6 py-8 text-center text-sm text-[var(--muted)]">
                     Loading payment history…
                   </div>
                 ) : error ? (
-                  <div className="rounded-3xl border border-rose-200 bg-rose-50 px-6 py-8 text-center text-sm text-rose-700">
+                  <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 px-6 py-8 text-center text-sm text-rose-600">
                     {error}
                   </div>
                 ) : payments.length === 0 ? (
-                  <div className="rounded-3xl border border-[var(--border)] bg-white px-6 py-8 text-center text-sm text-[var(--muted)]">
+                  <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-6 py-8 text-center text-sm text-[var(--muted)]">
                     No payments have been recorded yet. Click &quot;Make a payment&quot; to pay your next deposit or tuition balance.
                   </div>
                 ) : (
                   payments.map((payment) => (
-                    <div key={payment.id} className="grid grid-cols-5 gap-4 rounded-3xl border border-[var(--border)] bg-white px-4 py-4 shadow-sm">
+                    <div key={payment.id} className="grid grid-cols-5 gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 shadow-sm">
                       <span className="col-span-2">{payment.description || "Payment received"}</span>
                       <span className={payment.status.toLowerCase() === "completed" ? "text-emerald-600" : "text-[var(--accent)]"}>
                         {payment.status}
@@ -182,6 +195,7 @@ export default function PaymentsPage() {
           </div>
         </div>
       </main>
+      <RefundModal open={refundOpen} onClose={() => setRefundOpen(false)} />
     </StudentShell>
   );
 }

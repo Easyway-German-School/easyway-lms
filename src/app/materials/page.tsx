@@ -4,11 +4,12 @@ export const dynamic = "force-dynamic";
 
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import Mascot from "@/components/Mascot";
 import StudentShell from "@/components/StudentShell";
 import VideoLibrary from "@/components/video/VideoLibrary";
 import { isPlayableVideo, type LibraryVideo } from "@/lib/video-library";
-import { parseEmbedUrl } from "@/lib/embed-utils";
-import { AudioIcon, DocumentIcon, FilmIcon, ImageIcon, PackageIcon, PencilIcon, LinkIcon } from "@/components/icons";
+import { AudioIcon, DocumentIcon, FilmIcon, ImageIcon, PackageIcon, PencilIcon } from "@/components/icons";
 
 type Material = {
   id: string;
@@ -19,12 +20,11 @@ type Material = {
   fileSize: number;
   uploadedBy: string;
   createdAt: string;
-  isEmbedded?: boolean;
-  embedProvider?: string;
   course?: { title: string; level?: string };
 };
 
 type Tab = "watch" | "documents";
+type VideoRecommendation = { videoId: string; reason: string; priority: number };
 
 const DOCUMENT_FILTERS = [
   { value: "all", label: "All documents", icon: null },
@@ -45,15 +45,18 @@ export default function MaterialsPage() {
   // The paywall itself is the shell's job. This only survives so a 403 from
   // either API still says something useful instead of an empty page.
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [recommendations, setRecommendations] = useState<VideoRecommendation[]>([]);
 
   useEffect(() => {
     async function load() {
       try {
         // Both in flight together: the two tabs are one page, and a student on
         // a slow link should not pay two round trips to switch between them.
-        const [materialsRes, videosRes] = await Promise.all([
+        const [materialsRes, videosRes, recommendationsRes] = await Promise.all([
           fetch("/api/student/materials", { cache: "no-store" }),
           fetch("/api/student/videos", { cache: "no-store" }),
+          fetch("/api/student/video-recommendations", { cache: "no-store" }),
         ]);
 
         if (materialsRes.status === 401) {
@@ -82,6 +85,11 @@ export default function MaterialsPage() {
           // level has no recordings yet, and an empty hero is a bad first look.
           if ((data.videos || []).length === 0) setTab("documents");
         }
+
+        if (recommendationsRes.ok) {
+          const data = await recommendationsRes.json();
+          setRecommendations(Array.isArray(data.recommendations) ? data.recommendations : []);
+        }
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Failed to load materials");
       } finally {
@@ -89,12 +97,16 @@ export default function MaterialsPage() {
       }
     }
 
-    load();
+    void load();
+  }, [refreshTick]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setRefreshTick((value) => value + 1), 10_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   // Videos have their own tab, so they are not repeated in the document list.
-  // Also exclude embedded URLs from documents - they should only appear in watch tab
-  const documents = materials.filter((material) => !isPlayableVideo(material.fileType) && !material.isEmbedded);
+  const documents = materials.filter((material) => !isPlayableVideo(material.fileType));
   const filteredDocuments =
     filterType === "all" ? documents : documents.filter((material) => material.fileType?.includes(filterType));
 
@@ -137,13 +149,13 @@ export default function MaterialsPage() {
             <div className="rounded-3xl border border-amber-400/40 bg-amber-500/10 p-6 text-sm text-amber-900">
               <p className="font-semibold">Materials are locked</p>
               <p className="mt-2">{lockedMessage}</p>
-              <a href="/programs" className="mt-4 inline-flex rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">
+              <a href="/programs" className="mt-4 inline-flex rounded-full btn-glow px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">
                 Pay tuition now
               </a>
             </div>
           ) : null}
 
-          <div className="flex gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1.5">
+          <div className="flex gap-2 rounded-2xl cinematic-card p-1.5">
             {(
               [
                 { value: "watch" as const, icon: <FilmIcon />, label: `Watch${videos.length ? ` (${videos.length})` : ""}` },
@@ -166,11 +178,38 @@ export default function MaterialsPage() {
           </div>
 
           {loading ? (
-            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-12 text-center">
+            <div className="rounded-3xl cinematic-card p-12 text-center">
               <p className="text-[var(--muted)]">Loading your materials…</p>
             </div>
           ) : tab === "watch" ? (
-            <VideoLibrary videos={videos} level={level} />
+            <div className="space-y-5">
+              {recommendations.length > 0 ? (
+                <section className="rounded-3xl border border-[var(--accent)]/30 bg-[var(--surface)] p-5 shadow-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--accent)]">Recommended for you</p>
+                      <h2 className="mt-2 text-xl font-bold text-[var(--foreground)]">Your next watch</h2>
+                      <p className="mt-1 text-sm text-[var(--muted)]">Chosen from your progress, level, pathway, and learning goal.</p>
+                    </div>
+                    <Mascot mood="cocky" className="hidden h-16 w-16 sm:block" />
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    {recommendations.map((recommendation) => {
+                      const video = videos.find((item) => item.id === recommendation.videoId);
+                      if (!video) return null;
+                      return (
+                        <Link key={recommendation.videoId} href={`/materials/watch/${video.id}`} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-3 transition hover:border-[var(--accent)]/50">
+                          <p className="truncate text-sm font-semibold text-[var(--foreground)]">{video.title}</p>
+                          <p className="mt-2 line-clamp-2 text-xs leading-5 text-[var(--muted)]">{recommendation.reason}</p>
+                          <span className="mt-3 inline-flex items-center text-xs font-bold text-[var(--accent)]">Watch next →</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+              <VideoLibrary videos={videos} level={level} />
+            </div>
           ) : (
             <div className="space-y-6">
               <div className="flex flex-wrap gap-3">
@@ -191,7 +230,7 @@ export default function MaterialsPage() {
               </div>
 
               {filteredDocuments.length === 0 ? (
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-12 text-center">
+                <div className="rounded-xl cinematic-card p-12 text-center">
                   <p className="text-lg font-semibold">No documents found</p>
                   <p className="mt-2 text-[var(--muted)]">Check back later for new course materials</p>
                 </div>
@@ -202,7 +241,7 @@ export default function MaterialsPage() {
                       key={material.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="flex items-center gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 transition hover:bg-[var(--surface-alt)]"
+                      className="flex items-center gap-4 rounded-3xl cinematic-card p-6 transition hover:bg-[var(--surface-alt)]"
                     >
                       <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
                         {fileTypeIcon(material.fileType)}
@@ -222,7 +261,7 @@ export default function MaterialsPage() {
                         href={material.fileUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="shrink-0 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+                        className="shrink-0 rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white transition hover:brightness-110"
                       >
                         Download
                       </a>

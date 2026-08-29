@@ -1,9 +1,27 @@
-import NextAuth, { type AuthOptions } from "next-auth";
+import NextAuth, { getServerSession, type AuthOptions, type Session } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { lecturerCanSignIn } from "@/lib/lecturer-status";
+import { checkRateLimit, clearRateLimit, clientIp } from "@/lib/rate-limit";
+import { setTenantScope, beginRequestScope, runWithTenant, runUnscoped } from "@/lib/tenant/context";
+import { NextResponse } from "next/server";
+
+/**
+ * Run one query with whatever scope we have.
+ *
+ * Sign-in and session resolution both run in the gap where a tenant is being
+ * established rather than known, and the two halves of that gap need different
+ * treatment: once the user's tenant is in hand the query should be scoped to
+ * it, and before that it cannot be. Written once here so the two call sites
+ * below cannot disagree about which case they are in.
+ */
+function withScope<T>(tenantId: string | undefined, fn: () => Promise<T>): Promise<T> {
+  return tenantId
+    ? runWithTenant(tenantId, fn)
+    : runUnscoped("session callback resolving a user who carries no tenant", fn);
+}
 
 /**
  * The role a revoked tutor's session carries. Not a real role — every route
@@ -11,6 +29,12 @@ import { lecturerCanSignIn } from "@/lib/lecturer-status";
  * session callback below.
  */
 export const INACTIVE_LECTURER_ROLE = "inactive_lecturer";
+
+/**
+ * The role a session carries once the account's password has been reset out
+ * from under it. Not a real role — every route refuses it, which is the point.
+ */
+export const REVOKED_SESSION_ROLE = "revoked_session";
 
 const normalizeRole = (value: unknown) => String(value || "STUDENT").toLowerCase();
 
@@ -30,9 +54,54 @@ export const authOptions: AuthOptions = {
          */
         totp: { label: "Authentication code", type: "text" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) {
           throw new Error("Missing credentials");
+        }
+
+        /**
+         * Two counters, because they stop different attacks and one alone
+         * leaves the other open.
+         *
+         * By email: caps guesses against one account no matter how many
+         * addresses the attacker comes from. By IP: caps an attacker who
+         * sprays one common password across many accounts, which the
+         * per-email counter would never see.
+         *
+         * The per-email limit is deliberately the looser of the two and the
+         * window deliberately short. A tight one hands anybody who knows a
+         * student's address the ability to lock them out of their own portal
+         * by failing sign-in on purpose — trading a brute-force risk for a
+         * harassment tool. Ten tries in fifteen minutes is far below what
+         * guessing a password needs and far above what a real person typing
+         * from memory ever hits.
+         *
+         * Counted before the bcrypt compare, so a refused attempt costs us
+         * nothing. That is half the point: bcrypt is expensive by design, and
+         * an unmetered sign-in route is a way to spend our CPU, not just our
+         * patience.
+         */
+        const email = credentials.email.trim().toLowerCase();
+        const ip = clientIp(req?.headers);
+
+        const byEmail = checkRateLimit(`signin:email:${email}`, {
+          windowMs: 15 * 60 * 1000,
+          max: 10,
+        });
+        const byIp = checkRateLimit(`signin:ip:${ip}`, {
+          windowMs: 15 * 60 * 1000,
+          max: 50,
+        });
+
+        if (!byEmail.ok || !byIp.ok) {
+          /**
+           * One message for both, and it names no account. Saying "this
+           * account is locked" would confirm the address exists — turning the
+           * protection into the enumeration oracle it was added to prevent.
+           */
+          throw new Error(
+            "Too many sign-in attempts. Please wait a few minutes and try again.",
+          );
         }
 
         const user = await prisma.user.findUnique({
@@ -70,10 +139,21 @@ export const authOptions: AuthOptions = {
          * enumerate which accounts are inactive.
          */
         if (storedRole === "lecturer") {
-          const lecturer = await prisma.lecturer.findUnique({
-            where: { userId: user.id },
-            select: { status: true },
-          });
+          /**
+           * Unscoped because sign-in is the one moment there is no tenant to
+           * scope by — finding this person's own record is precisely how their
+           * tenant gets established. The lookup is by their own user id, which
+           * the password has just been checked against, so it can reach exactly
+           * one row and that row is theirs.
+           */
+          const lecturer = await runUnscoped(
+            "sign-in resolves the user's own tutor record before any tenant is known",
+            async () =>
+              await prisma.lecturer.findUnique({
+                where: { userId: user.id },
+                select: { status: true },
+              }),
+          );
           if (lecturer && !lecturerCanSignIn(lecturer.status)) {
             throw new Error(
               "This tutor account is no longer active. Contact the school office if you think this is wrong.",
@@ -114,6 +194,17 @@ export const authOptions: AuthOptions = {
           }
         }
 
+        /**
+         * Cleared only here, at full success — past the password, the tutor
+         * status check and the second factor.
+         *
+         * Not cleared on MFA_REQUIRED: that path has a correct password but no
+         * code yet, and forgiving the count there would let somebody who has
+         * stolen a password retry the six-digit code without limit, which is
+         * the one thing the second factor exists to make expensive.
+         */
+        clearRateLimit(`signin:email:${email}`);
+
         return {
           id: user.id,
           email: user.email,
@@ -143,14 +234,102 @@ export const authOptions: AuthOptions = {
         token.id = user.id;
         token.role = normalizeRole(user.role);
         token.tenantId = user.tenantId;
+        // Sign-in time. Anything reset after this invalidates the token.
+        token.issuedAt = Date.now();
+        token.pwCheckedAt = Date.now();
+        token.adminLocked = false;
       }
+
+      /**
+       * A password reset must end the sessions that existed before it.
+       *
+       * Otherwise the feature does not do the job people actually use it for.
+       * Someone resets their password precisely because they think another
+       * person is in their account — and with 30-day JWTs, that person keeps
+       * the roster, the marks and the payment history for the rest of the
+       * month regardless.
+       *
+       * Checked here rather than in the session callback, and throttled,
+       * because the session callback runs on every `getServerSession` — that
+       * is a database round trip per API call, forever, for every user. Every
+       * five minutes bounds the cost to something negligible and bounds the
+       * attacker's remaining window to five minutes, which is the right trade
+       * against a 30-day one.
+       */
+      const CHECK_EVERY_MS = 5 * 60 * 1000;
+      const lastChecked = Number(token.pwCheckedAt ?? 0);
+
+      if (token.id && Date.now() - lastChecked > CHECK_EVERY_MS) {
+        try {
+          const { lastPasswordResetAt } = await import("@/lib/password-reset");
+          const resetAt = await lastPasswordResetAt(token.id as string);
+          const issuedAt = Number(token.issuedAt ?? 0);
+
+          if (resetAt && issuedAt && resetAt.getTime() > issuedAt) {
+            token.revoked = true;
+          }
+          token.pwCheckedAt = Date.now();
+        } catch {
+          /**
+           * Fail open, deliberately, and for the same reason the tutor status
+           * check below does: a database blip must not sign the whole school
+           * out mid-lesson. It also means this works before the
+           * PasswordResetToken table has been pushed — the query throws, the
+           * check is skipped, and everything else carries on.
+           */
+        }
+      }
+
+      if (token.id && normalizeRole(token.role) === "admin") {
+        try {
+          const admin = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { adminLockedAt: true },
+          });
+          token.adminLocked = Boolean(admin?.adminLockedAt);
+        } catch {
+          // Keep the last known state during a transient database failure.
+        }
+      }
+
       return token;
     },
     async session({ session, token }: { session: any; token: JWT }) {
       if (session.user) {
+        /**
+         * A token issued before the password was reset carries no role.
+         *
+         * Same seam the revoked-tutor check below uses, for the same reason:
+         * every route already refuses a session whose role it does not
+         * recognise, so dropping the role here locks all of them at once
+         * rather than requiring each to remember a new check. The identity is
+         * kept so the portal can explain itself instead of the session
+         * silently evaporating.
+         */
+        if (token.revoked) {
+          session.user.id = token.id as string;
+          session.user.role = REVOKED_SESSION_ROLE;
+          return session;
+        }
+
+        if (token.adminLocked && normalizeRole(token.role) === "admin") {
+          session.user.id = token.id as string;
+          session.user.role = REVOKED_SESSION_ROLE;
+          session.user.adminLocked = true;
+          return session;
+        }
+
         session.user.id = token.id as string;
         session.user.role = normalizeRole(token.role || "STUDENT");
         session.user.tenantId = token.tenantId as string | undefined;
+        session.user.adminLocked = Boolean(token.adminLocked);
+        // Set only on a token minted by the act-as-student route — see
+        // src/lib/impersonation.ts. Read by ImpersonationBanner so the admin
+        // (never the student, who has their own untouched session) always
+        // knows they are inside someone else's account and can get back.
+        session.user.impersonatedBy = token.impersonatorId
+          ? { id: token.impersonatorId as string, email: token.impersonatorEmail as string | undefined }
+          : undefined;
         if (!token.tenantId && token.id) {
           try {
             const u = await prisma.user.findUnique({
@@ -192,10 +371,12 @@ export const authOptions: AuthOptions = {
          */
         if (session.user.role === "lecturer" && session.user.id) {
           try {
-            const lecturer = await prisma.lecturer.findUnique({
-              where: { userId: session.user.id as string },
-              select: { status: true },
-            });
+            const lecturer = await withScope(session.user.tenantId, async () =>
+              await prisma.lecturer.findUnique({
+                where: { userId: session.user.id as string },
+                select: { status: true },
+              }),
+            );
             if (lecturer && !lecturerCanSignIn(lecturer.status)) {
               session.user.role = INACTIVE_LECTURER_ROLE;
             }
@@ -211,5 +392,38 @@ export const authOptions: AuthOptions = {
 
   secret: process.env.NEXTAUTH_SECRET,
 };
+
+/**
+ * The one place a request's tenant is established.
+ *
+ * Every signed-in route and page in the app reaches its session through here or
+ * through requireAuthSession() below, so setting the scope at this single point
+ * scopes all of them — including the ones written after this, which is the
+ * whole reason it is here and not in each handler.
+ *
+ * Set unconditionally, including when there is no session and when the user
+ * carries no tenant. A gate that only sets the scope on success leaves the
+ * previous value in place on failure, and the previous value belongs to
+ * somebody else.
+ */
+export async function getServerAuthSession(): Promise<Session | null> {
+  // Before the await, for the reason in src/lib/tenant/context.ts: this is the
+  // half that reaches the caller.
+  beginRequestScope();
+  const session = (await getServerSession(authOptions as never)) as Session | null;
+  setTenantScope(session?.user?.tenantId ?? null);
+  return session;
+}
+
+export async function requireAuthSession(): Promise<Session | null> {
+  beginRequestScope();
+  const session = await getServerAuthSession();
+  if (!session?.user?.id) return null;
+  return session;
+}
+
+export function tenantWhere(tenantId?: string): { tenantId?: string } {
+  return tenantId ? { tenantId } : {};
+}
 
 export const authHandler = NextAuth(authOptions);

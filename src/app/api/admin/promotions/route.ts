@@ -1,28 +1,17 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { resolveAdmin } from "@/lib/admin-roles";
+import { requireCapability } from "@/lib/admin-roles";
 import { findPromotionCandidates, promoteStudents, SESSION_MONTHS } from "@/lib/promotion";
 
 export const dynamic = "force-dynamic";
 
 async function requireStudentsAdmin() {
-  const session = (await getServerSession(authOptions as any)) as any;
-  const admin = await resolveAdmin(session?.user?.id);
-
-  if (!admin) {
-    return { error: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
-  }
-  if (!admin.can("students")) {
-    return { error: NextResponse.json({ error: "Your admin role cannot move students" }, { status: 403 }) };
-  }
-  return { admin };
+  return requireCapability("students");
 }
 
 /** GET — students whose session has ended but who are still on the same level. */
 export async function GET(req: NextRequest) {
-  const auth = await requireStudentsAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireStudentsAdmin();
+  if (!gate.ok) return gate.response;
 
   try {
     const candidates = await findPromotionCandidates({
@@ -39,8 +28,8 @@ export async function GET(req: NextRequest) {
 
 /** POST — move the given students up a level. */
 export async function POST(req: NextRequest) {
-  const auth = await requireStudentsAdmin();
-  if (auth.error) return auth.error;
+  const gate = await requireStudentsAdmin();
+  if (!gate.ok) return gate.response;
 
   try {
     const body = await req.json();

@@ -76,7 +76,7 @@ export default function StartClassesPrompt({
       className={`overflow-hidden rounded-[28px] border-2 border-[var(--accent)] bg-[var(--surface)] shadow-[0_20px_60px_-24px_rgba(255,102,0,0.6)] ${className}`}
     >
       <div className="relative overflow-hidden bg-gradient-to-br from-[#0D7C7E] to-[#FF6600] px-6 py-5 text-white">
-        <div className="pointer-events-none absolute -right-6 -top-6 h-28 w-28 rounded-full bg-white/10 blur-2xl" />
+        <div className="pointer-events-none absolute -right-6 -top-6 h-28 w-28 rounded-full bg-[var(--surface-alt)] blur-2xl" />
         <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-white/75">
           {prompt.askedBefore === 0 ? "One question" : `Asked ${prompt.askedBefore + 1} times — no pressure`}
         </p>

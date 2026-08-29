@@ -23,6 +23,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { withUnscoped } from "@/lib/tenant/context";
 
 export const dynamic = "force-dynamic";
 // The reconcile and retention passes talk to LiveKit and to the bucket, which
@@ -40,7 +41,7 @@ async function run(job: string, work: () => Promise<unknown>): Promise<JobResult
   }
 }
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   /**
    * Vercel signs its own cron requests with `Authorization: Bearer $CRON_SECRET`
    * as long as CRON_SECRET is set in the project's environment. Without a
@@ -51,6 +52,7 @@ export async function GET(request: NextRequest) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
 
   const results: JobResult[] = [];
 
@@ -72,6 +74,32 @@ export async function GET(request: NextRequest) {
     await run("fee-reminders", async () => {
       const { sendDueFeeReminders } = await import("@/lib/fee-reminders");
       return sendDueFeeReminders();
+    }),
+  );
+
+  /**
+   * Exam reminders used to only exist as a manual "send now" button an admin
+   * had to remember to click — nothing scheduled it, so a student who
+   * registered got no reminder unless someone in the office thought to. This
+   * fires once, on the single calendar day three days before each sitting.
+   */
+  results.push(
+    await run("exam-reminders", async () => {
+      const { sendDueExamReminders } = await import("@/lib/exam-reminders");
+      return sendDueExamReminders();
+    }),
+  );
+
+  /**
+   * A tutor's students going quiet — low attendance, no portal activity, or
+   * repeated "not yet" answers — used to be invisible until somebody in the
+   * office happened to notice. This flags it to the tutor directly, at most
+   * once a week per tutor (see the dedupeKey in notifyTutorsOfChurnRisk).
+   */
+  results.push(
+    await run("churn-risk", async () => {
+      const { notifyTutorsOfChurnRisk } = await import("@/lib/student-risk");
+      return notifyTutorsOfChurnRisk();
     }),
   );
 
@@ -117,6 +145,105 @@ export async function GET(request: NextRequest) {
   );
 
   /**
+   * Fold yesterday's usage into the daily rollup and debit each school's
+   * balance.
+   *
+   * Yesterday rather than today, because a day that is still being written to
+   * would be restated on the next tick and every tick after — and a customer
+   * watching their balance move for reasons that keep changing has no way to
+   * check it. Both the rollup and the debit are keyed on the day, so running
+   * this hourly costs nothing and running it twice bills nothing twice.
+   */
+  /**
+   * The two meters that are readings rather than events — what is stored, and
+   * who was active. Taken BEFORE the rollup so today's reading is in the ledger
+   * when yesterday's day is folded.
+   */
+  results.push(
+    await run("meter-storage", async () => {
+      const { meterStorage } = await import("@/lib/usage/daily-meters");
+      return meterStorage();
+    }),
+  );
+
+  results.push(
+    await run("meter-active-students", async () => {
+      const { meterActiveStudents } = await import("@/lib/usage/daily-meters");
+      return meterActiveStudents();
+    }),
+  );
+
+  results.push(
+    await run("usage-rollup", async () => {
+      const { rollUpUsage } = await import("@/lib/usage/record");
+      return rollUpUsage();
+    }),
+  );
+
+  /**
+   * Deliver queued webhooks, and warn any school whose balance is running out.
+   *
+   * The low-balance warning is deliberately not "you have been cut off". A
+   * school mid-term losing its register over a late transfer would be a worse
+   * failure than carrying them for a few days, so this warns while there is
+   * still time to act and the grace allowance does the rest.
+   */
+  results.push(
+    await run("webhooks", async () => {
+      const { deliverPendingWebhooks } = await import("@/lib/webhooks");
+      return deliverPendingWebhooks(25);
+    }),
+  );
+
+  results.push(
+    await run("low-balance-warnings", async () => {
+      const { warnLowBalances } = await import("@/lib/usage/record");
+      return warnLowBalances();
+    }),
+  );
+
+  /**
+   * Open the story turns whose day has run out, and close the dead stories.
+   *
+   * This is the job that keeps Satzkette chains alive: a turn nobody took stops
+   * being exclusive and goes to the whole class. Cheap, and it must not be
+   * skipped — without it a single student who stops opening the app silently
+   * ends every story they were offered a turn in.
+   */
+  /**
+   * Push today's missions to whoever hasn't opened the dashboard yet — see
+   * src/lib/daily-missions-push.ts. Capped per tick for the same reason
+   * material-ai is: this runs a model call per (level, band) the first time
+   * each is seen today, plus a write per student, on the same box as the
+   * site itself.
+   */
+  results.push(
+    await run("daily-missions-push", async () => {
+      const { sendDueMissionPush } = await import("@/lib/daily-missions-push");
+      return sendDueMissionPush();
+    }),
+  );
+
+  /**
+   * "Your streak ends today" — the loss-aversion nudge Duolingo built its
+   * habit loop on. See src/lib/streak-reminders.ts for why it reuses the same
+   * attendance-day data every other streak display already reads.
+   */
+  results.push(
+    await run("streak-reminders", async () => {
+      const { sendDueStreakReminders } = await import("@/lib/streak-reminders");
+      return sendDueStreakReminders();
+    }),
+  );
+
+  results.push(
+    await run("satzkette-turns", async () => {
+      const { openLapsedTurns, archiveStaleMatches } = await import("@/lib/satzkette-server");
+      return { opened: await openLapsedTurns(), archived: await archiveStaleMatches() };
+    }),
+  );
+
+  /**
    * Summarise newly uploaded materials and turn them into quests.
    *
    * Last, and capped at three per tick, because it is the only job here that
@@ -139,6 +266,23 @@ export async function GET(request: NextRequest) {
     }),
   );
 
+  /**
+   * Turn newly finished class recordings into a transcript, a summary and
+   * the vocabulary that class actually taught — see class-transcription.ts.
+   * Capped even lower than material-ai: an ASR call over a full recording is
+   * the slowest, heaviest thing any cron job here does.
+   */
+  results.push(
+    await run("class-transcription", async () => {
+      try {
+        const { processTranscriptionQueue } = await import("@/lib/class-transcription");
+        return await processTranscriptionQueue(2);
+      } catch (error) {
+        return { skipped: true, reason: error instanceof Error ? error.message : String(error) };
+      }
+    }),
+  );
+
   const failed = results.filter((result) => !result.ok);
   return NextResponse.json(
     { ok: failed.length === 0, ran: results.length, results },
@@ -147,3 +291,13 @@ export async function GET(request: NextRequest) {
     { status: failed.length ? 500 : 200 },
   );
 }
+
+/**
+ * Wrapped rather than marked inside the body: the scope has to be
+ * established before the handler runs, not on its first line. See
+ * withUnscoped in src/lib/tenant/context.ts.
+ */
+export const GET = withUnscoped(
+  "the platform cron dispatcher runs every periodic job for every tenant",
+  handleGET,
+);

@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { resolveAdmin } from "@/lib/admin-roles";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requireAdmin } from "@/lib/admin-roles";
+import { activeTransport } from "@/lib/mailer";
+import {
+  BEHIND_TUITION_MIN_DAYS,
+  computeAll,
+  summariseReceivables,
+} from "@/lib/finance/receivables";
+import { computeChurnRisk, RECENT_WINDOW_DAYS } from "@/lib/student-risk";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -24,162 +28,186 @@ function monthKey(date: Date) {
  * the whole page 403ing — a secretary still needs the student numbers.
  */
 export async function GET() {
-  try {
-    const session = (await getServerSession(authOptions as any)) as any;
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const auth = await requireAdmin();
+  if (!auth.ok) return auth.response;
+  const admin = auth.admin;
 
-    const admin = await resolveAdmin(session.user.id as string);
-    if (!admin) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * DAY);
+  const riskWindowStart = new Date(now.getTime() - RECENT_WINDOW_DAYS * DAY);
 
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * DAY);
-
-    const [
-      students,
-      branches,
-      lecturers,
-      leads,
-      materials,
-      threads,
-      comments,
-      examRegistrations,
-      pendingExamRegistrations,
-      ungradedSubmissions,
-      recentAttendance,
-      connectors,
-      recentPayments,
-      recentStudents,
-      recentSubmissions,
-    ] = await Promise.all([
-      prisma.student.findMany({
-        select: {
-          id: true,
-          level: true,
-          status: true,
-          classType: true,
-          createdAt: true,
-          branch: { select: { id: true, name: true } },
-          user: { select: { name: true, email: true } },
-          payments: { where: { status: "completed" }, select: { amount: true } },
-        },
-        take: 5000,
-      }),
-      prisma.branch.count(),
-      prisma.lecturer.count(),
-      prisma.lead.groupBy({
-        by: ["status"],
-        _count: { id: true },
-      }).catch(() => []),
-      prisma.material.count().catch(() => 0),
-      prisma.thread.count().catch(() => 0),
-      prisma.comment.count().catch(() => 0),
-      prisma.examRegistration.count().catch(() => 0),
-      prisma.examRegistration.count({ where: { status: "pending" } }).catch(() => 0),
-      prisma.assignmentSubmission.count({ where: { score: null } }).catch(() => 0),
-      prisma.attendance.findMany({
-        where: { date: { gte: thirtyDaysAgo } },
-        select: { present: true, status: true },
-      }).catch(() => []),
-      prisma.integrationConnector.findMany({
-        select: { id: true, name: true, enabled: true, status: true, lastSyncAt: true, lastError: true, itemsSynced: true },
-      }).catch(() => []),
-      prisma.payment.findMany({
-        where: {
-          status: "completed",
-          createdAt: { gte: sixMonthsAgo },
-        },
-        select: {
-          amount: true,
-          createdAt: true,
-          method: true,
-          student: { select: { user: { select: { name: true } } } },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 500,
-      }).catch(() => []),
-      prisma.student.findMany({
-        take: 5,
-        orderBy: { createdAt: "desc" },
-        select: {
-          createdAt: true,
-          level: true,
-          user: { select: { name: true } },
-          branch: { select: { name: true } },
-        },
-      }).catch(() => []),
-      prisma.assignmentSubmission.findMany({
-        take: 5,
-        orderBy: { createdAt: "desc" },
-        select: {
-          createdAt: true,
-          student: { select: { user: { select: { name: true } } } },
-          assignment: { select: { title: true } },
-        },
-      }).catch(() => []),
-    ]);
+  const [
+    students,
+    branches,
+    lecturers,
+    leads,
+    materials,
+    messages,
+    moderatedMessages,
+    examRegistrations,
+    pendingExamRegistrations,
+    ungradedSubmissions,
+    recentAttendance,
+    connectors,
+    recentPayments,
+    recentStudents,
+    recentSubmissions,
+  ] = await Promise.all([
+    prisma.student.findMany({
+      select: {
+        id: true,
+        level: true,
+        status: true,
+        classType: true,
+        createdAt: true,
+        branch: { select: { id: true, name: true } },
+        user: { select: { name: true, email: true } },
+        payments: { where: { status: "completed" }, select: { amount: true } },
+        // Churn-risk inputs — see lib/student-risk.ts.
+        notStartedCount: true,
+        attendances: { where: { date: { gte: riskWindowStart } }, select: { present: true, status: true } },
+        videoProgress: { orderBy: { updatedAt: "desc" }, take: 1, select: { updatedAt: true } },
+        journeyEvents: { orderBy: { occurredAt: "desc" }, take: 1, select: { occurredAt: true } },
+      },
+      take: 5000,
+    }).catch(() => []),
+    prisma.branch.count().catch(() => 0),
+    prisma.lecturer.count().catch(() => 0),
+    prisma.lead.groupBy({ by: ["status"], _count: { id: true } }).catch(() => []),
+    prisma.material.count().catch(() => 0),
+    prisma.message.count().catch(() => 0),
+    prisma.message.count({ where: { hiddenAt: { not: null } } }).catch(() => 0),
+    prisma.examRegistration.count().catch(() => 0),
+    // "registered" is the real awaiting-confirmation state — "pending" was
+    // never a value this column takes, so this count silently read 0 always.
+    prisma.examRegistration.count({ where: { status: "registered" } }).catch(() => 0),
+    prisma.assignmentSubmission.count({ where: { score: null } }).catch(() => 0),
+    prisma.attendance.findMany({
+      where: { date: { gte: thirtyDaysAgo } },
+      select: { present: true, status: true },
+    }).catch(() => []),
+    prisma.integrationConnector.findMany({
+      select: { id: true, name: true, enabled: true, status: true, lastSyncAt: true, lastError: true, itemsSynced: true },
+    }).catch(() => []),
+    prisma.payment.findMany({
+      where: { status: "completed", createdAt: { gte: sixMonthsAgo } },
+      select: {
+        amount: true,
+        createdAt: true,
+        method: true,
+        student: { select: { id: true, user: { select: { name: true } } } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    }).catch(() => []),
+    prisma.student.findMany({
+      take: 5,
+      orderBy: { createdAt: "desc" },
+      select: { id: true, createdAt: true, level: true, user: { select: { name: true } }, branch: { select: { name: true } } },
+    }).catch(() => []),
+    prisma.assignmentSubmission.findMany({
+      take: 5,
+      orderBy: { createdAt: "desc" },
+      select: {
+        createdAt: true,
+        student: { select: { id: true, user: { select: { name: true } } } },
+        assignment: { select: { title: true } },
+      },
+    }).catch(() => []),
+  ]);
 
   // ---- Payment cohorts -------------------------------------------------
-  // Which side of the tuition paywall every student sits on. "Registered only"
-  // is the group the padlock is showing to, and the group worth chasing.
-  const cohorts = { unpaid: 0, registeredOnly: 0, depositPaid: 0, fullPaid: 0 };
-  let expectedRevenue = 0;
-  let collectedRevenue = 0;
-  const atRisk: Array<{ name: string; email: string; level: string; branch: string; paid: number; owed: number; daysEnrolled: number }> = [];
+  //
+  // COMPUTED IN src/lib/finance/receivables.ts, NOT HERE.
+  //
+  // The fee table, the deposit rate and the fortnight clock used to be applied
+  // in this loop and nowhere else, which is why every money figure on the
+  // dashboard was a dead end: the page could say "7 behind on tuition" and had
+  // no way to hand those seven to another screen, because no other screen could
+  // work out who they were. The rule lives in one module now and the students
+  // roster filters by the same one, so a tile can link to its own contents.
+  const finance = computeAll(
+    students.map((student) => ({
+      id: student.id,
+      level: student.level,
+      status: student.status,
+      classType: student.classType,
+      createdAt: student.createdAt,
+      branch: student.branch,
+      user: student.user,
+      payments: student.payments,
+    })),
+    now,
+  );
+
+  const summary = summariseReceivables(finance);
+  const cohorts = summary.cohortCounts;
+  const expectedRevenue = summary.expected;
+  const collectedRevenue = summary.collected;
+
   const byLevel: Record<string, number> = {};
-  const byBranch: Record<string, { name: string; students: number; collected: number; expected: number }> = {};
+  for (const row of finance) byLevel[row.level] = (byLevel[row.level] ?? 0) + 1;
 
-  for (const student of students) {
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
-    const fee = tuitionFeeFor(feeLookup);
-    const deposit = requiredDepositFor(feeLookup);
-    const paid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const atRisk = finance
+    .filter((row) => row.behindOnTuition)
+    .sort((a, b) => b.daysEnrolled - a.daysEnrolled)
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      level: row.level,
+      branch: row.branch,
+      branchId: row.branchId,
+      paid: row.paid,
+      owed: row.owedOnDeposit,
+      daysEnrolled: row.daysEnrolled,
+    }));
 
-    expectedRevenue += fee;
-    collectedRevenue += paid;
-
-    if (paid <= 0) cohorts.unpaid += 1;
-    else if (paid >= fee) cohorts.fullPaid += 1;
-    else if (paid >= deposit) cohorts.depositPaid += 1;
-    else cohorts.registeredOnly += 1;
-
-    byLevel[student.level] = (byLevel[student.level] ?? 0) + 1;
-
-    const branchKey = student.branch?.id ?? "unassigned";
-    const branchEntry = byBranch[branchKey] ?? {
-      name: student.branch?.name ?? "Unassigned",
-      students: 0,
-      collected: 0,
-      expected: 0,
-    };
-    branchEntry.students += 1;
-    branchEntry.collected += paid;
-    branchEntry.expected += fee;
-    byBranch[branchKey] = branchEntry;
-
-    const daysEnrolled = Math.floor((now.getTime() - student.createdAt.getTime()) / DAY);
-    // Two weeks in and still short of the deposit: the class has started
-    // without them, so this is the chase list.
-    if (paid < deposit && daysEnrolled >= 14) {
-      atRisk.push({
-        name: student.user?.name ?? "Unnamed",
-        email: student.user?.email ?? "",
-        level: student.level,
-        branch: student.branch?.name ?? "Unassigned",
-        paid,
-        owed: deposit - paid,
-        daysEnrolled,
-      });
-    }
-  }
-
-  atRisk.sort((a, b) => b.daysEnrolled - a.daysEnrolled);
+  /**
+   * CHURN RISK — a different question from `atRisk` above.
+   *
+   * `atRisk` means one specific thing: behind on tuition. A fully-paid
+   * student who has gone quiet for three weeks is invisible to it. This is
+   * the other signal — engagement/dropout risk — kept under its own name
+   * ("churn risk" / "Going quiet") everywhere so the two are never confused.
+   * See lib/student-risk.ts.
+   *
+   * `finance` and `students` are the same length in the same order (`finance`
+   * is `students.map(...)` via computeAll), so this zips by index rather than
+   * a second pass over the database.
+   */
+  const churnRisk = students
+    .map((student, i) => {
+      const financeRow = finance[i];
+      const risk = computeChurnRisk(
+        {
+          id: student.id,
+          createdAt: student.createdAt,
+          notStartedCount: student.notStartedCount,
+          recentAttendance: student.attendances,
+          lastVideoActivityAt: student.videoProgress[0]?.updatedAt ?? null,
+          lastJourneyEventAt: student.journeyEvents[0]?.occurredAt ?? null,
+          behindOnTuition: financeRow.behindOnTuition,
+        },
+        now,
+      );
+      return { financeRow, risk };
+    })
+    .filter(({ risk }) => risk.level === "high" || risk.level === "critical")
+    .sort((a, b) => b.risk.score - a.risk.score)
+    .map(({ financeRow, risk }) => ({
+      id: financeRow.id,
+      name: financeRow.name,
+      email: financeRow.email,
+      level: financeRow.level,
+      branch: financeRow.branch,
+      branchId: financeRow.branchId,
+      reason: risk.reasons[0] ?? "Showing signs of disengaging",
+      score: risk.score,
+    }));
 
   // ---- Revenue trend ---------------------------------------------------
   // Label is taken from the same Date that produced the key. Re-parsing
@@ -220,15 +248,28 @@ export async function GET() {
   // needs it too, so it is read here rather than duplicated.
   const feedShowsMoney = admin.can("payments");
 
+  /**
+   * `studentId` is only emitted to an admin who may open the file it points at.
+   * A `data_comm` manager legitimately sees the feed — it is the pulse of the
+   * school — but has no `students` capability, and a link that 403s on arrival
+   * is worse than no link. The field is dropped rather than nulled so the page
+   * renders a plain row for them with nothing to click.
+   */
+  const feedLinksToFiles = admin.can("students");
+  const linkTo = (studentId: string | null | undefined) =>
+    feedLinksToFiles && studentId ? { studentId } : {};
+
   const activity = [
     ...recentStudents.map((student) => ({
       kind: "signup" as const,
       at: student.createdAt.toISOString(),
+      ...linkTo(student.id),
       text: `${student.user?.name ?? "A new student"} enrolled${student.branch?.name ? ` at ${student.branch.name}` : ""} (${student.level})`,
     })),
     ...recentPayments.slice(0, 5).map((payment) => ({
       kind: "payment" as const,
       at: payment.createdAt.toISOString(),
+      ...linkTo(payment.student?.id),
       // THE THIRD PLACE THE SAME LEAK LIVED. Headline finance was gated, the
       // at-risk balances were not, and neither was this — a running feed of
       // "Running Student paid ₦180,000 via manual" on the front page of a
@@ -240,6 +281,7 @@ export async function GET() {
     ...recentSubmissions.map((submission) => ({
       kind: "submission" as const,
       at: submission.createdAt.toISOString(),
+      ...linkTo(submission.student?.id),
       text: `${submission.student?.user?.name ?? "A student"} submitted "${submission.assignment?.title ?? "an assignment"}"`,
     })),
   ]
@@ -254,13 +296,30 @@ export async function GET() {
   const newStudentsThisMonth = students.filter((student) => student.createdAt >= startOfMonth).length;
 
   const canSeeMoney = admin.can("payments");
-  const nodeProcess = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
-  const mailersendKey = nodeProcess?.env?.MAILERSEND_API_KEY?.trim() ?? "";
-  const smtpHost = nodeProcess?.env?.SMTP_HOST?.trim() ?? "";
 
   return NextResponse.json({
     adminRole: admin.adminRole,
     generatedAt: now.toISOString(),
+
+    /**
+     * WHAT THIS READER CAN ACTUALLY OPEN.
+     *
+     * Every figure on the dashboard is a link now, and a link that lands on
+     * "Not your area" is worse than a figure that was never clickable — it
+     * reads as the portal being broken rather than as a boundary. The page
+     * cannot work this out for itself; it knows the role name but not what the
+     * role grants, and a second copy of the grants table in the client is a
+     * second copy to forget to update. So the door list is sent with the data
+     * and the page picks each destination from it.
+     *
+     * An Accountant is the case that forced this: they hold `payments` and not
+     * `students`, so their at-risk rows lead into the finance workspace while a
+     * Secretary's lead to the student file.
+     */
+    viewer: {
+      adminRole: admin.adminRole,
+      capabilities: admin.capabilities,
+    },
 
     school: {
       students: students.length,
@@ -270,29 +329,32 @@ export async function GET() {
       branches,
       lecturers,
       materials,
-      threads,
-      comments,
+      messages,
+      moderatedMessages,
       examRegistrations,
       byLevel,
     },
 
     // Per-branch performance. Money columns follow the same capability rule as
     // the finance block, so a secretary sees head counts without revenue.
-    branchPerformance: Object.values(byBranch)
+    // `id` rides along so the row can link to its own roster rather than to a
+    // branch list the reader then has to search.
+    branchPerformance: summary.byBranch
       .map((branch) => ({
+        id: branch.key === "unassigned" ? null : branch.key,
         name: branch.name,
         students: branch.students,
         collected: canSeeMoney ? branch.collected : null,
         expected: canSeeMoney ? branch.expected : null,
-        collectionRate:
-          canSeeMoney && branch.expected > 0 ? Math.round((branch.collected / branch.expected) * 100) : null,
+        outstanding: canSeeMoney ? branch.outstanding : null,
+        collectionRate: canSeeMoney ? branch.collectionRate : null,
       }))
       .sort((a, b) => b.students - a.students),
 
     cohorts,
 
     // The whole point of the paywall: how many are stuck behind it.
-    lockedOut: cohorts.unpaid + cohorts.registeredOnly,
+    lockedOut: summary.lockedOut,
 
     attendance: {
       rate: attendanceRate,
@@ -326,6 +388,17 @@ export async function GET() {
     actionQueue: {
       atRiskCount: atRisk.length,
       /**
+       * The rule, in words, and the exact set it selected.
+       *
+       * The dashboard prints the rule under the tile so the number explains
+       * itself, and passes the ids to the roster so the destination is the
+       * same eight people even if somebody pays while the page is open. Both
+       * come from the count rather than being restated by the client, which is
+       * how the two used to drift.
+       */
+      atRiskRule: `Enrolled ${BEHIND_TUITION_MIN_DAYS}+ days and still short of the deposit`,
+      atRiskIds: atRisk.map((student) => student.id),
+      /**
        * THE BALANCES COME OFF FOR ANYONE WITHOUT `payments`.
        *
        * The `finance` block above was gated from the day sub-roles landed, and
@@ -344,26 +417,55 @@ export async function GET() {
         canSeeMoney
           ? student
           : {
+              // The id survives the money strip: it is not a balance, and it
+              // is what turns "chase this person" into a click.
+              id: student.id,
               name: student.name,
               email: student.email,
               level: student.level,
               branch: student.branch,
+              branchId: student.branchId,
               daysEnrolled: student.daysEnrolled,
             },
       ),
       pendingExamRegistrations,
       ungradedSubmissions,
       leadsAwaitingInvite: leadCounts.new ?? 0,
+
+      /**
+       * Not financial data, so unlike `atRisk` this needs no `canSeeMoney`
+       * strip — a Secretary sees exactly the same row a bursar would.
+       */
+      churnRiskCount: churnRisk.length,
+      churnRiskRule: "High or critical churn risk — attendance, activity, or repeated \"not yet\" answers",
+      churnRiskIds: churnRisk.map((student) => student.id),
+      churnRisk: churnRisk.slice(0, 8),
     },
 
     health: {
-      // Nothing has ever actually been delivered without this key — worth
-      // saying so on the front page rather than in a log file.
-      emailProvider: mailersendKey
-        ? { name: "MailerSend", configured: true }
-        : smtpHost
-        ? { name: "SMTP", configured: true }
-        : { name: "None", configured: false },
+      /**
+       * ASKED OF THE MAILER, NOT RE-DERIVED HERE.
+       *
+       * This used to test `MAILERSEND_API_KEY || SMTP_HOST` — its own second
+       * opinion about a question `src/lib/mailer.ts` already answers, and a
+       * wrong one in both directions. A school configured the supported way,
+       * with `EMAIL_PROVIDER=brevo` (which supplies the host from a preset, so
+       * SMTP_HOST is deliberately unset), was told on the front page that it
+       * had no email provider while mail was going out perfectly. And an
+       * SMTP_HOST with no credentials passed this check while `buildTransport`
+       * correctly refused it, so the banner stayed quiet on a server that could
+       * not deliver a thing.
+       *
+       * A health check that disagrees with the subsystem it reports on is worse
+       * than no health check: it teaches people to ignore the banner.
+       */
+      emailProvider: (() => {
+        const transport = activeTransport();
+        return {
+          name: transport === "mailersend" ? "MailerSend" : transport === "smtp" ? "SMTP" : "None",
+          configured: transport !== "none",
+        };
+      })(),
       integrations: connectors.map((connector) => ({
         id: connector.id,
         name: connector.name,
@@ -377,11 +479,4 @@ export async function GET() {
 
     activity,
   });
-  } catch (error) {
-    console.error("[admin/overview] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to load admin overview", details: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
-    );
-  }
 }

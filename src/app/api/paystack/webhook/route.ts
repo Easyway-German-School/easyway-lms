@@ -5,7 +5,10 @@ import { sendEmail } from "@/lib/mailer";
 import { classifyPaymentTransaction } from "@/lib/payment";
 import { settleExamFee } from "@/lib/exam-payments";
 import { enrollIfPathwayExists } from "@/lib/paystack-verify";
+import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { KIND, notifyInBackground } from "@/lib/notify";
+import { withUnscoped } from "@/lib/tenant/context";
+import { emitWebhook } from "@/lib/webhooks";
 
 // Paystack signs every webhook with HMAC SHA512 of the raw body, keyed by the
 // secret key, in the x-paystack-signature header. Without this check anyone who
@@ -37,7 +40,13 @@ function getPaymentDescription(paymentType: string, pathwayName: string) {
   return `Full payment for ${pathwayName}`;
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
+  /**
+   * Paystack knows nothing about tenants — it posts a payment reference and
+   * that reference is what identifies the school. So the lookup runs unscoped
+   * and the tenant comes off the record it finds, rather than the other way
+   * round.
+   */
   try {
     const body = await request.text();
 
@@ -75,6 +84,34 @@ export async function POST(request: Request) {
     // redirect alone loses the payment whenever someone closes the tab on
     // Paystack's success page — the money is taken and the seat stays unpaid.
     // settleExamFee is idempotent, so both paths arriving is harmless.
+    /**
+     * A school topping up its platform credit, which is a different kind of
+     * money from everything else that arrives here.
+     *
+     * Every other payment on this endpoint is a student paying the school. This
+     * one is the school paying us, so it must never reach the student payment
+     * path — a top-up recorded as tuition would credit some student with
+     * ₦50,000 they never paid, and the reconciliation would be a nightmare.
+     * Branched first and returned immediately for that reason.
+     *
+     * `creditTenant` is idempotent on the Paystack reference, so Paystack's
+     * retries and the browser callback both landing is harmless.
+     */
+    if (metadata.kind === "platform_topup" && metadata.tenantId) {
+      const { creditTenant } = await import("@/lib/usage/record");
+      const result = await creditTenant({
+        tenantId: String(metadata.tenantId),
+        amountKobo: BigInt(Math.round(Number(data.amount || 0))),
+        reference: String(data.reference || ""),
+        kind: "topup",
+        note: "Paystack top-up",
+      });
+      return NextResponse.json({
+        received: true,
+        topup: { applied: result.applied, balanceKobo: result.balanceKobo.toString() },
+      });
+    }
+
     if (metadata.kind === "exam_fee" && metadata.registrationId) {
       const amount = Math.round(Number(data.amount || 0) / 100);
       const result = await settleExamFee({
@@ -83,6 +120,83 @@ export async function POST(request: Request) {
         amount,
       });
       return NextResponse.json({ received: true, examFee: result });
+    }
+
+    /**
+     * A student upgrading to one-to-one tuition. Recorded as its own payment,
+     * separate from the tuition/deposit ledger above, and — unlike every other
+     * branch here — it changes the student's own row: classType flips to
+     * "private" so the tutor-assignment queue on the admin side picks them up.
+     * Idempotent on the Paystack reference, same as the tuition path, so a
+     * retried webhook cannot double-charge or double-flip the flag.
+     */
+    if (metadata.kind === "private_class_upgrade" && metadata.studentId) {
+      const upgradeStudentId = String(metadata.studentId);
+      const upgradeReference = String(data.reference || "");
+      const upgradeAmount = Math.round(Number(data.amount || 0) / 100);
+
+      const alreadyRecorded = upgradeReference
+        ? await prisma.payment.findFirst({ where: { stripeSessionId: upgradeReference } })
+        : null;
+      if (alreadyRecorded) {
+        return NextResponse.json({ received: true });
+      }
+
+      const upgradeStudent = await prisma.student.findUnique({
+        where: { id: upgradeStudentId },
+        include: { user: true },
+      });
+      if (!upgradeStudent) {
+        console.error("Paystack webhook could not resolve student for private class upgrade", { upgradeStudentId });
+        return NextResponse.json({ received: true });
+      }
+
+      await prisma.payment.create({
+        data: {
+          studentId: upgradeStudent.id,
+          amount: upgradeAmount,
+          currency: "NGN",
+          status: "completed",
+          method: "paystack",
+          description: "Private (one-to-one) class upgrade",
+          stripeSessionId: upgradeReference,
+          paymentIntentId: upgradeReference,
+        },
+      });
+
+      await prisma.student.update({
+        where: { id: upgradeStudent.id },
+        data: { classType: "private" },
+      });
+
+      notifyInBackground({
+        to: { studentIds: [upgradeStudent.id] },
+        kind: KIND.paymentReceived,
+        severity: "success",
+        title: "Private classes unlocked",
+        message: "Your one-to-one upgrade payment was received. The office will assign your tutor shortly.",
+        link: "/dashboard",
+      });
+
+      notifyInBackground({
+        to: { audience: "admin", capability: "students" },
+        kind: KIND.paymentReceived,
+        severity: "success",
+        title: "Private class upgrade purchased",
+        message: `${upgradeStudent.user?.name || "A student"} paid ₦${upgradeAmount.toLocaleString()} to switch to private classes. Assign a tutor.`,
+        link: "/admin/lecturer-invite",
+        push: true,
+      });
+
+      if (upgradeStudent.user?.email) {
+        await sendEmail({
+          to: upgradeStudent.user.email,
+          subject: "Your private class upgrade was received",
+          html: `<p>Hello ${upgradeStudent.user.name || "there"},</p><p>We received your payment for one-to-one private tuition. Our office will assign a dedicated tutor and confirm your schedule shortly.</p><p>Thank you,<br/>Easyway LMS</p>`,
+        });
+      }
+
+      return NextResponse.json({ received: true });
     }
 
     const rawStudentId = String(metadata.studentId || metadata.userId || "");
@@ -153,12 +267,42 @@ export async function POST(request: Request) {
         },
       });
 
-      await prisma.invoice.update({
-        where: { id: existingPayment.invoiceId ?? "" },
-        data: { status: paymentClassification.invoiceStatus },
-      }).catch(() => null);
+      /**
+       * Mark the invoice paid — but only when there is one.
+       *
+       * This was `where: { id: existingPayment.invoiceId ?? "" }` with a
+       * `.catch(() => null)`. Twenty-one of thirty-six completed payments have
+       * no invoice, so that fell through to a lookup for id `""`, Prisma threw
+       * P2025, and the catch ate it. Nothing was broken by it — those payments
+       * genuinely have no invoice to update — but it meant a REAL failure here
+       * was indistinguishable from the ordinary case. A connection blip while
+       * marking an invoice paid would leave a student showing as owing money
+       * they had paid, behind a paywall, and nobody would ever find out.
+       *
+       * Now the no-invoice case is a condition rather than an exception, and a
+       * genuine failure is logged loudly instead of discarded. Still not
+       * allowed to throw: the money is already recorded above, and rejecting
+       * the webhook would make Paystack retry a payment we have accepted.
+       */
+      if (existingPayment.invoiceId) {
+        try {
+          await prisma.invoice.update({
+            where: { id: existingPayment.invoiceId },
+            data: { status: paymentClassification.invoiceStatus },
+          });
+        } catch (error) {
+          console.error(
+            `[paystack] payment ${existingPayment.id} recorded, but invoice ${existingPayment.invoiceId} could not be marked ${paymentClassification.invoiceStatus}:`,
+            error,
+          );
+        }
+      }
 
       await enrollIfPathwayExists({ studentId: student.id, pathwayId, reference: paymentReference });
+
+      await promoteIfNextLevelPayment(student.id, metadata).catch((error) => {
+        console.error("Paystack webhook: next-level promotion failed", { studentId: student.id, error });
+      });
 
       return NextResponse.json({ received: true });
     }
@@ -193,7 +337,32 @@ export async function POST(request: Request) {
       },
     });
 
+    /**
+     * Tell any system the school has plugged in.
+     *
+     * Queued rather than sent, and it cannot throw, so a partner's endpoint
+     * being down has no bearing on whether this payment was recorded. The
+     * tenant comes from the student, because a provider webhook carries none.
+     */
+    await emitWebhook(
+      "payment.recorded",
+      {
+        paymentId: payment.id,
+        studentId: student.id,
+        studentCode: student.studentCode,
+        amount: paymentAmount,
+        currency: "NGN",
+        type: effectivePaymentType,
+        reference: paymentReference,
+      },
+      { tenantId: student.tenantId ?? undefined },
+    );
+
     await enrollIfPathwayExists({ studentId: student.id, pathwayId, reference: paymentReference });
+
+    await promoteIfNextLevelPayment(student.id, metadata).catch((error) => {
+      console.error("Paystack webhook: next-level promotion failed", { studentId: student.id, error });
+    });
 
     const notificationMessage =
       effectivePaymentType === "registration"
@@ -341,3 +510,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
   }
 }
+
+/**
+ * Wrapped rather than marked inside the body: the scope has to be
+ * established before the handler runs, not on its first line. See
+ * withUnscoped in src/lib/tenant/context.ts.
+ */
+export const POST = withUnscoped(
+  "payment provider webhook carries no tenant; the payment record identifies it",
+  handlePOST,
+);

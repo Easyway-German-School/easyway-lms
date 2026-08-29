@@ -54,6 +54,12 @@ export default function LecturerAnnouncementsPage() {
   const [urgent, setUrgent] = useState(false);
   const [sending, setSending] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  // The drafting aid keeps its own scratch field rather than writing into
+  // `message` as you type. A tutor's own words are the input, and overwriting
+  // them with the model's output before they have seen it would make the
+  // feature destructive.
+  const [notes, setNotes] = useState("");
+  const [drafting, setDrafting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -80,6 +86,42 @@ export default function LecturerAnnouncementsPage() {
     () => title.trim().length > 0 && message.trim().length > 0 && recipientCount > 0 && !sending,
     [title, message, recipientCount, sending],
   );
+
+  /**
+   * Ask Claude to write it up, and put the result in the real fields.
+   *
+   * It fills the form rather than sending, so the tutor reads and edits before
+   * anything reaches a student. The notes are kept afterwards, not cleared: the
+   * usual second action is "not quite — try again" and clearing the input would
+   * make them retype it.
+   */
+  async function draft() {
+    if (notes.trim().length < 5 || drafting) return;
+    setDrafting(true);
+    setFeedback(null);
+
+    try {
+      const response = await fetch("/api/lecturer/announcements/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: notes.trim(), urgent }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setFeedback({ tone: "error", text: data.error ?? "Could not draft that." });
+        return;
+      }
+
+      setTitle(data.draft.title);
+      setMessage(data.draft.message);
+      setFeedback({ tone: "ok", text: "Draft ready — read it over and edit anything before you send." });
+    } catch {
+      setFeedback({ tone: "error", text: "Network problem — your notes are still here." });
+    } finally {
+      setDrafting(false);
+    }
+  }
 
   async function send() {
     if (!canSend) return;
@@ -200,6 +242,43 @@ export default function LecturerAnnouncementsPage() {
             )}
 
             <div className="mt-5 space-y-4">
+              {/*
+                Sits ABOVE the real fields, and is optional.
+
+                A tutor who already knows what to say scrolls past it and types
+                into Title and Message as before. The one who has thirty seconds
+                between classes writes "no class thursday, moved to friday same
+                time, bring kapitel 4" and gets something their students will
+                actually read. Both paths end at the same two fields, which is
+                what keeps this an aid rather than a workflow.
+              */}
+              <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--background)] p-4">
+                <label htmlFor="announcement-notes" className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  Write it for me — optional
+                </label>
+                <textarea
+                  id="announcement-notes"
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  rows={2}
+                  placeholder="no class thursday, moved to friday same time, bring kapitel 4"
+                  className="mt-1.5 w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none transition focus:border-[var(--accent)]"
+                />
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void draft()}
+                    disabled={notes.trim().length < 5 || drafting}
+                    className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {drafting ? "Writing…" : "Draft this for me"}
+                  </button>
+                  <p className="text-xs text-[var(--muted)]">
+                    Fills in the title and message below. Nothing is sent until you press send.
+                  </p>
+                </div>
+              </div>
+
               <div>
                 <label htmlFor="announcement-title" className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                   Title

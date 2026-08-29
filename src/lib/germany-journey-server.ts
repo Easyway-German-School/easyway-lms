@@ -212,6 +212,8 @@ export async function loadJourney(
     goalId: student.germanyGoal,
   });
 
+  const privateFocus = student.classType === "private" ? await loadPrivateFocus(student.id, now) : null;
+
   const journey = buildJourney({
     studentName: student.user?.name ?? "",
     branchName,
@@ -225,6 +227,7 @@ export async function loadJourney(
     claimedStages,
     goalId: student.germanyGoal,
     goalNote: student.germanyGoalNote,
+    privateFocus,
     now,
   });
 
@@ -252,6 +255,44 @@ export async function loadJourney(
     tribeStanding,
     stamps,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* A private student's next booked topic                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a one-to-one tutor booked this student in for.
+ *
+ * The next scheduled session's topic wins, because "this is what's coming"
+ * is more useful on a road map than "this is what already happened". A
+ * student with nothing booked yet still sees their last session's topic
+ * rather than nothing — a stale-but-real fact beats a blank line.
+ */
+async function loadPrivateFocus(
+  studentId: string,
+  now: Date,
+): Promise<{ topic: string | null; nextSessionAt: string | null } | null> {
+  try {
+    const upcoming = await prisma.privateClass.findFirst({
+      where: { studentId, status: "scheduled", scheduledAt: { gte: now }, topic: { not: null } },
+      orderBy: { scheduledAt: "asc" },
+      select: { topic: true, scheduledAt: true },
+    });
+    if (upcoming?.topic) {
+      return { topic: upcoming.topic, nextSessionAt: upcoming.scheduledAt.toISOString() };
+    }
+
+    const recent = await prisma.privateClass.findFirst({
+      where: { studentId, status: "completed", topic: { not: null } },
+      orderBy: { scheduledAt: "desc" },
+      select: { topic: true },
+    });
+    return recent?.topic ? { topic: recent.topic, nextSessionAt: null } : null;
+  } catch {
+    // A missing topic is not worth failing the whole map over.
+    return null;
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -709,6 +750,9 @@ export type CohortMember = {
   levelCompletedFor: string | null;
   paymentStatus: string;
   outstanding: number;
+  /** ISO, or null when not held back. */
+  heldBackAt: string | null;
+  heldBackReason: string | null;
 };
 
 /**
@@ -738,6 +782,8 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
       notStartedCount: true,
       notStartedReason: true,
       levelCompletedFor: true,
+      heldBackAt: true,
+      heldBackReason: true,
       studentCode: true,
       user: { select: { name: true, email: true } },
       branch: { select: { name: true } },
@@ -788,6 +834,8 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
       levelCompletedFor: student.levelCompletedFor,
       paymentStatus: money.status,
       outstanding: Math.max(0, tuitionFee - totalPaid),
+      heldBackAt: student.heldBackAt?.toISOString() ?? null,
+      heldBackReason: student.heldBackReason,
     });
   }
 
@@ -877,6 +925,7 @@ export async function completeLevelForStudents(
       kind: "level-complete",
       severity: "success",
       link: "/dashboard",
+      push: true,
       dedupeKey: `level-complete:${now.toISOString().slice(0, 10)}`,
     }).catch((error) => {
       console.error("Level-complete announcement failed", error);
@@ -884,6 +933,53 @@ export async function completeLevelForStudents(
   }
 
   return result;
+}
+
+/**
+ * "Do not sign this student off with the rest of the batch."
+ *
+ * Separate from `completeLevelForStudents` on purpose — this is a decision
+ * to WITHHOLD sign-off, not a variant of granting it. Without it, a student
+ * held back for a failed assessment or an unresolved dispute has no way to
+ * stop reappearing in the cohort console's "select all not signed off" every
+ * time the office works through a batch, since nothing else distinguishes
+ * "not signed off yet" from "not signed off, deliberately."
+ */
+export async function setHeldBack(
+  studentId: string,
+  input: { heldBack: boolean; reason?: string | null },
+  now = new Date(),
+): Promise<void> {
+  if (input.heldBack) {
+    const reason = (input.reason ?? "").trim();
+    if (!reason) {
+      throw new Error("A reason is required to hold a student back");
+    }
+    await prisma.student.update({
+      where: { id: studentId },
+      data: { heldBackAt: now, heldBackReason: reason },
+    });
+    await recordEvent(studentId, {
+      type: "held-back",
+      label: "Held back from sign-off",
+      detail: reason,
+      source: "admin",
+      occurredAt: now,
+    });
+    return;
+  }
+
+  await prisma.student.update({
+    where: { id: studentId },
+    data: { heldBackAt: null, heldBackReason: null },
+  });
+  await recordEvent(studentId, {
+    type: "held-back-cleared",
+    label: "Hold cleared",
+    detail: null,
+    source: "admin",
+    occurredAt: now,
+  });
 }
 
 export { nextLevelAfter };

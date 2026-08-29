@@ -17,13 +17,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { getFile, storageConfigured } from "@/lib/storage";
+import { requireAuthSession } from "@/lib/auth";
+import { getFile, storageConfigured, RECORDING_PREFIX } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest, context: { params: Promise<{ key: string[] }> }) {
-  const session = await getServerSession(authOptions);
+  const session = await requireAuthSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -53,9 +53,18 @@ export async function GET(request: NextRequest, context: { params: Promise<{ key
     const value = upstream.headers.get(header);
     if (value) headers.set(header, value);
   }
-  // Private, because the response depends on the session; immutable, because
-  // every key we mint is unique and a stored file is never rewritten.
-  headers.set("Cache-Control", "private, max-age=31536000, immutable");
+  if (objectKey.startsWith(RECORDING_PREFIX)) {
+    // A class recording must not linger in the browser's disk cache after the
+    // tab closes — that is a de facto offline copy of a video the school does
+    // not want downloadable. `no-store` still lets the SAME request's Range
+    // chunks flow during active playback (that is in-memory buffering, not
+    // caching), it just stops the browser persisting them for next time.
+    headers.set("Cache-Control", "private, no-store");
+  } else {
+    // Everything else this route serves (photos, documents) is a stored,
+    // never-rewritten file behind a unique key — safe, and worth caching hard.
+    headers.set("Cache-Control", "private, max-age=31536000, immutable");
+  }
 
   return new NextResponse(upstream.body, { status: upstream.status, headers });
 }

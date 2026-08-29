@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { captureLead } from "@/lib/leads";
+import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
 
 /**
  * Public enquiry capture, for the registration form on the marketing site.
@@ -25,6 +26,31 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    /**
+     * The comment above says an open POST "costs nothing beyond the enquiry
+     * itself". That was true of a single enquiry and false of a hundred
+     * thousand: this table is the office's morning work queue, and burying a
+     * real prospective student under generated noise costs the school the
+     * enrolment. Metered by IP for that reason.
+     *
+     * Twenty an hour, which no genuine enquirer approaches — the form is
+     * filled in once — while still leaving room for a shared office or campus
+     * connection to send several.
+     */
+    const ip = clientIp(request.headers);
+    const limit = checkRateLimit(`leads:ip:${ip}`, {
+      windowMs: 60 * 60 * 1000,
+      max: 20,
+    });
+
+    if (!limit.ok) {
+      return rateLimitResponse(
+        limit,
+        "Too many enquiries from this connection. Please try again later.",
+        corsHeaders(request),
+      );
+    }
+
     const body = await request.json().catch(() => null);
 
     if (!body || typeof body.name !== "string" || typeof body.email !== "string") {

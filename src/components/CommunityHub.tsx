@@ -1,11 +1,54 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { usePushNotifications } from "@/lib/use-push";
-import { ArrowLeftIcon, BellIcon, BellOffIcon, BranchIcon, CommunityIcon, PinIcon } from "@/components/icons";
+import { uploadFile } from "@/lib/upload";
+import { ALLOWED_REACTIONS, type ReactionSummary } from "@/lib/community-reactions";
+import { STICKERS, StickerArt, stickerById } from "@/lib/community-stickers";
+import {
+  CHAT_THEMES,
+  CHAT_THEME_STORAGE_KEY,
+  chatThemeById,
+  type ChatTheme,
+} from "@/lib/chat-theme";
+import {
+  ArrowLeftIcon,
+  BellIcon,
+  BellOffIcon,
+  BranchIcon,
+  CheckIcon,
+  ChainIcon,
+  CommunityIcon,
+  GameControllerIcon,
+  ImageIcon,
+  PaletteIcon,
+  SendIcon,
+} from "@/components/icons";
 
 /**
- * Discord-style channel rail + Reddit-style threads.
+ * THE COHORT'S GROUP CHAT.
+ *
+ * This replaced a Discord-style channel rail wrapped around Reddit-style
+ * threads, and the reason is that almost nobody posted. A forum asks you to
+ * choose a title and a place before it lets you speak, and that single demand is
+ * enough to stop a nervous student asking whether there was homework. Every one
+ * of these students already runs a group chat on their phone all day. So the
+ * room is now a running conversation in time order, and the only thing between
+ * a student and saying something is a text box.
+ *
+ * Three decisions worth keeping:
+ *
+ *   - The channel rail survives, because a cohort genuinely has more than one
+ *     conversation and burying the tutor's announcements under chat would be
+ *     worse than the forum was. Announcements is read-only for students.
+ *   - Sending is OPTIMISTIC. On the connections this school actually runs on,
+ *     waiting for a round trip before your own words appear makes the app feel
+ *     broken, and people press send twice.
+ *   - New messages arrive by POLLING while the room is open. Not elegant; see
+ *     the note in /api/portal/updates for why a held-open stream is the wrong
+ *     shape on Vercel. It backs off hard when the tab is hidden, which is what
+ *     keeps it cheap.
  *
  * Rendered both full-page (/community) and inside the floating launcher panel,
  * so it takes a `compact` flag rather than duplicating the UI.
@@ -18,641 +61,1408 @@ type Channel = {
   description: string | null;
   kind: string;
   unreadCount: number;
-  _count: { threads: number };
+  _count: { messages: number };
 };
 
 type Space = {
   id: string;
   name: string;
   level: string;
+  sessionSlot: string;
   description: string | null;
   branch: { id: string; name: string };
   channels: Channel[];
 };
 
-type Author = { id: string; name: string | null; role: string };
-
-type Thread = {
-  id: string;
-  title: string;
-  body: string;
-  pinned: boolean;
-  createdAt: string;
-  lastActivityAt: string;
-  author: Author;
-  _count: { comments: number };
-  optimistic?: boolean;
-};
-
-type CommentNode = {
+type ChatMessage = {
   id: string;
   body: string;
+  hidden: boolean;
+  hiddenReason: string | null;
+  mine: boolean;
   createdAt: string;
-  author: Author;
-  children: CommentNode[];
-  optimistic?: boolean;
+  editedAt: string | null;
+  attachment: { url: string; type: string | null; name: string | null } | null;
+  author: { id: string; name: string; role: string };
+  replyTo: { id: string; author: string; body: string; hidden: boolean } | null;
+  /** Folded one-per-emoji, with whether this reader is in the count. */
+  reactions?: ReactionSummary[];
+  /** A sticker from the school's set, sent instead of text. */
+  stickerId?: string | null;
+  /** This message IS an invite card — somebody started a game in this room. */
+  gameMatch?: { id: string; title: string; status: string } | null;
+  /** Staff have held this at the top of the room. */
+  pinned?: boolean;
+  /** Set on a bubble we have drawn but the server has not confirmed. */
+  pending?: boolean;
+  failed?: boolean;
 };
+
+/** How often an open room asks for new messages. */
+const POLL_ACTIVE_MS = 4_000;
+/** And how often when the tab is in the background. */
+const POLL_HIDDEN_MS = 30_000;
+
+/** Rotated at random so a room's stories aren't all called the same thing. */
+const GAME_INVITE_TITLES = ["Let's write something", "Story time", "Add a sentence", "Chain reaction"];
+
+/** The sticker-tray button: a peeling sticker corner. */
+function StickerGlyph({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path
+        d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5V14l-6 6H5.5A1.5 1.5 0 0 1 4 18.5z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M20 14h-4.5a1.5 1.5 0 0 0-1.5 1.5V20" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <circle cx="9" cy="10" r="1.2" fill="currentColor" />
+      <circle cx="14" cy="10" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
 
 function initials(name: string | null) {
   if (!name) return "?";
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
 }
 
-function timeAgo(iso: string) {
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-  return new Date(iso).toLocaleDateString();
+/**
+ * A colour per person, derived from their id.
+ *
+ * The point is not decoration. In a group chat the thing you do fifty times a
+ * minute is work out who is talking, and a stable colour does that faster than
+ * reading a name — which is exactly why every messaging app does it.
+ */
+const NAME_COLOURS = [
+  "text-rose-500",
+  "text-amber-600",
+  "text-emerald-600",
+  "text-sky-600",
+  "text-violet-600",
+  "text-fuchsia-600",
+  "text-teal-600",
+];
+
+function colourFor(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return NAME_COLOURS[hash % NAME_COLOURS.length];
 }
 
-function RoleBadge({ role }: { role: string }) {
-  const r = String(role || "").toLowerCase();
-  if (r !== "lecturer" && r !== "admin") return null;
-  return (
-    <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">
-      {r === "admin" ? "Staff" : "Tutor"}
-    </span>
-  );
+function timeOf(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function Avatar({ name, size = 32 }: { name: string | null; size?: number }) {
-  return (
-    <div
-      className="flex shrink-0 items-center justify-center rounded-full bg-[var(--accent-strong)] font-semibold text-white"
-      style={{ width: size, height: size, fontSize: size * 0.36 }}
-      aria-hidden="true"
-    >
-      {initials(name)}
-    </div>
-  );
+/** "Today" / "Yesterday" / a date — the separator every chat has. */
+function dayLabel(iso: string) {
+  const date = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 86_400_000);
+  const same = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (same(date, today)) return "Today";
+  if (same(date, yesterday)) return "Yesterday";
+  return date.toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" });
 }
 
-function Skeleton({ lines = 3 }: { lines?: number }) {
-  return (
-    <div className="space-y-3" aria-hidden="true">
-      {Array.from({ length: lines }).map((_, i) => (
-        <div key={i} className="animate-pulse rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div className="h-3 w-1/3 rounded bg-[var(--surface-alt)]" />
-          <div className="mt-3 h-3 w-4/5 rounded bg-[var(--surface-alt)]" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function CommentThread({
-  nodes,
-  depth = 0,
-  onReply,
-  replyingTo,
-  replyText,
-  setReplyText,
-  submitReply,
-  busy,
-}: {
-  nodes: CommentNode[];
-  depth?: number;
-  onReply: (id: string | null) => void;
-  replyingTo: string | null;
-  replyText: string;
-  setReplyText: (v: string) => void;
-  submitReply: (parentId: string | null) => void;
-  busy: boolean;
-}) {
-  return (
-    <div className={depth > 0 ? "mt-3 space-y-3 border-l-2 border-[var(--border)] pl-4" : "space-y-3"}>
-      {nodes.map((node) => (
-        <div key={node.id} className={node.optimistic ? "opacity-60" : ""}>
-          <div className="flex gap-3">
-            <Avatar name={node.author.name} size={28} />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold">{node.author.name ?? "Member"}</span>
-                <RoleBadge role={node.author.role} />
-                <span className="text-xs text-[var(--muted)]">{timeAgo(node.createdAt)}</span>
-              </div>
-              <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{node.body}</p>
-              {depth < 4 && (
-                <button
-                  onClick={() => onReply(replyingTo === node.id ? null : node.id)}
-                  className="mt-1 text-xs font-semibold text-[var(--accent)] hover:underline"
-                >
-                  {replyingTo === node.id ? "Cancel" : "Reply"}
-                </button>
-              )}
-
-              {replyingTo === node.id && (
-                <div className="mt-2 flex gap-2">
-                  <input
-                    autoFocus
-                    value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitReply(node.id); } }}
-                    placeholder="Write a reply…"
-                    className="flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm outline-none focus:border-[var(--accent)]"
-                  />
-                  <button
-                    onClick={() => submitReply(node.id)}
-                    disabled={busy || !replyText.trim()}
-                    className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                  >
-                    Send
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-          {node.children.length > 0 && (
-            <CommentThread
-              nodes={node.children}
-              depth={depth + 1}
-              onReply={onReply}
-              replyingTo={replyingTo}
-              replyText={replyText}
-              setReplyText={setReplyText}
-              submitReply={submitReply}
-              busy={busy}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
+const SLOT_LABEL: Record<string, string> = {
+  morning: "Morning",
+  afternoon: "Afternoon",
+  evening: "Evening",
+};
 
 /**
- * Opt-in for lock-screen notifications. Sits at the foot of the channel rail
- * rather than interrupting on load — permission is only ever asked for on a
- * deliberate tap, because a reflexive "Block" cannot be undone from the app.
+ * The Suspense boundary is required, not decorative: `useSearchParams` opts the
+ * tree into client rendering and Next refuses to infer the boundary. This
+ * component is mounted from the floating launcher inside all three portal
+ * shells as well as from /community, so putting it here means no caller has to
+ * remember.
  */
-function NotifyToggle({ compact }: { compact: boolean }) {
-  const { supported, enabled, busy, enable, disable, error } = usePushNotifications();
-  if (!supported) return null;
-
+export default function CommunityHub({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="mt-3 border-t border-[var(--border)] px-2 pt-3">
-      <button
-        type="button"
-        onClick={enabled ? disable : enable}
-        disabled={busy}
-        className={`flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold transition disabled:opacity-50 ${
-          enabled ? "text-[var(--accent)]" : "text-[var(--muted)] hover:bg-[var(--surface)]"
-        }`}
-      >
-        {enabled ? <BellIcon className="h-3.5 w-3.5 shrink-0" /> : <BellOffIcon className="h-3.5 w-3.5 shrink-0" />}
-        <span className="truncate">
-          {busy ? "One moment…" : enabled ? "Notifications on" : compact ? "Notify me" : "Turn on notifications"}
-        </span>
-      </button>
-      {error && <p className="px-2 pb-1 text-[10px] leading-4 text-red-500">{error}</p>}
-    </div>
+    <Suspense
+      fallback={
+        <div className="grid h-64 place-items-center rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-sm text-[var(--muted)]">
+          Opening your class group…
+        </div>
+      }
+    >
+      <CommunityHubInner compact={compact} />
+    </Suspense>
   );
 }
 
-export default function CommunityHub({ compact = false }: { compact?: boolean }) {
+function CommunityHubInner({ compact = false }: { compact?: boolean }) {
+  const searchParams = useSearchParams();
+  const deepLinkChannel = searchParams?.get("channel") ?? null;
+
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [isStaff, setIsStaff] = useState(false);
-  const [scopeNote, setScopeNote] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [canPost, setCanPost] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingRoom, setLoadingRoom] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [attachment, setAttachment] = useState<{ url: string; type: string | null; name: string | null } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  /** Id of the message being corrected, and the text in its box. */
+  const [editing, setEditing] = useState<string | null>(null);
+  /** Which message currently has the emoji row open. One at a time. */
+  const [reactingTo, setReactingTo] = useState<string | null>(null);
+  /** The sticker tray above the composer. */
+  const [stickerTrayOpen, setStickerTrayOpen] = useState(false);
+  /** The games tray above the composer — same shape as the sticker tray. */
+  const [gamesTrayOpen, setGamesTrayOpen] = useState(false);
+  const [startingGame, setStartingGame] = useState(false);
+  const [editDraft, setEditDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showRail, setShowRail] = useState(!compact);
+  /** This device's chat wallpaper/bubble colour. Defaults to the brand look until read from storage. */
+  const [chatTheme, setChatTheme] = useState<ChatTheme>(chatThemeById(null));
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
 
-  const [spaceId, setSpaceId] = useState<string | null>(null);
-  const [channelId, setChannelId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  /** Newest confirmed message id — the cursor the poll asks from. */
+  const cursorRef = useRef<string | null>(null);
 
-  const [threads, setThreads] = useState<Thread[]>([]);
-  const [threadsLoading, setThreadsLoading] = useState(false);
-  const [openThreadId, setOpenThreadId] = useState<string | null>(null);
-  const [comments, setComments] = useState<CommentNode[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const push = usePushNotifications();
 
-  const [composerOpen, setComposerOpen] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newBody, setNewBody] = useState("");
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [replyText, setReplyText] = useState("");
-  const [rootReply, setRootReply] = useState("");
-  const [busy, setBusy] = useState(false);
-  const listRef = useRef<HTMLDivElement>(null);
-
-  // Load the spaces this member is allowed to see.
+  // Read the saved chat theme once the component is mounted — never during
+  // render, so server and first client paint agree and there is nothing to
+  // hydrate-mismatch on.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/community/spaces", { cache: "no-store" });
-        if (!res.ok) throw new Error("Unable to load your community");
-        const data = await res.json();
-        if (cancelled) return;
-
-        setSpaces(data.spaces ?? []);
-        setIsStaff(Boolean(data.isStaff));
-        if ((data.spaces ?? []).length === 0) {
-          setScopeNote(
-            data.scope?.branchId
-              ? "No community has been set up for your level yet."
-              : "Your branch hasn't been set, so we can't place you in a community yet. Please contact your branch coordinator.",
-          );
-        }
-        const first = (data.spaces ?? [])[0];
-        if (first) {
-          setSpaceId(first.id);
-          setChannelId(first.channels[0]?.id ?? null);
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Something went wrong");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const activeSpace = useMemo(() => spaces.find((s) => s.id === spaceId) ?? null, [spaces, spaceId]);
-  const activeChannel = useMemo(
-    () => activeSpace?.channels.find((c) => c.id === channelId) ?? null,
-    [activeSpace, channelId],
-  );
-
-  const loadThreads = useCallback(async (id: string) => {
-    setThreadsLoading(true);
-    setOpenThreadId(null);
     try {
-      const res = await fetch(`/api/community/threads?channelId=${encodeURIComponent(id)}`, {
-        cache: "no-store",
-      });
-      const data = await res.json();
-      setThreads(res.ok ? data.threads ?? [] : []);
-      if (!res.ok) setError(data.error ?? "Unable to load this channel");
-      else setError(null);
+      setChatTheme(chatThemeById(window.localStorage.getItem(CHAT_THEME_STORAGE_KEY)));
     } catch {
-      setError("Unable to load this channel");
-    } finally {
-      setThreadsLoading(false);
+      // Private browsing. The brand default stays in effect for this visit.
     }
   }, []);
 
-  useEffect(() => { if (channelId) loadThreads(channelId); }, [channelId, loadThreads]);
+  const pickChatTheme = useCallback((theme: ChatTheme) => {
+    setChatTheme(theme);
+    setThemePickerOpen(false);
+    try {
+      window.localStorage.setItem(CHAT_THEME_STORAGE_KEY, theme.id);
+    } catch {
+      // Private browsing. The pick still applies for the rest of this visit.
+    }
+  }, []);
 
-  // Mirror of `spaces` for effects that need to read it without depending on
-  // it — depending on it directly would re-run them on every badge update.
-  const spacesRef = useRef(spaces);
-  useEffect(() => { spacesRef.current = spaces; }, [spaces]);
+  const channels = useMemo(() => spaces.flatMap((space) => space.channels), [spaces]);
+  const active = useMemo(() => channels.find((c) => c.id === activeId) ?? null, [channels, activeId]);
+  const activeSpace = useMemo(
+    () => spaces.find((space) => space.channels.some((c) => c.id === activeId)) ?? null,
+    [spaces, activeId],
+  );
 
-  // Opening a channel clears its badge. Zeroed locally first so the red dot
-  // vanishes on tap rather than after a round-trip; the server call just makes
-  // it stick. The event tells the floating launcher to refresh its own count.
+  /* ---------------------------------------------------------------- spaces */
+
+  const loadSpaces = useCallback(async () => {
+    try {
+      const res = await fetch("/api/community/spaces", { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not load your community");
+
+      const list: Space[] = data.spaces ?? [];
+      setSpaces(list);
+      setIsStaff(Boolean(data.isStaff));
+
+      setActiveId((current) => {
+        if (current) return current;
+        const all = list.flatMap((space) => space.channels);
+        // A notification opens the room it came from; otherwise land in the
+        // room people actually talk in rather than the announcement board.
+        const wanted = deepLinkChannel ? all.find((c) => c.id === deepLinkChannel) : undefined;
+        return (wanted ?? all.find((c) => c.slug === "general") ?? all[0])?.id ?? null;
+      });
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load your community");
+    }
+  }, [deepLinkChannel]);
+
   useEffect(() => {
-    if (!channelId) return;
+    void loadSpaces();
+  }, [loadSpaces]);
 
-    // Nothing unread means nothing to clear. Skipping the write matters: every
-    // POST here touches the SQLite file, and simply viewing a channel should
-    // not be a database write.
-    const current = spacesRef.current
-      .flatMap((space) => space.channels)
-      .find((c) => c.id === channelId);
-    if (!current || current.unreadCount === 0) return;
+  /* -------------------------------------------------------------- messages */
 
-    setSpaces((prev) =>
-      prev.map((space) => ({
+  const markRead = useCallback(async (channelId: string) => {
+    await fetch("/api/community/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channelId }),
+    }).catch(() => {});
+    setSpaces((current) =>
+      current.map((space) => ({
         ...space,
         channels: space.channels.map((c) => (c.id === channelId ? { ...c, unreadCount: 0 } : c)),
       })),
     );
+  }, []);
 
-    fetch("/api/community/read", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channelId }),
-    })
-      .then(() => window.dispatchEvent(new Event("easyway:unread-changed")))
-      .catch(() => {
-        /* Badge state is not worth surfacing an error for. */
-      });
-  }, [channelId]);
+  // Opening a room: newest page, jump to the bottom, clear the badge.
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
 
-  async function openThread(id: string) {
-    setOpenThreadId(id);
-    setDetailLoading(true);
-    setComments([]);
-    try {
-      const res = await fetch(`/api/community/threads/${id}`);
-      const data = await res.json();
-      if (res.ok) setComments(data.comments ?? []);
-    } finally {
-      setDetailLoading(false);
-    }
-  }
+    setLoadingRoom(true);
+    setMessages([]);
+    setReplyTo(null);
+    cursorRef.current = null;
 
-  async function createThread() {
-    if (!channelId || !newTitle.trim() || !newBody.trim()) return;
-    setBusy(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/community/messages?channelId=${activeId}`, { cache: "no-store" });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error(data.error || "Could not open this room");
 
-    // Optimistic: show it immediately, reconcile when the server answers.
-    const temp: Thread = {
-      id: `temp-${Date.now()}`,
-      title: newTitle.trim(),
-      body: newBody.trim(),
-      pinned: false,
-      createdAt: new Date().toISOString(),
-      lastActivityAt: new Date().toISOString(),
-      author: { id: "me", name: "You", role: "student" },
-      _count: { comments: 0 },
-      optimistic: true,
+        const list: ChatMessage[] = data.messages ?? [];
+        setMessages(list);
+        setCanPost(data.canPost !== false);
+        setHasMore(Boolean(data.hasMore));
+        cursorRef.current = list.length ? list[list.length - 1].id : null;
+        void markRead(activeId);
+      } catch (roomError) {
+        if (!cancelled) setError(roomError instanceof Error ? roomError.message : "Could not open this room");
+      } finally {
+        if (!cancelled) setLoadingRoom(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
     };
-    setThreads((prev) => [temp, ...prev]);
-    const titleSent = newTitle, bodySent = newBody;
-    setNewTitle(""); setNewBody(""); setComposerOpen(false);
-    listRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [activeId, markRead]);
+
+  /**
+   * The poll.
+   *
+   * Asks only for what arrived after the newest message we hold, so the answer
+   * is an empty array almost every time. It reschedules itself rather than
+   * running on a fixed interval, which stops a slow response stacking requests
+   * on a bad connection — the exact condition under which stacking hurts most.
+   */
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    async function tick() {
+      if (cancelled) return;
+      try {
+        const cursor = cursorRef.current;
+        const query = cursor ? `&after=${encodeURIComponent(cursor)}` : "";
+        const res = await fetch(`/api/community/messages?channelId=${activeId}${query}`, { cache: "no-store" });
+        const data = await res.json();
+
+        if (!cancelled && res.ok && (data.messages?.length ?? 0) > 0) {
+          const incoming: ChatMessage[] = data.messages;
+          setMessages((current) => {
+            // The server's copy of our own optimistic bubble arrives here too.
+            const known = new Set(current.map((m) => m.id));
+            const fresh = incoming.filter((m) => !known.has(m.id));
+            return fresh.length ? [...current, ...fresh] : current;
+          });
+          cursorRef.current = incoming[incoming.length - 1].id;
+          if (document.visibilityState === "visible") void markRead(activeId!);
+        }
+      } catch {
+        // A failed poll is a blip. The next one is four seconds away.
+      } finally {
+        if (!cancelled) {
+          timer = window.setTimeout(
+            tick,
+            document.visibilityState === "visible" ? POLL_ACTIVE_MS : POLL_HIDDEN_MS,
+          );
+        }
+      }
+    }
+
+    timer = window.setTimeout(tick, POLL_ACTIVE_MS);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [activeId, markRead]);
+
+  /**
+   * Follow the conversation, but only if the reader was already at the bottom.
+   *
+   * Yanking somebody down to a new message while they are reading back through
+   * yesterday is the single most irritating thing a chat can do.
+   */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+    if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages]);
+
+  const loadOlder = useCallback(async () => {
+    if (!activeId || !messages.length || loadingOlder) return;
+    setLoadingOlder(true);
+    const el = scrollRef.current;
+    const previousHeight = el?.scrollHeight ?? 0;
 
     try {
-      const res = await fetch("/api/community/threads", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channelId, title: titleSent, body: bodySent }),
-      });
+      const res = await fetch(
+        `/api/community/messages?channelId=${activeId}&before=${encodeURIComponent(messages[0].id)}`,
+        { cache: "no-store" },
+      );
       const data = await res.json();
       if (res.ok) {
-        setThreads((prev) => prev.map((t) => (t.id === temp.id ? data.thread : t)));
-      } else {
-        setThreads((prev) => prev.filter((t) => t.id !== temp.id));
-        setError(data.error ?? "Could not post your thread");
+        setMessages((current) => [...(data.messages ?? []), ...current]);
+        setHasMore(Boolean(data.hasMore));
+        // Hold the reader's place: without this, prepending jumps them to the top.
+        requestAnimationFrame(() => {
+          if (el) el.scrollTop = el.scrollHeight - previousHeight;
+        });
       }
     } catch {
-      setThreads((prev) => prev.filter((t) => t.id !== temp.id));
-      setError("Could not post your thread");
+      // Nothing to say — the button is still there to try again.
     } finally {
-      setBusy(false);
+      setLoadingOlder(false);
     }
-  }
+  }, [activeId, messages, loadingOlder]);
 
-  async function submitReply(parentId: string | null) {
-    const text = parentId ? replyText : rootReply;
-    if (!openThreadId || !text.trim()) return;
-    setBusy(true);
+  /* ----------------------------------------------------------------- send */
 
-    const temp: CommentNode = {
-      id: `temp-${Date.now()}`,
-      body: text.trim(),
-      createdAt: new Date().toISOString(),
-      author: { id: "me", name: "You", role: "student" },
-      children: [],
-      optimistic: true,
-    };
+  /**
+   * Attach a picture.
+   *
+   * The file goes to storage BEFORE the message is sent, not with it — the
+   * shared uploader presigns and puts straight to the bucket, which is what
+   * keeps a phone photo off Vercel's 4.5 MB request-body ceiling. So by the
+   * time Send is pressed there is only a URL to post, and the slow part has
+   * already happened while the student was still typing their caption.
+   */
+  const attach = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setError("Pictures only, for now.");
+      return;
+    }
+    // Generous for a phone photo, mean enough to stop somebody posting a video
+    // frame-grab that every classmate then downloads on mobile data.
+    if (file.size > 8 * 1024 * 1024) {
+      setError("That picture is too large — 8 MB is the limit.");
+      return;
+    }
 
-    const graft = (nodes: CommentNode[]): CommentNode[] =>
-      nodes.map((n) =>
-        n.id === parentId ? { ...n, children: [...n.children, temp] } : { ...n, children: graft(n.children) },
-      );
-    setComments((prev) => (parentId ? graft(prev) : [...prev, temp]));
-    if (parentId) { setReplyText(""); setReplyingTo(null); } else setRootReply("");
+    setUploading(true);
+    setError(null);
+    try {
+      const uploaded = await uploadFile(file, "files");
+      setAttachment({ url: uploaded.url, type: uploaded.contentType, name: uploaded.filename });
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Could not upload that picture");
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
+  /**
+   * `sticker` and `gameMatch` are passed in rather than held in state, because
+   * sending either is a single tap with nothing to compose first — the tray
+   * calls this directly. Never both at once in practice, but nothing here
+   * assumes that.
+   */
+  const send = useCallback(async (sticker?: string, gameMatch?: { id: string; title: string; status: string }) => {
+    const text = draft.trim();
+    // A picture, a sticker or a game invite on its own is a message; the
+    // server agrees.
+    if ((!text && !attachment && !sticker && !gameMatch) || !activeId) return;
+
+    const tempId = `pending-${Date.now()}`;
+    const quoted = replyTo;
+    const picture = attachment;
+
+    setMessages((current) => [
+      ...current,
+      {
+        id: tempId,
+        body: text,
+        hidden: false,
+        hiddenReason: null,
+        mine: true,
+        createdAt: new Date().toISOString(),
+        editedAt: null,
+        attachment: picture,
+        stickerId: sticker ?? null,
+        gameMatch: gameMatch ?? null,
+        author: { id: "me", name: "You", role: "student" },
+        replyTo: quoted
+          ? { id: quoted.id, author: quoted.author.name, body: quoted.body.slice(0, 180), hidden: false }
+          : null,
+        pending: true,
+      },
+    ]);
+    setDraft("");
+    setReplyTo(null);
+    setAttachment(null);
+    setStickerTrayOpen(false);
 
     try {
-      const res = await fetch("/api/community/comments", {
+      const res = await fetch("/api/community/messages", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ threadId: openThreadId, body: temp.body, parentId }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channelId: activeId,
+          body: text,
+          replyToId: quoted?.id ?? null,
+          attachmentUrl: picture?.url ?? null,
+          attachmentType: picture?.type ?? null,
+          attachmentName: picture?.name ?? null,
+          stickerId: sticker ?? null,
+          gameMatchId: gameMatch?.id ?? null,
+        }),
       });
-      if (res.ok) {
-        await openThread(openThreadId);
-        setThreads((prev) =>
-          prev.map((t) => (t.id === openThreadId ? { ...t, _count: { comments: t._count.comments + 1 } } : t)),
-        );
-      }
-    } finally {
-      setBusy(false);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Message not sent");
+
+      // Swap the placeholder for the real row, which carries the id the poll
+      // needs as its cursor.
+      setMessages((current) => current.map((m) => (m.id === tempId ? data.message : m)));
+      cursorRef.current = data.message.id;
+    } catch (sendError) {
+      /**
+       * A failed message stays on screen, marked, with the text recoverable.
+       * Silently dropping it is how somebody discovers an hour later that the
+       * question they asked was never asked.
+       */
+      setMessages((current) => current.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)));
+      setError(sendError instanceof Error ? sendError.message : "Message not sent");
     }
-  }
+  }, [draft, activeId, replyTo, attachment]);
 
-  if (loading) {
-    return <div className={compact ? "p-4" : "p-8"}><Skeleton lines={4} /></div>;
-  }
+  /**
+   * THE GAMES TRAY — the iMessage-style "invite to play", scoped to the room.
+   *
+   * There is no 1:1 chat anywhere in this app; every room here is already the
+   * cohort — "your level and session" — so starting a game FOR THIS ROOM is
+   * the invite. It reuses the ordinary POST /api/games that the Games tab
+   * itself calls (same whole-cohort matchmaking, same per-room cap on active
+   * stories), then drops one message into this thread carrying the new
+   * match's id — send() already knows how to post and render that, the same
+   * one-tap shape a sticker uses.
+   */
+  const startGame = useCallback(async () => {
+    if (!activeSpace || !activeId || startingGame) return;
+    setStartingGame(true);
+    setGamesTrayOpen(false);
+    try {
+      const title = GAME_INVITE_TITLES[Math.floor(Math.random() * GAME_INVITE_TITLES.length)];
+      const res = await fetch("/api/games", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spaceId: activeSpace.id, title }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not start a game");
+      await send(undefined, { id: data.match.id, title: data.match.title, status: data.match.status ?? "active" });
+    } catch (startError) {
+      setError(startError instanceof Error ? startError.message : "Could not start a game");
+    } finally {
+      setStartingGame(false);
+    }
+  }, [activeSpace, activeId, startingGame, send]);
 
-  if (spaces.length === 0) {
+  /**
+   * Editing, and why it is optimistic in one direction only.
+   *
+   * The new text is shown immediately because that is what makes a correction
+   * feel like a correction rather than a request. But if the server refuses —
+   * the message was hidden while the box was open, most likely — the ORIGINAL
+   * comes back, not the attempt. Leaving the failed edit on screen would let
+   * somebody believe they had fixed a wrong room number when they had not.
+   */
+  const saveEdit = useCallback(async () => {
+    const target = editing;
+    const text = editDraft.trim();
+    if (!target || !text) return;
+
+    const original = messages.find((m) => m.id === target)?.body ?? "";
+    setMessages((current) =>
+      current.map((m) => (m.id === target ? { ...m, body: text, editedAt: new Date().toISOString() } : m)),
+    );
+    setEditing(null);
+    setEditDraft("");
+
+    try {
+      const res = await fetch(`/api/community/messages/${target}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: text }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not save that edit");
+    } catch (editError) {
+      setMessages((current) => current.map((m) => (m.id === target ? { ...m, body: original } : m)));
+      setError(editError instanceof Error ? editError.message : "Could not save that edit");
+    }
+  }, [editing, editDraft, messages]);
+
+  const remove = useCallback(async (message: ChatMessage) => {
+    if (!confirm(message.mine ? "Delete your message?" : "Remove this message for everyone?")) return;
+    const res = await fetch(`/api/community/messages/${message.id}`, { method: "DELETE" });
+    if (res.ok) {
+      setMessages((current) =>
+        current.map((m) =>
+          m.id === message.id
+            ? { ...m, hidden: true, body: isStaff ? m.body : "", hiddenReason: "Removed" }
+            : m,
+        ),
+      );
+    }
+  }, [isStaff]);
+
+  /** Hold a message at the top of the room, or let it go again. */
+  const togglePin = useCallback(async (message: ChatMessage) => {
+    const next = !message.pinned;
+    setMessages((current) => current.map((m) => (m.id === message.id ? { ...m, pinned: next } : m)));
+    const res = await fetch("/api/community/moderate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: next ? "pin" : "unpin", messageId: message.id }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      setMessages((current) => current.map((m) => (m.id === message.id ? { ...m, pinned: !next } : m)));
+      setError("Could not change the pin.");
+    }
+  }, []);
+
+  /**
+   * Stop somebody posting for a while.
+   *
+   * Confirmed, and the duration is asked for rather than assumed — a mute is
+   * the one action here that a student feels as a punishment, so it should
+   * take a moment of deliberation rather than a stray tap on a phone.
+   */
+  const muteAuthor = useCallback(async (message: ChatMessage) => {
+    const choice = prompt(
+      `Mute ${message.author.name}? Type 1h, 24h or 7d.\n\nThey can still read the room and get announcements — they just cannot post.`,
+      "24h",
+    );
+    if (!choice) return;
+    const duration = choice.trim().toLowerCase();
+
+    const reason = prompt("Reason (shown to them, optional):", "") ?? "";
+
+    const res = await fetch("/api/community/moderate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "mute", userId: message.author.id, duration, reason }),
+    }).catch(() => null);
+
+    const data = await res?.json().catch(() => ({}));
+    if (!res?.ok) {
+      setError(data?.error || "Could not mute that member.");
+      return;
+    }
+    setError(`${message.author.name} is muted until ${new Date(data.mutedUntil).toLocaleString("en-GB")}.`);
+  }, []);
+
+  /**
+   * Reacting, drawn before the server is asked.
+   *
+   * A reaction has to feel like the tap caused it, which means the pill moves
+   * on the same frame — anything else reads as lag on a phone. The server is
+   * the authority on the final count, so its answer replaces the guess when it
+   * lands; a failure puts the guess back rather than leaving a pill that says
+   * something the database does not.
+   */
+  const toggleReaction = useCallback(async (messageId: string, emoji: string) => {
+    setReactingTo(null);
+
+    const guess = (list: ReactionSummary[] = []): ReactionSummary[] => {
+      const existing = list.find((r) => r.emoji === emoji);
+      if (!existing) return [...list, { emoji, count: 1, mine: true }];
+      if (existing.mine) {
+        // Taking mine back: drop the pill entirely if I was the only one.
+        return existing.count <= 1
+          ? list.filter((r) => r.emoji !== emoji)
+          : list.map((r) => (r.emoji === emoji ? { ...r, count: r.count - 1, mine: false } : r));
+      }
+      return list.map((r) => (r.emoji === emoji ? { ...r, count: r.count + 1, mine: true } : r));
+    };
+
+    let before: ReactionSummary[] = [];
+    setMessages((current) =>
+      current.map((m) => {
+        if (m.id !== messageId) return m;
+        before = m.reactions ?? [];
+        return { ...m, reactions: guess(m.reactions) };
+      }),
+    );
+
+    try {
+      const res = await fetch("/api/community/reactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, emoji }),
+      });
+      if (!res.ok) throw new Error("rejected");
+      const data = await res.json();
+      setMessages((current) =>
+        current.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions ?? [] } : m)),
+      );
+    } catch {
+      setMessages((current) =>
+        current.map((m) => (m.id === messageId ? { ...m, reactions: before } : m)),
+      );
+    }
+  }, []);
+
+  /* ----------------------------------------------------------------- view */
+
+  if (error && !spaces.length) {
     return (
-      <div className={`${compact ? "p-6" : "p-10"} text-center`}>
-        <BranchIcon className="mx-auto h-10 w-10 text-[var(--muted)]" />
-        <h3 className="mt-3 text-lg font-semibold">No community yet</h3>
-        <p className="mt-2 text-sm text-[var(--muted)]">{scopeNote ?? error ?? "Nothing to show."}</p>
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+        <CommunityIcon className="mx-auto h-8 w-8 text-[var(--muted)]" />
+        <p className="mt-3 text-sm font-semibold text-[var(--foreground)]">{error}</p>
       </div>
     );
   }
 
-  const openThreadData = threads.find((t) => t.id === openThreadId) ?? null;
-
-  // Mirrors the server rule in /api/community/threads: announcement channels
-  // are broadcast-only, so students get no composer there.
-  const canPost = !(activeChannel?.kind === "announcement" && !isStaff);
+  if (!spaces.length) {
+    return (
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+        <CommunityIcon className="mx-auto h-8 w-8 text-[var(--muted)]" />
+        <p className="mt-3 text-sm font-semibold text-[var(--foreground)]">Your class group is being set up</p>
+        <p className="mx-auto mt-1.5 max-w-sm text-sm text-[var(--muted)]">
+          Once the office has confirmed your branch, level and class time, your group opens here automatically.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    // In compact mode the hub floats over a page, so it has to stay inside the
-    // viewport on a laptop or a phone rather than running off the top.
-    <div className={`flex flex-col sm:flex-row ${compact ? "h-[min(32rem,60vh)]" : "h-[calc(100vh-13rem)] min-h-[34rem]"} overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]`}>
-      {/* Channel rail */}
-      <aside className={`${compact ? "w-40" : "sm:w-64 w-full"} shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-alt)] p-3`}>
-        {isStaff && spaces.length > 1 && (
-          <select
-            value={spaceId ?? ""}
-            onChange={(e) => {
-              const s = spaces.find((x) => x.id === e.target.value);
-              setSpaceId(e.target.value);
-              setChannelId(s?.channels[0]?.id ?? null);
-            }}
-            className="mb-3 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-xs font-semibold outline-none"
-          >
-            {spaces.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        )}
+    <div
+      className={`flex overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] ${
+        compact ? "h-[30rem]" : "h-[calc(100vh-16rem)] min-h-[32rem]"
+      }`}
+    >
+      {/* ------------------------------------------------------- channel rail */}
+      <aside
+        className={`${
+          showRail ? "flex" : "hidden"
+        } w-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface-alt)] sm:flex sm:w-64`}
+      >
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {spaces.map((space) => (
+            <div key={space.id} className="mb-3">
+              <div className="px-2 py-1.5">
+                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">
+                  <BranchIcon className="h-3 w-3" />
+                  {space.branch?.name}
+                </p>
+                {/*
+                  The sitting is on the label, not implied. Three A1 rooms that
+                  differ only in the time of day are indistinguishable without
+                  it — which is the confusion this whole change exists to end.
+                */}
+                <p className="mt-0.5 text-sm font-semibold text-[var(--foreground)]">
+                  {space.level} · {SLOT_LABEL[space.sessionSlot] ?? space.sessionSlot}
+                </p>
+              </div>
 
-        <div className="px-2 pb-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">
-            {activeSpace?.branch.name}
-          </p>
-          <p className="text-sm font-bold leading-tight">{activeSpace?.level} community</p>
+              {space.channels.map((channel) => {
+                const selected = channel.id === activeId;
+                return (
+                  <button
+                    key={channel.id}
+                    onClick={() => {
+                      setActiveId(channel.id);
+                      // Picking a room takes you INTO it on a narrow screen.
+                      // This used to fire only in the compact embed, so on the
+                      // full page a phone tapped a channel and stayed staring
+                      // at the list.
+                      setShowRail(false);
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition ${
+                      selected
+                        ? "bg-[var(--accent)] font-semibold text-white"
+                        : "text-[var(--foreground)] hover:bg-[var(--surface)]"
+                    }`}
+                  >
+                    <span className={selected ? "text-white/70" : "text-[var(--muted)]"}>#</span>
+                    <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+                    {channel.unreadCount > 0 && !selected ? (
+                      <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold text-white">
+                        {channel.unreadCount > 99 ? "99+" : channel.unreadCount}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
 
-        <nav className="mt-2 space-y-1">
-          {activeSpace?.channels.map((c) => {
-            const active = c.id === channelId;
-            return (
-              <button
-                key={c.id}
-                onClick={() => setChannelId(c.id)}
-                className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm transition ${
-                  active ? "bg-[var(--accent)] font-semibold text-white" : "hover:bg-[var(--surface)]"
-                }`}
-              >
-                <span className={`truncate ${!active && c.unreadCount > 0 ? "font-bold" : ""}`}>
-                  <span className={active ? "text-white/70" : "text-[var(--muted)]"}>#</span> {c.name}
-                </span>
-                {/* Unread wins the slot: a red count is the thing that pulls
-                    someone back in, the plain thread total is just context. */}
-                {c.unreadCount > 0 && !active ? (
-                  <span className="shrink-0 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                    {c.unreadCount > 99 ? "99+" : c.unreadCount}
-                  </span>
-                ) : c._count.threads > 0 ? (
-                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${active ? "bg-white/25 text-white" : "bg-[var(--surface)] text-[var(--muted)]"}`}>
-                    {c._count.threads}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </nav>
-
-        <NotifyToggle compact={compact} />
+        <button
+          onClick={push.enabled ? push.disable : push.enable}
+          disabled={!push.supported || push.busy}
+          className="m-2 flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface)] disabled:opacity-40"
+        >
+          {push.enabled ? <BellOffIcon className="h-3.5 w-3.5" /> : <BellIcon className="h-3.5 w-3.5" />}
+          {push.enabled ? "Mute this device" : "Notify me on this device"}
+        </button>
       </aside>
 
-      {/* Content */}
-      <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-bold">
-              <span className="text-[var(--muted)]">#</span> {activeChannel?.name ?? "Select a channel"}
-            </h2>
-            {activeChannel?.description && !compact && (
-              <p className="truncate text-xs text-[var(--muted)]">{activeChannel.description}</p>
-            )}
+      {/* -------------------------------------------------------------- room
+          ONE PANE AT A TIME BELOW `sm`, both from `sm` up.
+
+          This condition used to be `showRail && compact`, which meant the
+          swap only happened in the compact embed. On the full page at phone
+          width the rail rendered `flex w-full` AND the room rendered `flex`
+          beside it, so the list ate the entire viewport and the conversation
+          was pushed off the right-hand edge — the chat was unreachable on a
+          phone, which is where most of this school reads it.
+      */}
+      <section className={`${showRail ? "hidden" : "flex"} min-w-0 flex-1 flex-col sm:flex`}>
+        <header className="relative flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
+          <button
+            onClick={() => setShowRail(true)}
+            aria-label="All channels"
+            className="rounded-lg p-1.5 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] sm:hidden"
+          >
+            <ArrowLeftIcon className="h-4 w-4" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-[var(--foreground)]">
+              # {active?.name ?? "Community"}
+            </p>
+            <p className="truncate text-xs text-[var(--muted)]">
+              {activeSpace
+                ? `${activeSpace.branch?.name} · ${activeSpace.level} · ${
+                    SLOT_LABEL[activeSpace.sessionSlot] ?? activeSpace.sessionSlot
+                  }`
+                : active?.description}
+            </p>
           </div>
-          {openThreadId ? (
-            <button onClick={() => setOpenThreadId(null)} className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--surface-alt)]">
-              <ArrowLeftIcon className="h-3.5 w-3.5" /> Back
+
+          {/*
+            THIS DEVICE'S CHAT THEME, not the school's.
+
+            Sits beside the room name rather than in a settings page, because
+            the whole point is that a student can find it while they are
+            looking at the chat it changes. Position is per-device only —
+            nothing here writes to the room, so nobody else's screen changes.
+          */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setThemePickerOpen((open) => !open)}
+              aria-label="Chat theme"
+              aria-expanded={themePickerOpen}
+              title="Chat theme"
+              className="rounded-lg p-1.5 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)]"
+            >
+              <PaletteIcon className="h-4 w-4" />
             </button>
-          ) : canPost ? (
-            <button onClick={() => setComposerOpen((v) => !v)} className="shrink-0 rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white">
-              {composerOpen ? "Cancel" : "New post"}
-            </button>
-          ) : (
-            <span className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)]">
-              Tutors only
-            </span>
-          )}
+
+            {themePickerOpen ? (
+              <div
+                role="group"
+                aria-label="Choose a chat theme"
+                className="absolute right-0 top-full z-20 mt-2 w-56 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shadow-2xl"
+              >
+                <p className="px-2 pb-1.5 pt-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">
+                  Chat theme · this device
+                </p>
+                <div className="grid grid-cols-1 gap-0.5">
+                  {CHAT_THEMES.map((theme) => {
+                    const selected = theme.id === chatTheme.id;
+                    return (
+                      <button
+                        key={theme.id}
+                        onClick={() => pickChatTheme(theme)}
+                        aria-pressed={selected}
+                        className={`flex items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-sm transition ${
+                          selected ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--surface-alt)]"
+                        }`}
+                      >
+                        <span
+                          aria-hidden
+                          className="h-6 w-6 shrink-0 rounded-full border border-[var(--border-strong)] shadow-inner"
+                          style={{ background: theme.swatch }}
+                        />
+                        <span className="min-w-0 flex-1 truncate font-medium text-[var(--foreground)]">
+                          {theme.label}
+                        </span>
+                        {selected ? <CheckIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" strokeWidth={3} /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </header>
 
-        <div ref={listRef} className="flex-1 overflow-y-auto p-4">
-          {/* Composer */}
-          {composerOpen && !openThreadId && (
-            <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-              <input
-                autoFocus
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="Title — what's your question?"
-                className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold outline-none focus:border-[var(--accent)]"
-              />
-              <textarea
-                value={newBody}
-                onChange={(e) => setNewBody(e.target.value)}
-                rows={3}
-                placeholder="Add some detail…"
-                className="mt-2 w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-              />
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4"
+          style={{ background: chatTheme.wallpaper }}
+        >
+          {hasMore ? (
+            <div className="pb-2 text-center">
               <button
-                onClick={createThread}
-                disabled={busy || !newTitle.trim() || !newBody.trim()}
-                className="mt-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                onClick={loadOlder}
+                disabled={loadingOlder}
+                className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)] disabled:opacity-40"
               >
-                Post
+                {loadingOlder ? "Loading…" : "Load earlier messages"}
               </button>
             </div>
-          )}
+          ) : null}
 
-          {/* Thread detail */}
-          {openThreadId && openThreadData ? (
-            <div>
-              <article className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
-                <div className="flex items-center gap-2">
-                  <Avatar name={openThreadData.author.name} size={30} />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">{openThreadData.author.name ?? "Member"}</span>
-                      <RoleBadge role={openThreadData.author.role} />
-                    </div>
-                    <span className="text-xs text-[var(--muted)]">{timeAgo(openThreadData.createdAt)}</span>
-                  </div>
-                </div>
-                <h3 className="mt-3 text-lg font-bold">{openThreadData.title}</h3>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{openThreadData.body}</p>
-              </article>
-
-              <div className="mt-4 flex gap-2">
-                <input
-                  value={rootReply}
-                  onChange={(e) => setRootReply(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitReply(null); } }}
-                  placeholder="Write a reply…"
-                  className="flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm outline-none focus:border-[var(--accent)]"
-                />
-                <button
-                  onClick={() => submitReply(null)}
-                  disabled={busy || !rootReply.trim()}
-                  className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  Send
-                </button>
-              </div>
-
-              <div className="mt-5">
-                {detailLoading ? <Skeleton lines={2} /> : comments.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-[var(--muted)]">No replies yet — be the first.</p>
-                ) : (
-                  <CommentThread
-                    nodes={comments}
-                    onReply={setReplyingTo}
-                    replyingTo={replyingTo}
-                    replyText={replyText}
-                    setReplyText={setReplyText}
-                    submitReply={submitReply}
-                    busy={busy}
-                  />
-                )}
-              </div>
-            </div>
-          ) : threadsLoading ? (
-            <Skeleton lines={3} />
-          ) : threads.length === 0 ? (
-            <div className="py-14 text-center">
-              <CommunityIcon className="mx-auto h-9 w-9 text-[var(--muted)]" />
-              <p className="mt-3 text-sm font-semibold">Nothing here yet</p>
+          {loadingRoom ? (
+            <p className="py-10 text-center text-sm text-[var(--muted)]">Opening the room…</p>
+          ) : messages.length === 0 ? (
+            <div className="py-12 text-center">
+              <CommunityIcon className="mx-auto h-8 w-8 text-[var(--muted)]" />
+              <p className="mt-3 text-sm font-semibold text-[var(--foreground)]">No messages yet</p>
               <p className="mt-1 text-sm text-[var(--muted)]">
-                {canPost
-                  ? `Start the first conversation in #${activeChannel?.name}.`
-                  : "Your tutors will post class news here."}
+                {canPost ? "Say hallo — be the first one in." : "Your tutor will post class news here."}
               </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {threads.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => !t.optimistic && openThread(t.id)}
-                  className={`block w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--accent)] ${t.optimistic ? "opacity-60" : ""}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <Avatar name={t.author.name} size={32} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {t.pinned && <PinIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />}
-                        <span className="truncate text-sm font-bold">{t.title}</span>
-                        <RoleBadge role={t.author.role} />
+            messages.map((message, index) => {
+              const previous = messages[index - 1];
+              const newDay = !previous || dayLabel(previous.createdAt) !== dayLabel(message.createdAt);
+              /**
+               * Consecutive messages from one person lose the repeated name and
+               * avatar. It is what turns a list of records into a conversation,
+               * and it buys back a lot of vertical space on a phone.
+               */
+              const grouped =
+                !newDay &&
+                previous?.author.id === message.author.id &&
+                new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() < 5 * 60_000;
+
+              return (
+                <div key={message.id}>
+                  {newDay ? (
+                    <div className="my-4 flex items-center gap-3">
+                      <span className="h-px flex-1 bg-[var(--border)]" />
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">
+                        {dayLabel(message.createdAt)}
+                      </span>
+                      <span className="h-px flex-1 bg-[var(--border)]" />
+                    </div>
+                  ) : null}
+
+                  <div className={`group flex gap-2 ${message.mine ? "flex-row-reverse" : ""}`}>
+                    {!message.mine ? (
+                      <div className="w-8 shrink-0">
+                        {!grouped ? (
+                          <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--accent-soft)] text-[11px] font-bold text-[var(--accent)]">
+                            {initials(message.author.name)}
+                          </span>
+                        ) : null}
                       </div>
-                      <p className="mt-1 line-clamp-2 text-sm text-[var(--muted)]">{t.body}</p>
-                      <div className="mt-2 flex items-center gap-3 text-xs text-[var(--muted)]">
-                        <span>{t.author.name ?? "Member"}</span>
-                        <span>{timeAgo(t.lastActivityAt)}</span>
-                        <span className="font-semibold text-[var(--accent)]">
-                          {t._count.comments} {t._count.comments === 1 ? "reply" : "replies"}
-                        </span>
+                    ) : null}
+
+                    <div className={`max-w-[78%] min-w-0 ${message.mine ? "items-end" : ""}`}>
+                      {!grouped && !message.mine ? (
+                        <p className="mb-0.5 flex items-center gap-1.5 text-xs font-semibold">
+                          <span className={colourFor(message.author.id)}>{message.author.name}</span>
+                          {message.author.role === "lecturer" || message.author.role === "admin" ? (
+                            <span className="rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                              {message.author.role === "admin" ? "Office" : "Tutor"}
+                            </span>
+                          ) : null}
+                        </p>
+                      ) : null}
+
+                      {(() => {
+                        /*
+                          A sticker floats; it does not sit on a coloured
+                          bubble. Painting the accent behind it would put a
+                          pale illustration on an orange slab and lose the
+                          edges of the artwork — every messaging app draws
+                          stickers bare for the same reason.
+                        */
+                        const isSticker = Boolean(message.stickerId && stickerById(message.stickerId));
+                        // A game invite is a card, not a chat bubble — it needs
+                        // its own border and background regardless of theme or
+                        // "mine", the same reasoning that keeps a sticker bare.
+                        const isGameInvite = Boolean(message.gameMatch);
+                        return (
+                      <div
+                        className={`text-sm leading-6 ${
+                          isGameInvite && !message.hidden
+                            ? "p-0"
+                            : isSticker && !message.hidden
+                            ? "bg-transparent p-0"
+                            : `rounded-2xl px-3 py-2 ${
+                                message.hidden
+                                  ? "border border-dashed border-[var(--border)] bg-transparent italic text-[var(--muted)]"
+                                  : message.mine
+                                    ? "text-white"
+                                    : "bg-[var(--surface-alt)] text-[var(--foreground)]"
+                              }`
+                        } ${message.failed ? "ring-1 ring-rose-400" : ""} ${message.pending ? "opacity-60" : ""}`}
+                        // This device's chosen bubble colour/gradient — see
+                        // lib/chat-theme.ts. Only "mine", not hidden, not a
+                        // sticker or a game invite (both float/card bare on
+                        // purpose, see below).
+                        style={
+                          message.mine && !message.hidden && !isSticker && !isGameInvite
+                            ? { background: chatTheme.bubble }
+                            : undefined
+                        }
+                      >
+                        {message.replyTo ? (
+                          <div
+                            className={`mb-1.5 rounded-lg border-l-2 px-2 py-1 text-xs ${
+                              message.mine
+                                ? "border-[var(--border)] bg-[var(--surface-alt)] text-[var(--foreground)]"
+                                : "border-[var(--accent)] bg-[var(--surface)] text-[var(--muted)]"
+                            }`}
+                          >
+                            <p className="font-semibold">{message.replyTo.author}</p>
+                            <p className="truncate">
+                              {message.replyTo.hidden ? "Message removed" : message.replyTo.body}
+                            </p>
+                          </div>
+                        ) : null}
+
+                        {message.hidden ? (
+                          <p>{message.hiddenReason || "This message was removed"}</p>
+                        ) : editing === message.id ? (
+                          /*
+                            The correction happens in place, inside the bubble
+                            it belongs to. Moving the text down to the composer
+                            would put it a long way from the thing being fixed
+                            and leave the reader unsure which message they were
+                            editing once two look alike.
+                          */
+                          <div className="space-y-1.5">
+                            <textarea
+                              autoFocus
+                              value={editDraft}
+                              onChange={(event) => setEditDraft(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Escape") setEditing(null);
+                                if (event.key === "Enter" && !event.shiftKey) {
+                                  event.preventDefault();
+                                  void saveEdit();
+                                }
+                              }}
+                              rows={2}
+                              className="w-full resize-none rounded-lg bg-black/20 px-2 py-1.5 text-sm text-inherit outline-none ring-1 ring-white/30"
+                            />
+                            <div className="flex gap-2 text-[11px] font-semibold">
+                              <button onClick={() => void saveEdit()} className="underline">Save</button>
+                              <button onClick={() => setEditing(null)} className="opacity-70">Cancel</button>
+                            </div>
+                          </div>
+                        ) : message.gameMatch ? (
+                          /*
+                            THE INVITE CARD. Its own bordered tile rather than a
+                            bubble, the way an attachment or a sticker already
+                            reads as "not quite text" — a game invite is
+                            similarly a thing to tap, not a line to read.
+                          */
+                          <a
+                            href={`/games/${message.gameMatch.id}`}
+                            className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-[var(--foreground)] transition hover:border-[var(--accent)]"
+                          >
+                            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                              <ChainIcon className="h-5 w-5" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-bold uppercase tracking-wide text-[var(--accent)]">
+                                Satzkette
+                              </span>
+                              <span className="block truncate text-sm font-semibold">{message.gameMatch.title}</span>
+                              <span className="block text-xs text-[var(--muted)]">
+                                {message.gameMatch.status === "completed" ? "Finished — read the story" : "Tap to add a sentence"}
+                              </span>
+                            </span>
+                          </a>
+                        ) : message.stickerId && stickerById(message.stickerId) ? (
+                          /*
+                            A sticker fills the bubble instead of sitting in it.
+                            An unknown id — one retired from the set — falls
+                            through to the text branch and renders whatever body
+                            there was, rather than leaving a torn tile behind.
+                          */
+                          <StickerArt sticker={stickerById(message.stickerId)!} size={116} />
+                        ) : (
+                          <p className="whitespace-pre-wrap break-words">{message.body}</p>
+                        )}
+
+                        {message.attachment ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={message.attachment.url}
+                            alt={message.attachment.name ?? "Attachment"}
+                            className="mt-2 max-h-64 rounded-xl object-cover"
+                          />
+                        ) : null}
+
+                        <p
+                          className={`mt-1 text-[10px] ${
+                            message.mine && !message.hidden ? "text-white/70" : "text-[var(--muted)]"
+                          }`}
+                        >
+                          {timeOf(message.createdAt)}
+                          {message.editedAt ? " · edited" : ""}
+                          {message.pending ? " · sending…" : ""}
+                          {message.failed ? " · not sent" : ""}
+                        </p>
                       </div>
+                        );
+                      })()}
+
+                      {/*
+                        REACTIONS, under the bubble they belong to.
+
+                        Always rendered when there are any — a reaction that
+                        only appears on hover is invisible to the half of this
+                        school reading on a phone, which is the half that
+                        reacts. A pill the reader is part of is filled rather
+                        than outlined, so "did I already react" is answerable
+                        without counting.
+                      */}
+                      {message.reactions && message.reactions.length > 0 ? (
+                        <div className={`mt-1 flex flex-wrap gap-1 ${message.mine ? "justify-end" : ""}`}>
+                          {message.reactions.map((reaction) => (
+                            <button
+                              key={reaction.emoji}
+                              onClick={() => void toggleReaction(message.id, reaction.emoji)}
+                              aria-pressed={reaction.mine}
+                              aria-label={`${reaction.emoji} ${reaction.count}${reaction.mine ? ", including you" : ""}`}
+                              className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition active:scale-95 ${
+                                reaction.mine
+                                  ? "border-[var(--accent)] bg-[var(--accent)]/15 font-semibold text-[var(--accent)]"
+                                  : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)] hover:border-[var(--accent)]"
+                              }`}
+                            >
+                              <span className="text-sm leading-none">{reaction.emoji}</span>
+                              <span className="tabular-nums">{reaction.count}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {/* The picker, open for one message at a time. */}
+                      {reactingTo === message.id ? (
+                        <div className={`mt-1 flex flex-wrap gap-1 ${message.mine ? "justify-end" : ""}`}>
+                          {ALLOWED_REACTIONS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              onClick={() => void toggleReaction(message.id, emoji)}
+                              aria-label={`React with ${emoji}`}
+                              className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-base leading-none shadow-sm transition hover:scale-110 active:scale-95"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {!message.hidden && !message.pending ? (
+                        /*
+                          VISIBLE ON TOUCH, revealed on hover only where hover
+                          exists. `opacity-0 group-hover:opacity-100` alone
+                          meant Reply, Edit and Delete could not be reached at
+                          all on a phone — there is no hover to trigger them —
+                          so the actions were desktop-only by accident.
+                        */
+                        <div
+                          className={`mt-0.5 flex gap-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100 ${
+                            reactingTo === message.id ? "sm:opacity-100" : ""
+                          } ${message.mine ? "justify-end" : ""}`}
+                        >
+                          <button
+                            onClick={() => setReactingTo((current) => (current === message.id ? null : message.id))}
+                            aria-expanded={reactingTo === message.id}
+                            className="text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--accent)]"
+                          >
+                            React
+                          </button>
+                          <button
+                            onClick={() => {
+                              setReplyTo(message);
+                              composerRef.current?.focus();
+                            }}
+                            className="text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--accent)]"
+                          >
+                            Reply
+                          </button>
+                          {/*
+                            Only the author, and never staff. A moderator who
+                            could rewrite a student's words would make every
+                            transcript here worthless at the exact moment one
+                            matters — so removal is the only power staff get.
+                          */}
+                          {message.mine ? (
+                            <button
+                              onClick={() => {
+                                setEditing(message.id);
+                                setEditDraft(message.body);
+                              }}
+                              className="text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--accent)]"
+                            >
+                              Edit
+                            </button>
+                          ) : null}
+                          {message.mine || isStaff ? (
+                            <button
+                              onClick={() => void remove(message)}
+                              className="text-[11px] font-semibold text-[var(--muted)] hover:text-rose-500"
+                            >
+                              {message.mine ? "Delete" : "Remove"}
+                            </button>
+                          ) : null}
+                          {/*
+                            Staff only, and separate from removal on purpose:
+                            one takes a message away, the other holds it up.
+                          */}
+                          {isStaff ? (
+                            <button
+                              onClick={() => void togglePin(message)}
+                              className="text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--accent)]"
+                            >
+                              {message.pinned ? "Unpin" : "Pin"}
+                            </button>
+                          ) : null}
+                          {isStaff && !message.mine ? (
+                            <button
+                              onClick={() => void muteAuthor(message)}
+                              className="text-[11px] font-semibold text-[var(--muted)] hover:text-amber-600"
+                            >
+                              Mute
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
-                </button>
-              ))}
-            </div>
+                </div>
+              );
+            })
           )}
+          <div ref={bottomRef} />
         </div>
+
+        {/* ------------------------------------------------------- composer */}
+        {canPost ? (
+          <div className="border-t border-[var(--border)] p-3">
+            {replyTo ? (
+              <div className="mb-2 flex items-start gap-2 rounded-xl border-l-2 border-[var(--accent)] bg-[var(--surface-alt)] px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-[var(--accent)]">Replying to {replyTo.author.name}</p>
+                  <p className="truncate text-xs text-[var(--muted)]">{replyTo.body}</p>
+                </div>
+                <button
+                  onClick={() => setReplyTo(null)}
+                  aria-label="Cancel reply"
+                  className="shrink-0 text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : null}
+
+            {/*
+              The picture is shown BEFORE it is sent, with a way to take it off
+              again. A student photographing homework on a phone gets the wrong
+              shot often enough that committing on selection would be cruel.
+            */}
+            {attachment ? (
+              <div className="mb-2 flex items-center gap-3 rounded-xl bg-[var(--surface-alt)] p-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={attachment.url} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
+                <p className="min-w-0 flex-1 truncate text-xs text-[var(--muted)]">
+                  {attachment.name ?? "Picture"} · ready to send
+                </p>
+                <button
+                  onClick={() => setAttachment(null)}
+                  aria-label="Remove picture"
+                  className="shrink-0 rounded-lg px-2 py-1 text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : null}
+
+            {error ? (
+              <p className="mb-2 flex items-center gap-2 text-xs text-rose-500">
+                {error}
+                <button onClick={() => setError(null)} className="underline">dismiss</button>
+              </p>
+            ) : null}
+
+            {/*
+              THE STICKER TRAY.
+
+              Sits above the composer rather than in a popover, because on a
+              phone a popover anchored to a button next to the keyboard is
+              either under the thumb or off the screen. A horizontal scroller
+              is the shape every messaging app already uses here, and it needs
+              no positioning logic to survive a keyboard opening.
+            */}
+            {stickerTrayOpen ? (
+              <div className="mb-2 rounded-2xl bg-[var(--surface-alt)] p-2">
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {STICKERS.map((sticker) => (
+                    <button
+                      key={sticker.id}
+                      onClick={() => void send(sticker.id)}
+                      title={sticker.meaning}
+                      className="shrink-0 rounded-2xl transition hover:scale-105 active:scale-95"
+                    >
+                      <StickerArt sticker={sticker} size={72} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {/*
+              THE GAMES TRAY — the iMessage-style "play together" drawer,
+              scoped to this room the same way the sticker tray is. See
+              startGame() above for why a game invite here means "start a game
+              for the whole cohort chat", not a person-to-person invite.
+            */}
+            {gamesTrayOpen ? (
+              <div className="mb-2 space-y-2 rounded-2xl bg-[var(--surface-alt)] p-3">
+                <button
+                  onClick={() => void startGame()}
+                  disabled={startingGame}
+                  className="flex w-full items-center gap-3 rounded-xl bg-[var(--surface)] p-3 text-left transition hover:brightness-95 disabled:opacity-50"
+                >
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                    <ChainIcon className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-[var(--foreground)]">
+                      {startingGame ? "Starting…" : "Satzkette — start a story"}
+                    </span>
+                    <span className="block text-xs text-[var(--muted)]">
+                      Everyone in this room takes turns adding one sentence.
+                    </span>
+                  </span>
+                </button>
+
+                {isStaff ? (
+                  <a
+                    href="/lecturer/live-quiz"
+                    className="flex w-full items-center gap-3 rounded-xl bg-[var(--surface)] p-3 text-left transition hover:brightness-95"
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                      <GameControllerIcon className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-[var(--foreground)]">Live quiz</span>
+                      <span className="block text-xs text-[var(--muted)]">Set one up for this class.</span>
+                    </span>
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="flex items-end gap-2">
+              {/*
+                `capture` is deliberately absent. On a phone this offers both the
+                camera and the gallery; forcing the camera would block the very
+                common case of sending a photo taken five minutes earlier.
+              */}
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  // Reset first, so picking the same file twice still fires.
+                  event.target.value = "";
+                  if (file) void attach(file);
+                }}
+              />
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                aria-label="Attach a picture"
+                title="Attach a picture"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] disabled:opacity-40"
+              >
+                <ImageIcon className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => {
+                  setStickerTrayOpen((open) => !open);
+                  setGamesTrayOpen(false);
+                }}
+                aria-label="Send a sticker"
+                aria-expanded={stickerTrayOpen}
+                title="Send a sticker"
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-lg transition hover:bg-[var(--surface-alt)] ${
+                  stickerTrayOpen ? "bg-[var(--surface-alt)] text-[var(--accent)]" : "text-[var(--muted)]"
+                }`}
+              >
+                <StickerGlyph className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => {
+                  setGamesTrayOpen((open) => !open);
+                  setStickerTrayOpen(false);
+                }}
+                aria-label="Play a game"
+                aria-expanded={gamesTrayOpen}
+                title="Play a game"
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition hover:bg-[var(--surface-alt)] ${
+                  gamesTrayOpen ? "bg-[var(--surface-alt)] text-[var(--accent)]" : "text-[var(--muted)]"
+                }`}
+              >
+                <GameControllerIcon className="h-5 w-5" />
+              </button>
+              <textarea
+                ref={composerRef}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  // Enter sends, Shift+Enter breaks the line — the convention
+                  // everybody already has in their fingers. Not on a phone,
+                  // where Enter is the only way to get a new line at all.
+                  if (event.key === "Enter" && !event.shiftKey && window.innerWidth >= 640) {
+                    event.preventDefault();
+                    void send();
+                  }
+                }}
+                rows={1}
+                placeholder={uploading ? "Uploading your picture…" : `Message #${active?.name ?? ""}`}
+                className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+              />
+              <button
+                onClick={() => void send()}
+                // A picture with no caption is a perfectly good message, so the
+                // button lives off either one. It stays down while the upload
+                // is in flight, because sending then would post the caption
+                // without the photograph it was written about.
+                disabled={uploading || (!draft.trim() && !attachment)}
+                aria-label="Send"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white transition hover:brightness-110 disabled:opacity-30"
+              >
+                <SendIcon className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="border-t border-[var(--border)] px-4 py-3 text-center text-xs text-[var(--muted)]">
+            Only your tutor and the branch office post in this channel.
+          </p>
+        )}
       </section>
     </div>
   );

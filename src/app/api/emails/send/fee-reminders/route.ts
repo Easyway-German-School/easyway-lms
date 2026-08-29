@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { sendDueFeeReminders } from "@/lib/fee-reminders";
 
 /**
@@ -11,7 +11,7 @@ import { sendDueFeeReminders } from "@/lib/fee-reminders";
  */
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
     
     if (!session || (session.user.role !== "ADMIN" && session.user.role !== "SYSTEM")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
  */
 export async function GET(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
     
     if (!session || (session.user.role !== "ADMIN" && session.user.role !== "SYSTEM")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

@@ -63,7 +63,7 @@ import {
   SparklesIcon,
   StarIcon,
 } from "@/components/icons";
-import TuitionMascot from "@/components/TuitionMascot";
+import Mascot from "@/components/Mascot";
 import GermanFlag from "@/components/journey/GermanFlag";
 import { Birds, Cloud, CrossingPlane, Landmark, SkyLight, paletteFor } from "@/components/journey/JourneyScenery";
 import type { GermanyGoal } from "@/lib/germany-goals";
@@ -489,13 +489,13 @@ function Guide({
           transformOrigin: onLeft ? "right bottom" : "left bottom",
         }}
       >
-        <div className="relative w-full rounded-2xl bg-white px-3 py-2 shadow-[0_10px_26px_rgba(2,6,23,0.35)]">
-          <p className="text-[11px] font-bold leading-4 text-slate-900">{line}</p>
+        <div className="relative w-full rounded-2xl bg-[var(--surface)] px-3 py-2 shadow-[0_10px_26px_rgba(2,6,23,0.35)]">
+          <p className="text-[11px] font-bold leading-4 text-[var(--foreground)]">{line}</p>
           {/* The tail points down at the mascot's head, not at the node — the
               bubble belongs to the character, and the character points at the
               node. */}
           <span
-            className={`absolute -bottom-1.5 h-3 w-3 rotate-45 bg-white ${onLeft ? "right-8" : "left-8"}`}
+            className={`absolute -bottom-1.5 h-3 w-3 rotate-45 bg-[var(--surface)] ${onLeft ? "right-8" : "left-8"}`}
           />
         </div>
 
@@ -503,7 +503,7 @@ function Guide({
             pointing rightwards, and a guide pointing away from the thing they
             are introducing is worse than no guide at all. */}
         <span className="mt-1 block" style={onLeft ? undefined : { transform: "scaleX(-1)" }}>
-          <TuitionMascot pointing className="h-[80px] w-[68px]" />
+          <Mascot mood="happy" pointAngle={0} className="h-[80px] w-[68px]" />
         </span>
       </div>
     </motion.div>
@@ -782,7 +782,7 @@ export default function JourneyWorld({
         <Cloud className="top-[7.5%] w-28 sm:w-36" duration={140} delay={12} opacity={0.4} />
         <Cloud className="top-[14%] w-24 sm:w-32" duration={170} delay={40} opacity={0.28} />
         <CrossingPlane className="top-[5%] w-44 sm:w-56" />
-        <Birds className="right-[12%] top-[10%] w-16 text-slate-600/60" />
+        <Birds className="right-[12%] top-[10%] w-16 text-[var(--muted)]/60" />
 
         {/* ---------------------------------------------------------------- */}
         {/* Ground and scenery                                               */}

@@ -44,7 +44,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
 
   return (
     <main className="grid min-h-screen place-items-center bg-gradient-to-b from-[#070f22] via-[#0b1830] to-[#070f22] px-6 py-16">
-      <div className="w-full max-w-xl rounded-[32px] border border-[#c8a24a]/30 bg-white/[0.03] p-8 text-slate-200 shadow-[0_30px_80px_-40px_rgba(200,162,74,0.4)]">
+      <div className="w-full max-w-xl rounded-[32px] border border-[#c8a24a]/30 bg-[var(--surface)]/[0.03] p-8 text-slate-200 shadow-[0_30px_80px_-40px_rgba(200,162,74,0.4)]">
         <p className="text-[0.7rem] font-semibold uppercase tracking-[0.3em] text-[#c8a24a]">
           Easyway German Language School
         </p>
@@ -75,7 +75,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
               </p>
             </div>
 
-            <dl className="mt-8 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2">
+            <dl className="mt-8 grid gap-px overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] sm:grid-cols-2">
               <Row label="Awarded to" value={certificate.studentName} />
               <Row label="Student ID" value={certificate.studentCode ?? "—"} />
               <Row label="Certificate" value={CERTIFICATE_TITLES[certificate.kind as CertificateKind]} />

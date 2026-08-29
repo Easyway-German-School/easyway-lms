@@ -19,7 +19,7 @@ export default function StatCard({
         <div className={`flex h-12 w-12 items-center justify-center rounded-2xl text-lg text-white ${accent}`}>{icon}</div>
         <div>
           <p className="text-sm font-medium text-[var(--muted)]">{label}</p>
-          <p className="mt-1 text-2xl font-semibold text-[#333333]">{value}</p>
+          <p className="mt-1 text-2xl font-semibold text-[var(--foreground)]">{value}</p>
         </div>
       </div>
     </div>

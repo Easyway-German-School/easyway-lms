@@ -64,19 +64,13 @@ function buildPrompt(title: string, level: string, text: string): string {
   ].join("\n");
 }
 
-function coerceInsight(raw: unknown): MaterialInsight | null {
-  if (!raw || typeof raw !== "object") return null;
-  const value = raw as Record<string, unknown>;
-
-  const summary = String(value.summary ?? "").trim();
-  if (!summary) return null;
-
-  const keyPoints = (Array.isArray(value.keyPoints) ? value.keyPoints : [])
-    .map((point) => String(point ?? "").trim())
-    .filter(Boolean)
-    .slice(0, 6);
-
-  const quests = (Array.isArray(value.quests) ? value.quests : [])
+/**
+ * Shared validation for a quest list, whether it came out of the model
+ * (`coerceInsight`, below) or off a tutor's edit form (the review API) — a
+ * tutor typing an empty title should fail the same way a bad generation does.
+ */
+export function coerceQuests(raw: unknown): MaterialQuest[] {
+  return (Array.isArray(raw) ? raw : [])
     .map((entry) => {
       if (!entry || typeof entry !== "object") return null;
       const quest = entry as Record<string, unknown>;
@@ -93,6 +87,21 @@ function coerceInsight(raw: unknown): MaterialInsight | null {
     })
     .filter((quest): quest is MaterialQuest => quest !== null)
     .slice(0, 3);
+}
+
+function coerceInsight(raw: unknown): MaterialInsight | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+
+  const summary = String(value.summary ?? "").trim();
+  if (!summary) return null;
+
+  const keyPoints = (Array.isArray(value.keyPoints) ? value.keyPoints : [])
+    .map((point) => String(point ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 6);
+
+  const quests = coerceQuests(value.quests);
 
   // A summary with no quests is still worth keeping — it is most of the value,
   // and refusing it would mean one weak generation loses the lot.
@@ -147,7 +156,7 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
       "material_summary",
       `${level}:${text.slice(0, MAX_PROMPT_CHARS)}`,
       async () => {
-        const raw = await callModel(buildPrompt(material.title, level, text), 1200);
+        const raw = await callModel(buildPrompt(material.title, level, text), 1200, "learning-content");
         return coerceInsight(parseModelJson(raw));
       },
       { model: activeModelName() },

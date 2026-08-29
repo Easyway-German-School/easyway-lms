@@ -13,6 +13,7 @@ interface Student {
   email: string;
   branch: string;
   present: boolean;
+  status?: 'present' | 'late' | 'absent';
 }
 
 interface AttendanceSession {
@@ -24,16 +25,30 @@ interface AttendanceSession {
   presentStudents: number;
 }
 
+interface AttendanceHistory {
+  date: string;
+  totalStudents: number;
+  presentStudents: number;
+  lateStudents: number;
+}
+
 export default function LecturerAttendance() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
+  const [history, setHistory] = useState<AttendanceHistory[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedCourse, setSelectedCourse] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
   const [studentFilter, setStudentFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  /**
+   * Replaces an `alert()`. A modal dialog for a routine confirmation is a
+   * click the tutor has to dismiss before they can mark the next class, and it
+   * is the one piece of UI that cannot be styled to look like the school's.
+   */
+  const [saved, setSaved] = useState('');
   const [marking, setMarking] = useState(false);
 
   useEffect(() => {
@@ -60,6 +75,7 @@ export default function LecturerAttendance() {
       
       const data = await res.json();
       setSessions(data.sessions);
+      setHistory(data.history ?? []);
       // The register no longer depends on a Class row existing. A tutor with
       // no course template still has students — they are found from the
       // branch + level the office assigned — so this loads either way.
@@ -90,7 +106,9 @@ export default function LecturerAttendance() {
   function toggleAttendance(studentId: string) {
     setStudents(
       students.map((s) =>
-        s.id === studentId ? { ...s, present: !s.present } : s
+        s.id === studentId
+          ? { ...s, present: s.status === 'absent', status: s.status === 'present' ? 'late' : s.status === 'late' ? 'absent' : 'present' }
+          : s
       )
     );
   }
@@ -107,6 +125,7 @@ export default function LecturerAttendance() {
           attendance: students.map((s) => ({
             studentId: s.id,
             present: s.present,
+            status: s.status,
           })),
         }),
       });
@@ -114,7 +133,8 @@ export default function LecturerAttendance() {
       if (!res.ok) throw new Error('Failed to save attendance');
 
       setError('');
-      alert('Attendance marked successfully!');
+      setSaved(`Attendance saved for ${students.length} student${students.length === 1 ? '' : 's'}.`);
+      window.setTimeout(() => setSaved(''), 4000);
       fetchSessions();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
@@ -158,6 +178,12 @@ export default function LecturerAttendance() {
             </div>
           )}
 
+          {saved && (
+            <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
+              {saved}
+            </div>
+          )}
+
           {/* Who is actually in this tutor's class.
               The marking grid below still works off Enrollment, which most
               cohorts have no rows in — so a tutor with a full class saw "No
@@ -168,6 +194,43 @@ export default function LecturerAttendance() {
             <h2 className="text-lg font-bold text-[var(--foreground)] mb-4">My class register</h2>
             <LecturerStudentRoster />
           </div>
+
+          {history.length > 0 && (
+            <div className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+              <div className="border-b border-[var(--border)] px-6 py-4">
+                <h2 className="text-lg font-bold text-[var(--foreground)]">Attendance history</h2>
+                <p className="mt-1 text-sm text-[var(--muted)]">Saved registers for your assigned students.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[620px]">
+                  <thead className="bg-[var(--surface-alt)]">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-[var(--foreground)]">Date</th>
+                      <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Marked</th>
+                      <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Present</th>
+                      <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Late</th>
+                      <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Absent</th>
+                      <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((record) => (
+                      <tr key={record.date} className="border-t border-[var(--border)]">
+                        <td className="px-6 py-3 text-sm text-[var(--foreground)]">{record.date}</td>
+                        <td className="px-6 py-3 text-center text-sm text-[var(--foreground)]">{record.totalStudents}</td>
+                        <td className="px-6 py-3 text-center text-sm text-emerald-700">{record.presentStudents - record.lateStudents}</td>
+                        <td className="px-6 py-3 text-center text-sm text-amber-700">{record.lateStudents}</td>
+                        <td className="px-6 py-3 text-center text-sm text-rose-700">{record.totalStudents - record.presentStudents}</td>
+                        <td className="px-6 py-3 text-center text-sm font-semibold text-[var(--foreground)]">
+                          {Math.round((record.presentStudents / record.totalStudents) * 100)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Filters */}
           <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
@@ -233,7 +296,7 @@ export default function LecturerAttendance() {
                 </label>
                 <div className="px-4 py-2 bg-[var(--surface-alt)] rounded-lg">
                   <p className="text-sm text-[var(--foreground)]">
-                    <strong>{students.filter((s) => s.present).length}</strong> / {students.length} Present
+                    <strong>{students.filter((s) => s.status === 'present').length}</strong> present · {students.filter((s) => s.status === 'late').length} late · {students.filter((s) => s.status === 'absent').length} absent
                   </p>
                 </div>
               </div>
@@ -289,12 +352,14 @@ export default function LecturerAttendance() {
                           <button
                             onClick={() => toggleAttendance(student.id)}
                             className={`inline-flex items-center gap-1.5 px-4 py-1 rounded-full text-sm font-semibold transition-colors ${
-                              student.present
+                              student.status === 'present'
                                 ? 'bg-green-100 text-green-700'
-                                : 'bg-red-100 text-red-700'
+                                : student.status === 'late'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-red-100 text-red-700'
                             }`}
                           >
-                            {student.present ? <><CheckIcon className="h-3.5 w-3.5" /> Present</> : <><CrossIcon className="h-3.5 w-3.5" /> Absent</>}
+                            {student.status === 'present' ? <><CheckIcon className="h-3.5 w-3.5" /> Present</> : student.status === 'late' ? 'Late' : <><CrossIcon className="h-3.5 w-3.5" /> Absent</>}
                           </button>
                         </td>
                       </tr>

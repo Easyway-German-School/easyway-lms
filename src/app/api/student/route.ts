@@ -1,5 +1,5 @@
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { derivePaymentStatus, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { NextResponse } from "next/server";
@@ -7,7 +7,7 @@ import { mayAutoCreateStudent } from "@/lib/candidates";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await requireAuthSession();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -18,6 +18,9 @@ export async function GET() {
         user: true,
         // Tuition is priced by branch as well as level.
         branch: { select: { name: true } },
+        // Only ever populated for a private student, but harmless to join
+        // for everyone else since tutorId is null there.
+        tutor: { select: { id: true, photoUrl: true, specialization: true, bio: true, user: { select: { name: true } } } },
         enrollments: {
           include: {
             pathway: true,
@@ -60,6 +63,7 @@ export async function GET() {
         include: {
           user: true,
           branch: { select: { name: true } },
+          tutor: { select: { id: true, photoUrl: true, specialization: true, bio: true, user: { select: { name: true } } } },
           enrollments: {
             include: {
               pathway: true,
@@ -73,6 +77,17 @@ export async function GET() {
     if (!student) {
       return NextResponse.json({ error: "Unable to load student profile" }, { status: 500 });
     }
+
+    const nextPrivateClass = student.classType === "private"
+      ? await prisma.privateClass.findFirst({
+          where: { studentId: student.id, status: { in: ["scheduled", "postponed"] }, scheduledAt: { gte: new Date() } },
+          orderBy: { scheduledAt: "asc" },
+          select: { scheduledAt: true, topic: true },
+        })
+      : null;
+    const nextLive = nextPrivateClass
+      ? `${nextPrivateClass.scheduledAt.toLocaleString()}${nextPrivateClass.topic ? ` · ${nextPrivateClass.topic}` : ""}`
+      : student.nextLive;
 
     const grades = await prisma.grade.findMany({
       where: { studentId: student.id },
@@ -108,8 +123,15 @@ export async function GET() {
       branchName: student.branch?.name ?? null,
       classType: student.classType,
       deliveryMode: student.deliveryMode,
+      tutorId: student.tutor?.id ?? null,
+      tutorName: student.tutor?.user?.name ?? null,
+      tutorPhotoUrl: student.tutor?.photoUrl ?? null,
+      tutorSpecialization: student.tutor?.specialization ?? null,
+      tutorBio: student.tutor?.bio ?? null,
       pathway: student.pathway,
-      nextLive: student.nextLive,
+      germanyGoal: student.germanyGoal,
+      germanyGoalNote: student.germanyGoalNote,
+      nextLive,
       examReadiness: student.examReadiness,
       averageGrade,
       gradeCount,

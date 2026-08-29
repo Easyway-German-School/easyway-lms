@@ -321,6 +321,26 @@ export const QuizIcon = icon("QuizIcon", (
   </>
 ));
 
+/**
+ * Two interlocking links — a Satzkette is a chain of sentences, and the sidebar
+ * needs it to read as a different thing from the Quiz game's question mark.
+ */
+export const ChainIcon = icon("ChainIcon", (
+  <>
+    <path d="M9.5 14.5a3.5 3.5 0 0 1 0-5l2-2a3.5 3.5 0 0 1 5 5l-1 1" />
+    <path d="M14.5 9.5a3.5 3.5 0 0 1 0 5l-2 2a3.5 3.5 0 0 1-5-5l1-1" />
+  </>
+));
+
+/** The composer's "play a game" button, and the invite card's own glyph. */
+export const GameControllerIcon = icon("GameControllerIcon", (
+  <>
+    <path d="M8 9h8a3.5 3.5 0 0 1 3.5 3.5v2.5a2 2 0 0 1-3.6 1.2L14.5 14h-5l-1.4 2.2A2 2 0 0 1 4.5 15v-2.5A3.5 3.5 0 0 1 8 9Z" />
+    <path d="M8.5 11.3v2M7.5 12.3h2" />
+    <path d="M15.3 12.2h.01M17.3 13.7h.01" />
+  </>
+));
+
 export const EssayIcon = icon("EssayIcon", (
   <>
     <path d="M20.5 3.5C11.7 4.6 6.6 9.4 5 15l3.9 3.9C14.5 17.3 19.4 12.3 20.5 3.5" />
@@ -748,6 +768,34 @@ export const SignalIcon = icon("SignalIcon", (
   </>
 ));
 
+/** A phone handset — switching a session to another device. */
+export const DeviceIcon = icon("DeviceIcon", (
+  <>
+    <rect x="7" y="2" width="10" height="20" rx="2" />
+    <path d="M11 18h2" />
+  </>
+));
+
+/** Go edge-to-edge. Four corners opening outwards. */
+export const ExpandIcon = icon("ExpandIcon", (
+  <>
+    <path d="M9 3H5a2 2 0 0 0-2 2v4" />
+    <path d="M15 3h4a2 2 0 0 1 2 2v4" />
+    <path d="M15 21h4a2 2 0 0 0 2-2v-4" />
+    <path d="M9 21H5a2 2 0 0 1-2-2v-4" />
+  </>
+));
+
+/** Leave edge-to-edge. The same four corners, folding back in. */
+export const ShrinkIcon = icon("ShrinkIcon", (
+  <>
+    <path d="M3 9h4a2 2 0 0 0 2-2V3" />
+    <path d="M21 9h-4a2 2 0 0 1-2-2V3" />
+    <path d="M21 15h-4a2 2 0 0 0-2 2v4" />
+    <path d="M3 15h4a2 2 0 0 1 2 2v4" />
+  </>
+));
+
 export const HandIcon = icon("HandIcon", (
   <>
     <path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11" />
@@ -764,6 +812,13 @@ export const ChevronRightIcon = icon("ChevronRightIcon", <path d="m9.5 5.5 6.5 6
 export const ChevronDownIcon = icon("ChevronDownIcon", <path d="m5.5 9.5 6.5 6.5 6.5-6.5" />);
 export const ArrowRightIcon = icon("ArrowRightIcon", <><path d="M4 12h15" /><path d="m13 6 6 6-6 6" /></>);
 export const ArrowLeftIcon = icon("ArrowLeftIcon", <><path d="M20 12H5" /><path d="m11 6-6 6 6 6" /></>);
+export const ExternalLinkIcon = icon("ExternalLinkIcon", (
+  <>
+    <path d="M9 6H6.5A1.5 1.5 0 0 0 5 7.5v10A1.5 1.5 0 0 0 6.5 19h10a1.5 1.5 0 0 0 1.5-1.5V15" />
+    <path d="M13 5h6v6" />
+    <path d="M20 4 11 13" />
+  </>
+));
 export const PlusIcon = icon("PlusIcon", <path d="M12 5v14M5 12h14" />);
 export const TrashIcon = icon("TrashIcon", (
   <>
@@ -884,4 +939,91 @@ export const ListIcon = icon("ListIcon", (
 /** The trip itself — and the flight at the top of the journey map. */
 export const PlaneIcon = icon("PlaneIcon", (
   <path d="M10.5 19.5 12 15l7.5-2.2a1.8 1.8 0 0 0 0-3.4L4 4.5l2.5 6L11 12l-4.5 1.5L4 12.2l.8 3.3-.8 3.3 3.2-1.6z" />
+));
+
+/* --------------------------------------------------------------- the help desk */
+
+/**
+ * The question mark that sits in the corner of the student portal.
+ *
+ * A circle rather than a bare glyph on purpose: at 16px a lone "?" reads as
+ * punctuation left behind by mistake, and this one has to be recognisable as a
+ * button from across a sidebar.
+ */
+export const HelpIcon = icon("HelpIcon", (
+  <>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.2a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2-2.4 3.6" />
+    <path d="M12 17.2h.01" strokeWidth="2.4" />
+  </>
+));
+
+/** One request in the office's queue. */
+export const TicketIcon = icon("TicketIcon", (
+  <>
+    <path d="M3.5 8.5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v1.2a2.3 2.3 0 0 0 0 4.6v1.2a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-1.2a2.3 2.3 0 0 0 0-4.6z" />
+    <path d="M14 6.5v11" strokeDasharray="2 2.4" />
+  </>
+));
+
+/* ------------------------------------------------------------ activity tracker */
+
+/** Bars: the shape of a count over time. */
+export const BarChartIcon = icon("BarChartIcon", (
+  <>
+    <path d="M4 20h16" />
+    <rect x="5.5" y="12" width="3.6" height="5" rx="1" />
+    <rect x="10.2" y="8" width="3.6" height="9" rx="1" />
+    <rect x="14.9" y="4.5" width="3.6" height="12.5" rx="1" />
+  </>
+));
+
+/** Storage, as in how much tape the school is holding. */
+export const DatabaseIcon = icon("DatabaseIcon", (
+  <>
+    <ellipse cx="12" cy="6" rx="7.5" ry="3" />
+    <path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6" />
+    <path d="M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3" />
+  </>
+));
+
+/** Three dots, stacked. Opens a menu of things you can do to somebody else. */
+export const DotsVerticalIcon = icon("DotsVerticalIcon", (
+  <>
+    <circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none" />
+  </>
+));
+
+/* -------------------------------------------------------------------- player */
+
+export const PauseIcon = icon("PauseIcon", (
+  <>
+    <rect x="7" y="5" width="4" height="14" rx="1" />
+    <rect x="13" y="5" width="4" height="14" rx="1" />
+  </>
+));
+
+/** Ten seconds back, with the "10" the ear reads off a real player. */
+export const SkipBackIcon = icon("SkipBackIcon", (
+  <>
+    <path d="M8.5 5.5 3.8 9l4.7 3.5" />
+    <path d="M3.8 9h9a6.8 6.8 0 1 1-5.8 10.3" />
+  </>
+));
+
+/** Ten seconds forward — the mirror of SkipBackIcon. */
+export const SkipForwardIcon = icon("SkipForwardIcon", (
+  <>
+    <path d="M15.5 5.5 20.2 9l-4.7 3.5" />
+    <path d="M20.2 9h-9a6.8 6.8 0 1 0 5.8 10.3" />
+  </>
+));
+
+export const PictureInPictureIcon = icon("PictureInPictureIcon", (
+  <>
+    <rect x="3" y="4.5" width="18" height="14" rx="2" />
+    <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
+  </>
 ));

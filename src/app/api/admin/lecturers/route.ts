@@ -2,16 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import bcryptjs from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 
-import { requireCapability } from "@/lib/admin-roles";
-import { requireTenantSession, tenantScopeForLecturer } from "@/lib/tenant-access";
+import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import {
   COURSE_LEVELS,
   assignmentToData,
   describeAssignment,
   isAssigned,
   readAssignment,
-  studentWhereForAssignment,
-  matchesBatch,
+  studentWhereForLecturer,
+  belongsToLecturer,
   type CourseLevel,
 } from "@/lib/lecturer-assignment";
 import { KIND, notify } from "@/lib/notify";
@@ -21,6 +20,7 @@ import {
   LECTURER_STATUS_META,
   readLecturerStatus,
 } from "@/lib/lecturer-status";
+import { lecturerFeatures, parseLecturerFeatures } from "@/lib/lecturer-features";
 
 /**
  * Tutor administration.
@@ -98,68 +98,91 @@ async function syncLecturerClasses(lecturerId: string, levels: string[]) {
   }
 }
 
-/** How many students an assignment currently reaches. */
-async function countStudents(assignment: ReturnType<typeof readAssignment>) {
-  const where = studentWhereForAssignment(assignment);
+/**
+ * How many students this tutor actually has — the class description AND
+ * anybody the office named onto them.
+ *
+ * It counted only the description before, so a tutor created for one named
+ * student read "0 students" on their own card while that student sat on their
+ * register. Two different answers to the same question on two screens is how
+ * an office stops trusting either.
+ */
+async function countStudents(assignment: ReturnType<typeof readAssignment>, lecturerId: string) {
+  const where = studentWhereForLecturer(assignment, lecturerId);
   if (!where) return 0;
   if (!assignment.batches.length) {
     return prisma.student.count({ where: where as any });
   }
-  const rows = await prisma.student.findMany({ where: where as any, select: { admission: true } });
-  return rows.filter((row) => matchesBatch(assignment, row.admission)).length;
+  const rows = await prisma.student.findMany({
+    where: where as any,
+    select: { admission: true, tutorId: true },
+  });
+  return rows.filter((row) => belongsToLecturer(assignment, lecturerId, row)).length;
 }
 
 export async function GET() {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
 
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
-
   const [lecturers, branches] = await Promise.all([
     prisma.lecturer.findMany({
-      where: tenantScopeForLecturer(auth.tenantId),
       orderBy: { createdAt: "desc" },
       include: {
         user: { select: { id: true, name: true, email: true, role: true } },
         classes: { include: { course: true }, orderBy: { createdAt: "asc" } },
       },
     }),
-    prisma.branch.findMany({
-      where: auth.tenantId ? { tenantId: auth.tenantId } : {},
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, mode: true },
-    }),
+    prisma.branch.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, mode: true } }),
   ]);
 
   const branchNames = new Map(branches.map((branch) => [branch.id, branch.name]));
 
-  const rows = await Promise.all(
-    lecturers.map(async (lecturer) => {
-      const assignment = readAssignment(lecturer);
-      return {
-        id: lecturer.id,
-        user: lecturer.user,
-        specialization: lecturer.specialization,
-        bio: lecturer.bio,
-        phone: lecturer.phone,
-        photoUrl: lecturer.photoUrl,
-        status: readLecturerStatus(lecturer.status),
-        statusNote: lecturer.statusNote,
-        statusChangedAt: lecturer.statusChangedAt,
-        employmentType: lecturer.employmentType,
-        startedAt: lecturer.startedAt,
-        assignment,
-        assignmentLabel: describeAssignment(assignment, branchNames),
-        studentCount: await countStudents(assignment),
-        classes: lecturer.classes.map((klass) => ({
-          id: klass.id,
-          name: klass.name,
-          course: { title: klass.course.title, level: klass.course.level },
-        })),
-      };
-    }),
-  );
+  /**
+   * BRANCH SCOPING — an admin restricted to specific branches sees only the
+   * tutors assigned to at least one of them. A tutor with no branch in their
+   * assignment at all (`branchIds` empty — "No class assigned") is not shown
+   * to a restricted admin either: there is nothing about them that says they
+   * belong inside the restriction, and the safer reading of "unassigned" is
+   * "not yet this admin's to see", not "visible everywhere".
+   */
+  const allowedBranchIds = scopedBranchIds(gate.admin);
+
+  const rows = (
+    await Promise.all(
+      lecturers.map(async (lecturer) => {
+        const assignment = readAssignment(lecturer);
+        if (allowedBranchIds && !assignment.branchIds.some((id) => allowedBranchIds.includes(id))) {
+          return null;
+        }
+        return {
+          id: lecturer.id,
+          user: lecturer.user,
+          specialization: lecturer.specialization,
+          bio: lecturer.bio,
+          phone: lecturer.phone,
+          photoUrl: lecturer.photoUrl,
+          status: readLecturerStatus(lecturer.status),
+          statusNote: lecturer.statusNote,
+          statusChangedAt: lecturer.statusChangedAt,
+          // Resolved rather than raw, so the admin form shows the same answer
+          // the tutor's own portal acts on — including the
+          // null-means-everything default, which a raw column would render as
+          // no boxes ticked.
+          features: lecturerFeatures(lecturer.features),
+          employmentType: lecturer.employmentType,
+          startedAt: lecturer.startedAt,
+          assignment,
+          assignmentLabel: describeAssignment(assignment, branchNames),
+          studentCount: await countStudents(assignment, lecturer.id),
+          classes: lecturer.classes.map((klass) => ({
+            id: klass.id,
+            name: klass.name,
+            course: { title: klass.course.title, level: klass.course.level },
+          })),
+        };
+      }),
+    )
+  ).filter((row): row is NonNullable<typeof row> => row !== null);
 
   return NextResponse.json({ lecturers: rows, branches });
 }
@@ -167,9 +190,6 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
-
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
 
   const body = await request.json().catch(() => null);
   const name = typeof body?.name === "string" ? body.name.trim() : "";
@@ -210,7 +230,14 @@ export async function POST(request: NextRequest) {
       name,
       password: hashedPassword,
       role: "LECTURER",
-      tenantId: auth.tenantId ?? null,
+      /**
+       * SET EXPLICITLY. `User` is a global model, so the isolation extension
+       * never stamps it — a tutor created without this line got a session with
+       * no tenant, which in strict mode makes every query in their portal
+       * throw, and the portal bounces them back to the sign-in form. That is
+       * what "I created a tutor and their login does nothing" was.
+       */
+      tenantId: gate.session.user.tenantId,
       lecturer: {
         create: {
           specialization: specialization || null,
@@ -221,6 +248,9 @@ export async function POST(request: NextRequest) {
           statusChangedAt: new Date(),
           employmentType,
           startedAt,
+          // Absent from the form means everything, which is what a tutor
+          // created before this field has. The office narrows it deliberately.
+          features: parseLecturerFeatures(body?.features),
           ...assignment,
         },
       },
@@ -261,9 +291,6 @@ export async function PATCH(request: NextRequest) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
 
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
-
   const body = await request.json().catch(() => null);
   const lecturerId = typeof body?.lecturerId === "string" ? body.lecturerId : "";
   if (!lecturerId) {
@@ -272,12 +299,9 @@ export async function PATCH(request: NextRequest) {
 
   const lecturer = await prisma.lecturer.findUnique({
     where: { id: lecturerId },
-    include: { user: { select: { id: true, name: true, tenantId: true } } },
+    include: { user: { select: { id: true, name: true } } },
   });
   if (!lecturer) {
-    return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
-  }
-  if (auth.tenantId && lecturer.user.tenantId !== auth.tenantId) {
     return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
   }
 
@@ -326,6 +350,15 @@ export async function PATCH(request: NextRequest) {
   }
   if (typeof body.statusNote === "string") data.statusNote = body.statusNote.trim() || null;
 
+  /**
+   * Which optional areas this tutor may reach. Only written when the key is
+   * actually present, so a form that does not carry the checkboxes cannot
+   * silently reset a tutor to "everything" — or to nothing.
+   */
+  if (body.features !== undefined) {
+    data.features = parseLecturerFeatures(body.features);
+  }
+
   // The assignment fields move as a set. Sending any one of them rewrites all
   // of them, so a half-submitted form can never leave a tutor assigned to a
   // branch at a level they no longer teach.
@@ -360,6 +393,7 @@ export async function PATCH(request: NextRequest) {
           ? body.statusNote.trim()
           : LECTURER_STATUS_META[nextStatus].description,
       link: "/lecturer/dashboard",
+      push: true,
     }).catch((error) => console.error("Status notification failed", error));
   }
 
@@ -381,6 +415,7 @@ export async function PATCH(request: NextRequest) {
         ? `You are now assigned to ${label}. Your roster, timetable and attendance lists have already been updated.`
         : "Your class assignment was cleared. Contact the office before your next session.",
       link: "/lecturer/classes",
+      push: true,
     }).catch((error) => console.error("Assignment notification failed", error));
   }
 
@@ -392,11 +427,14 @@ export async function DELETE(request: NextRequest) {
   if (!gate.ok) return gate.response;
 
   const body = await request.json().catch(() => ({}));
-  const lecturerIds: string[] = Array.isArray(body.lecturerIds)
-    ? body.lecturerIds.filter((id: unknown): id is string => typeof id === "string" && id.trim().length > 0).map((id: string) => id.trim())
-    : typeof body.lecturerId === "string" && body.lecturerId.trim().length > 0
-      ? [body.lecturerId.trim()]
-      : [];
+  const lecturerIds: string[] = [];
+  if (Array.isArray(body.lecturerIds)) {
+    for (const id of body.lecturerIds) {
+      if (typeof id === "string" && id.trim().length > 0) lecturerIds.push(id.trim());
+    }
+  } else if (typeof body.lecturerId === "string" && body.lecturerId.trim().length > 0) {
+    lecturerIds.push(body.lecturerId.trim());
+  }
   if (body.confirmation !== "DELETE TUTORS") {
     return NextResponse.json({ error: "Confirmation phrase DELETE TUTORS is required" }, { status: 400 });
   }
@@ -405,11 +443,9 @@ export async function DELETE(request: NextRequest) {
 
   const lecturers = await prisma.lecturer.findMany({
     where: { id: { in: lecturerIds } },
-    select: { id: true, userId: true, user: { select: { tenantId: true } } },
+    select: { id: true, userId: true },
   });
-  if (lecturers.length !== lecturerIds.length || (gate.session.user.tenantId && lecturers.some((lecturer) => lecturer.user.tenantId !== gate.session.user.tenantId))) {
-    return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
-  }
+  if (lecturers.length !== lecturerIds.length) return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
 
   for (const lecturer of lecturers) {
     await prisma.session.deleteMany({ where: { userId: lecturer.userId } });

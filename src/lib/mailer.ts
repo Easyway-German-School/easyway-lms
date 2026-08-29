@@ -29,6 +29,17 @@ const PROVIDER_PRESETS: Record<string, { host: string; port: number; secure: boo
   // Zoho requires SSL on 465 for SMTP.
   zoho: { host: "smtp.zoho.com", port: 465, secure: true },
   gmail: { host: "smtp.gmail.com", port: 465, secure: true },
+  /**
+   * Brevo relays on 587 with STARTTLS, so `secure` is FALSE here.
+   *
+   * That looks wrong and is not: `secure: true` means "wrap the socket in TLS
+   * from the first byte", which is port 465's behaviour. On 587 the connection
+   * opens in the clear and upgrades via STARTTLS, and forcing TLS immediately
+   * makes every send fail to connect. This codebase has already been bitten by
+   * exactly that — see the envFlag() comment above, where the string "false"
+   * was being read as true and doing this same damage.
+   */
+  brevo: { host: "smtp-relay.brevo.com", port: 587, secure: false },
 };
 
 function buildTransport() {
@@ -50,12 +61,37 @@ function buildTransport() {
    */
   if (preset && !process.env.SMTP_USER) return null;
 
-  const port = preset?.port ?? Number(process.env.SMTP_PORT || 587);
+  /**
+   * An explicit SMTP_PORT wins over the preset, exactly as SMTP_SECURE below
+   * already does.
+   *
+   * This was `preset?.port ?? SMTP_PORT`, so choosing a provider silently made
+   * the port unsettable — and that is not a theoretical inconvenience. Many
+   * networks (Nigerian consumer ISPs especially, but plenty of office and
+   * hosting firewalls too) block outbound 587 and 465 wholesale to stop spam
+   * from compromised machines. Measured on this one: Brevo 587 and 465 both
+   * hang with no connection and no error, Gmail 587 likewise — while Brevo's
+   * alternate 2525 answers immediately. Every provider publishes a port like
+   * 2525 for precisely this case, and there was no way to select it without
+   * abandoning the preset and hand-writing the host too.
+   *
+   * A blocked port fails as a silent hang rather than a refusal, which reads
+   * exactly like a wrong password. That is the trap this closes.
+   */
+  const portOverride = Number(process.env.SMTP_PORT);
+  const port = Number.isFinite(portOverride) && portOverride > 0
+    ? portOverride
+    : preset?.port ?? 587;
+
   // An explicit SMTP_SECURE still wins over the preset when it is set.
   const secure =
     process.env.SMTP_SECURE !== undefined && process.env.SMTP_SECURE !== ""
       ? envFlag(process.env.SMTP_SECURE)
-      : preset?.secure ?? port === 465;
+      : port === 465
+        ? true
+        : port === preset?.port
+          ? preset.secure
+          : false;
 
   return nodemailer.createTransport({
     host,
@@ -174,6 +210,20 @@ export async function sendEmail({
   }
 }
 
+/**
+ * One delivered message, on the school's bill.
+ *
+ * Metered off the EmailLog row rather than off the send call, so the source
+ * event has an id that survives a retry: the same log row cannot be billed
+ * twice, and a send that failed is never billed at all because it never
+ * reaches here with status "sent".
+ */
+async function meterEmail(logId: string | null, status: string) {
+  if (status !== "sent" || !logId) return;
+  const { recordUsage } = await import("@/lib/usage/record");
+  void recordUsage({ meter: "email.sent", quantity: 1, sourceId: `emaillog:${logId}` });
+}
+
 async function logEmail(entry: {
   to: string;
   subject: string;
@@ -184,7 +234,7 @@ async function logEmail(entry: {
 }) {
   // Logging must never be the reason a send fails.
   try {
-    await prisma.emailLog.create({
+    const row = await prisma.emailLog.create({
       data: {
         recipientEmail: entry.to,
         subject: entry.subject,
@@ -193,7 +243,9 @@ async function logEmail(entry: {
         studentId: entry.studentId ?? null,
         errorMessage: entry.error ?? null,
       },
+      select: { id: true },
     });
+    await meterEmail(row.id, entry.status);
   } catch (err) {
     console.warn("Could not write EmailLog entry:", err);
   }

@@ -20,6 +20,7 @@ import {
   ResultsIcon,
   UserPlusIcon,
 } from "@/components/icons";
+import { usePushNotifications } from "@/lib/use-push";
 
 /**
  * The bell, shared by all three portals.
@@ -35,7 +36,8 @@ import {
  *     its icon.
  *   - Raises a toast for anything that arrives while the tab is open, so an
  *     admin watching the dashboard learns about a payment without opening the
- *     panel. Critical ones also make a sound — see `chime`.
+ *     panel. Every new unread notification also makes one bell ping — see
+ *     `chime`.
  *   - Deep-links. Every notification carries where it came from, so clicking
  *     "Payment received" opens the payment rather than the reader's memory.
  */
@@ -83,6 +85,34 @@ function iconFor(kind: string) {
   return <Glyph className="h-5 w-5" />;
 }
 
+/**
+ * Where a notification goes when nobody set a link on it.
+ *
+ * Every notification is tappable, so one without a destination is a dead tap —
+ * and the class notices are the ones students actually chase ("is today's class
+ * still on?"). Anything about a class lands on the timetable, which is the page
+ * that answers the question they opened the notification to ask.
+ *
+ * A real `link` on the row always wins; this only fills the gap.
+ */
+const KIND_DESTINATIONS: Array<[string, string]> = [
+  ["class", "/calendar"],
+  ["attendance", "/calendar"],
+  ["material", "/materials"],
+  ["assignment", "/assignment"],
+  ["result", "/results"],
+  ["exam", "/exam-centre"],
+  ["certificate", "/certificates"],
+  ["payment", "/payments"],
+  ["tuition", "/payments"],
+  ["level.advance", "/programs"],
+];
+
+function destinationForKind(kind: string): string | null {
+  const match = KIND_DESTINATIONS.find(([prefix]) => kind === prefix || kind.startsWith(`${prefix}.`));
+  return match?.[1] ?? null;
+}
+
 const TONES: Record<string, { chip: string; dot: string; rail: string }> = {
   success: {
     chip: "bg-emerald-500/10 text-emerald-600",
@@ -121,7 +151,7 @@ function relativeTime(iso: string): string {
 }
 
 /**
- * Two notes, synthesised rather than shipped as an audio file so there is no
+ * One bell ping, synthesised rather than shipped as an audio file so there is no
  * asset to 404 and nothing to download before the first alert can sound.
  *
  * Browsers refuse to start an AudioContext until the user has interacted with
@@ -138,18 +168,18 @@ function chime() {
       void ctx.resume();
     }
     const now = ctx.currentTime;
-    [880, 1174.7].forEach((frequency, step) => {
+    [880, 1320].forEach((frequency, harmonic) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.value = frequency;
-      const at = now + step * 0.14;
+      const at = now;
       gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(0.18, at + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.32);
+      gain.gain.exponentialRampToValueAtTime(harmonic === 0 ? 0.16 : 0.06, at + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.28);
       osc.connect(gain).connect(ctx.destination);
       osc.start(at);
-      osc.stop(at + 0.34);
+      osc.stop(at + 0.3);
     });
     window.setTimeout(() => void ctx.close().catch(() => {}), 1200);
   } catch {
@@ -167,6 +197,7 @@ export default function NotificationCenter({
 }) {
   const router = useRouter();
   const reduceMotion = useReducedMotion();
+  const push = usePushNotifications();
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -193,7 +224,7 @@ export default function NotificationCenter({
 
         if (fresh.length > 0) {
           setToasts((current) => [...fresh.slice(0, 3), ...current].slice(0, 3));
-          if (fresh.some((n) => n.severity === "critical")) chime();
+          chime();
         }
       }
 
@@ -278,9 +309,10 @@ export default function NotificationCenter({
     (notification: Notification) => {
       void markRead([notification.id]);
       setToasts((current) => current.filter((t) => t.id !== notification.id));
-      if (notification.link) {
+      const destination = notification.link ?? destinationForKind(notification.kind);
+      if (destination) {
         setIsOpen(false);
-        router.push(notification.link);
+        router.push(destination);
       }
     },
     [markRead, router],
@@ -337,12 +369,6 @@ export default function NotificationCenter({
               <>
                 <span aria-hidden>·</span>
                 <span className="truncate">{notification.senderName}</span>
-              </>
-            )}
-            {notification.link && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="font-semibold text-[var(--accent)]">Open</span>
               </>
             )}
           </div>
@@ -402,7 +428,11 @@ export default function NotificationCenter({
                 transition={{ type: "spring", stiffness: 400, damping: 30 }}
                 role="dialog"
                 aria-label="Notifications"
-                className={`fixed inset-x-3 top-16 z-50 flex max-h-[70vh] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.5rem)] sm:w-[400px] ${
+                // `top-16` alone assumes a 4rem header and no device notch/PWA
+                // status-bar inset — on a phone with either, the panel could
+                // render partly behind it. `max()` with `env(safe-area-inset-top)`
+                // pushes it below whichever is actually taller.
+                className={`fixed inset-x-3 top-[max(4rem,calc(env(safe-area-inset-top)+3.5rem))] z-50 flex max-h-[70vh] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.5rem)] sm:w-[400px] ${
                   align === "right" ? "sm:right-0" : "sm:left-0"
                 }`}
               >
@@ -423,6 +453,32 @@ export default function NotificationCenter({
                     </button>
                   )}
                 </div>
+
+                {push.supported && !push.enabled ? (
+                  <div className="border-b border-[var(--border)] bg-[var(--accent)]/[0.05] px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-[var(--foreground)]">Get alerts on this device</p>
+                        <p className="mt-0.5 text-[11px] leading-4 text-[var(--muted)]">
+                          Receive class, material and account notifications when the portal is closed.
+                        </p>
+                      </div>
+                      {push.permission === "denied" ? (
+                        <span className="shrink-0 text-right text-[10px] font-semibold text-[var(--muted)]">Allow in browser settings</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void push.enable()}
+                          disabled={push.busy}
+                          className="shrink-0 rounded-lg bg-[var(--accent)] px-3 py-2 text-[11px] font-bold text-white transition hover:brightness-110 disabled:opacity-60"
+                        >
+                          {push.busy ? "Enabling…" : "Enable"}
+                        </button>
+                      )}
+                    </div>
+                    {push.error ? <p className="mt-2 text-[11px] leading-4 text-red-600">{push.error}</p> : null}
+                  </div>
+                ) : null}
 
                 <div className="flex-1 overflow-y-auto overscroll-contain">
                   {isLoading ? (
@@ -486,8 +542,18 @@ export default function NotificationCenter({
         </AnimatePresence>
       </div>
 
-      {/* Toasts. Fixed to the viewport, so they are not clipped by the shell. */}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[120] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
+      {/*
+        Toasts. Fixed to the viewport, so they are not clipped by the shell.
+
+        They RISE IN FROM BELOW THE FOLD rather than sliding in from the side:
+        the toast starts fully out of frame (`y: 120`, past its own height) and
+        travels up into place. On a phone that is the bottom of the screen,
+        which is where the thumb already is and where every messaging app the
+        students use puts the same thing — and it means a notification never
+        lands over the header, the bell, or whatever they were reading.
+      */}
+      {/* `env(safe-area-inset-bottom)` keeps this clear of a phone's home-indicator strip. */}
+      <div className="pointer-events-none fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[120] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:w-[22rem]">
         <AnimatePresence initial={false}>
           {toasts.map((toast) => {
             const tone = toneFor(toast.severity);
@@ -495,10 +561,10 @@ export default function NotificationCenter({
               <motion.button
                 key={toast.id}
                 layout
-                initial={{ opacity: 0, x: 40, scale: 0.96 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={{ opacity: 0, x: 40, scale: 0.96 }}
-                transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                initial={{ opacity: 0, y: 120, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 120, scale: 0.96 }}
+                transition={{ type: "spring", stiffness: 320, damping: 32 }}
                 onClick={() => open(toast)}
                 className={`pointer-events-auto flex w-full gap-3 rounded-2xl border border-[var(--border)] border-l-4 ${tone.rail} bg-[var(--surface)] p-3.5 text-left shadow-2xl`}
               >

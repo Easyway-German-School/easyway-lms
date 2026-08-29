@@ -1,9 +1,50 @@
 "use client";
 
-import { useEffect, useState } from "react";
+/**
+ * MATERIALS — the activity tracker, and the library underneath it.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT WAS WRONG WITH THIS PAGE
+ * ---------------------------------------------------------------------------
+ * It was an upload form and a table of files, and it opened on a course
+ * dropdown — so a school that had not yet created a course saw the words "No
+ * courses available" and nothing else, on a page called Materials, in a portal
+ * where the tutors had been uploading material all week. Every class recording
+ * the platform captures, every live class, every private lesson: none of it
+ * appeared here, because a recording belongs to a level and a date rather than
+ * to a course, and the only view was filtered by course.
+ *
+ * So the page now opens on what the school DID — every live class, every
+ * private class, every capture LiveKit made and every file a human uploaded,
+ * over a window — and the library it was before is the second tab.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE CHARTS ARE HAND-DRAWN SVG
+ * ---------------------------------------------------------------------------
+ * There is no chart library in this project and adding one to draw four bars
+ * would be a dependency, a bundle and a theming problem in exchange for
+ * something that is forty lines of `<rect>`. The shapes here are deliberately
+ * simple for the same reason: a stacked daily bar and a ranked list answer
+ * "how much, and where" without anybody having to learn to read them.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import AdminShell from "@/components/AdminShell";
 import BrandLoader from "@/components/BrandLoader";
 import { uploadFile } from "@/lib/upload";
+import {
+  BarChartIcon,
+  BookOpenIcon,
+  BroadcastIcon,
+  DatabaseIcon,
+  FilmIcon,
+  PrivateClassIcon,
+  RefreshIcon,
+  TrashIcon,
+  UploadIcon,
+  UsersIcon,
+} from "@/components/icons";
 
 interface Course {
   id: string;
@@ -19,13 +60,578 @@ interface Material {
   fileUrl: string;
   fileType: string;
   fileSize: number;
-  course: {
-    title: string;
-  };
+  course: { title: string };
   createdAt: string;
 }
 
+type Activity = {
+  window: { days: number; since: string };
+  totals: {
+    liveClasses: number;
+    privateClasses: number;
+    liveHours: number;
+    privateHours: number;
+    attendedJoins: number;
+    recordings: number;
+    recordedHours: number;
+    recordedGb: number;
+    uploads: number;
+    uploadedMb: number;
+    libraryTotal: number;
+    recordingsEver: number;
+  };
+  series: Array<{ key: string; liveClasses: number; privateClasses: number; recordings: number; uploads: number }>;
+  recordingStatus: Record<string, number>;
+  uploadKinds: Record<string, number>;
+  byLevel: Array<{ level: string; count: number }>;
+  feed: Array<{ at: string; type: "live" | "private" | "recording" | "upload"; title: string; detail: string }>;
+};
+
+/**
+ * One colour per activity, used by the chart, the legend and the feed alike.
+ * Written once so a bar and the dot next to its name can never disagree, which
+ * is the classic way a hand-rolled chart goes quietly wrong.
+ */
+const SERIES = [
+  { key: "liveClasses" as const, label: "Live classes", colour: "#0D7C7E" },
+  { key: "privateClasses" as const, label: "Private classes", colour: "#7C3AED" },
+  { key: "recordings" as const, label: "Recordings", colour: "#FF6600" },
+  { key: "uploads" as const, label: "Uploads", colour: "#0EA5E9" },
+];
+
+const FEED_ICON = {
+  live: BroadcastIcon,
+  private: PrivateClassIcon,
+  recording: FilmIcon,
+  upload: UploadIcon,
+};
+
+const FEED_TONE = {
+  live: "bg-teal-100 text-teal-700",
+  private: "bg-violet-100 text-violet-700",
+  recording: "bg-orange-100 text-orange-700",
+  upload: "bg-sky-100 text-sky-700",
+};
+
+function timeAgo(iso: string): string {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
 export default function MaterialsPage() {
+  const [tab, setTab] = useState<"activity" | "library">("library");
+
+  return (
+    <AdminShell>
+      <div className="space-y-6">
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+          <h1 className="text-2xl font-bold text-[var(--foreground)] sm:text-3xl">Materials &amp; activity</h1>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--muted)]">
+            Everything the platform recorded doing: live classes and one-to-ones, the captures LiveKit made of
+            them, and the files tutors uploaded by hand. The library itself is the second tab.
+          </p>
+        </motion.div>
+
+        <div className="flex gap-1 rounded-2xl bg-[var(--surface)] p-1 shadow-sm ring-1 ring-[var(--border)] sm:w-fit">
+          {(
+            [
+              { value: "activity" as const, label: "Activity", icon: BarChartIcon },
+              { value: "library" as const, label: "Library", icon: BookOpenIcon },
+            ]
+          ).map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.value}
+                onClick={() => setTab(item.value)}
+                className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition sm:flex-none ${
+                  tab === item.value ? "bg-[var(--accent)] text-white" : "text-[var(--muted)] hover:bg-[var(--surface-alt)]"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {tab === "activity" ? <ActivityTab /> : <VideoCatalogTab />}
+      </div>
+    </AdminShell>
+  );
+}
+
+/* ------------------------------------------------------------------ activity */
+
+function ActivityTab() {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState<Activity | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [reconcileLoading, setReconcileLoading] = useState(false);
+  const [reconcileMessage, setReconcileMessage] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/materials/activity?days=${days}`, { cache: "no-store" });
+      if (!res.ok) throw new Error("failed");
+      setData((await res.json()) as Activity);
+      setError("");
+    } catch {
+      setError("Could not load activity.");
+    } finally {
+      setLoading(false);
+    }
+  }, [days]);
+
+  const reconcileRecordings = useCallback(async () => {
+    setReconcileLoading(true);
+    setReconcileMessage(null);
+    try {
+      const res = await fetch("/api/live/recording/reconcile", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json?.error || "Reconcile failed");
+      }
+      setReconcileMessage(`Checked ${json.checked}, finalised ${json.finalised}.`);
+    } catch (err) {
+      setReconcileMessage(`Reconcile failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setReconcileLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(() => void load(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  if (loading && !data) return <BrandLoader fill size="lg" message="Counting what happened." />;
+  if (error && !data) return <p className="rounded-2xl bg-rose-50 p-6 text-sm text-rose-700">{error}</p>;
+  if (!data) return null;
+
+  const t = data.totals;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-2">
+        {[7, 30, 90].map((option) => (
+          <button
+            key={option}
+            onClick={() => setDays(option)}
+            className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
+              days === option ? "bg-slate-900 text-white" : "bg-[var(--surface)] text-[var(--muted)] ring-1 ring-[var(--border)] hover:bg-[var(--surface-alt)]"
+            }`}
+          >
+            Last {option} days
+          </button>
+        ))}
+        <button
+          onClick={load}
+          aria-label="Refresh"
+          className="rounded-full bg-[var(--surface)] p-2 text-[var(--muted)] ring-1 ring-[var(--border)] transition hover:bg-[var(--surface-alt)]"
+        >
+          <RefreshIcon className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat
+          icon={<BroadcastIcon className="h-5 w-5" />}
+          tone="bg-teal-100 text-teal-700"
+          label="Live classes taught"
+          value={t.liveClasses}
+          hint={`${t.liveHours} teaching hours`}
+        />
+        <Stat
+          icon={<PrivateClassIcon className="h-5 w-5" />}
+          tone="bg-violet-100 text-violet-700"
+          label="Private classes"
+          value={t.privateClasses}
+          hint={`${t.privateHours} hours one-to-one`}
+        />
+        <Stat
+          icon={<FilmIcon className="h-5 w-5" />}
+          tone="bg-orange-100 text-orange-700"
+          label="Classes recorded"
+          value={t.recordings}
+          hint={`${t.recordedHours} hours of tape`}
+        />
+        <Stat
+          icon={<UsersIcon className="h-5 w-5" />}
+          tone="bg-sky-100 text-sky-700"
+          label="Student joins"
+          value={t.attendedJoins}
+          hint="times a student walked into a room"
+        />
+      </div>
+
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={reconcileRecordings}
+          disabled={reconcileLoading}
+          className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+        >
+          <RefreshIcon className="h-4 w-4" />
+          {reconcileLoading ? "Reconciling…" : "Repair recording library"}
+        </button>
+        {reconcileMessage ? <p className="text-sm text-[var(--muted)]">{reconcileMessage}</p> : null}
+      </div>
+
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--foreground)]">Every day in the window</h2>
+            <p className="mt-0.5 text-sm text-[var(--muted)]">
+              Stacked, so the height of a day is everything that happened on it.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {SERIES.map((series) => (
+              <span key={series.key} className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]">
+                <span className="h-2.5 w-2.5 rounded-sm" style={{ background: series.colour }} />
+                {series.label}
+              </span>
+            ))}
+          </div>
+        </div>
+        <StackedBars series={data.series} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+          <h2 className="text-lg font-semibold text-[var(--foreground)]">Where the teaching went</h2>
+          <p className="mt-0.5 text-sm text-[var(--muted)]">Sessions by level over the window.</p>
+          <RankedBars
+            rows={data.byLevel.map((row) => ({ label: row.level, value: row.count }))}
+            colour="#0D7C7E"
+            empty="No classes were opened in this window."
+          />
+
+          <h3 className="mt-6 text-sm font-semibold text-[var(--foreground)]">What was uploaded</h3>
+          <RankedBars
+            rows={Object.entries(data.uploadKinds).map(([kind, count]) => ({ label: kind, value: count }))}
+            colour="#0EA5E9"
+            empty="Nothing was uploaded in this window."
+          />
+        </div>
+
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+          <h2 className="text-lg font-semibold text-[var(--foreground)]">Recording health</h2>
+          <p className="mt-0.5 text-sm text-[var(--muted)]">
+            Failures are shown, not filtered. &ldquo;Was Tuesday recorded?&rdquo; is the question this page exists
+            to answer.
+          </p>
+          <RankedBars
+            rows={Object.entries(data.recordingStatus).map(([status, count]) => ({ label: status, value: count }))}
+            colour="#FF6600"
+            empty="No captures were started in this window."
+          />
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            <MiniStat icon={<DatabaseIcon className="h-4 w-4" />} label="Tape stored" value={`${t.recordedGb} GB`} />
+            <MiniStat icon={<UploadIcon className="h-4 w-4" />} label="Files uploaded" value={`${t.uploadedMb} MB`} />
+            <MiniStat icon={<BookOpenIcon className="h-4 w-4" />} label="Library, all time" value={String(t.libraryTotal)} />
+            <MiniStat icon={<FilmIcon className="h-4 w-4" />} label="Recordings, all time" value={String(t.recordingsEver)} />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+        <h2 className="text-lg font-semibold text-[var(--foreground)]">As it happened</h2>
+        <p className="mt-0.5 text-sm text-[var(--muted)]">The last forty things the platform did.</p>
+        {data.feed.length === 0 ? (
+          <p className="py-10 text-center text-sm text-[var(--muted)]">Nothing in this window.</p>
+        ) : (
+          <div className="mt-4 space-y-1">
+            {data.feed.map((event, index) => {
+              const Icon = FEED_ICON[event.type];
+              return (
+                <div key={`${event.at}-${index}`} className="flex items-start gap-3 rounded-2xl p-2.5 hover:bg-[var(--surface-alt)]">
+                  <span className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl ${FEED_TONE[event.type]}`}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-[var(--foreground)]">{event.title}</p>
+                    <p className="truncate text-xs text-[var(--muted)]">{event.detail}</p>
+                  </div>
+                  <span className="shrink-0 text-xs text-[var(--muted)]">{timeAgo(event.at)}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The daily stack.
+ *
+ * A viewBox with `preserveAspectRatio="none"` so it fills whatever width it is
+ * given without anybody computing pixels — the bars stretch, the labels do not,
+ * because the labels live outside the SVG. Ninety days of bars on a phone is
+ * unreadable at any width, so the axis labels thin out rather than overlap.
+ */
+function StackedBars({ series }: { series: Activity["series"] }) {
+  const max = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...series.map((day) => day.liveClasses + day.privateClasses + day.recordings + day.uploads),
+      ),
+    [series],
+  );
+
+  const step = Math.ceil(series.length / 8);
+
+  return (
+    <div className="mt-5">
+      <div className="flex h-48 items-end gap-[3px]">
+        {series.map((day) => {
+          const total = day.liveClasses + day.privateClasses + day.recordings + day.uploads;
+          return (
+            <div
+              key={day.key}
+              className="group relative flex min-w-0 flex-1 flex-col justify-end"
+              title={`${day.key}: ${total} event${total === 1 ? "" : "s"}`}
+            >
+              {SERIES.map((entry) => {
+                const value = day[entry.key];
+                if (!value) return null;
+                return (
+                  <div
+                    key={entry.key}
+                    style={{ height: `${(value / max) * 100}%`, background: entry.colour }}
+                    className="w-full first:rounded-t-sm"
+                  />
+                );
+              })}
+              {/* An empty day still gets a hairline. Without it a quiet
+                  fortnight is a gap in the chart, which reads as missing data
+                  rather than as nothing having happened. */}
+              {total === 0 ? <div className="h-[2px] w-full rounded-sm bg-[var(--surface-alt)]" /> : null}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex gap-[3px]">
+        {series.map((day, index) => (
+          <span key={day.key} className="min-w-0 flex-1 text-center text-[9px] text-[var(--muted)]">
+            {index % step === 0 ? day.key.slice(5) : ""}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RankedBars({
+  rows,
+  colour,
+  empty,
+}: {
+  rows: Array<{ label: string; value: number }>;
+  colour: string;
+  empty: string;
+}) {
+  if (rows.length === 0) return <p className="py-6 text-center text-sm text-[var(--muted)]">{empty}</p>;
+  const max = Math.max(...rows.map((row) => row.value), 1);
+
+  return (
+    <div className="mt-4 space-y-2.5">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium capitalize text-[var(--foreground-soft)]">{row.label}</span>
+            <span className="font-semibold text-[var(--foreground)]">{row.value}</span>
+          </div>
+          <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--surface-alt)]">
+            <div
+              className="h-full rounded-full transition-[width] duration-500"
+              style={{ width: `${(row.value / max) * 100}%`, background: colour }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Stat({
+  icon,
+  tone,
+  label,
+  value,
+  hint,
+}: {
+  icon: React.ReactNode;
+  tone: string;
+  label: string;
+  value: number;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <span className={`grid h-10 w-10 place-items-center rounded-xl ${tone}`}>{icon}</span>
+      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{label}</p>
+      <p className="mt-0.5 text-3xl font-bold text-[var(--foreground)]">{value.toLocaleString()}</p>
+      <p className="mt-0.5 text-xs text-[var(--muted)]">{hint}</p>
+    </div>
+  );
+}
+
+function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-[var(--surface-alt)] p-3">
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]">
+        {icon}
+        {label}
+      </span>
+      <p className="mt-1 text-lg font-bold text-[var(--foreground)]">{value}</p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------- library */
+
+type CatalogVideo = {
+  id: string;
+  title: string;
+  description: string | null;
+  url: string;
+  sourceUrl: string | null;
+  provider: string;
+  category: "private" | "recording" | "external" | "course";
+  categoryLabel: string;
+  audience: string;
+  kind: string;
+  level: string | null;
+  courseTitle: string | null;
+  branch: string | null;
+  lecturer: string | null;
+  series: string | null;
+  episodeNumber: number | null;
+  durationSeconds: number | null;
+  fileSize: number;
+  recordingStatus: string | null;
+  recordingVariant: string | null;
+  keepForever: boolean;
+  recordedAt: string | null;
+  createdAt: string;
+};
+
+function VideoCatalogTab() {
+  const [videos, setVideos] = useState<CatalogVideo[]>([]);
+  const [filter, setFilter] = useState<"all" | CatalogVideo["category"]>("all");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/admin/materials/catalog", { cache: "no-store" });
+      const text = await response.text();
+      let data: { error?: string; videos?: CatalogVideo[] } = {};
+      try { data = text ? JSON.parse(text) : {}; } catch { throw new Error(`Catalog returned an invalid response (${response.status}).`); }
+      if (!response.ok) throw new Error(data.error || "Could not load the video catalog.");
+      setVideos(data.videos ?? []);
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load the video catalog.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const visible = filter === "all" ? videos : videos.filter((video) => video.category === filter);
+  const groups = [
+    { key: "all" as const, label: "All videos" },
+    { key: "recording" as const, label: "Live recordings" },
+    { key: "private" as const, label: "Private classes" },
+    { key: "external" as const, label: "External embeds" },
+    { key: "course" as const, label: "Course library" },
+  ];
+
+  async function deleteVideo(video: CatalogVideo) {
+    if (!window.confirm(`Delete “${video.title}” from every library?`)) return;
+    const response = await fetch("/api/admin/materials", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: video.id }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setError(payload.error || "Could not delete this video.");
+      return;
+    }
+    setVideos((current) => current.filter((item) => item.id !== video.id));
+  }
+
+  if (loading) return <BrandLoader fill size="lg" message="Opening the video catalog." />;
+
+  return (
+    <div className="space-y-5">
+      {error ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        {groups.map((group) => (
+          <button key={group.key} type="button" onClick={() => setFilter(group.key)} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === group.key ? "bg-slate-900 text-white" : "bg-[var(--surface)] text-[var(--muted)] ring-1 ring-[var(--border)]"}`}>
+            {group.label} <span className="ml-1 opacity-70">{group.key === "all" ? videos.length : videos.filter((video) => video.category === group.key).length}</span>
+          </button>
+        ))}
+        <button type="button" onClick={load} aria-label="Refresh catalog" className="rounded-full bg-[var(--surface)] p-2 text-[var(--muted)] ring-1 ring-[var(--border)]"><RefreshIcon className="h-4 w-4" /></button>
+      </div>
+
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <h2 className="text-lg font-semibold">Library catalogue</h2>
+        <p className="mt-1 text-sm text-[var(--muted)]">Recordings, private-class material, hosted course videos, and YouTube/Vimeo/Drive/Loom embeds. Documents remain in the upload library below.</p>
+      </div>
+
+      {visible.length === 0 ? (
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center text-sm text-[var(--muted)]">No videos in this shelf yet.</div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {visible.map((video) => (
+            <article key={video.id} className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
+              <div className={`flex h-28 items-center justify-center ${video.category === "recording" ? "bg-orange-100 text-orange-700" : video.category === "private" ? "bg-violet-100 text-violet-700" : video.category === "external" ? "bg-sky-100 text-sky-700" : "bg-teal-100 text-teal-700"}`}>
+                <FilmIcon className="h-10 w-10" />
+              </div>
+              <div className="space-y-3 p-4">
+                <div className="flex items-start justify-between gap-3"><h3 className="font-semibold">{video.title}</h3><span className="shrink-0 rounded-full bg-[var(--surface-alt)] px-2 py-1 text-[10px] font-bold uppercase text-[var(--muted)]">{video.provider}</span></div>
+                <p className="text-xs font-semibold text-[var(--accent)]">{video.categoryLabel}</p>
+                <p className="text-xs text-[var(--muted)]">{[video.audience, video.level, video.courseTitle, video.branch, video.lecturer].filter(Boolean).join(" · ")}</p>
+                {video.recordingStatus ? <p className="text-xs text-[var(--muted)]">Recording: {video.recordingStatus}{video.recordingVariant ? ` · ${video.recordingVariant}` : ""}{video.keepForever ? " · kept" : ""}</p> : null}
+                <div className="flex items-center justify-between gap-2 text-xs text-[var(--muted)]"><span>{new Date(video.recordedAt || video.createdAt).toLocaleDateString()}</span><span className="flex items-center gap-3"><a href={video.sourceUrl || video.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-[var(--accent)] hover:underline">Open video</a><button type="button" onClick={() => deleteVideo(video)} aria-label={`Delete ${video.title}`} className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-rose-50 hover:text-rose-600"><TrashIcon className="h-4 w-4" /></button></span></div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm text-[var(--muted)]">
+        <strong className="text-[var(--foreground)]">Upload documents and course files</strong> remain available in the existing course library. The catalog above deliberately shows playable video items only, so PDFs and worksheets do not get mixed into the video shelves.
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The page as it was, restyled to match the rest of the admin area and no
+ * longer a dead end when no courses exist. The upload form still needs a
+ * course — course material genuinely belongs to a course — but the absence of
+ * one is now a sentence rather than the entire screen.
+ */
+function LibraryTab() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string>("");
@@ -33,52 +639,40 @@ export default function MaterialsPage() {
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [formData, setFormData] = useState({
-    title: "",
-    description: "",
-  });
+  const [formData, setFormData] = useState({ title: "", description: "" });
 
-  useEffect(() => {
-    Promise.all([loadCourses()]);
-  }, []);
-
-  useEffect(() => {
-    if (selectedCourseId) {
-      loadMaterials();
-    }
-  }, [selectedCourseId]);
-
-  async function loadCourses() {
-    try {
-      const res = await fetch("/api/admin/courses");
-      if (!res.ok) throw new Error("Failed to fetch courses");
-      const data = await res.json();
-      setCourses(data);
-      if (data.length > 0) {
-        setSelectedCourseId(data[0].id);
-      }
-    } catch (err) {
-      setError("Failed to load courses");
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadMaterials() {
+  const loadMaterials = useCallback(async () => {
     if (!selectedCourseId) return;
     try {
-      const res = await fetch(
-        `/api/admin/materials?courseId=${selectedCourseId}`
-      );
+      const res = await fetch(`/api/admin/materials?courseId=${selectedCourseId}`);
       if (!res.ok) throw new Error("Failed to fetch materials");
-      const data = await res.json();
-      setMaterials(data);
+      setMaterials(await res.json());
     } catch (err) {
       setError("Failed to load materials");
       console.error(err);
     }
-  }
+  }, [selectedCourseId]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/courses");
+        if (!res.ok) throw new Error("Failed to fetch courses");
+        const data = await res.json();
+        setCourses(data);
+        if (data.length > 0) setSelectedCourseId(data[0].id);
+      } catch (err) {
+        setError("Failed to load courses");
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    loadMaterials();
+  }, [loadMaterials]);
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
@@ -130,9 +724,7 @@ export default function MaterialsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
-
       if (!res.ok) throw new Error("Failed to delete material");
-
       setError("");
       await loadMaterials();
     } catch (err) {
@@ -141,193 +733,157 @@ export default function MaterialsPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <AdminShell>
-        <BrandLoader fill size="lg" message="Loading materials." />
-      </AdminShell>
-    );
-  }
-
-  if (courses.length === 0) {
-    return (
-      <AdminShell>
-        <div className="p-8">
-          <h1 className="text-3xl font-bold mb-4">Course Materials</h1>
-          <p className="text-gray-500">
-            No courses available. Create courses first.
-          </p>
-        </div>
-      </AdminShell>
-    );
-  }
+  if (loading) return <BrandLoader fill size="lg" message="Loading materials." />;
 
   return (
-    <AdminShell>
-      <div className="p-8">
-        <h1 className="text-3xl font-bold mb-8">Course Materials</h1>
+    <div className="space-y-5">
+      {error ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
-        {error && (
-          <div className="mb-4 p-4 bg-red-100 text-red-700 rounded">
-            {error}
-          </div>
-        )}
-
-        {/* Course Selector */}
-        <div className="mb-8">
-          <label className="block text-sm font-medium mb-2">Select Course</label>
-          <select
-            value={selectedCourseId}
-            onChange={(e) => setSelectedCourseId(e.target.value)}
-            className="w-full px-3 py-2 border rounded"
-          >
-            {courses.map((course) => (
-              <option key={course.id} value={course.id}>
-                {course.title} ({course.level})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Upload Form */}
-        <div className="bg-white rounded-lg border p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-1">Upload Material</h2>
-          <p className="mb-4 text-sm text-slate-500">
-            The file lands in the Materials library of every student at this course&apos;s level, and shows
-            on their dashboard as newly added. Tutors can also attach it to a specific day from
-            the class timetable.
+      {courses.length === 0 ? (
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center">
+          <BookOpenIcon className="mx-auto h-9 w-9 text-[var(--muted)]" />
+          <p className="mt-3 text-sm text-[var(--muted)]">
+            There are no courses yet, and course material has to belong to one. Create a course first —
+            recordings and level material are unaffected and still appear under Activity.
           </p>
-          <form onSubmit={handleUpload} className="grid gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                File *
-              </label>
-              <input
-                type="file"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="w-full px-3 py-2 border rounded"
-                required
-              />
-              {file && (
-                <p className="text-sm text-gray-600 mt-1">
-                  {file.name} ({(file.size / 1024).toFixed(2)} KB)
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Title *
-              </label>
-              <input
-                type="text"
-                value={formData.title}
-                onChange={(e) =>
-                  setFormData({ ...formData, title: e.target.value })
-                }
-                placeholder="e.g., Module 1 Study Guide"
-                className="w-full px-3 py-2 border rounded"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Description
-              </label>
-              <textarea
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
-                placeholder="Optional description"
-                className="w-full px-3 py-2 border rounded h-20"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={uploading}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+        </div>
+      ) : (
+        <>
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+            <label className="block text-sm font-semibold text-[var(--foreground)]">Course</label>
+            <select
+              value={selectedCourseId}
+              onChange={(e) => setSelectedCourseId(e.target.value)}
+              className="mt-2 w-full rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm sm:max-w-md"
             >
-              {uploading ? "Uploading..." : "Upload Material"}
-            </button>
-          </form>
-        </div>
+              {courses.map((course) => (
+                <option key={course.id} value={course.id}>
+                  {course.title} ({course.level})
+                </option>
+              ))}
+            </select>
+          </div>
 
-        {/* Materials Table */}
-        <div className="bg-white rounded-lg border overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="px-6 py-3 text-left text-sm font-medium">
-                  Title
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-medium">
-                  Type
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-medium">
-                  Size
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-medium">
-                  Uploaded
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-medium">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {materials.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
-                    No materials uploaded for this course
-                  </td>
-                </tr>
-              ) : (
-                materials.map((material) => (
-                  <tr key={material.id} className="border-b hover:bg-gray-50">
-                    <td className="px-6 py-3">
-                      <a
-                        href={material.fileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-800 font-medium"
-                      >
-                        {material.title}
-                      </a>
-                      {material.description && (
-                        <p className="text-sm text-gray-600 mt-1">
-                          {material.description}
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-6 py-3">
-                      <span className="inline-block px-2 py-1 bg-gray-100 rounded text-xs font-medium">
-                        {material.fileType.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3 text-sm">
-                      {(material.fileSize / 1024).toFixed(2)} KB
-                    </td>
-                    <td className="px-6 py-3 text-sm">
-                      {new Date(material.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-3">
-                      <button
-                        onClick={() => handleDelete(material.id)}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        Delete
-                      </button>
-                    </td>
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+            <h2 className="text-lg font-semibold text-[var(--foreground)]">Upload material</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              The file lands in the Materials library of every student at this course&apos;s level, and shows on
+              their dashboard as newly added. Tutors can also attach it to a specific day from the class
+              timetable.
+            </p>
+            <form onSubmit={handleUpload} className="mt-4 grid gap-4">
+              <div>
+                <label className="block text-sm font-medium text-[var(--foreground-soft)]">File *</label>
+                <input
+                  type="file"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
+                  required
+                />
+                {file ? (
+                  <p className="mt-1 text-sm text-[var(--muted)]">
+                    {file.name} ({(file.size / 1024).toFixed(2)} KB)
+                  </p>
+                ) : null}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--foreground-soft)]">Title *</label>
+                <input
+                  type="text"
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  placeholder="e.g., Module 1 Study Guide"
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--foreground-soft)]">Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Optional description"
+                  className="mt-1 h-20 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={uploading}
+                className="inline-flex w-fit items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+              >
+                <UploadIcon className="h-4 w-4" />
+                {uploading ? "Uploading…" : "Upload material"}
+              </button>
+            </form>
+          </div>
+
+          <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[36rem]">
+                <thead className="border-b border-[var(--border)] bg-[var(--surface-alt)]">
+                  <tr>
+                    {["Title", "Type", "Size", "Uploaded", ""].map((heading) => (
+                      <th key={heading} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                        {heading}
+                      </th>
+                    ))}
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </AdminShell>
+                </thead>
+                <tbody>
+                  {materials.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-10 text-center text-sm text-[var(--muted)]">
+                        No materials uploaded for this course.
+                      </td>
+                    </tr>
+                  ) : (
+                    materials.map((material) => (
+                      <tr key={material.id} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-alt)]">
+                        <td className="px-5 py-3">
+                          <a
+                            href={material.fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-semibold text-[var(--accent)] hover:underline"
+                          >
+                            {material.title}
+                          </a>
+                          {material.description ? (
+                            <p className="mt-0.5 text-xs text-[var(--muted)]">{material.description}</p>
+                          ) : null}
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className="rounded-full bg-[var(--surface-alt)] px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--muted)]">
+                            {material.fileType}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-sm text-[var(--muted)]">
+                          {(material.fileSize / 1024).toFixed(0)} KB
+                        </td>
+                        <td className="px-5 py-3 text-sm text-[var(--muted)]">
+                          {new Date(material.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="px-5 py-3">
+                          <button
+                            onClick={() => handleDelete(material.id)}
+                            aria-label={`Delete ${material.title}`}
+                            className="rounded-lg p-2 text-[var(--muted)] transition hover:bg-rose-50 hover:text-rose-600"
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

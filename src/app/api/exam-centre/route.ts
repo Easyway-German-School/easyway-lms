@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOpenExams, registerForExam } from "@/lib/exam-centre";
 import { queueEmail } from "@/lib/email-queue";
 import { ensureCandidateAccount } from "@/lib/candidates";
 import { payToken } from "@/lib/exam-payments";
+import { isExamBodyLive } from "@/lib/tenant/features";
+import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
 
 /**
  * Public exam centre: browse open sittings and book a seat.
@@ -28,7 +30,10 @@ export async function GET(req: NextRequest) {
     ]);
 
     // Signed-in students get their own details prefilled.
-    const session = (await getServerSession(authOptions as any)) as any;
+    const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const features = await featuresForCurrentTenant();
+    const liveExams = exams.filter((e) => isExamBodyLive(features, e.examBody));
     let me = null;
     if (session?.user?.id) {
       const student = await prisma.student.findUnique({
@@ -46,7 +51,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ exams, branches, me });
+    return NextResponse.json({ exams: liveExams, branches, me });
   } catch (error) {
     console.error("Exam centre GET failed:", error);
     return NextResponse.json({ error: "Unable to load exam sittings" }, { status: 500 });
@@ -64,7 +69,8 @@ export async function POST(req: NextRequest) {
 
     // A signed-in student registers as themselves; the client cannot pass a
     // studentId and book on someone else's behalf.
-    const session = (await getServerSession(authOptions as any)) as any;
+    const session = await requireAuthSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     let studentId: string | null = null;
     let notifyEmail = candidateEmail as string | undefined;
     let notifyName = candidateName as string | undefined;
@@ -92,6 +98,24 @@ export async function POST(req: NextRequest) {
       const account = await ensureCandidateAccount({ email: candidateEmail, name: candidateName });
       ownerUserId = account.userId;
       claimLink = account.claimUrl;
+    }
+
+    /**
+     * The server-side half of the ÖSD/telc gate. Until this existed, the only
+     * thing stopping a booking for a body this tenant hasn't turned on was
+     * MyExamsPanel filtering it out of the list it showed — nothing stopped a
+     * direct POST with that exam's id.
+     */
+    const targetExam = await prisma.exam.findUnique({
+      where: { id: examId },
+      select: { examBody: true },
+    });
+    const features = await featuresForCurrentTenant();
+    if (targetExam && !isExamBodyLive(features, targetExam.examBody)) {
+      return NextResponse.json(
+        { error: "Booking for this awarding body isn't open yet.", code: "not_found" },
+        { status: 403 },
+      );
     }
 
     const result = await registerForExam({

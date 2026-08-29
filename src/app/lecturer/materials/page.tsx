@@ -5,9 +5,10 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import LecturerShell from '@/components/LecturerShell';
 import BrandLoader from "@/components/BrandLoader";
-import { BookOpenIcon, CalendarIcon, DocumentIcon, EmptyIcon, LecturerIcon, PackageIcon, VideoIcon, LinkIcon } from '@/components/icons';
+import { BookOpenIcon, CalendarIcon, DocumentIcon, EmptyIcon, LecturerIcon, LinkIcon, PackageIcon, VideoIcon } from '@/components/icons';
 import { uploadFile } from '@/lib/upload';
-import { parseEmbedUrl } from '@/lib/embed-utils';
+import { parseEmbed } from '@/lib/media-embed';
+import LecturerQuestReview from '@/components/materials/LecturerQuestReview';
 
 interface Course {
   id: string;
@@ -28,6 +29,7 @@ interface Material {
   fileName: string;
   fileSize: number;
   uploadedAt: string;
+  aiState: string;
 }
 
 export default function LecturerMaterials() {
@@ -41,11 +43,22 @@ export default function LecturerMaterials() {
   const [isUploading, setIsUploading] = useState(false);
   const [showForm, setShowForm] = useState(false);
 
+  /**
+   * Upload a file, or point at one somebody else is already hosting.
+   *
+   * Tutors teach from YouTube constantly, and re-uploading a 300 MB clip over a
+   * Nigerian connection just to get it into the library is not something anyone
+   * does twice — so those videos were living in WhatsApp instead. A link lands
+   * on exactly the same shelf as an upload; see lib/media-embed.ts.
+   */
+  const [source, setSource] = useState<'file' | 'link'>('file');
+
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     courseId: '',
     file: null as File | null,
+    sourceUrl: '',
     // Video-library fields. A class recording is filed by level and date; a
     // lesson video can also be grouped into a named series so it gets its own
     // shelf in the student library.
@@ -55,12 +68,15 @@ export default function LecturerMaterials() {
     episodeNumber: '',
     recordedAt: '',
     durationSeconds: '',
-    // Embedded URL fields
-    embedUrl: '',
-    isEmbedded: false,
   });
 
-  const isVideoFile = Boolean(formData.file?.type?.startsWith('video/'));
+  // Parsed here as well as on the server so the tutor sees "YouTube" the moment
+  // they paste, rather than discovering the link was unusable after submitting.
+  const parsedLink = source === 'link' ? parseEmbed(formData.sourceUrl) : null;
+  const linkTyped = source === 'link' && formData.sourceUrl.trim().length > 0;
+
+  // A pasted link is always a video, so the shelf fields below apply to it too.
+  const isVideoFile = source === 'link' ? Boolean(parsedLink) : Boolean(formData.file?.type?.startsWith('video/'));
 
   /**
    * Read the runtime out of the chosen file before uploading.
@@ -134,86 +150,18 @@ export default function LecturerMaterials() {
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     const courseId = formData.courseId || selectedCourseId;
-    
     if (!formData.title) {
       setError('Please add a title');
       return;
     }
-
-    // Check if it's embedded or file upload
-    if (formData.isEmbedded) {
-      if (!formData.embedUrl) {
-        setError('Please enter a video URL (YouTube, TikTok, Vimeo, etc.)');
-        return;
-      }
-      
-      const embedData = parseEmbedUrl(formData.embedUrl);
-      if (!embedData) {
-        setError('Invalid URL. Please use YouTube, TikTok, Vimeo, Instagram, or a valid web link');
-        return;
-      }
-
-      if (!courseId && !formData.level) {
-        setError(formData.level ? 'Please choose the level' : 'Please choose a course');
-        return;
-      }
-
-      setIsUploading(true);
-      try {
-        const res = await fetch('/api/lecturer/materials', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: formData.title,
-            description: formData.description,
-            courseId: courseId,
-            embedUrl: formData.embedUrl,
-            embedProvider: embedData.provider,
-            isEmbedded: 'true',
-            level: formData.level,
-            series: formData.series,
-            episodeNumber: formData.episodeNumber,
-            recordedAt: formData.recordedAt,
-          }),
-        });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || 'Failed to add material');
-        }
-
-        const newMaterial = await res.json();
-        setMaterials([newMaterial, ...materials]);
-        setFormData({
-          title: '',
-          description: '',
-          courseId: '',
-          file: null,
-          isRecording: false,
-          level: '',
-          series: '',
-          episodeNumber: '',
-          recordedAt: '',
-          durationSeconds: '',
-          embedUrl: '',
-          isEmbedded: false,
-        });
-        setShowForm(false);
-        setError('');
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to add material');
-      } finally {
-        setIsUploading(false);
-      }
-      return;
-    }
-
-    // Original file upload logic
-    if (!formData.file) {
+    if (source === 'file' && !formData.file) {
       setError('Please choose a file');
       return;
     }
-    
+    if (source === 'link' && !parsedLink) {
+      setError('Paste a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.');
+      return;
+    }
     // A recording is filed by level rather than course, so the two have
     // different required fields.
     if (formData.isRecording ? !formData.level : !courseId) {
@@ -226,8 +174,11 @@ export default function LecturerMaterials() {
     try {
       // The file goes to storage first and only its URL is posted here — a
       // lesson PDF or a recorded class is well past what a request body may
-      // carry in production.
-      const uploaded = await uploadFile(formData.file, 'materials');
+      // carry in production. A link skips this entirely: there is nothing to
+      // move, only a URL to record.
+      const uploaded = source === 'file' && formData.file
+        ? await uploadFile(formData.file, 'materials')
+        : null;
 
       const res = await fetch('/api/lecturer/materials', {
         method: 'POST',
@@ -236,10 +187,14 @@ export default function LecturerMaterials() {
           title: formData.title,
           description: formData.description,
           courseId: formData.isRecording ? '' : courseId,
-          fileUrl: uploaded.url,
-          fileName: uploaded.filename,
-          fileType: uploaded.contentType,
-          fileSize: uploaded.size,
+          ...(uploaded
+            ? {
+                fileUrl: uploaded.url,
+                fileName: uploaded.filename,
+                fileType: uploaded.contentType,
+                fileSize: uploaded.size,
+              }
+            : { sourceUrl: formData.sourceUrl.trim() }),
           isRecording: String(formData.isRecording),
           level: formData.level,
           series: formData.series,
@@ -263,14 +218,13 @@ export default function LecturerMaterials() {
         description: '',
         courseId: '',
         file: null,
+        sourceUrl: '',
         isRecording: false,
         level: '',
         series: '',
         episodeNumber: '',
         recordedAt: '',
         durationSeconds: '',
-        embedUrl: '',
-        isEmbedded: false,
       });
       setShowForm(false);
       setError('');
@@ -325,34 +279,6 @@ export default function LecturerMaterials() {
                 newly added on their dashboard. To tie it to one class day instead, attach it from
                 the Timetable page.
               </p>
-              
-              {/* Toggle between Upload and Embed */}
-              <div className="mb-4 flex gap-2 border-b border-[var(--border)]">
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, isEmbedded: false })}
-                  className={`px-4 py-2 font-semibold transition ${
-                    !formData.isEmbedded
-                      ? 'text-[var(--accent)] border-b-2 border-[var(--accent)]'
-                      : 'text-[var(--muted)] hover:text-[var(--foreground)]'
-                  }`}
-                >
-                  Upload File
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, isEmbedded: true })}
-                  className={`px-4 py-2 font-semibold transition ${
-                    formData.isEmbedded
-                      ? 'text-[var(--accent)] border-b-2 border-[var(--accent)]'
-                      : 'text-[var(--muted)] hover:text-[var(--foreground)]'
-                  }`}
-                >
-                  <LinkIcon className="inline mr-1 h-4 w-4" />
-                  Embed URL
-                </button>
-              </div>
-              
               <form onSubmit={handleUpload} className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
@@ -379,23 +305,7 @@ export default function LecturerMaterials() {
                     className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder-[var(--muted)] min-h-[100px]"
                   />
                 </div>
-                {formData.isEmbedded && (
-                  <div>
-                    <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
-                      Video URL
-                    </label>
-                    <input
-                      type="url"
-                      placeholder="Paste YouTube, TikTok, Vimeo, Instagram link, or any web link"
-                      value={formData.embedUrl}
-                      onChange={(e) => setFormData({ ...formData, embedUrl: e.target.value })}
-                      className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder-[var(--muted)]"
-                    />
-                    <p className="text-xs text-[var(--muted)] mt-1">
-                      Supported: YouTube, TikTok, Vimeo, Instagram, or any web link
-                    </p>
-                  </div>
-                )}
+
                 {!formData.isRecording && (
                   <div>
                     <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
@@ -421,23 +331,83 @@ export default function LecturerMaterials() {
 
                 <div>
                   <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
-                    File Upload
+                    Where is it?
                   </label>
-                  <input
-                    type="file"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] || null;
-                      setFormData({ ...formData, file, durationSeconds: '' });
-                      if (file) readVideoDuration(file);
-                    }}
-                    className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
-                    required
-                  />
-                  <p className="text-xs text-[var(--muted)] mt-1">Supported: PDF, PPT, DOCX, MP4 (max 100MB)</p>
-                  {formData.durationSeconds && (
-                    <p className="text-xs text-[var(--accent)] mt-1">
-                      Runtime detected: {Math.floor(Number(formData.durationSeconds) / 60)} min {Number(formData.durationSeconds) % 60} sec
-                    </p>
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {([
+                      { value: 'file' as const, icon: <PackageIcon className="h-4 w-4" />, label: 'Upload a file', hint: 'PDF, slides, or a video you have' },
+                      { value: 'link' as const, icon: <LinkIcon className="h-4 w-4" />, label: 'Paste a link', hint: 'YouTube, Vimeo, Loom, Drive' },
+                    ]).map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setSource(option.value)}
+                        className={`rounded-lg border px-4 py-2.5 text-left text-sm transition ${
+                          source === option.value
+                            ? 'border-[var(--accent)] bg-[var(--surface)] font-semibold text-[var(--foreground)]'
+                            : 'border-[var(--border)] bg-[var(--surface-alt)] text-[var(--muted)]'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">{option.icon}{option.label}</span>
+                        <span className="block text-xs font-normal text-[var(--muted)]">{option.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {source === 'file' ? (
+                    <>
+                      <input
+                        type="file"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          setFormData({ ...formData, file, durationSeconds: '' });
+                          if (file) readVideoDuration(file);
+                        }}
+                        className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
+                        required
+                      />
+                      <p className="text-xs text-[var(--muted)] mt-1">Supported: PDF, PPT, DOCX, MP4 (max 100MB)</p>
+                      {formData.durationSeconds && (
+                        <p className="text-xs text-[var(--accent)] mt-1">
+                          Runtime detected: {Math.floor(Number(formData.durationSeconds) / 60)} min {Number(formData.durationSeconds) % 60} sec
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        type="url"
+                        inputMode="url"
+                        placeholder="https://www.youtube.com/watch?v=…"
+                        value={formData.sourceUrl}
+                        onChange={(e) => setFormData({ ...formData, sourceUrl: e.target.value })}
+                        className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder-[var(--muted)]"
+                        required
+                      />
+                      {/* Answered as they type, because the alternative is
+                          submitting a form and being told the link was wrong. */}
+                      {linkTyped && parsedLink ? (
+                        <div className="mt-2 flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5">
+                          {parsedLink.thumbnailUrl ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img src={parsedLink.thumbnailUrl} alt="" className="h-12 w-20 shrink-0 rounded object-cover" />
+                          ) : null}
+                          <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                            <span className="font-semibold">{parsedLink.label} video recognised.</span>
+                            <br />
+                            Students will play it inside the library — they never leave the portal.
+                          </p>
+                        </div>
+                      ) : linkTyped ? (
+                        <p className="mt-2 text-xs text-red-600">
+                          Not a video link we recognise. Try a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.
+                        </p>
+                      ) : (
+                        <p className="text-xs text-[var(--muted)] mt-1">
+                          Nothing is copied — the video stays where it is and plays inside your students&apos; library.
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
 
@@ -459,8 +429,8 @@ export default function LecturerMaterials() {
                             onClick={() => setFormData({ ...formData, isRecording: option.value })}
                             className={`rounded-lg border px-4 py-2.5 text-left text-sm transition ${
                               formData.isRecording === option.value
-                                ? 'border-[var(--accent)] bg-white font-semibold text-[var(--foreground)]'
-                                : 'border-[var(--border)] bg-white/50 text-[var(--muted)]'
+                                ? 'border-[var(--accent)] bg-[var(--surface)] font-semibold text-[var(--foreground)]'
+                                : 'border-[var(--border)] bg-[var(--surface-alt)] text-[var(--muted)]'
                             }`}
                           >
                             <span className="flex items-center gap-2">{option.icon}{option.label}</span>
@@ -583,6 +553,8 @@ export default function LecturerMaterials() {
                       Download
                     </button>
                   </div>
+
+                  {material.aiState === 'ready' && <LecturerQuestReview materialId={material.id} />}
                 </div>
               ))}
             </div>

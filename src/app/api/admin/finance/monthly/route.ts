@@ -1,12 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
 import { requireCapability } from "@/lib/admin-roles";
-import { requireTenantSession, tenantScopeForPayment } from "@/lib/tenant-access";
-async function isAdmin(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  return user?.role?.toLowerCase() === "admin";
-}
 
 function startOfMonth(dt: Date) {
   return new Date(dt.getFullYear(), dt.getMonth(), 1, 0, 0, 0, 0);
@@ -19,12 +13,6 @@ function endOfMonth(dt: Date) {
 export async function GET(request: Request) {
   const gate = await requireCapability("payments");
   if (!gate.ok) return gate.response;
-
-  const auth = await requireTenantSession();
-  if (!auth.ok) return auth.response!;
-  if (!await isAdmin(auth.session.user.id)) return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-
-  const paymentWhere = tenantScopeForPayment(auth.tenantId);
 
   const now = new Date();
   const months: { label: string; start: Date; end: Date }[] = [];
@@ -41,7 +29,7 @@ export async function GET(request: Request) {
 
   for (const m of months) {
     const agg = await prisma.payment.aggregate({
-      where: { ...paymentWhere, status: "completed", createdAt: { gte: m.start, lte: m.end } },
+      where: { status: "completed", createdAt: { gte: m.start, lte: m.end } },
       _sum: { amount: true },
     });
     results.push({ label: m.label, revenue: agg._sum.amount || 0 });

@@ -4,6 +4,7 @@ import { AttachmentIcon, AudioIcon, DocumentIcon, FilmIcon, ImageIcon, PencilIco
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { isPlayableVideo } from "@/lib/video-library";
 
 /**
  * Recently uploaded materials, on the dashboard.
@@ -83,10 +84,11 @@ export default function NewMaterialsCard() {
       <div className="mt-6 space-y-4">
         {materials.slice(0, 4).map((material) => {
           const days = Math.floor((Date.now() - new Date(material.createdAt).getTime()) / 86_400_000);
+          const isVideo = isPlayableVideo(material.fileType);
           return (
-            <a
+            <Link
               key={material.id}
-              href={material.fileUrl}
+              href={isVideo ? `/materials/watch/${material.id}` : material.fileUrl}
               className="flex items-center gap-4 rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]"
             >
               <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
@@ -100,7 +102,7 @@ export default function NewMaterialsCard() {
                   {days === 0 ? "added today" : days === 1 ? "added yesterday" : `added ${days} days ago`}
                 </p>
               </div>
-            </a>
+            </Link>
           );
         })}
       </div>

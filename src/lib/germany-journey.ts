@@ -35,7 +35,14 @@
  * does the database half.
  */
 
-import { LEVELS, SESSION_MONTHS, nextLevelAfter } from "@/lib/levels";
+import {
+  JOURNEY_LEVELS,
+  JOURNEY_TOP_LEVEL,
+  LEVELS,
+  SESSION_MONTHS,
+  journeyLevelFor,
+  nextLevelAfter,
+} from "@/lib/levels";
 import { CUSTOM_GOAL, goalFor, levelForGoal, type GermanyGoal } from "@/lib/germany-goals";
 
 /* -------------------------------------------------------------------------- */
@@ -256,10 +263,14 @@ export function targetLevelFor(input: {
 
   // The goal they chose can only ever LENGTHEN the road, never shorten it —
   // see levelForGoal. Someone who tells us they are joining a spouse (A1) does
-  // not get their B2 course quietly cut in half; someone heading to university
-  // gets told about the C1 before they finish B2 and find out the hard way.
-  if (!input.goalId) return fromFile;
-  return levelForGoal(goalFor(input.goalId), fromFile);
+  // not get their B2 course quietly cut in half.
+  //
+  // Clamped to the drawn range at the end. A university goal still REQUIRES
+  // C1 and its own copy still says so; what changed is that the road stops
+  // being drawn at B2, so the target handed to the map has to stop there too
+  // or the ladder asks for a node that no longer exists.
+  const target = input.goalId ? levelForGoal(goalFor(input.goalId), fromFile) : fromFile;
+  return journeyLevelFor(target);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -321,7 +332,13 @@ export function buildCountdown(
   const daysElapsed = Math.max(0, rawElapsed);
   const daysLeft = Math.max(0, totalDays - daysElapsed);
 
-  const weeksTotal = Math.max(1, Math.round(totalDays / 7));
+  // A calendar month is 28-31 days, so deriving "weeks total" from totalDays/7
+  // makes an August-started level read as 9 weeks and a February-started one
+  // read as 8 — while every other line in the portal (the advance offer, the
+  // per-week price) states the level as a flat WEEKS_OF_TEACHING (months * 4).
+  // Pin this to the same constant so "8 weeks" never depends on which month a
+  // student happened to start in.
+  const weeksTotal = Math.max(1, months * 4);
   const weeksElapsed = Math.floor(daysElapsed / 7);
   const weekNumber = Math.min(weeksTotal, weeksElapsed + 1);
 
@@ -387,14 +404,27 @@ export function buildCountdown(
 /* -------------------------------------------------------------------------- */
 
 export type ArrivalEstimate = {
-  /** ISO. Null when there is nothing honest to project from. */
+  /** ISO. Null when there is nothing honest to project from. Germany, after paperwork. */
   date: string | null;
   /** "March 2028" */
   label: string | null;
+  /**
+   * ISO. When {@link monthsOfTeaching} of classes alone would be done — no
+   * paperwork added. This is the date that actually matches "N levels to
+   * {targetLevel}", and is what the UI must show next to that sentence: a
+   * card that says "4 levels to B2 · 8 months of teaching" beside a DATE that
+   * silently also counts 8 months of visa paperwork reads as "B2 in 16
+   * months," which is not what it means and is not what it said.
+   */
+  levelDate: string | null;
+  /** "April 2027" */
+  levelLabel: string | null;
   /** Levels still to teach between here and the target. */
   levelsRemaining: number;
   /** Months of teaching left, before paperwork. */
   monthsOfTeaching: number;
+  /** Months allowed for paperwork after the teaching is done — this goal's, not a flat number. */
+  paperworkMonths: number;
   /** The words that must appear next to the date. Not optional. */
   caveat: string;
 };
@@ -422,16 +452,21 @@ export function estimateArrival(input: {
   now?: Date;
 }): ArrivalEstimate {
   const { paperworkMonths = 4, now = new Date() } = input;
-  const levels = LEVELS as readonly string[];
-  const from = levels.indexOf(String(input.currentLevel ?? "A1").toUpperCase());
-  const to = levels.indexOf(String(input.targetLevel ?? "B2").toUpperCase());
+  // Same clamped ladder the road is drawn from, so the arrival date counts the
+  // levels the student can actually see ahead of them.
+  const levels = JOURNEY_LEVELS as readonly string[];
+  const from = levels.indexOf(journeyLevelFor(input.currentLevel));
+  const to = levels.indexOf(journeyLevelFor(input.targetLevel ?? JOURNEY_TOP_LEVEL));
 
   if (from < 0 || to < 0 || to < from) {
     return {
       date: null,
       label: null,
+      levelDate: null,
+      levelLabel: null,
       levelsRemaining: 0,
       monthsOfTeaching: 0,
+      paperworkMonths,
       caveat: "An estimate, not a promise.",
     };
   }
@@ -444,15 +479,26 @@ export function estimateArrival(input: {
     : SESSION_MONTHS;
 
   const monthsOfTeaching = currentLevelMonthsLeft + levelsAfterCurrent * SESSION_MONTHS;
+  const levelMonths = Math.ceil(monthsOfTeaching);
   const totalMonths = Math.ceil(monthsOfTeaching + paperworkMonths);
 
+  // Two dates, on purpose. `levelDate` is when the classes alone are done —
+  // the one that has to match "N levels · N months of teaching" on the same
+  // card. `date` is Germany itself, teaching plus this goal's paperwork
+  // allowance. Handing back only the second one (as this used to) meant the
+  // UI's only honest option was to bury the paperwork months in a caveat
+  // line, which reads as a lie about how long the levels themselves take.
+  const levelDate = new Date(now.getFullYear(), now.getMonth() + levelMonths, 1);
   const date = new Date(now.getFullYear(), now.getMonth() + totalMonths, 1);
 
   return {
     date: date.toISOString(),
     label: date.toLocaleString("en-US", { month: "long", year: "numeric" }),
+    levelDate: levelDate.toISOString(),
+    levelLabel: levelDate.toLocaleString("en-US", { month: "long", year: "numeric" }),
     levelsRemaining: levelsAfterCurrent + 1,
     monthsOfTeaching: Math.round(monthsOfTeaching),
+    paperworkMonths,
     caveat: `If your levels run back to back and paperwork takes the usual ${paperworkMonths} months. An estimate, not a promise.`,
   };
 }
@@ -484,6 +530,14 @@ export type JourneyInput = {
   goalId?: string | null;
   /** Their own words, when they picked "Something else". */
   goalNote?: string | null;
+
+  /**
+   * A one-to-one student's tutor knows exactly what this week is about — a
+   * group student's road cannot say that because there is no single tutor to
+   * ask. Optional, and only ever adds a sentence to the CURRENT level stage's
+   * teaser; it never replaces the crafted copy in LEVEL_VOICE.
+   */
+  privateFocus?: { topic: string | null; nextSessionAt: string | null } | null;
 
   now?: Date;
 };
@@ -539,16 +593,20 @@ export function buildJourney(input: JourneyInput): Journey {
   const now = input.now ?? new Date();
   const goal = input.goalId ? goalFor(input.goalId) : CUSTOM_GOAL;
   const goalUnset = !input.goalId;
-  const currentLevel = String(input.currentLevel ?? "A1").toUpperCase();
-  const targetLevel = String(input.targetLevel ?? "B2").toUpperCase();
-  const levels = LEVELS as readonly string[];
+  /**
+   * Clamped to the drawn range. A student sitting C1 is placed on the last
+   * node rather than dropped off the road — see journeyLevelFor.
+   */
+  const currentLevel = journeyLevelFor(input.currentLevel);
+  const targetLevel = journeyLevelFor(input.targetLevel ?? JOURNEY_TOP_LEVEL);
+  const levels = JOURNEY_LEVELS as readonly string[];
 
   const completed = new Set(input.levelsCompleted.map((l) => String(l).toUpperCase()));
   const startedIso = toIso(input.classesStartedAt);
 
   // Which level nodes to draw. Never fewer than the one they are sitting in,
   // never more than their goal — see targetLevelFor.
-  const fromIndex = 0;
+  const fromIndex = Math.max(0, levels.indexOf(currentLevel));
   const toIndex = Math.max(levels.indexOf(currentLevel), levels.indexOf(targetLevel));
   const levelNodes = levels.slice(fromIndex, toIndex + 1);
 
@@ -563,6 +621,11 @@ export function buildJourney(input: JourneyInput): Journey {
   // ---- The ladder -------------------------------------------------------
   for (const level of levelNodes) {
     const copy = LEVEL_VOICE[level];
+    // A private student's current level gets one extra sentence naming what
+    // their tutor actually booked them for this week, so "premium" is a fact
+    // about the map rather than only a word in its header.
+    const isCurrentLevel = level === currentLevel && !completed.has(level);
+    const focusTopic = isCurrentLevel ? input.privateFocus?.topic?.trim() || null : null;
     raw.push({
       id: `level:${level}`,
       kind: "level",
@@ -570,7 +633,7 @@ export function buildJourney(input: JourneyInput): Journey {
       voice: copy.voice,
       label: level,
       echo: copy.echo,
-      teaser: copy.teaser,
+      teaser: focusTopic ? `${copy.teaser} This week with your tutor: ${focusTopic}.` : copy.teaser,
       tribe: level === targetLevel ? "The Finishers" : null,
       clearedAt: completed.has(level) ? (input.claimedStages[`level:${level}`]?.at ?? null) : null,
     });
