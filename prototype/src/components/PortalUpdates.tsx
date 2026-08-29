@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { CommunityIcon } from "@/components/icons";
+import { AlertIcon, BellIcon, CommunityIcon } from "@/components/icons";
 
 /**
  * MESSAGES THAT REACH YOU WHEREVER YOU ARE IN THE PORTAL.
@@ -66,6 +66,41 @@ function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+/**
+ * One short bell ping, synthesised so there is no audio asset to 404 and
+ * nothing to download before the first alert can sound. Moved here from the
+ * old NotificationCenter toast: this is now the one place a notification
+ * announces itself in-app. Browsers block an AudioContext until the user has
+ * interacted with the page, which is the behaviour we want — a tab left open
+ * overnight cannot start making noise on its own — so a blocked chime just
+ * fails silently.
+ */
+function chime() {
+  try {
+    const Ctor =
+      window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return;
+    const ctx = new Ctor();
+    if (ctx.state === "suspended") void ctx.resume();
+    const now = ctx.currentTime;
+    [880, 1320].forEach((frequency, harmonic) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(harmonic === 0 ? 0.16 : 0.06, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    });
+    window.setTimeout(() => void ctx.close().catch(() => {}), 1200);
+  } catch {
+    /* No audio available. The card and the push still landed. */
+  }
+}
+
 export default function PortalUpdates() {
   const router = useRouter();
   const [visible, setVisible] = useState<Update[]>([]);
@@ -106,6 +141,10 @@ export default function PortalUpdates() {
             for (const update of fresh) seenRef.current.add(update.id);
             // Oldest first, so the newest ends up nearest the reader's thumb.
             setVisible((current) => [...current, ...fresh.reverse()].slice(-MAX_VISIBLE));
+            // A notification earns the bell ping the old NotificationCenter
+            // toast used to make; a stream of chat messages does not, or a
+            // busy class would chime forty times a minute.
+            if (fresh.some((update) => update.source === "notification")) chime();
           }
 
           /**
@@ -177,9 +216,21 @@ export default function PortalUpdates() {
               TONE[update.severity] ?? TONE.info
             }`}
           >
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-[11px] font-bold text-[var(--accent)]">
+            <span
+              className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[11px] font-bold ${
+                update.severity === "critical" || update.severity === "warning"
+                  ? "bg-amber-500/15 text-amber-600"
+                  : "bg-[var(--accent-soft)] text-[var(--accent)]"
+              }`}
+            >
               {update.author ? (
                 initials(update.author.name)
+              ) : update.source === "notification" ? (
+                update.severity === "critical" || update.severity === "warning" ? (
+                  <AlertIcon className="h-4 w-4" />
+                ) : (
+                  <BellIcon className="h-4 w-4" />
+                )
               ) : (
                 <CommunityIcon className="h-4 w-4" />
               )}

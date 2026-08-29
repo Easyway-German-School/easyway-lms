@@ -121,10 +121,13 @@ self.addEventListener("push", (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    payload = { title: "Easyway community", body: event.data ? event.data.text() : "" };
+    payload = { title: "Easyway", body: event.data ? event.data.text() : "" };
   }
 
-  const title = payload.title || "Easyway community";
+  // Every notify() send now carries its own title/body/url/tag, whatever the
+  // kind — class, payment, result, message. The old "community" defaults are
+  // only the last resort for a malformed push.
+  const title = payload.title || "Easyway";
   const options = {
     body: payload.body || "",
     icon: "/icon-192.png",
@@ -132,9 +135,9 @@ self.addEventListener("push", (event) => {
     silent: false,
     // Same tag collapses repeat notifications for one thread into a single
     // entry instead of stacking a dozen buzzes for one busy conversation.
-    tag: payload.tag || "easyway-community",
+    tag: payload.tag || "easyway",
     renotify: true,
-    data: { url: payload.url || "/community" },
+    data: { url: payload.url || "/" },
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -142,15 +145,20 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || "/community";
+  const target = (event.notification.data && event.notification.data.url) || "/";
 
   // Focus an already-open tab when there is one, rather than piling up tabs.
+  // A bare "/" target matches any tab, so only prefer an existing tab when the
+  // notification points somewhere specific; otherwise just open the app.
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      for (const client of clients) {
-        if (client.url.includes(target) && "focus" in client) return client.focus();
+      if (target.length > 1) {
+        for (const client of clients) {
+          if (client.url.includes(target) && "focus" in client) return client.focus();
+        }
       }
       if (self.clients.openWindow) return self.clients.openWindow(target);
+      if (clients[0] && "focus" in clients[0]) return clients[0].focus();
       return undefined;
     }),
   );

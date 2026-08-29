@@ -106,6 +106,7 @@ export type MomentId =
   | "level-advance"
   | "lesson-complete"
   | "notifications"
+  | "daily-briefing"
   | "journey"
   | "poster"
   | "game-turn";
@@ -179,6 +180,19 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Turn on reminders",
     dockBlurb: "So you hear about class and new material without opening the app.",
+  },
+  /**
+   * Becca's daily hello — streak, XP, and today's missions, once per day on
+   * the first login. Sits just above the journey moment: both are recurring
+   * motivation, but this is the one framed as "here is your day", so it wins
+   * the first slot on a quiet morning and the journey moment follows or docks.
+   * Never load-bearing — a missed day costs nothing but a nudge.
+   */
+  "daily-briefing": {
+    priority: 52,
+    kind: "modal",
+    dockLabel: "Your day with Becca",
+    dockBlurb: "Your streak, your XP and today's three missions.",
   },
   journey: {
     priority: 50,

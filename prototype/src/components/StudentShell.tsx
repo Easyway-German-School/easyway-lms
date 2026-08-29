@@ -12,6 +12,7 @@ import BrandLogo from "@/components/BrandLogo";
 import LiveClassCall from "@/components/live/LiveClassCall";
 import MomentDock from "@/components/MomentDock";
 import GameTurnToast from "@/components/GameTurnToast";
+import DailyBriefing from "@/components/DailyBriefing";
 import LessonCompleteCelebration from "@/components/LessonCompleteCelebration";
 import BetaFeedbackPrompt from "@/components/BetaFeedbackPrompt";
 import StudentUsageTracker from "@/components/StudentUsageTracker";
@@ -425,6 +426,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       {/* The old dashboard "waiting on you" games card, now a queued nudge
           instead of a permanent section — see lib/moment-queue.tsx. */}
       <GameTurnToast />
+
+      {/* Becca's once-a-day hello: streak, XP and today's missions, surfaced
+          on the first page of the day instead of waiting to be scrolled to.
+          Queue-managed, so it never fights the tour or a celebration. Only
+          for students actually in the portal — an unpaid lock screen has no
+          missions to brief. */}
+      {hasAccess && <DailyBriefing />}
 
       {/* Fires on a genuine server-validated completion — see
           celebrateLessonComplete() in LessonCompleteCelebration.tsx. */}

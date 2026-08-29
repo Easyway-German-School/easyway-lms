@@ -9,6 +9,7 @@ import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import SignOutButton from "@/components/SignOutButton";
 import HelpLauncher from "@/components/HelpLauncher";
+import PortalUpdates from "@/components/PortalUpdates";
 import BrandLoader from "@/components/BrandLoader";
 import {
   AttendanceIcon,
@@ -268,6 +269,11 @@ export default function ParentShell({ children }: { children: ReactNode }) {
         </main>
 
         <HelpLauncher />
+
+        {/* One in-app popup system across every portal — the same bottom-anchored
+            card students and staff get, so a parent hears about a payment notice
+            or a message from any page. Push handles the phone when it's closed. */}
+        <PortalUpdates />
       </div>
     </ParentChildContext.Provider>
   );

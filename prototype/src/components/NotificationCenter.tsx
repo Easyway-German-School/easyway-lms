@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertIcon,
@@ -34,12 +34,14 @@ import { usePushNotifications } from "@/lib/use-push";
  *   - Picks its icon from `kind`, a field on the row, instead of searching the
  *     title for the word "Payment". A retitled notification no longer loses
  *     its icon.
- *   - Raises a toast for anything that arrives while the tab is open, so an
- *     admin watching the dashboard learns about a payment without opening the
- *     panel. Every new unread notification also makes one bell ping — see
- *     `chime`.
  *   - Deep-links. Every notification carries where it came from, so clicking
  *     "Payment received" opens the payment rather than the reader's memory.
+ *
+ * It used to also raise its own toast for anything arriving while the tab was
+ * open. That is now `PortalUpdates`' job — one popup system for the whole
+ * portal, chat and notifications together — because two of them meant every
+ * send landed twice, one stacked half-off-screen above the other. This
+ * component is the bell and the panel now, nothing more.
  */
 
 type Notification = {
@@ -150,43 +152,6 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/**
- * One bell ping, synthesised rather than shipped as an audio file so there is no
- * asset to 404 and nothing to download before the first alert can sound.
- *
- * Browsers refuse to start an AudioContext until the user has interacted with
- * the page, which is exactly right — it means a tab left open overnight cannot
- * start making noise on its own. A blocked chime is not an error, so it fails
- * silently.
- */
-function chime() {
-  try {
-    const Ctor = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctor) return;
-    const ctx = new Ctor();
-    if (ctx.state === "suspended") {
-      void ctx.resume();
-    }
-    const now = ctx.currentTime;
-    [880, 1320].forEach((frequency, harmonic) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = frequency;
-      const at = now;
-      gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(harmonic === 0 ? 0.16 : 0.06, at + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.28);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(at);
-      osc.stop(at + 0.3);
-    });
-    window.setTimeout(() => void ctx.close().catch(() => {}), 1200);
-  } catch {
-    /* No audio available. The toast and the badge still landed. */
-  }
-}
-
 export default function NotificationCenter({
   align = "right",
   className = "",
@@ -203,11 +168,6 @@ export default function NotificationCenter({
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [toasts, setToasts] = useState<Notification[]>([]);
-
-  // Ids seen on a previous poll. Seeded by the first load so opening the tab
-  // does not toast the entire backlog.
-  const known = useRef<Set<string> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -215,18 +175,6 @@ export default function NotificationCenter({
       if (!response.ok) return;
       const data = await response.json();
       const incoming: Notification[] = data.notifications ?? [];
-
-      if (known.current === null) {
-        known.current = new Set(incoming.map((n) => n.id));
-      } else {
-        const fresh = incoming.filter((n) => !known.current!.has(n.id) && !n.readAt);
-        for (const n of incoming) known.current.add(n.id);
-
-        if (fresh.length > 0) {
-          setToasts((current) => [...fresh.slice(0, 3), ...current].slice(0, 3));
-          chime();
-        }
-      }
 
       setNotifications(incoming);
       setUnreadCount(data.unreadCount ?? 0);
@@ -255,13 +203,6 @@ export default function NotificationCenter({
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [load]);
-
-  // Toasts retire themselves.
-  useEffect(() => {
-    if (toasts.length === 0) return;
-    const timer = window.setTimeout(() => setToasts((current) => current.slice(0, -1)), 7000);
-    return () => window.clearTimeout(timer);
-  }, [toasts]);
 
   const markRead = useCallback(
     async (ids: string[]) => {
@@ -308,7 +249,6 @@ export default function NotificationCenter({
   const open = useCallback(
     (notification: Notification) => {
       void markRead([notification.id]);
-      setToasts((current) => current.filter((t) => t.id !== notification.id));
       const destination = notification.link ?? destinationForKind(notification.kind);
       if (destination) {
         setIsOpen(false);
@@ -542,44 +482,6 @@ export default function NotificationCenter({
         </AnimatePresence>
       </div>
 
-      {/*
-        Toasts. Fixed to the viewport, so they are not clipped by the shell.
-
-        They RISE IN FROM BELOW THE FOLD rather than sliding in from the side:
-        the toast starts fully out of frame (`y: 120`, past its own height) and
-        travels up into place. On a phone that is the bottom of the screen,
-        which is where the thumb already is and where every messaging app the
-        students use puts the same thing — and it means a notification never
-        lands over the header, the bell, or whatever they were reading.
-      */}
-      {/* `env(safe-area-inset-bottom)` keeps this clear of a phone's home-indicator strip. */}
-      <div className="pointer-events-none fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[120] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:w-[22rem]">
-        <AnimatePresence initial={false}>
-          {toasts.map((toast) => {
-            const tone = toneFor(toast.severity);
-            return (
-              <motion.button
-                key={toast.id}
-                layout
-                initial={{ opacity: 0, y: 120, scale: 0.96 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 120, scale: 0.96 }}
-                transition={{ type: "spring", stiffness: 320, damping: 32 }}
-                onClick={() => open(toast)}
-                className={`pointer-events-auto flex w-full gap-3 rounded-2xl border border-[var(--border)] border-l-4 ${tone.rail} bg-[var(--surface)] p-3.5 text-left shadow-2xl`}
-              >
-                <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${tone.chip}`}>
-                  {iconFor(toast.kind)}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold text-[var(--foreground)]">{toast.title}</span>
-                  <span className="mt-0.5 line-clamp-2 block text-xs text-[var(--muted)]">{toast.message}</span>
-                </span>
-              </motion.button>
-            );
-          })}
-        </AnimatePresence>
-      </div>
     </>
   );
 }
