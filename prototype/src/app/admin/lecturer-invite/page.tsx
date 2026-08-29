@@ -100,6 +100,27 @@ function naira(amount: number) {
   return `₦${Math.max(0, Math.round(amount)).toLocaleString()}`;
 }
 
+/**
+ * Remove a teaching group AND re-derive the flat levels/sessionSlots mirrors
+ * from what is left.
+ *
+ * `levels` and `sessionSlots` have no picker of their own on this form — they
+ * are only ever filled by `addGroup` unioning each group in. So when a group
+ * comes out they have to be recomputed, or they keep listing a level/sitting
+ * the tutor no longer teaches. That stale mirror is what made the tutor's own
+ * timetable answer "That class is not yours to edit". `branchIds` is left alone
+ * because it does have its own picker and may hold a branch on purpose.
+ */
+function pruneGroup(value: LecturerAssignment, group: LecturerAssignment["groups"][number]): LecturerAssignment {
+  const groups = value.groups.filter((item) => item !== group);
+  return {
+    ...value,
+    groups,
+    levels: [...new Set(groups.map((item) => item.level))],
+    sessionSlots: [...new Set(groups.map((item) => item.sessionSlot))],
+  };
+}
+
 /** The five pickers, shared by the create form and every edit panel. */
 function AssignmentFields({
   branches,
@@ -144,7 +165,7 @@ function AssignmentFields({
           <select value={groupSlot} onChange={(event) => setGroupSlot(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">{SESSION_SLOTS.map((slot) => <option key={slot} value={slot}>{slot.charAt(0).toUpperCase() + slot.slice(1)}</option>)}</select>
           <button type="button" onClick={addGroup} className="rounded-xl bg-[var(--accent-strong)] px-4 py-2 text-sm font-bold text-white">Add</button>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">{value.groups.map((group) => <button key={`${group.branchId}-${group.level}-${group.sessionSlot}`} type="button" onClick={() => onChange({ ...value, groups: value.groups.filter((item) => item !== group) })} className="rounded-full border border-[var(--accent)]/40 bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)]">{branches.find((branch) => branch.id === group.branchId)?.name ?? "Branch"} · {group.level} · {group.sessionSlot} ×</button>)}</div>
+        <div className="mt-3 flex flex-wrap gap-2">{value.groups.map((group) => <button key={`${group.branchId}-${group.level}-${group.sessionSlot}`} type="button" onClick={() => onChange(pruneGroup(value, group))} className="rounded-full border border-[var(--accent)]/40 bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)]">{branches.find((branch) => branch.id === group.branchId)?.name ?? "Branch"} · {group.level} · {group.sessionSlot} ×</button>)}</div>
       </div>
 
       <AssignmentPicker

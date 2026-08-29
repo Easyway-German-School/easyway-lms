@@ -110,16 +110,37 @@ export async function GET(req: NextRequest) {
     // A tutor gets their own class by default rather than having to find it.
     // An admin has no assignment to fall back on, so they get whatever branch
     // sorts first — the dropdowns let them switch from there.
+    //
+    // When the admin pinned exact teaching groups, the default MUST be one of
+    // those. The flat branchIds/levels/sessionSlots arrays are a union mirror of
+    // every group the tutor has ever had, and they are not pruned when a group
+    // is removed — so `levels[0]` can point at a level this tutor no longer
+    // teaches, and mayEdit() (which checks the groups) then correctly refuses
+    // it, and the tutor sees "That class is not yours to edit" on their own
+    // timetable. Reading the default from groups[0] keeps GET and mayEdit in
+    // step.
+    const primaryGroup = assignment?.groups[0] ?? null;
+
     const branchId =
       req.nextUrl.searchParams.get("branchId") ??
+      primaryGroup?.branchId ??
       assignment?.branchIds[0] ??
       (staff.role === "admin" ? branches[0]?.id : null) ??
       null;
-    const level = req.nextUrl.searchParams.get("level") ?? assignment?.levels[0] ?? "A1";
+    const level =
+      req.nextUrl.searchParams.get("level") ??
+      primaryGroup?.level ??
+      assignment?.levels[0] ??
+      "A1";
     const batch = req.nextUrl.searchParams.get("batch");
     // Which sitting is being edited. A branch can run the same level morning
     // and evening, and those are different classes with different topics.
-    const slot = normalizeSlot(req.nextUrl.searchParams.get("slot") ?? assignment?.sessionSlots[0] ?? null);
+    const slot = normalizeSlot(
+      req.nextUrl.searchParams.get("slot") ??
+        primaryGroup?.sessionSlot ??
+        assignment?.sessionSlots[0] ??
+        null,
+    );
 
     if (!branchId) {
       return NextResponse.json(

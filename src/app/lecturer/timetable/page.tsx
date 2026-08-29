@@ -46,6 +46,7 @@ type Assignment = {
   branchIds: string[];
   levels: string[];
   sessionSlots: string[];
+  groups: Array<{ branchId: string; level: string; sessionSlot: string }>;
   classTypes: string[];
   batches: string[];
 };
@@ -183,15 +184,28 @@ export default function LecturerTimetablePage() {
 
   // A tutor may switch between the cohorts the office gave them, but nothing
   // else. An admin gets the full list from the server.
+  //
+  // When the admin pinned exact teaching groups, offer only the levels and
+  // sittings that actually appear in a group for the branch in view. The flat
+  // levels/sessionSlots arrays are a union mirror that is not pruned when a
+  // group is removed, so trusting them here would let a tutor pick a
+  // level/sitting the server then refuses with "not yours to edit".
+  const groupsForBranch = (assignment?.groups ?? []).filter(
+    (group) => !branchId || group.branchId === branchId,
+  );
   const selectableBranches = branches;
   const selectableLevels = canChooseCohort
     ? ["A1", "A2", "B1", "B2", "C1", "C2"]
-    : (assignment?.levels ?? []);
+    : assignment?.groups?.length
+      ? [...new Set(groupsForBranch.map((group) => group.level))]
+      : (assignment?.levels ?? []);
   const selectableSlots = canChooseCohort
     ? ["morning", "afternoon", "evening"]
-    : assignment?.sessionSlots.length
-      ? assignment.sessionSlots
-      : ["morning", "afternoon", "evening"];
+    : assignment?.groups?.length
+      ? [...new Set(groupsForBranch.filter((group) => group.level === level).map((group) => group.sessionSlot))]
+      : assignment?.sessionSlots.length
+        ? assignment.sessionSlots
+        : ["morning", "afternoon", "evening"];
 
   return (
     <PortalShell>

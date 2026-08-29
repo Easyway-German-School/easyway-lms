@@ -1,12 +1,14 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 
 import TuitionCheckout from "@/components/TuitionCheckout";
 import NextLevelCheckout from "@/components/NextLevelCheckout";
 import PremiumPrivateClasses from "@/components/PremiumPrivateClasses";
+import { ArrowLeftIcon } from "@/components/icons";
 
 /**
  * The tuition checkout.
@@ -166,6 +168,16 @@ function ProgramsPageInner() {
   return (
     <div className="min-h-screen bg-[var(--surface-alt)] py-10 text-[var(--foreground)]">
       <div className="mx-auto max-w-6xl space-y-8 px-6 md:px-10">
+        {/* This page renders its own layout with no portal sidebar, so it needs
+            its own way back — otherwise a student who lands here from a link
+            has only the browser button. */}
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--accent)] hover:opacity-80"
+        >
+          <ArrowLeftIcon /> Back to dashboard
+        </Link>
+
         <header className="rounded-3xl bg-[var(--surface)] p-8 shadow-sm">
           <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">
             {forNextLevel ? "Continuing your studies" : "Tuition & pathways"}
