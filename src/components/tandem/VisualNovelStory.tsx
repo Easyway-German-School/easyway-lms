@@ -4,9 +4,10 @@
  * The personalized, illustrated scene experience — what a student with a
  * matching germanyGoal (care/ausbildung/work/study) sees instead of
  * GenericTandemChat. Full-bleed background, an anchored character portrait,
- * a novel-style dialogue box, light branching choices, and one writing beat
- * per episode, all driven by the same real Whisper/Azure/Claude pipeline
- * the generic experience uses for its speaking beats.
+ * a novel-style dialogue box, real branching choices, a persistent
+ * relationship meter, and one writing beat per episode, all driven by the
+ * same real Whisper/Azure/Claude pipeline the generic experience uses for
+ * its speaking beats.
  *
  * This is a SERIES, not a single chapter: `access` (a StoryAccessState) is
  * the single source of truth for which of three modes we're in — mid-episode
@@ -16,18 +17,29 @@
  * one it's handed and re-fetches it after every mutation.
  *
  * State is keyed by {sceneId, beatId} rather than a flat turn index — a
- * choice beat can send two different students down the same next beat with
- * different flavor text, which a linear turnIndex can't represent.
+ * choice beat can send two different students down genuinely different next
+ * beats, which a linear turnIndex can't represent.
+ *
+ * RELATIONSHIP MEMORY: `access.relationships` is a 0-100 trust score per
+ * character, computed server-side and carried across the whole series (not
+ * reset each episode — see story-progress.ts). `pickLineVariant` picks the
+ * highest-trust line a `line` beat qualifies to show; this is how a
+ * character visibly remembers earlier choices without the scene graph
+ * itself branching.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { usePronunciationRecorder } from "@/lib/client/use-pronunciation-recorder";
-import type { StoryCharacter, ExpressionKey } from "@/lib/story/types";
+import { pickLineVariant, type StoryCharacter, type ExpressionKey } from "@/lib/story/types";
 import type { StoryAccessState } from "@/lib/story-progress";
-import { MicIcon, SpeakerIcon, CheckCircleIcon, ClockIcon } from "@/components/icons";
+import { STORY_EPISODE_XP } from "@/lib/gamification";
+import { MicIcon, SpeakerIcon, CheckCircleIcon, ClockIcon, HeartIcon, SparklesIcon } from "@/components/icons";
 
 type WriteResult = { score: number; feedback: string; corrections: string[]; achievementTitle: string | null };
+type TrustChange = { characterId: string; delta: number; newValue: number } | null;
+
+const TYPEWRITER_MS_PER_CHAR = 16;
 
 function useCountdown(targetIso: string | undefined): string {
   const [label, setLabel] = useState("soon");
@@ -48,12 +60,61 @@ function useCountdown(targetIso: string | undefined): string {
   return label;
 }
 
+/** Reveals `text` one character at a time. `skip()` jumps straight to the full text — used when the player taps ahead of the reveal. */
+function useTypewriter(text: string) {
+  const [shown, setShown] = useState(text);
+  const [done, setDone] = useState(true);
+  const skippedRef = useRef(false);
+
+  useEffect(() => {
+    skippedRef.current = false;
+    if (!text) { setShown(""); setDone(true); return; }
+    setShown("");
+    setDone(false);
+    const chars = Array.from(text);
+    let i = 0;
+    const interval = window.setInterval(() => {
+      if (skippedRef.current) return;
+      i += 1;
+      setShown(chars.slice(0, i).join(""));
+      if (i >= chars.length) { setDone(true); window.clearInterval(interval); }
+    }, TYPEWRITER_MS_PER_CHAR);
+    return () => window.clearInterval(interval);
+  }, [text]);
+
+  function skip() {
+    skippedRef.current = true;
+    setShown(text);
+    setDone(true);
+  }
+
+  return { shown, done, skip };
+}
+
+/** Small heart meter under a speaker's name — the only visible trace of the series-wide trust score. */
+function TrustMeter({ value }: { value: number }) {
+  return (
+    <div className="mt-1 flex items-center gap-1.5">
+      <HeartIcon className="h-3 w-3 shrink-0 text-[var(--accent)]" />
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-white/15">
+        <motion.div
+          className="h-full rounded-full bg-[var(--accent)]"
+          initial={false}
+          animate={{ width: `${value}%` }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function VisualNovelStory({ initialAccess }: { initialAccess: StoryAccessState }) {
   const [access, setAccess] = useState<StoryAccessState>(initialAccess);
   const [isAdvancing, setIsAdvancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flavorNote, setFlavorNote] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [trustToast, setTrustToast] = useState<{ characterName: string; delta: number } | null>(null);
 
   const [writeText, setWriteText] = useState("");
   const [writeResult, setWriteResult] = useState<WriteResult | null>(null);
@@ -66,6 +127,7 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
   const playable = access.state === "playable" ? access : null;
   const chapter = playable?.chapter;
   const progress = playable?.progress;
+  const relationships = playable?.relationships ?? {};
   const characterById = useMemo(() => new Map((chapter?.characters ?? []).map((character) => [character.id, character])), [chapter]);
   const scene = chapter && progress ? chapter.scenes[progress.currentSceneId] : undefined;
   const beat = scene && progress ? scene.beats[progress.currentBeatId] : undefined;
@@ -81,10 +143,30 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
     setError(null);
   }, [progress?.currentSceneId, progress?.currentBeatId]);
 
+  useEffect(() => {
+    if (!trustToast) return;
+    const timeout = window.setTimeout(() => setTrustToast(null), 2600);
+    return () => window.clearTimeout(timeout);
+  }, [trustToast]);
+
   const speakerId = beat && beat.type !== "write" ? beat.speakerId : undefined;
   const speaker: StoryCharacter | undefined = speakerId ? characterById.get(speakerId) : undefined;
-  const expression: ExpressionKey = beat?.type === "line" ? beat.expression : speaker?.defaultExpression ?? "neutral";
+
+  // A `line` beat may carry higher-trust rewrites — pick the one this
+  // player's history with the speaker actually qualifies for.
+  const resolvedLine = beat?.type === "line" ? pickLineVariant(relationships, beat) : null;
+  const expression: ExpressionKey = resolvedLine ? resolvedLine.expression : speaker?.defaultExpression ?? "neutral";
   const portraitSrc = speaker ? speaker.portraits[expression] ?? speaker.portraits[speaker.defaultExpression] : undefined;
+  const trustValue = speaker ? relationships[speaker.id] ?? 50 : 50;
+
+  // Whatever's actually read aloud/typed out for the current beat — the one
+  // string the typewriter effect below animates in, regardless of beat type.
+  const primaryText =
+    beat?.type === "line" ? resolvedLine?.text ?? "" :
+    beat?.type === "yourLine" ? beat.targetPhrase :
+    beat?.type === "choice" ? beat.prompt ?? "" :
+    "";
+  const typewriter = useTypewriter(primaryText);
 
   const recorder = usePronunciationRecorder({
     expectedPhrase: beat?.type === "yourLine" ? beat.targetPhrase : "",
@@ -112,6 +194,7 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
 
   async function advance(choiceOptionId?: string, nextFlavorNote?: string) {
     if (!scene || !beat) return;
+    if (!typewriter.done) { typewriter.skip(); return; }
     setIsAdvancing(true);
     setError(null);
     try {
@@ -125,6 +208,11 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
       setSpokenResult(null);
       setAccess(data.access);
       setFlavorNote(nextFlavorNote ?? null);
+      const trustChange = data.trustChange as TrustChange;
+      if (trustChange && trustChange.delta) {
+        const name = characterById.get(trustChange.characterId)?.name ?? "";
+        setTrustToast({ characterName: name, delta: trustChange.delta });
+      }
     } catch {
       setError("Unable to continue the story.");
     } finally {
@@ -160,16 +248,32 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
 
   const wordCount = writeText.trim().split(/\s+/).filter(Boolean).length;
   const background = scene?.background;
+  const justFinishedEpisode = access.state === "locked" || access.state === "season-complete";
 
   if (access.state === "locked") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--surface-alt)] p-6 text-[var(--foreground)]">
-        <div className="max-w-md rounded-3xl bg-[var(--surface)] p-8 text-center shadow-2xl ring-1 ring-white/10">
+        <motion.div
+          initial={{ opacity: 0, y: 16, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
+          className="max-w-md rounded-3xl bg-[var(--surface)] p-8 text-center shadow-2xl ring-1 ring-white/10"
+        >
           <CheckCircleIcon className="mx-auto h-10 w-10 text-[var(--accent)]" />
           <h1 className="mt-4 text-2xl font-semibold">{access.completedChapter.title} — complete</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
             Every line you spoke and wrote here was scored for real, not just clicked through.
           </p>
+          {justFinishedEpisode ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.2, type: "spring", stiffness: 260, damping: 18 }}
+              className="mx-auto mt-4 inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)]/15 px-4 py-1.5 text-sm font-bold text-[var(--accent)]"
+            >
+              <SparklesIcon className="h-4 w-4" /> +{STORY_EPISODE_XP} XP · Episode complete
+            </motion.div>
+          ) : null}
           <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-left">
             <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
               <ClockIcon className="h-3.5 w-3.5" /> Next: unlocks in {countdown}
@@ -177,7 +281,7 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
             <p className="mt-2 text-sm font-semibold">{access.nextChapter.title}</p>
             <p className="mt-1 text-xs text-[var(--muted)]">{access.nextChapter.synopsis}</p>
           </div>
-        </div>
+        </motion.div>
       </div>
     );
   }
@@ -201,19 +305,26 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
   }
 
   return (
-    <div
-      className="relative min-h-screen bg-cover bg-center text-white"
-      style={{ backgroundImage: `linear-gradient(180deg, rgba(10,20,20,0.35) 0%, rgba(10,15,18,0.85) 78%), linear-gradient(160deg, #0f2027, #1c3f3a)` }}
-    >
-      {background ? (
-        <img
-          src={background}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover"
-          style={{ mixBlendMode: "normal" }}
-          onError={(event) => { event.currentTarget.style.display = "none"; }}
-        />
-      ) : null}
+    <div className="relative min-h-screen overflow-hidden bg-cover bg-center text-white">
+      <div
+        className="absolute inset-0"
+        style={{ backgroundImage: `linear-gradient(180deg, rgba(10,20,20,0.35) 0%, rgba(10,15,18,0.85) 78%), linear-gradient(160deg, #0f2027, #1c3f3a)` }}
+      />
+      <AnimatePresence mode="sync">
+        {background ? (
+          <motion.img
+            key={background}
+            src={background}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+            initial={{ opacity: 0, scale: 1.04 }}
+            animate={{ opacity: 1, scale: 1.1 }}
+            exit={{ opacity: 0 }}
+            transition={{ opacity: { duration: 0.7 }, scale: { duration: 22, ease: "linear" } }}
+            onError={(event) => { event.currentTarget.style.display = "none"; }}
+          />
+        ) : null}
+      </AnimatePresence>
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/10 to-black/80" />
 
       <div className="relative flex min-h-screen flex-col justify-end px-4 pb-6 pt-10 sm:px-8">
@@ -228,39 +339,69 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
               <div className="absolute bottom-0 flex h-40 w-40 items-center justify-center rounded-full bg-[var(--accent)]/30 text-4xl font-black text-white sm:h-48 sm:w-48">
                 {speaker.name.slice(0, 1)}
               </div>
-              {portraitSrc ? (
-                <img
-                  src={portraitSrc}
-                  alt={speaker.name}
-                  className="relative h-full w-full object-contain object-bottom drop-shadow-2xl"
-                  onError={(event) => { event.currentTarget.style.display = "none"; }}
-                />
-              ) : null}
+              <AnimatePresence mode="wait">
+                {portraitSrc ? (
+                  <motion.img
+                    key={portraitSrc}
+                    src={portraitSrc}
+                    alt={speaker.name}
+                    className="relative h-full w-full object-contain object-bottom drop-shadow-2xl"
+                    initial={{ opacity: 0, y: 10, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3, ease: "easeOut" }}
+                    onError={(event) => { event.currentTarget.style.display = "none"; }}
+                  />
+                ) : null}
+              </AnimatePresence>
             </div>
           </div>
         ) : (
           <div className="flex-1" />
         )}
 
+        <div className="pointer-events-none relative mx-auto mt-4 flex w-full max-w-2xl justify-end">
+          <AnimatePresence>
+            {trustToast ? (
+              <motion.div
+                initial={{ opacity: 0, y: 8, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="absolute -top-8 inline-flex items-center gap-1 rounded-full bg-black/70 px-3 py-1 text-[11px] font-semibold text-white backdrop-blur"
+              >
+                <HeartIcon className="h-3 w-3 text-[var(--accent)]" />
+                {trustToast.delta > 0 ? "+" : ""}{trustToast.delta} {trustToast.characterName}
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        </div>
+
         <motion.div
           key={`${scene.id}-${beat.id}-${beat.type === "write" && writeResult ? "graded" : ""}-${beat.type === "yourLine" && spokenResult ? "spoken" : ""}`}
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25 }}
-          className="mx-auto mt-4 w-full max-w-2xl rounded-3xl border border-white/15 bg-black/60 p-5 shadow-2xl backdrop-blur"
+          onClick={() => { if (!typewriter.done) typewriter.skip(); }}
+          className="mx-auto mt-2 w-full max-w-2xl cursor-pointer rounded-3xl border border-white/15 bg-black/60 p-5 shadow-2xl backdrop-blur"
         >
             {flavorNote && beat.type === "line" ? <p className="mb-2 text-xs italic text-white/60">{flavorNote}</p> : null}
 
             {beat.type === "line" && speaker ? (
               <>
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">{speaker.name} · {speaker.role}</p>
-                <p className="mt-2 text-base leading-relaxed">{beat.text}</p>
+                <TrustMeter value={trustValue} />
+                <p className="mt-2 min-h-[3em] text-base leading-relaxed">{typewriter.shown}</p>
                 <div className="mt-4 flex items-center justify-between gap-3">
-                  <button type="button" onClick={() => speakLine(beat.text)} disabled={isSpeaking} className="inline-flex items-center gap-1.5 text-xs font-semibold text-white/80 hover:text-white disabled:opacity-50">
+                  <button type="button" onClick={(e) => { e.stopPropagation(); speakLine(resolvedLine?.text ?? ""); }} disabled={isSpeaking} className="inline-flex items-center gap-1.5 text-xs font-semibold text-white/80 hover:text-white disabled:opacity-50">
                     <SpeakerIcon className="h-3.5 w-3.5" /> {isSpeaking ? "Playing…" : "Hear it"}
                   </button>
-                  <button type="button" onClick={() => void advance()} disabled={isAdvancing} className="rounded-full bg-[var(--accent)] px-5 py-2 text-xs font-bold text-white disabled:opacity-60">
-                    {isAdvancing ? "…" : "Continue"}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); void advance(); }}
+                    disabled={isAdvancing}
+                    className="rounded-full bg-[var(--accent)] px-5 py-2 text-xs font-bold text-white disabled:opacity-60"
+                  >
+                    {isAdvancing ? "…" : typewriter.done ? "Continue" : "Skip"}
                   </button>
                 </div>
               </>
@@ -269,11 +410,12 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
             {beat.type === "yourLine" && speaker ? (
               <>
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">To {speaker.name}</p>
-                <p className="mt-2 text-base leading-relaxed">{beat.targetPhrase}</p>
+                <TrustMeter value={trustValue} />
+                <p className="mt-2 min-h-[3em] text-base leading-relaxed">{typewriter.shown}</p>
                 {!spokenResult ? (
                   <button
                     type="button"
-                    onClick={() => void recorder.toggleRecording()}
+                    onClick={(e) => { e.stopPropagation(); void recorder.toggleRecording(); }}
                     disabled={recorder.isAnalyzing || !recorder.micSupported}
                     className={`mt-4 inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${recorder.isRecording ? "bg-red-600" : "bg-emerald-500 hover:bg-emerald-600"}`}
                   >
@@ -286,15 +428,15 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
 
             {beat.type === "choice" && speaker ? (
               <>
-                {beat.prompt ? <p className="text-sm text-white/80">{beat.prompt}</p> : null}
+                {beat.prompt ? <p className="min-h-[2.5em] text-sm text-white/80">{typewriter.shown}</p> : null}
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {beat.options.map((option) => (
                     <button
                       key={option.id}
                       type="button"
-                      onClick={() => void advance(option.id, option.flavorNote)}
-                      disabled={isAdvancing}
-                      className="rounded-2xl border border-white/20 bg-white/5 p-3 text-left text-sm text-white transition hover:border-[var(--accent)] hover:bg-white/10 disabled:opacity-60"
+                      onClick={(e) => { e.stopPropagation(); void advance(option.id, option.flavorNote); }}
+                      disabled={isAdvancing || !typewriter.done}
+                      className="rounded-2xl border border-white/20 bg-white/5 p-3 text-left text-sm text-white transition hover:border-[var(--accent)] hover:bg-white/10 disabled:opacity-40"
                     >
                       {option.text}
                     </button>
@@ -313,6 +455,7 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
                     <textarea
                       value={writeText}
                       onChange={(event) => setWriteText(event.target.value)}
+                      onClick={(e) => e.stopPropagation()}
                       rows={3}
                       placeholder="Auf Deutsch schreiben…"
                       className="mt-3 w-full rounded-2xl border border-white/20 bg-black/30 p-3 text-sm text-white placeholder:text-white/40 focus:outline-none"
@@ -321,7 +464,7 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
                       <span className="text-xs text-white/50">{wordCount} / {beat.minWords} words</span>
                       <button
                         type="button"
-                        onClick={() => void submitWrite()}
+                        onClick={(e) => { e.stopPropagation(); void submitWrite(); }}
                         disabled={isSubmittingWrite || !writeText.trim()}
                         className="rounded-full bg-[var(--accent)] px-5 py-2 text-xs font-bold text-white disabled:opacity-60"
                       >
@@ -341,6 +484,16 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
               <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1"><CheckCircleIcon className="h-3.5 w-3.5 text-[var(--accent)]" /> {spokenResult.wordAccuracy}% match</span>
               {spokenResult.pronunciationScore !== null ? <span className="rounded-full bg-white/10 px-2.5 py-1">{spokenResult.pronunciationScore}% pronunciation</span> : null}
               {spokenResult.achievementTitle ? <span className="rounded-full bg-white/10 px-2.5 py-1">{spokenResult.achievementTitle}</span> : null}
+              {(spokenResult.pronunciationScore ?? 0) >= 80 || spokenResult.wordAccuracy >= 90 ? (
+                <motion.span
+                  initial={{ opacity: 0, scale: 0.7 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 16 }}
+                  className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/20 px-2.5 py-1 font-bold text-[var(--accent)]"
+                >
+                  <SparklesIcon className="h-3 w-3" /> Nailed it
+                </motion.span>
+              ) : null}
             </div>
             <button type="button" onClick={() => void advance()} disabled={isAdvancing} className="mt-3 rounded-full bg-[var(--accent)] px-5 py-2 text-xs font-bold text-white disabled:opacity-60">
               {isAdvancing ? "…" : "Continue"}
@@ -352,7 +505,19 @@ export default function VisualNovelStory({ initialAccess }: { initialAccess: Sto
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto mt-3 w-full max-w-2xl rounded-2xl border border-white/15 bg-black/50 p-4 backdrop-blur">
             <div className="flex items-center justify-between">
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">Score: {writeResult.score}%</p>
-              {writeResult.achievementTitle ? <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-white/80">{writeResult.achievementTitle}</span> : null}
+              <div className="flex items-center gap-2">
+                {writeResult.score >= 80 ? (
+                  <motion.span
+                    initial={{ opacity: 0, scale: 0.7 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 16 }}
+                    className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/20 px-2 py-1 text-xs font-bold text-[var(--accent)]"
+                  >
+                    <SparklesIcon className="h-3 w-3" /> Nailed it
+                  </motion.span>
+                ) : null}
+                {writeResult.achievementTitle ? <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-white/80">{writeResult.achievementTitle}</span> : null}
+              </div>
             </div>
             <p className="mt-2 text-sm text-white">{writeResult.feedback}</p>
             {writeResult.corrections.length ? <p className="mt-1 text-xs text-white/60">{writeResult.corrections[0]}</p> : null}

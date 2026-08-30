@@ -55,6 +55,19 @@ export const careEpisode2: StoryChapter = {
           expression: "neutral",
           text: "Guten Morgen, willkommen zurück! Herr Voss hatte heute Nacht leider keine gute Nacht.",
           translation: "Good morning, welcome back! Herr Voss unfortunately didn't have a good night.",
+          // Callback to episode 1: only shows if the student left Schwester
+          // Bettina genuinely impressed last time (the "prepared" choice, b1's
+          // high-trust variant). This is trust CARRIED ACROSS episodes, not
+          // reset — the whole reason relationships live on seriesProgress
+          // instead of per-episode progress.
+          variants: [
+            {
+              minTrust: 58,
+              expression: "warm",
+              text: "Guten Morgen — schön, Sie wiederzusehen! Ich hab extra auf Sie gewartet, bevor wir zu Herrn Voss gehen. Er hatte leider keine gute Nacht.",
+              translation: "Good morning — great to see you again! I actually waited for you before we go to Herr Voss. Unfortunately he didn't have a good night.",
+            },
+          ],
           next: "m2",
         },
         m2: {
@@ -86,6 +99,7 @@ export const careEpisode2: StoryChapter = {
               translation: "I'd like to check on Herr Voss first.",
               next: "m5",
               flavorNote: "Schwester Bettina nickt und führt Sie direkt zu ihm.",
+              trustDelta: 6,
             },
             {
               id: "as-planned",
@@ -93,6 +107,7 @@ export const careEpisode2: StoryChapter = {
               translation: "Let's start with the handover as planned.",
               next: "m5",
               flavorNote: "Schwester Bettina stimmt zu — Herr Voss kann noch ein paar Minuten warten.",
+              trustDelta: 2,
             },
           ],
           next: null,

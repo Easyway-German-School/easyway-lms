@@ -73,18 +73,50 @@ export const careEpisode1: StoryChapter = {
               id: "prepared",
               text: "Ich habe die Akten schon gelesen.",
               translation: "I've already read the files.",
-              next: "h4",
+              next: "h4a",
               flavorNote: "Schwester Bettina nickt beeindruckt.",
+              trustDelta: 8,
             },
             {
               id: "ask-help",
               text: "Können Sie mir kurz helfen, mich einzuarbeiten?",
               translation: "Could you help me get oriented first?",
-              next: "h4",
+              next: "h4b",
               flavorNote: "Schwester Bettina lächelt und nimmt sich einen Moment Zeit.",
+              trustDelta: 4,
             },
           ],
           next: null,
+        },
+        // Real fork: "prepared" skips straight to the compliment; "ask-help"
+        // detours through a short tip exchange (its own yourLine beat) before
+        // both paths land back on h4. Neither is more "correct" — a different
+        // shape of the same morning, not a right/wrong branch.
+        h4a: {
+          id: "h4a",
+          type: "line",
+          speakerId: "nurse",
+          expression: "pleased",
+          text: "Sehr gut vorbereitet — das sieht man nicht oft am ersten Tag.",
+          translation: "Very well prepared — you don't see that often on a first day.",
+          next: "h4",
+        },
+        h4b: {
+          id: "h4b",
+          type: "line",
+          speakerId: "nurse",
+          expression: "warm",
+          text: "Kein Problem. Fangen wir langsam an, Schritt für Schritt.",
+          translation: "No problem. Let's start slowly, step by step.",
+          next: "h4c",
+        },
+        h4c: {
+          id: "h4c",
+          type: "yourLine",
+          speakerId: "nurse",
+          targetPhrase: "Danke, das hilft mir wirklich.",
+          translation: "Thank you, that really helps me.",
+          next: "h4",
         },
         h4: {
           id: "h4",
@@ -153,6 +185,15 @@ export const careEpisode1: StoryChapter = {
           expression: "pleased",
           text: "Das haben Sie gut gemacht. Herr Voss hat sich bei Ihnen wohlgefühlt.",
           translation: "You did well there. Herr Voss felt at ease with you.",
+          // Only reachable via the "prepared" choice earlier (+8 trust) —
+          // Schwester Bettina remembers the whole morning, not just the round.
+          variants: [
+            {
+              minTrust: 58,
+              text: "Sie haben das heute wirklich beeindruckend gemacht. Herr Voss hat Ihnen komplett vertraut — und ehrlich gesagt, ich auch.",
+              translation: "You did that impressively well today. Herr Voss trusted you completely — and honestly, so do I.",
+            },
+          ],
           next: "b2",
         },
         b2: {
