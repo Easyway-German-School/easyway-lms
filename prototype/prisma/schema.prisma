@@ -1128,6 +1128,16 @@ model Material {
    * so reading it turns into something to do rather than something to file.
    */
   aiQuests      Json?
+  /**
+   * A written-up study note built from this material in the same background
+   * pass as `aiSummary`/`aiQuests` — see src/lib/material-ai.ts. Shape:
+   * `{ overview, sections: [{heading, points[]}], vocabulary: [{de,en,note?}],
+   * grammar?: [] }`. This is what lands in a student's "My Notes" hub so the
+   * tutor's handout arrives already read for them. Gated on the SAME tutor
+   * sign-off as the quests (`questsReviewedAt`) — the model's output never
+   * reaches a student unmoderated.
+   */
+  aiNotes       Json?
   aiState       String    @default("none") // none | pending | ready | failed
   aiUpdatedAt   DateTime?
   /**
@@ -1259,6 +1269,17 @@ model ClassRecording {
    */
   purgedAt DateTime?
 
+  /**
+   * When this recording stops being visible to STUDENTS — set to 14 days
+   * after the class on publish (see src/lib/class-recorder.ts). This is a
+   * read-side filter only: nothing is deleted. The assigned tutor and admin
+   * keep every recording forever regardless. The AI class notes
+   * (`ClassTranscript`) and anything the student wrote survive past this and
+   * stay in their "My Notes" hub — only the video itself goes. `keepForever`
+   * overrides it, keeping the video on the student's shelf too.
+   */
+  studentExpiresAt DateTime?
+
   startedAt DateTime  @default(now())
   endedAt   DateTime?
 
@@ -1294,6 +1315,7 @@ model ClassRecording {
   @@index([status, startedAt])
   @@index([roomName, status])
   @@index([privateClassId])
+  @@index([studentExpiresAt])
   @@index([tenantId])
 }
 

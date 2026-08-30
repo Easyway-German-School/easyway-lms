@@ -82,7 +82,7 @@ async function main() {
   const plan = await planRetention();
   console.log("");
   console.log("retention       :", `${plan.verdicts.length} recording(s) considered`);
-  console.log("  policy        :", `protect ${RETENTION.protectedDays}d, reclaim if unwatched ${RETENTION.idleWindowDays}d`);
+  console.log("  policy        :", `student shelf ${RETENTION.studentWindowDays}d, then kept for staff forever (manual delete only)`);
   console.log("  reclaimable   :", `${plan.reclaimable} (${(plan.bytesReclaimable / 1024 / 1024).toFixed(1)} MB)`);
   for (const verdict of plan.verdicts.slice(0, 5)) {
     console.log(`    ${verdict.decision === "reclaim" ? "RECLAIM" : "keep   "} ${verdict.title} — ${verdict.reason}`);

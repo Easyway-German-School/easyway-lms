@@ -26,6 +26,7 @@ import { EgressStatus } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { createRecordingThumbnail } from "@/lib/recording-thumbnail";
+import { studentExpiryFrom } from "@/lib/retention";
 import {
   AUDIO_ENCODING,
   CLASS_ENCODING,
@@ -314,6 +315,9 @@ export async function finaliseRecording(egress: {
         durationSeconds,
         sizeBytes,
         materialId: material.id,
+        // 14 days on the student's shelf, then the video drops off for them
+        // (the tutor and admin keep it forever). See src/lib/retention.ts.
+        studentExpiresAt: studentExpiryFrom(recordedAt),
       },
     });
 

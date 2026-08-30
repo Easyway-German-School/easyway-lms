@@ -40,6 +40,13 @@ export type LibraryVideo = {
   embedLabel: string | null;
   /** A private one-to-one capture — see class-recorder.ts. Splits the shelf and unlocks the premium notes panel. */
   isPrivate: boolean;
+  /**
+   * For a class recording: ISO date this video drops off the student's shelf
+   * (14 days after the class — see src/lib/retention.ts). Null for a lesson
+   * video, and null for a recording marked keep-forever. The library uses it
+   * to nudge "download this before it's gone" inside the installed app.
+   */
+  expiresAt: string | null;
 };
 
 export type VideoShelf = {
@@ -116,6 +123,16 @@ export function watchPercent(video: Pick<LibraryVideo, "positionSeconds" | "dura
  */
 export function isInProgress(video: LibraryVideo): boolean {
   return !video.completed && video.positionSeconds > 30;
+}
+
+/**
+ * Whole days until a class recording leaves the student's shelf, or null if it
+ * never does (a lesson video, or a keep-forever recording). 0 means "today".
+ */
+export function daysUntilExpiry(video: Pick<LibraryVideo, "expiresAt">, now: Date = new Date()): number | null {
+  if (!video.expiresAt) return null;
+  const ms = new Date(video.expiresAt).getTime() - now.getTime();
+  return Math.max(0, Math.ceil(ms / 86_400_000));
 }
 
 /** Treated as finished at 95% — nobody watches the credits. */

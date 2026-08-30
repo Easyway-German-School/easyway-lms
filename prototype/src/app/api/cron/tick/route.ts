@@ -111,19 +111,16 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
-   * Retention deletes lesson recordings, so it does not run itself on the
-   * strength of a schedule existing.
-   *
-   * `RETENTION_AUTO=true` is the school saying it has read the policy and
-   * wants it enforced. Until then this reports what it *would* reclaim, which
-   * is the number worth looking at before handing a cron the power to delete a
-   * term's teaching.
+   * Retention no longer deletes anything on a schedule. Staff keep every class
+   * recording forever; the student-side 14-day window is a read filter in
+   * `/api/student/videos`, not a deletion (see src/lib/retention.ts). What
+   * runs here instead is the nudge: a student about to lose a recording off
+   * their shelf gets told, so they can download it in the app first.
    */
-  const retentionAuto = process.env.RETENTION_AUTO === "true";
   results.push(
-    await run(retentionAuto ? "retention" : "retention-dry-run", async () => {
-      const { applyRetention } = await import("@/lib/retention");
-      return applyRetention({ dryRun: !retentionAuto });
+    await run("recording-expiry-nudge", async () => {
+      const { sendDueExpiryNudges } = await import("@/lib/recording-expiry-nudge");
+      return sendDueExpiryNudges();
     }),
   );
 
