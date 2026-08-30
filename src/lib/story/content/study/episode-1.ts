@@ -74,18 +74,49 @@ export const studyEpisode1: StoryChapter = {
               id: "sit-together",
               text: "Lass uns zusammen sitzen, das wäre schön.",
               translation: "Let's sit together, that would be nice.",
-              next: "p4",
+              next: "p4a",
               flavorNote: "Lena lächelt und rückt einen Stuhl für dich zurecht.",
+              trustDelta: 8,
             },
             {
               id: "sit-front",
               text: "Ich setze mich lieber nach vorne, um alles gut zu hören.",
               translation: "I'd rather sit up front so I can hear everything well.",
-              next: "p4",
+              next: "p4b",
               flavorNote: "Lena nickt — das versteht sie gut.",
+              trustDelta: 3,
             },
           ],
           next: null,
+        },
+        // Real fork: "sit-together" skips to Lena warming up right away;
+        // "sit-front" detours through a shorter, friendlier exchange before
+        // both land on p4.
+        p4a: {
+          id: "p4a",
+          type: "line",
+          speakerId: "peer",
+          expression: "warm",
+          text: "Perfekt, ich mag es schon jetzt, dich kennenzulernen.",
+          translation: "Perfect, I already like getting to know you.",
+          next: "p4",
+        },
+        p4b: {
+          id: "p4b",
+          type: "line",
+          speakerId: "peer",
+          expression: "neutral",
+          text: "Verstehe ich total. Ich zeig dir trotzdem, wo die guten Plätze sind.",
+          translation: "Totally get it. I'll still show you where the good seats are.",
+          next: "p4c",
+        },
+        p4c: {
+          id: "p4c",
+          type: "yourLine",
+          speakerId: "peer",
+          targetPhrase: "Danke, das ist nett von dir.",
+          translation: "Thanks, that's kind of you.",
+          next: "p4",
         },
         p4: {
           id: "p4",
@@ -154,6 +185,14 @@ export const studyEpisode1: StoryChapter = {
           expression: "warm",
           text: "Das war doch gar nicht so schlimm, oder? Der Professor mag es, wenn man mitdenkt.",
           translation: "That wasn't so bad after all, was it? The professor likes it when people think along.",
+          // Only reachable via the "sit-together" choice earlier (+8 trust).
+          variants: [
+            {
+              minTrust: 58,
+              text: "Das war doch gar nicht so schlimm, oder? Ehrlich, ich glaube, der Professor mag dich jetzt schon ein bisschen.",
+              translation: "That wasn't so bad after all, was it? Honestly, I think the professor already likes you a little bit.",
+            },
+          ],
           next: "s2",
         },
         s2: {

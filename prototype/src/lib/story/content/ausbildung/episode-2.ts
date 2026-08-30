@@ -53,6 +53,17 @@ export const ausbildungEpisode2: StoryChapter = {
           expression: "neutral",
           text: "Guten Morgen! Na, wie fühlen Sie sich nach dem ersten Tag?",
           translation: "Good morning! So, how are you feeling after the first day?",
+          // Callback to episode 1: only shows if the student left Herr Brandt
+          // genuinely impressed last time. Trust is CARRIED ACROSS episodes —
+          // see story-progress.ts's relationships map.
+          variants: [
+            {
+              minTrust: 58,
+              expression: "warm",
+              text: "Guten Morgen — und schön, dass Sie wieder da sind! Ich hab mich schon auf den heutigen Tag mit Ihnen gefreut. Na, wie fühlen Sie sich nach dem ersten Tag?",
+              translation: "Good morning — and good to have you back! I was actually looking forward to today with you. So, how are you feeling after the first day?",
+            },
+          ],
           next: "a2",
         },
         a2: {
@@ -75,6 +86,7 @@ export const ausbildungEpisode2: StoryChapter = {
               translation: "I'd like to work with Jonas again.",
               next: "a4",
               flavorNote: "Herr Brandt lächelt — Jonas wird sich freuen.",
+              trustDelta: 4,
             },
             {
               id: "something-new",
@@ -82,6 +94,7 @@ export const ausbildungEpisode2: StoryChapter = {
               translation: "I'd like to try something new.",
               next: "a4",
               flavorNote: "Herr Brandt nickt — neugierig zu sein ist eine gute Eigenschaft.",
+              trustDelta: 6,
             },
           ],
           next: null,
