@@ -39,6 +39,8 @@ type Onboarding = {
   isOnlineBranch: boolean;
   /** physical | hybrid | online — see /api/student/onboarding. */
   deliveryMode?: string;
+  /** group | private. A private student can also keep classes offline. */
+  classType?: string;
   sessionSlot: string;
   tourSeen: boolean;
 };
@@ -67,6 +69,9 @@ function buildSteps(profile: Onboarding): Step[] {
   const mode = profile.deliveryMode ?? (profile.isOnlineBranch ? "online" : "physical");
   const isOnline = mode === "online";
   const isHybrid = mode === "hybrid";
+  // Online, hybrid and private students can all keep a class on the device to
+  // watch with no signal — the rest sit in the room.
+  const canDownload = isOnline || isHybrid || profile.classType === "private";
 
   const where = isOnline
     ? "You study online, so your classroom travels with you."
@@ -81,7 +86,7 @@ function buildSteps(profile: Onboarding): Step[] {
       id: "welcome",
       eyebrow: "Willkommen",
       title: profile.firstName ? `Hallo, ${profile.firstName}.` : "Hallo.",
-      body: `You are starting at ${profile.level}. ${where} Give me forty seconds and I will show you the four things you will actually use — then you never have to see me again.`,
+      body: `You are starting at ${profile.level}. ${where} Give me a minute and I will show you what you will actually use — then you never have to see me again.`,
       stamp: "Hallo",
     },
     {
@@ -98,13 +103,24 @@ function buildSteps(profile: Onboarding): Step[] {
       stamp: "Class",
     },
     {
-      id: "materials",
+      id: "catchup",
       target: '[data-tour="nav:/materials"]',
       inSidebar: true,
-      eyebrow: "If you miss one",
+      eyebrow: "Miss one? Minutes, not the lesson",
       title: "Every class is recorded",
-      body: "Materials has a Watch tab. Recordings land there the same day, and the player picks up exactly where your connection dropped. Missing a class costs you minutes, not the lesson.",
+      body: canDownload
+        ? "Recordings land in the Watch tab the same day and pick up exactly where your connection dropped. Install the app and you can download a class to watch later with no signal at all. And a written recap of every class — the new words, what to practise — waits in My Notes, one tab down."
+        : "Recordings land in the Watch tab the same day and pick up exactly where your connection dropped. A written recap of every class — the new words, what to practise — waits in My Notes, one tab down, so revising takes a minute.",
       stamp: "Watch",
+    },
+    {
+      id: "coach",
+      target: '[data-tour="nav:/games"]',
+      inSidebar: true,
+      eyebrow: "For the days between classes",
+      title: "Your AI coach and games",
+      body: "Talk to the AI coach to drill your speaking out loud, or play a quick round to keep your streak alive. This is what the students who actually finish do on the days there is no class.",
+      stamp: "Üben",
     },
     {
       id: "community",

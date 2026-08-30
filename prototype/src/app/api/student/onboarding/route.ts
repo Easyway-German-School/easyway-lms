@@ -44,6 +44,12 @@ export async function GET() {
        * half of their own product.
        */
       deliveryMode: student.deliveryMode,
+      /**
+       * group | private. A private student can also keep classes offline, so
+       * the tour's "download it to watch with no signal" line should reach
+       * them the same as online/hybrid students do.
+       */
+      classType: student.classType,
       sessionSlot: student.sessionSlot,
       tourSeen: Boolean(student.welcomeTourSeenAt),
     });

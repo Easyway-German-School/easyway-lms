@@ -7,6 +7,7 @@ import Link from "next/link";
 import BrandLoader from "@/components/BrandLoader";
 import PasswordInput from "@/components/PasswordInput";
 import BrandLogo from "@/components/BrandLogo";
+import Mascot from "@/components/Mascot";
 
 export default function SignInForm() {
   const router = useRouter();
@@ -56,25 +57,31 @@ export default function SignInForm() {
   return (
     <div className="min-h-screen bg-[linear-gradient(135deg,_#f5f5f5_0%,_#fffbf8_100%)] px-4 py-8 sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-6xl flex-col overflow-hidden rounded-[32px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_30px_80px_-24px_rgba(13,124,126,0.28)] lg:flex-row">
-        <div className="relative hidden flex-1 flex-col justify-between bg-gradient-to-br from-[var(--accent-strong)] via-[var(--accent)] to-[#FF8533] p-8 text-white lg:flex">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.2),_transparent_35%)]" />
+        <div className="relative hidden flex-1 flex-col justify-between overflow-hidden bg-gradient-to-br from-[#0D7C7E] via-[#FF6600] to-[#FF8533] p-8 text-white lg:flex">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.22),_transparent_38%)]" />
           <div className="relative z-10">
-            {/* The artwork has a white background, so it needs a white chip
-                to sit on rather than the orange gradient. */}
-            <div className="inline-flex items-center rounded-2xl bg-white px-4 py-3 shadow-lg shadow-black/10">
-              <BrandLogo variant="wordmark" className="h-10" />
+            <div className="flex items-start justify-between gap-4">
+              {/* The artwork has a white background, so it needs a white chip
+                  to sit on rather than the gradient. */}
+              <div className="inline-flex items-center rounded-2xl bg-white px-4 py-3 shadow-lg shadow-black/10">
+                <BrandLogo variant="wordmark" className="h-10" />
+              </div>
+              {/* Becca — the guide students already know from the tour and the
+                  daily briefing. Small enough not to fight the headline. */}
+              <Mascot mood="greeting" className="h-16 w-16 shrink-0 drop-shadow-lg" />
             </div>
-            <h1 className="mt-8 text-4xl font-semibold leading-tight">Continue your German learning journey with confidence.</h1>
+            <h1 className="mt-8 text-4xl font-semibold leading-tight">Welcome back — let&rsquo;s keep your German moving.</h1>
             <p className="mt-4 max-w-md text-sm leading-6 text-slate-100">
-              Access your courses, join the community, and prepare for exams in one calm, beautifully organized dashboard.
+              Your class, your recordings, your notes and your coach are exactly where you left them.
             </p>
           </div>
           <div className="relative z-10 rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur">
-            <p className="text-sm font-medium">Why students love Easyway</p>
+            <p className="text-sm font-medium">What&rsquo;s waiting inside</p>
             <ul className="mt-3 space-y-2 text-sm text-slate-100">
-              <li>• Personalized learning tracks</li>
-              <li>• Live session scheduling</li>
-              <li>• Fast progress tracking</li>
+              <li>• Every lesson recorded — miss one, catch up in minutes</li>
+              <li>• A written recap after each class — the new words, what to practise</li>
+              <li>• An AI coach and games for the days between classes</li>
+              <li>• Pay in parts — classes unlock as you go</li>
             </ul>
           </div>
         </div>
@@ -82,14 +89,18 @@ export default function SignInForm() {
         <div className="flex-1 p-6 sm:p-8 lg:p-10">
           <div className="mx-auto max-w-md">
             <div className="mb-8">
-              {/* The branded panel is hidden below lg, so the logo appears
-                  here too — otherwise mobile sign-in has no identity at all. */}
+              {/* The branded panel is hidden below lg, so the logo — and one
+                  line of the pitch — appear here too, otherwise mobile sign-in
+                  has no identity and no reason to it. */}
               <div className="mb-6 lg:hidden">
                 <BrandLogo variant="wordmark" className="h-10" />
+                <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
+                  Your class, your recordings, your notes and your coach — right where you left them.
+                </p>
               </div>
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">Welcome back</p>
               <h2 className="mt-2 text-3xl font-semibold text-[var(--foreground)]">Sign in to your account</h2>
-              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">Continue your academic plan with a secure and modern experience.</p>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">Pick up right where you left off.</p>
             </div>
 
             <form className="space-y-4" onSubmit={handleSignIn}>
