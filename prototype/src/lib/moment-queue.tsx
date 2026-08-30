@@ -109,7 +109,8 @@ export type MomentId =
   | "daily-briefing"
   | "journey"
   | "poster"
-  | "game-turn";
+  | "game-turn"
+  | "install-offline-notes";
 
 type Kind = "toast" | "modal";
 
@@ -219,6 +220,19 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Your turn is waiting",
     dockBlurb: "Your class is writing a story and it's your turn to add a line.",
+  },
+  /**
+   * "Install the app to keep your notes offline." A soft upsell shown only to
+   * physical students, who get no video downloads but can still pocket their
+   * notes. Priority below the poster: it is the least urgent thing on the
+   * dashboard, an advert for a convenience, and the two-modal cap should
+   * almost always push it to the dock rather than in front of anyone.
+   */
+  "install-offline-notes": {
+    priority: 25,
+    kind: "modal",
+    dockLabel: "Notes in your pocket",
+    dockBlurb: "Install the app to read your class notes with no signal.",
   },
 };
 

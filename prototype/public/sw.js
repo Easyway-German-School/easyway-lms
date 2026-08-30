@@ -7,17 +7,26 @@
  * deletes the old ones. Without that, a student who installed the app in
  * August would still be served August's JavaScript in December.
  */
-const CACHE = "easyway-v1";
+const CACHE = "easyway-v2";
 
 /**
- * The one page worth having before the network is asked.
+ * The pages worth having before the network is asked.
  *
  * Deliberately tiny. It is tempting to precache the dashboard, but every
  * portal page is server-rendered per user — a cached copy is somebody's
  * private timetable sitting in a shared cache, and the wrong person's data is
  * far worse than an offline notice.
+ *
+ * `/materials/offline` is the ONE exception, and it is safe: that route is
+ * client-only, renders no session and no per-user data server-side, and reads
+ * nothing but the device's own IndexedDB. A shared cached copy of it leaks
+ * nothing. It is what a student opens on the train to watch a downloaded
+ * class, so it must load with no network.
  */
-const PRECACHE = ["/offline"];
+const PRECACHE = ["/offline", "/materials/offline"];
+
+/** The navigations we are allowed to serve from cache (see PRECACHE note). */
+const CACHEABLE_NAVIGATIONS = new Set(["/materials/offline"]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -105,6 +114,26 @@ self.addEventListener("fetch", (event) => {
 
   // Page navigations: network-first, offline notice as the last resort.
   if (request.mode === "navigate") {
+    // The downloads shelf is allowed to come from cache and refresh in the
+    // background — it holds no user data and has to open with no network.
+    if (CACHEABLE_NAVIGATIONS.has(url.pathname)) {
+      event.respondWith(
+        caches.match(url.pathname).then((hit) => {
+          const network = fetch(request)
+            .then((response) => {
+              if (response.ok) {
+                const copy = response.clone();
+                caches.open(CACHE).then((cache) => cache.put(url.pathname, copy));
+              }
+              return response;
+            })
+            .catch(() => hit);
+          return hit || network;
+        }),
+      );
+      return;
+    }
+
     event.respondWith(
       fetch(request).catch(() =>
         caches.match("/offline").then((hit) => hit || new Response("You are offline.", {

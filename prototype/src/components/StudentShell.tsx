@@ -6,6 +6,8 @@ import { useSession } from "next-auth/react";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
+import OfflineBanner from "@/components/OfflineBanner";
+import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
@@ -196,6 +198,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     // themselves when to open is how a first login came to mean five stacked
     // overlays — see lib/moment-queue.tsx.
     <MomentQueueProvider>
+    <OfflineBanner />
     <ImpersonationBanner />
     {/* Was a hardcoded blue gradient, which is why the portal stayed daylight-
         blue whatever theme was chosen. The themed canvas is the page's job. */}
@@ -433,6 +436,10 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           for students actually in the portal — an unpaid lock screen has no
           missions to brief. */}
       {hasAccess && <DailyBriefing />}
+
+      {/* Lowest-priority nudge: physical students can't download video, but
+          they can keep their notes offline if they install the app. */}
+      {hasAccess && <InstallForNotesMoment />}
 
       {/* Fires on a genuine server-validated completion — see
           celebrateLessonComplete() in LessonCompleteCelebration.tsx. */}
