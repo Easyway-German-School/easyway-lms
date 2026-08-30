@@ -41,6 +41,7 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   { prefix: "/admin/exam-centre", capability: "exams" },
   { prefix: "/admin/exam-registrations", capability: "exams" },
   { prefix: "/admin/marking", capability: "exams" },
+  { prefix: "/admin/gradebook", capability: "exams" },
 
   { prefix: "/admin/courses", capability: "materials" },
   { prefix: "/admin/materials", capability: "materials" },
@@ -53,15 +54,13 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // the fee book rather than a new capability for what is, underneath, a
   // billing dispute.
   { prefix: "/admin/legal", capability: "payments" },
-  // What the school owes the platform, as opposed to what students owe the
-  // school. Same desk reads both — it is the bursar who checks an invoice — so
-  // it sits behind the same capability rather than inventing a tenth.
-  //
-  // `/admin/platform` is deliberately NOT in this table. It is not a school
-  // area at all, and it is gated on User.platformRole rather than on any
-  // capability a school can grant. Adding it here would let a school's super
-  // admin hand out the cross-tenant console with a checkbox.
-  { prefix: "/admin/billing", capability: "payments" },
+  // `/admin/billing` (what the school owes the platform) and `/admin/platform`
+  // (the operator console) are deliberately NOT in this table. Neither is a
+  // school area: `/admin/billing` is now a redirect to `/platform/billing`
+  // under EduPrime, and `/admin/platform` redirects to `/platform`. Both are
+  // gated on User.platformRole / the platform proxy rule, not on a capability
+  // a school can grant — adding them here would let a school's super admin
+  // hand out the platform's own screens with a checkbox.
   { prefix: "/admin/reports", capability: "reports" },
   { prefix: "/admin/personalization", capability: "reports" },
   // Behaviour patterns across the roster. Sits with reporting rather than

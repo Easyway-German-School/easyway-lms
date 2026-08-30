@@ -6,6 +6,113 @@ import { NextResponse, NextRequest } from "next/server";
 import { generatePersonalizedPlan } from "@/lib/ai";
 import { mayAutoCreateStudent } from "@/lib/candidates";
 import { KIND, notify } from "@/lib/notify";
+import { readLearningStyle, type LearningStyle, type StyleSeed } from "@/lib/learner-style";
+import { profileFor } from "@/lib/learner-intelligence";
+import { bestHours } from "@/lib/learner-signals";
+
+/**
+ * HOW THIS STUDENT ACTUALLY STUDIES.
+ *
+ * Pulls the three things the academic scorer never looked at — which lesson
+ * format they finish, how long a lesson they see through, whether they push
+ * past their level — plus the rhythm the behaviour engine already computed,
+ * and hands the lot to `readLearningStyle`. Everything here is best-effort: a
+ * failure (no behaviour profile yet, a tenant-scope hiccup) degrades to a
+ * null style and the plan is ranked on academics alone, exactly as before.
+ */
+async function readStudentStyle(
+  student: { id: string; userId: string; level: string | null; learningPreferences: unknown },
+): Promise<LearningStyle | null> {
+  try {
+    const [completions, grades, videos, rhythmProfile] = await Promise.all([
+      prisma.completion.findMany({
+        where: { studentId: student.id },
+        orderBy: { startedAt: "desc" },
+        take: 120,
+        select: {
+          lessonId: true,
+          status: true,
+          startedAt: true,
+          completedAt: true,
+          score: true,
+          lesson: {
+            select: {
+              type: true,
+              duration: true,
+              module: { select: { course: { select: { level: true } } } },
+            },
+          },
+        },
+      }),
+      prisma.grade.findMany({
+        where: { studentId: student.id },
+        orderBy: { createdAt: "desc" },
+        take: 40,
+        select: { type: true, score: true, createdAt: true },
+      }),
+      prisma.videoProgress.findMany({
+        where: { studentId: student.id },
+        orderBy: { updatedAt: "desc" },
+        take: 60,
+        select: {
+          completed: true,
+          positionSeconds: true,
+          updatedAt: true,
+          material: { select: { durationSeconds: true } },
+        },
+      }),
+      profileFor(student.userId).catch(() => null),
+    ]);
+
+    const rhythm = rhythmProfile && rhythmProfile.totalEvents > 0
+      ? {
+          avgSessionMinutes: rhythmProfile.avgSessionMinutes,
+          bestHours: bestHours(rhythmProfile),
+          archetype: rhythmProfile.archetype,
+          surfaceShare: Object.fromEntries(
+            (rhythmProfile.signals?.areaMix ?? []).map((row) => [row.area, row.share]),
+          ),
+        }
+      : null;
+
+    const seedRaw = student.learningPreferences;
+    const seed: StyleSeed =
+      seedRaw && typeof seedRaw === "object"
+        ? {
+            format: (seedRaw as Record<string, unknown>).format as string | undefined,
+            pace: (seedRaw as Record<string, unknown>).pace as string | undefined,
+          }
+        : null;
+
+    return readLearningStyle(
+      {
+        lessonTouches: completions.map((c) => ({
+          lessonId: c.lessonId,
+          type: c.lesson?.type ?? "lesson",
+          status: c.status,
+          startedAt: c.startedAt,
+          completedAt: c.completedAt,
+          nominalMinutes: typeof c.lesson?.duration === "number" ? c.lesson.duration : null,
+          score: c.score,
+          level: c.lesson?.module?.course?.level ?? null,
+        })),
+        grades: grades.map((g) => ({ type: g.type, score: g.score, at: g.createdAt })),
+        videos: videos.map((v) => ({
+          completed: v.completed,
+          positionSeconds: v.positionSeconds,
+          durationSeconds: v.material?.durationSeconds ?? null,
+          at: v.updatedAt,
+        })),
+        rhythm,
+        seed,
+        studentLevel: student.level,
+      },
+    );
+  } catch (error) {
+    console.warn("[personalize] could not read learning style", error);
+    return null;
+  }
+}
 
 export async function GET(request: NextRequest) {
   const session = await requireAuthSession();
@@ -106,10 +213,18 @@ export async function GET(request: NextRequest) {
     const compareStrategies = request.nextUrl.searchParams.get('compare') === 'true';
     const strategiesToRun = compareStrategies ? ['deterministic', 'hybrid'] : [requestedStrategy];
 
+    // Read taste once and reuse it across every strategy in this request.
+    const learningStyle = await readStudentStyle(student);
+
     const generatedPlans = await Promise.all(
       strategiesToRun.map(async (strategyName) => ({
         strategy: strategyName,
-        plan: await generatePersonalizedPlan(profile, enrichedCandidates, { maxLessons: 12, minutesPerDay: 30, strategy: strategyName }),
+        plan: await generatePersonalizedPlan(profile, enrichedCandidates, {
+          maxLessons: 12,
+          minutesPerDay: 30,
+          strategy: strategyName,
+          styleSignals: learningStyle,
+        }),
       }))
     );
 

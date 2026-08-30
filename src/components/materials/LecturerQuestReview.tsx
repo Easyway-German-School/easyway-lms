@@ -10,9 +10,17 @@
 
 import { useEffect, useState } from "react";
 import { CheckIcon } from "@/components/icons";
+import StudyNoteView from "@/components/notes/StudyNoteView";
+import type { StudyNote } from "@/lib/material-ai";
 
 type Quest = { title: string; task: string; answer: string; xp: number };
-type ReviewData = { summary: string | null; keyPoints: string[]; quests: Quest[]; reviewedAt: string | null };
+type ReviewData = {
+  summary: string | null;
+  keyPoints: string[];
+  quests: Quest[];
+  notes: StudyNote | null;
+  reviewedAt: string | null;
+};
 
 export default function LecturerQuestReview({ materialId }: { materialId: string }) {
   const [open, setOpen] = useState(false);
@@ -52,7 +60,7 @@ export default function LecturerQuestReview({ materialId }: { materialId: string
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(payload?.error || "Could not save these quests.");
       setData((current) => (current ? { ...current, reviewedAt: payload.reviewedAt } : current));
-      setSavedNote(approve ? "Approved — students can now see these." : "Saved.");
+      setSavedNote(approve ? "Approved — students can now see the quests and the ready-made note." : "Saved.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save these quests.");
     } finally {
@@ -84,6 +92,17 @@ export default function LecturerQuestReview({ materialId }: { materialId: string
             <p className="rounded-lg bg-[var(--surface-alt)] px-3 py-2 text-xs leading-4 text-[var(--foreground-soft)]">
               {data.summary}
             </p>
+          )}
+
+          {data?.notes && (
+            <details className="rounded-lg border border-[var(--border)] p-3">
+              <summary className="cursor-pointer text-xs font-bold text-[var(--accent)]">
+                Ready-made note preview (students see this once you approve)
+              </summary>
+              <div className="mt-3 text-xs">
+                <StudyNoteView note={data.notes} />
+              </div>
+            </details>
           )}
 
           {quests.map((quest, index) => (

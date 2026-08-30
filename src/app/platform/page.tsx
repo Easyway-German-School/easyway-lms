@@ -1,17 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import PlatformShell from "@/components/PlatformShell";
 import {
   AlertIcon,
   CheckCircleIcon,
+  ChevronRightIcon,
   KeyIcon,
+  PackageIcon,
   PaletteIcon,
   PlusIcon,
   RefreshIcon,
-  ShieldIcon,
   SparklesIcon,
   TrashIcon,
+  UserPlusIcon,
+  UsersIcon,
+  WalletIcon,
 } from "@/components/icons";
 import {
   EXTERNAL_EXAM_BODIES,
@@ -22,6 +26,9 @@ import {
 
 const EXAM_BODY_LABEL: Record<ExternalExamBody, string> = { osd: "ÖSD", telc: "telc" };
 
+/** EduPrime's own brand blue — what a new school's colour field starts on. */
+const EDUPRIME_BLUE = "#2563EB";
+
 /**
  * The platform console — the schools on the system, and the keys they hold.
  *
@@ -30,9 +37,10 @@ const EXAM_BODY_LABEL: Record<ExternalExamBody, string> = { osd: "ÖSD", telc: "
  * the URL is told there is nothing here rather than that there is something
  * they may not have.
  *
- * Lives at `/platform`, not `/admin/platform`: this screen manages every
- * school on the system, EasyWay included, so it does not wear EasyWay's own
- * admin chrome. See PlatformShell.
+ * Lives at `/platform` (EduPrime), not `/admin/platform`: this screen manages
+ * every school on the system, EasyWay included, so it does not wear EasyWay's
+ * own admin chrome — it wears EduPrime's, the platform's own brand. Billing is
+ * the sibling screen at `/platform/billing`. See PlatformShell.
  */
 
 type Tenant = {
@@ -63,6 +71,14 @@ type ApiKeyRow = {
   createdAt: string;
 };
 
+type Owner = {
+  id: string;
+  name: string | null;
+  email: string;
+  createdAt: string;
+  passwordClaimed: boolean;
+};
+
 const SCOPES = [
   "students:read",
   "students:write",
@@ -75,10 +91,130 @@ const SCOPES = [
   "usage:read",
 ];
 
-function naira(kobo: string | null | undefined): string {
-  if (kobo == null) return "—";
+/* -------------------------------------------------------------------------- */
+/* Small presentational helpers — a shared vocabulary so the whole console    */
+/* reads as one product rather than a stack of forms.                         */
+/* -------------------------------------------------------------------------- */
+
+const FIELD =
+  "w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--primary)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--primary)_28%,transparent)]";
+
+function btnPrimary(extra = "") {
+  return `inline-flex items-center justify-center gap-1.5 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${extra}`;
+}
+function btnGhost(extra = "") {
+  return `inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] px-3.5 py-2 text-sm font-semibold text-[var(--foreground-soft)] transition hover:border-[var(--border-strong)] hover:text-[var(--foreground)] ${extra}`;
+}
+
+function Labeled({
+  label,
+  hint,
+  className,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={`block space-y-1.5 ${className ?? ""}`}>
+      <span className="block text-xs font-semibold text-[var(--muted)]">{label}</span>
+      {children}
+      {hint && <span className="block text-[11px] leading-4 text-[var(--muted)]">{hint}</span>}
+    </label>
+  );
+}
+
+function Badge({ tone, children }: { tone: "amber" | "green" | "neutral" | "red"; children: React.ReactNode }) {
+  const map = {
+    amber: "bg-[var(--warning-soft)] text-[var(--warning)]",
+    green: "bg-[var(--success-soft)] text-[var(--success)]",
+    red: "bg-[var(--danger-soft)] text-[var(--danger)]",
+    neutral: "bg-[var(--surface-alt)] text-[var(--muted)]",
+  } as const;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${map[tone]}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function planTone(plan: string): "amber" | "green" | "neutral" {
+  const p = plan.toLowerCase();
+  if (p.includes("trial")) return "amber";
+  if (p.includes("active") || p.includes("paid") || p.includes("pro")) return "green";
+  return "neutral";
+}
+
+function formatKobo(kobo: string | null | undefined) {
+  if (kobo == null) return { text: "—", tone: "neutral" as const };
   const value = Number(BigInt(kobo)) / 100;
-  return value.toLocaleString("en-NG", { style: "currency", currency: "NGN", maximumFractionDigits: 0 });
+  const abs = Math.abs(value).toLocaleString("en-NG", {
+    style: "currency",
+    currency: "NGN",
+    maximumFractionDigits: 0,
+  });
+  if (value < 0) return { text: `−${abs}`, tone: "red" as const };
+  if (value === 0) return { text: abs, tone: "neutral" as const };
+  return { text: abs, tone: "green" as const };
+}
+
+function MoneyChip({ kobo }: { kobo: string | null | undefined }) {
+  const { text, tone } = formatKobo(kobo);
+  const cls =
+    tone === "red"
+      ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+      : tone === "green"
+        ? "bg-[var(--success-soft)] text-[var(--success)]"
+        : "text-[var(--muted)]";
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold tabular-nums ${cls}`}>
+      {text}
+    </span>
+  );
+}
+
+function initialsOf(name: string) {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase() || "?"
+  );
+}
+
+function Stat({
+  icon: Icon,
+  label,
+  value,
+  danger,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string | number;
+  danger?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="flex items-center gap-2 text-[var(--muted)]">
+        <Icon className="h-4 w-4" />
+        <span className="text-xs font-semibold uppercase tracking-wide">{label}</span>
+      </div>
+      <p
+        className={`mt-2 text-2xl font-bold tabular-nums ${
+          danger ? "text-[var(--danger)]" : "text-[var(--foreground)]"
+        }`}
+      >
+        {value}
+      </p>
+    </div>
+  );
 }
 
 /**
@@ -106,20 +242,20 @@ function FeatureToggleList({
     });
   }
 
+  const chip = (on: boolean) =>
+    `inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+      on
+        ? "border-[var(--primary)] bg-[var(--primary)] text-white"
+        : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--border-strong)]"
+    }`;
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
         {EXTERNAL_EXAM_BODIES.map((body) => {
           const on = features.examCentre.externalBodies[body];
           return (
-            <button
-              key={body}
-              type="button"
-              onClick={() => toggleBody(body)}
-              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold ${
-                on ? "border-[var(--primary)] bg-[var(--primary)] text-white" : "border-[var(--border)] text-[var(--muted)]"
-              }`}
-            >
+            <button key={body} type="button" onClick={() => toggleBody(body)} className={chip(on)}>
               {on && <CheckCircleIcon className="h-3.5 w-3.5" />}
               {EXAM_BODY_LABEL[body]} exam booking
             </button>
@@ -136,23 +272,17 @@ function FeatureToggleList({
               },
             })
           }
-          className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold ${
-            features.games.onlineCohortRequiresLiveClass
-              ? "border-[var(--primary)] bg-[var(--primary)] text-white"
-              : "border-[var(--border)] text-[var(--muted)]"
-          }`}
+          className={chip(features.games.onlineCohortRequiresLiveClass)}
         >
           {features.games.onlineCohortRequiresLiveClass && <CheckCircleIcon className="h-3.5 w-3.5" />}
           Online cohort games require a live class
         </button>
       </div>
-      <p className="text-[11px] text-[var(--muted)]">
-        ÖSD/telc booking is only worth turning on once this school actually has a confirmed fee and a real
-        booking link with that awarding body — see the checklist on the student-facing exam centre. EasyWay&apos;s
-        own are off for exactly that reason.
+      <p className="text-[11px] leading-4 text-[var(--muted)]">
+        ÖSD / telc booking is only worth turning on once this school actually has a confirmed fee and a
+        real booking link with that awarding body. EasyWay&apos;s own are off for exactly that reason.
       </p>
-      <label className="block space-y-1">
-        <span className="text-xs font-semibold text-[var(--muted)]">Goethe referral link</span>
+      <Labeled label="Goethe referral link" hint="Leave blank to hide the Goethe card entirely.">
         <input
           value={features.examCentre.goetheReferralUrl ?? ""}
           onChange={(e) =>
@@ -161,13 +291,15 @@ function FeatureToggleList({
               examCentre: { ...features.examCentre, goetheReferralUrl: e.target.value.trim() || null },
             })
           }
-          placeholder="Leave blank to hide the Goethe card entirely"
-          className="w-full rounded-xl border border-[var(--border)] px-3 py-2 font-mono text-xs"
+          placeholder="https://…"
+          className={`${FIELD} font-mono text-xs`}
         />
-      </label>
+      </Labeled>
     </div>
   );
 }
+
+/* -------------------------------------------------------------------------- */
 
 export default function PlatformConsolePage() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -175,6 +307,7 @@ export default function PlatformConsolePage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);
+  const [onboardOpen, setOnboardOpen] = useState(false);
 
   /**
    * Held in state and shown until dismissed, because it exists exactly once.
@@ -182,6 +315,7 @@ export default function PlatformConsolePage() {
    * has to revoke and re-issue.
    */
   const [freshKey, setFreshKey] = useState<{ plaintext: string; name: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const [newTenant, setNewTenant] = useState({
     name: "",
@@ -205,6 +339,31 @@ export default function PlatformConsolePage() {
     environment: "test",
     scopes: [],
   });
+  const [owners, setOwners] = useState<Owner[]>([]);
+  const [newOwner, setNewOwner] = useState({ name: "", email: "" });
+  const [ownerSetupUrl, setOwnerSetupUrl] = useState<string | null>(null);
+  const [ownerCopied, setOwnerCopied] = useState(false);
+
+  const [billing, setBilling] = useState<{ enforce: boolean; graceKobo: string }>({
+    enforce: false,
+    graceKobo: "0",
+  });
+  const [billingSaved, setBillingSaved] = useState(false);
+  const [domainState, setDomainState] = useState<{
+    state: string;
+    cnameTarget?: string;
+    servedName?: string;
+    expectedName?: string;
+    httpStatus?: number;
+  } | null>(null);
+  const [checkingDomain, setCheckingDomain] = useState(false);
+
+  const [rates, setRates] = useState<
+    Array<{ meter: string; kobo: number; per: number; isPlaceholder: boolean }>
+  >([]);
+  const [rateEdits, setRateEdits] = useState<Record<string, string>>({});
+  const [ratesSaved, setRatesSaved] = useState(false);
+
   const [busy, setBusy] = useState(false);
 
   const loadTenants = useCallback(async () => {
@@ -241,19 +400,55 @@ export default function PlatformConsolePage() {
     setFeaturesSaved(false);
   }, []);
 
+  const loadOwners = useCallback(async (tenantId: string) => {
+    const response = await fetch(`/api/platform/tenants/${tenantId}/owner`);
+    if (!response.ok) return;
+    const data = await response.json();
+    setOwners(data.owners ?? []);
+  }, []);
+
+  const loadBilling = useCallback(async (tenantId: string) => {
+    const response = await fetch(`/api/platform/tenants/${tenantId}/billing`);
+    if (!response.ok) return;
+    const data = await response.json();
+    setBilling(data.settings ?? { enforce: false, graceKobo: "0" });
+    setBillingSaved(false);
+  }, []);
+
+  const loadRates = useCallback(async () => {
+    const response = await fetch("/api/platform/rates");
+    if (!response.ok) return;
+    const data = await response.json();
+    setRates(data.rates ?? []);
+    setRateEdits(
+      Object.fromEntries(
+        (data.rates ?? []).map((r: { meter: string; kobo: number }) => [r.meter, String(r.kobo)]),
+      ),
+    );
+    setRatesSaved(false);
+  }, []);
+
   useEffect(() => {
     loadTenants();
-  }, [loadTenants]);
+    loadRates();
+  }, [loadTenants, loadRates]);
 
   useEffect(() => {
     if (selected) {
       loadKeys(selected);
       loadFeatures(selected);
+      loadOwners(selected);
+      loadBilling(selected);
+      setNewOwner({ name: "", email: "" });
+      setOwnerSetupUrl(null);
+      setOwnerCopied(false);
+      setDomainState(null);
     } else {
       setKeys([]);
       setFeatures(null);
+      setOwners([]);
     }
-  }, [selected, loadKeys, loadFeatures]);
+  }, [selected, loadKeys, loadFeatures, loadOwners, loadBilling]);
 
   async function createTenant() {
     setBusy(true);
@@ -267,6 +462,7 @@ export default function PlatformConsolePage() {
       if (!response.ok) throw new Error(data.error ?? "Could not create the school.");
       setNewTenant({ name: "", slug: "", domain: "", brandName: "", logoUrl: "", primaryColor: "" });
       setNewTenantFeatures(defaultFeatures());
+      setOnboardOpen(false);
       await loadTenants();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create the school.");
@@ -287,6 +483,7 @@ export default function PlatformConsolePage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not issue the key.");
       setFreshKey({ plaintext: data.plaintext, name: data.key.name });
+      setCopied(false);
       setNewKey({ name: "", environment: "test", scopes: [] });
       await loadKeys(selected);
       await loadTenants();
@@ -302,6 +499,88 @@ export default function PlatformConsolePage() {
     try {
       await fetch(`/api/platform/keys/${keyId}`, { method: "DELETE" });
       if (selected) await loadKeys(selected);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createOwner() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/platform/tenants/${selected}/owner`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newOwner),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not create the owner.");
+      setOwnerSetupUrl(data.setupUrl ?? null);
+      setOwnerCopied(false);
+      setNewOwner({ name: "", email: "" });
+      await loadOwners(selected);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create the owner.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveBilling() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/platform/tenants/${selected}/billing`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(billing),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not save.");
+      setBilling(data.settings ?? billing);
+      setBillingSaved(true);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkDomain() {
+    if (!selected) return;
+    setCheckingDomain(true);
+    setDomainState(null);
+    try {
+      const response = await fetch(`/api/platform/tenants/${selected}/domain-check`);
+      const data = await response.json();
+      if (response.ok) setDomainState(data);
+    } finally {
+      setCheckingDomain(false);
+    }
+  }
+
+  async function saveRates() {
+    setBusy(true);
+    try {
+      const payload: Record<string, number | null> = {};
+      for (const r of rates) {
+        const raw = rateEdits[r.meter];
+        payload[r.meter] = raw === "" || raw == null ? null : Number(raw);
+      }
+      const response = await fetch("/api/platform/rates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rates: payload }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not save the rates.");
+      setRates(data.rates ?? []);
+      setRatesSaved(true);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save the rates.");
     } finally {
       setBusy(false);
     }
@@ -374,51 +653,82 @@ export default function PlatformConsolePage() {
 
   const current = tenants.find((t) => t.id === selected) ?? null;
 
+  const totals = useMemo(() => {
+    const students = tenants.reduce((n, t) => n + (t._count?.students ?? 0), 0);
+    const apiKeys = tenants.reduce((n, t) => n + (t._count?.apiKeys ?? 0), 0);
+    const balance = tenants.reduce(
+      (n, t) => n + (t.credit?.balanceKobo ? Number(BigInt(t.credit.balanceKobo)) : 0),
+      0,
+    );
+    return { students, apiKeys, balance };
+  }, [tenants]);
+
   return (
-    <PlatformShell>
-      <div className="min-w-0 space-y-8">
-        <header>
-          <h1 className="flex items-center gap-3 text-3xl font-bold">
-            <ShieldIcon className="h-7 w-7" />
-            Platform
-          </h1>
-          <p className="mt-2 max-w-3xl text-sm text-[var(--muted)]">
-            The schools running on this system, and the keys their engineers integrate with.
-            Separate from running any one school: nothing here reaches a student record.
-          </p>
-        </header>
+    <PlatformShell label="Console">
+      <div className="min-w-0 space-y-6">
+        {/* Page header */}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Console</h1>
+            <p className="mt-1 max-w-xl text-sm text-[var(--muted)]">
+              Every school on the platform, their usage, and the API keys their engineers integrate
+              with. Nothing here reaches a student record.
+            </p>
+          </div>
+          <button type="button" onClick={loadTenants} className={btnGhost("shrink-0")}>
+            <RefreshIcon className="h-4 w-4" />
+            Refresh
+          </button>
+        </div>
 
         {error && (
-          <div className="flex items-start gap-3 rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:bg-red-950/30">
+          <div className="flex items-start gap-3 rounded-2xl border border-[var(--danger)]/40 bg-[var(--danger-soft)] p-4 text-sm text-[var(--danger)]">
             <AlertIcon className="mt-0.5 h-5 w-5 shrink-0" />
             <p className="min-w-0">{error}</p>
           </div>
         )}
 
+        {/* KPI row */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat icon={PackageIcon} label="Schools" value={tenants.length} />
+          <Stat icon={UsersIcon} label="Students" value={totals.students.toLocaleString()} />
+          <Stat icon={KeyIcon} label="API keys" value={totals.apiKeys} />
+          <Stat
+            icon={WalletIcon}
+            label="Platform balance"
+            value={formatKobo(String(totals.balance)).text}
+            danger={totals.balance < 0}
+          />
+        </div>
+
+        {/* One-time key reveal */}
         {freshKey && (
-          <div className="rounded-3xl border-2 border-amber-400 bg-amber-50 p-5 dark:bg-amber-950/20">
-            <p className="flex items-center gap-2 text-sm font-semibold">
+          <div className="rounded-2xl border border-[var(--warning)]/50 bg-[var(--warning-soft)] p-5">
+            <p className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
               <KeyIcon className="h-5 w-5" />
               {freshKey.name} — copy this now
             </p>
             <p className="mt-1 text-xs text-[var(--muted)]">
               Stored as a hash. This is the only time it can be shown, by design.
             </p>
-            <code className="mt-3 block overflow-x-auto rounded-xl bg-[var(--surface)] p-3 font-mono text-xs">
+            <code className="mt-3 block overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 font-mono text-xs text-[var(--foreground)]">
               {freshKey.plaintext}
             </code>
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
-                onClick={() => navigator.clipboard?.writeText(freshKey.plaintext)}
-                className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold"
+                onClick={() => {
+                  navigator.clipboard?.writeText(freshKey.plaintext);
+                  setCopied(true);
+                }}
+                className={btnPrimary("px-4 py-1.5 text-xs")}
               >
-                Copy
+                {copied ? "Copied" : "Copy"}
               </button>
               <button
                 type="button"
                 onClick={() => setFreshKey(null)}
-                className="rounded-full px-4 py-1.5 text-xs font-semibold text-[var(--muted)]"
+                className={btnGhost("px-4 py-1.5 text-xs")}
               >
                 I have it
               </button>
@@ -426,376 +736,695 @@ export default function PlatformConsolePage() {
           </div>
         )}
 
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">Schools</h2>
+        {/* Schools */}
+        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+            <div>
+              <h2 className="text-sm font-semibold">Schools</h2>
+              <p className="text-xs text-[var(--muted)]">
+                {loading ? "Loading…" : `${tenants.length} on the platform`}
+              </p>
+            </div>
             <button
               type="button"
-              onClick={loadTenants}
-              className="flex items-center gap-2 rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold"
+              onClick={() => setOnboardOpen((v) => !v)}
+              className={onboardOpen ? btnGhost() : btnPrimary()}
             >
-              <RefreshIcon className="h-4 w-4" />
-              Refresh
+              <PlusIcon className="h-4 w-4" />
+              {onboardOpen ? "Cancel" : "Onboard school"}
             </button>
           </div>
 
+          {/* Onboard form — inline, above the table */}
+          {onboardOpen && (
+            <div className="space-y-5 border-b border-[var(--border)] bg-[var(--surface-alt)] p-5">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <Labeled label="School name">
+                  <input
+                    value={newTenant.name}
+                    onChange={(e) => setNewTenant({ ...newTenant, name: e.target.value })}
+                    placeholder="Bright Futures Academy"
+                    className={FIELD}
+                  />
+                </Labeled>
+                <Labeled label="Slug" hint="Lowercase, hyphens. Used in URLs and key prefixes.">
+                  <input
+                    value={newTenant.slug}
+                    onChange={(e) => setNewTenant({ ...newTenant, slug: e.target.value })}
+                    placeholder="bright-futures"
+                    className={`${FIELD} font-mono`}
+                  />
+                </Labeled>
+                <Labeled label="Domain" hint="Optional. Point a CNAME here later.">
+                  <input
+                    value={newTenant.domain}
+                    onChange={(e) => setNewTenant({ ...newTenant, domain: e.target.value })}
+                    placeholder="lms.brightfutures.ng"
+                    className={`${FIELD} font-mono`}
+                  />
+                </Labeled>
+                <Labeled label="Display name" hint="Optional. What students see, if different.">
+                  <input
+                    value={newTenant.brandName}
+                    onChange={(e) => setNewTenant({ ...newTenant, brandName: e.target.value })}
+                    placeholder="Bright Futures"
+                    className={FIELD}
+                  />
+                </Labeled>
+                <Labeled label="Logo URL" hint="Optional. https:// only.">
+                  <input
+                    value={newTenant.logoUrl}
+                    onChange={(e) => setNewTenant({ ...newTenant, logoUrl: e.target.value })}
+                    placeholder="https://…"
+                    className={`${FIELD} font-mono`}
+                  />
+                </Labeled>
+                <Labeled label="Brand colour" hint="Optional. Hex.">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={newTenant.primaryColor || EDUPRIME_BLUE}
+                      onChange={(e) => setNewTenant({ ...newTenant, primaryColor: e.target.value })}
+                      className="h-9 w-11 shrink-0 cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--surface)]"
+                      aria-label="Brand colour"
+                    />
+                    <input
+                      value={newTenant.primaryColor}
+                      onChange={(e) => setNewTenant({ ...newTenant, primaryColor: e.target.value })}
+                      placeholder={EDUPRIME_BLUE}
+                      className={`${FIELD} font-mono`}
+                    />
+                  </div>
+                </Labeled>
+              </div>
+
+              <div className="space-y-2 border-t border-[var(--border)] pt-4">
+                <p className="text-xs font-semibold text-[var(--muted)]">
+                  What they start with — everything the platform can deliver, on by default.
+                </p>
+                <FeatureToggleList features={newTenantFeatures} onChange={setNewTenantFeatures} />
+              </div>
+
+              <button
+                type="button"
+                disabled={busy || !newTenant.name || !newTenant.slug}
+                onClick={createTenant}
+                className={btnPrimary()}
+              >
+                {busy ? "Creating…" : "Create school"}
+              </button>
+            </div>
+          )}
+
+          {/* Table */}
           {loading ? (
-            <p className="text-sm text-[var(--muted)]">Loading…</p>
+            <div className="divide-y divide-[var(--border)]">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-4 px-5 py-4">
+                  <div className="h-4 w-40 animate-pulse rounded bg-[var(--surface-alt)]" />
+                  <div className="ml-auto h-4 w-16 animate-pulse rounded bg-[var(--surface-alt)]" />
+                </div>
+              ))}
+            </div>
+          ) : tenants.length === 0 ? (
+            <div className="px-5 py-12 text-center">
+              <PackageIcon className="mx-auto h-8 w-8 text-[var(--muted)]" />
+              <p className="mt-3 text-sm font-semibold">No schools yet</p>
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                Onboard the first one to start metering usage.
+              </p>
+            </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="text-xs text-[var(--muted)]">
-                  <tr>
-                    <th className="py-2 pr-4">School</th>
-                    <th className="py-2 pr-4">Domain</th>
-                    <th className="py-2 pr-4">Plan</th>
-                    <th className="py-2 pr-4">Students</th>
-                    <th className="py-2 pr-4">Keys</th>
-                    <th className="py-2 pr-4">Balance</th>
+                <thead>
+                  <tr className="text-[11px] uppercase tracking-wide text-[var(--muted)]">
+                    <th className="px-5 py-2.5 font-semibold">School</th>
+                    <th className="px-3 py-2.5 font-semibold">Plan</th>
+                    <th className="px-3 py-2.5 font-semibold">Domain</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Students</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Keys</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Balance</th>
+                    <th className="w-8 px-3 py-2.5" />
                   </tr>
                 </thead>
                 <tbody>
-                  {tenants.map((tenant) => (
-                    <tr
-                      key={tenant.id}
-                      onClick={() => setSelected(tenant.id === selected ? null : tenant.id)}
-                      className={`cursor-pointer border-t border-[var(--border)] ${
-                        tenant.id === selected ? "bg-[var(--surface)]" : ""
-                      }`}
-                    >
-                      <td className="py-2 pr-4">
-                        <span className="font-semibold">{tenant.name}</span>
-                        <span className="ml-2 text-xs text-[var(--muted)]">{tenant.slug}</span>
-                      </td>
-                      <td className="py-2 pr-4 text-xs text-[var(--muted)]">
-                        {tenant.domain ?? "—"}
-                      </td>
-                      <td className="py-2 pr-4">{tenant.plan}</td>
-                      <td className="py-2 pr-4">{tenant._count.students}</td>
-                      <td className="py-2 pr-4">{tenant._count.apiKeys}</td>
-                      <td className="py-2 pr-4">{naira(tenant.credit?.balanceKobo)}</td>
-                    </tr>
-                  ))}
+                  {tenants.map((tenant) => {
+                    const isSel = tenant.id === selected;
+                    return (
+                      <tr
+                        key={tenant.id}
+                        onClick={() => setSelected(isSel ? null : tenant.id)}
+                        className={`cursor-pointer border-t border-[var(--border)] transition ${
+                          isSel
+                            ? "bg-[var(--accent-soft)]"
+                            : "hover:bg-[var(--surface-alt)]"
+                        }`}
+                      >
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-3">
+                            <span
+                              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[11px] font-bold"
+                              style={{
+                                background: "color-mix(in srgb, var(--primary) 14%, transparent)",
+                                color: "var(--primary)",
+                              }}
+                            >
+                              {initialsOf(tenant.name)}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="truncate font-semibold">{tenant.name}</div>
+                              <div className="truncate font-mono text-[11px] text-[var(--muted)]">
+                                {tenant.slug}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3">
+                          <Badge tone={planTone(tenant.plan)}>{tenant.plan}</Badge>
+                        </td>
+                        <td className="px-3 py-3 text-xs text-[var(--muted)]">
+                          {tenant.domain ?? "—"}
+                        </td>
+                        <td className="px-3 py-3 text-right tabular-nums">{tenant._count.students}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{tenant._count.apiKeys}</td>
+                        <td className="px-3 py-3 text-right">
+                          <MoneyChip kobo={tenant.credit?.balanceKobo} />
+                        </td>
+                        <td className="px-3 py-3">
+                          <ChevronRightIcon
+                            className={`h-4 w-4 text-[var(--muted)] transition ${
+                              isSel ? "rotate-90" : ""
+                            }`}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
-        </section>
+        </div>
 
-        <section className="space-y-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
-          <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <PlusIcon className="h-5 w-5" />
-            Onboard a school
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <input
-              value={newTenant.name}
-              onChange={(e) => setNewTenant({ ...newTenant, name: e.target.value })}
-              placeholder="Name"
-              className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
-            />
-            <input
-              value={newTenant.slug}
-              onChange={(e) => setNewTenant({ ...newTenant, slug: e.target.value })}
-              placeholder="slug (lowercase-hyphens)"
-              className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
-            />
-            <input
-              value={newTenant.domain}
-              onChange={(e) => setNewTenant({ ...newTenant, domain: e.target.value })}
-              placeholder="domain (optional)"
-              className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
-            />
-            <input
-              value={newTenant.brandName}
-              onChange={(e) => setNewTenant({ ...newTenant, brandName: e.target.value })}
-              placeholder="Display name (optional)"
-              className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
-            />
-            <input
-              value={newTenant.logoUrl}
-              onChange={(e) => setNewTenant({ ...newTenant, logoUrl: e.target.value })}
-              placeholder="Logo URL (optional)"
-              className="rounded-xl border border-[var(--border)] px-3 py-2 font-mono text-sm"
-            />
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={newTenant.primaryColor || "#FF6600"}
-                onChange={(e) => setNewTenant({ ...newTenant, primaryColor: e.target.value })}
-                className="h-10 w-12 shrink-0 cursor-pointer rounded-xl border border-[var(--border)]"
-              />
-              <input
-                value={newTenant.primaryColor}
-                onChange={(e) => setNewTenant({ ...newTenant, primaryColor: e.target.value })}
-                placeholder="Brand colour (optional)"
-                className="w-full rounded-xl border border-[var(--border)] px-3 py-2 font-mono text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2 border-t border-[var(--border)] pt-4">
-            <p className="text-xs font-semibold text-[var(--muted)]">
-              What they start with — everything the platform can actually deliver, checked by default.
-            </p>
-            <FeatureToggleList features={newTenantFeatures} onChange={setNewTenantFeatures} />
-          </div>
-
-          <button
-            type="button"
-            disabled={busy || !newTenant.name || !newTenant.slug}
-            onClick={createTenant}
-            className="rounded-full bg-[var(--primary)] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            Create
-          </button>
-        </section>
-
+        {/* Selected school */}
         {current && (
-          <section className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-              <PaletteIcon className="h-5 w-5" />
-              How {current.name} looks
-            </h2>
-            <p className="text-sm text-[var(--muted)]">
-              Applied to everyone arriving on this school&apos;s own domain. Leave any of it blank
-              and they get the standard EasyWay presentation.
-            </p>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1">
-                <span className="text-xs font-semibold text-[var(--muted)]">Display name</span>
-                <input
-                  value={brand.brandName}
-                  onChange={(e) => setBrand({ ...brand, brandName: e.target.value })}
-                  placeholder={current.name}
-                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
-                />
-                <span className="block text-xs text-[var(--muted)]">
-                  What students see. The name above is what invoices say.
-                </span>
-              </label>
-
-              <label className="space-y-1">
-                <span className="text-xs font-semibold text-[var(--muted)]">Domain</span>
-                <input
-                  value={brand.domain}
-                  onChange={(e) => setBrand({ ...brand, domain: e.target.value })}
-                  placeholder="lms.theirschool.com"
-                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2 font-mono text-sm"
-                />
-                <span className="block text-xs text-[var(--muted)]">
-                  Nothing below applies until they point this at us.
-                </span>
-              </label>
-
-              <label className="space-y-1 sm:col-span-2">
-                <span className="text-xs font-semibold text-[var(--muted)]">Logo URL</span>
-                <input
-                  value={brand.logoUrl}
-                  onChange={(e) => setBrand({ ...brand, logoUrl: e.target.value })}
-                  placeholder="https://… or /uploads/…"
-                  className="w-full rounded-xl border border-[var(--border)] px-3 py-2 font-mono text-sm"
-                />
-                <span className="block text-xs text-[var(--muted)]">
-                  A horizontal lockup. Must be https — plain http is blocked as mixed content and
-                  would simply never appear. The square emblem stays ours.
-                </span>
-              </label>
-
-              <label className="space-y-1">
-                <span className="text-xs font-semibold text-[var(--muted)]">Brand colour</span>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={brand.primaryColor || "#FF6600"}
-                    onChange={(e) => setBrand({ ...brand, primaryColor: e.target.value })}
-                    className="h-10 w-14 shrink-0 cursor-pointer rounded-xl border border-[var(--border)]"
-                  />
-                  <input
-                    value={brand.primaryColor}
-                    onChange={(e) => setBrand({ ...brand, primaryColor: e.target.value })}
-                    placeholder="#FF6600"
-                    className="w-full rounded-xl border border-[var(--border)] px-3 py-2 font-mono text-sm"
-                  />
-                </div>
-                <span className="block text-xs text-[var(--muted)]">
-                  One colour. The teal it pairs with stays fixed — deriving a second colour from
-                  one picked value is what makes a product look generated.
-                </span>
-              </label>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={saveBranding}
-                className="rounded-full bg-[var(--primary)] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          <div className="overflow-hidden rounded-2xl border-2 border-[color-mix(in_srgb,var(--primary)_40%,var(--border))] bg-[var(--surface)]">
+            <div className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--surface-alt)] px-5 py-4">
+              <span
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-sm font-bold"
+                style={{
+                  background: "color-mix(in srgb, var(--primary) 14%, transparent)",
+                  color: "var(--primary)",
+                }}
               >
-                Save
+                {initialsOf(current.name)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate text-base font-semibold">{current.name}</h2>
+                <p className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                  <span className="font-mono">{current.slug}</span>
+                  <Badge tone={planTone(current.plan)}>{current.plan}</Badge>
+                </p>
+              </div>
+              <button type="button" onClick={() => setSelected(null)} className={btnGhost("px-3 py-1.5 text-xs")}>
+                Close
               </button>
-              {brandSaved && (
-                <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                  <CheckCircleIcon className="h-4 w-4" />
-                  Saved. Their users see it within the minute.
-                </span>
-              )}
             </div>
-          </section>
-        )}
 
-        {current && features && (
-          <section className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-              <SparklesIcon className="h-5 w-5" />
-              What {current.name} can do
-            </h2>
-            <p className="text-sm text-[var(--muted)]">
-              What we built for EasyWay, switched on or off for this school specifically. They don&apos;t set
-              these themselves — an operator does, from a request.
-            </p>
+            <div className="space-y-5 p-5">
+              {/* School owner — the account that can actually sign in */}
+              <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <UserPlusIcon className="h-4 w-4" />
+                  School owner
+                </h3>
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  The administrator account for this school. Creating the school does not create one —
+                  without this, nobody can sign in. They get a set-password link by email.
+                </p>
 
-            <FeatureToggleList
-              features={features}
-              onChange={(next) => {
-                setFeatures(next);
-                setFeaturesSaved(false);
-              }}
-            />
-
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={saveFeatures}
-                className="rounded-full bg-[var(--primary)] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                Save
-              </button>
-              {featuresSaved && (
-                <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                  <CheckCircleIcon className="h-4 w-4" />
-                  Saved. Takes effect within the minute.
-                </span>
-              )}
-            </div>
-          </section>
-        )}
-
-        {current && (
-          <section className="space-y-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-              <KeyIcon className="h-5 w-5" />
-              API keys — {current.name}
-            </h2>
-
-            {keys.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">
-                No keys yet. Nobody can call the API on this school&apos;s behalf.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-left text-sm">
-                  <thead className="text-xs text-[var(--muted)]">
-                    <tr>
-                      <th className="py-2 pr-4">Name</th>
-                      <th className="py-2 pr-4">Prefix</th>
-                      <th className="py-2 pr-4">Env</th>
-                      <th className="py-2 pr-4">Last used</th>
-                      <th className="py-2 pr-4"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {keys.map((key) => (
-                      <tr key={key.id} className="border-t border-[var(--border)]">
-                        <td className="py-2 pr-4">
-                          {key.name}
-                          {key.revokedAt && (
-                            <span className="ml-2 text-xs text-red-600">revoked</span>
+                {owners.length > 0 && (
+                  <ul className="mt-3 space-y-1.5">
+                    {owners.map((o) => (
+                      <li
+                        key={o.id}
+                        className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                      >
+                        <span className="font-medium">{o.name || "—"}</span>
+                        <span className="font-mono text-xs text-[var(--muted)]">{o.email}</span>
+                        <span className="ml-auto">
+                          {o.passwordClaimed ? (
+                            <Badge tone="green">active</Badge>
+                          ) : (
+                            <Badge tone="amber">invite pending</Badge>
                           )}
-                        </td>
-                        <td className="py-2 pr-4 font-mono text-xs">ewk_{key.environment}_{key.prefix}</td>
-                        <td className="py-2 pr-4">{key.environment}</td>
-                        <td className="py-2 pr-4 text-xs text-[var(--muted)]">
-                          {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : "never"}
-                        </td>
-                        <td className="py-2 pr-4 text-right">
-                          {!key.revokedAt && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => revokeKey(key.id)}
-                              className="flex items-center gap-1 text-xs font-semibold text-red-600"
-                            >
-                              <TrashIcon className="h-4 w-4" />
-                              Revoke
-                            </button>
-                          )}
-                        </td>
-                      </tr>
+                        </span>
+                      </li>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                  </ul>
+                )}
 
-            <div className="space-y-3 border-t border-[var(--border)] pt-4">
-              <p className="text-sm font-semibold">Issue a key</p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <input
-                  value={newKey.name}
-                  onChange={(e) => setNewKey({ ...newKey, name: e.target.value })}
-                  placeholder="What is it for? e.g. Student portal sync"
-                  className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
-                />
-                <select
-                  value={newKey.environment}
-                  onChange={(e) => setNewKey({ ...newKey, environment: e.target.value })}
-                  className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
-                >
-                  <option value="test">test — safe to make mistakes in</option>
-                  <option value="live">live — real students, real money</option>
-                </select>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {SCOPES.map((scope) => {
-                  const on = newKey.scopes.includes(scope);
-                  return (
+                {ownerSetupUrl && (
+                  <div className="mt-3 rounded-lg border border-[var(--primary)]/40 bg-[color-mix(in_srgb,var(--primary)_6%,var(--surface))] p-3">
+                    <p className="text-xs font-semibold text-[var(--foreground)]">
+                      Invite sent. Share this link directly if their email is slow:
+                    </p>
+                    <code className="mt-1.5 block overflow-x-auto rounded border border-[var(--border)] bg-[var(--surface)] p-2 font-mono text-[11px]">
+                      {ownerSetupUrl}
+                    </code>
                     <button
-                      key={scope}
                       type="button"
-                      onClick={() =>
-                        setNewKey({
-                          ...newKey,
-                          scopes: on
-                            ? newKey.scopes.filter((s) => s !== scope)
-                            : [...newKey.scopes, scope],
-                        })
-                      }
-                      className={`flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium ${
-                        on
-                          ? "border-[var(--primary)] bg-[var(--primary)] text-white"
-                          : "border-[var(--border)]"
-                      }`}
+                      onClick={() => {
+                        navigator.clipboard?.writeText(ownerSetupUrl);
+                        setOwnerCopied(true);
+                      }}
+                      className={btnGhost("mt-2 px-3 py-1 text-xs")}
                     >
-                      {on && <CheckCircleIcon className="h-3 w-3" />}
-                      {scope}
+                      {ownerCopied ? "Copied" : "Copy link"}
                     </button>
-                  );
-                })}
-              </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={issueKey}
-                className="rounded-full bg-[var(--primary)] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                Issue
-              </button>
+                  </div>
+                )}
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <Labeled label="Owner name">
+                    <input
+                      value={newOwner.name}
+                      onChange={(e) => setNewOwner({ ...newOwner, name: e.target.value })}
+                      placeholder="Dr. Amaka Obi"
+                      className={FIELD}
+                    />
+                  </Labeled>
+                  <Labeled label="Owner email" hint="Must not already have an account anywhere on the platform.">
+                    <input
+                      type="email"
+                      value={newOwner.email}
+                      onChange={(e) => setNewOwner({ ...newOwner, email: e.target.value })}
+                      placeholder="amaka@theirschool.edu.ng"
+                      className={`${FIELD} font-mono`}
+                    />
+                  </Labeled>
+                </div>
+                <button
+                  type="button"
+                  disabled={busy || !newOwner.name.trim() || !newOwner.email.trim()}
+                  onClick={createOwner}
+                  className={btnPrimary("mt-4")}
+                >
+                  {busy ? "Creating…" : owners.length ? "Add another owner" : "Create owner & send invite"}
+                </button>
+              </section>
+
+              {/* Billing enforcement */}
+              <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <WalletIcon className="h-4 w-4" />
+                  Billing
+                </h3>
+                <div className="mt-3 flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                  <span className="text-xs text-[var(--muted)]">Current balance</span>
+                  <MoneyChip kobo={current.credit?.balanceKobo} />
+                </div>
+
+                <label className="mt-4 flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={billing.enforce}
+                    onChange={(e) => {
+                      setBilling({ ...billing, enforce: e.target.checked });
+                      setBillingSaved(false);
+                    }}
+                    className="mt-0.5 h-4 w-4 accent-[var(--primary)]"
+                  />
+                  <span className="text-sm">
+                    <span className="font-semibold">Enforce a spent-through balance</span>
+                    <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                      Off (default), a negative balance is only a warning. On, metered work — live
+                      classes, AI, email — is refused once the balance and the grace below are both
+                      used up. Turn this on only after topping up or agreeing terms.
+                    </span>
+                  </span>
+                </label>
+
+                <Labeled
+                  className="mt-3 max-w-xs"
+                  label="Extra grace (kobo)"
+                  hint="Headroom past zero before blocking. 100000 = ₦1,000."
+                >
+                  <input
+                    value={billing.graceKobo}
+                    onChange={(e) => {
+                      setBilling({ ...billing, graceKobo: e.target.value.replace(/[^\d-]/g, "") });
+                      setBillingSaved(false);
+                    }}
+                    className={`${FIELD} font-mono`}
+                    inputMode="numeric"
+                  />
+                </Labeled>
+
+                <div className="mt-4 flex items-center gap-3">
+                  <button type="button" disabled={busy} onClick={saveBilling} className={btnPrimary()}>
+                    Save billing
+                  </button>
+                  {billingSaved && (
+                    <span className="flex items-center gap-1 text-xs font-semibold text-[var(--success)]">
+                      <CheckCircleIcon className="h-4 w-4" />
+                      Saved — within the minute.
+                    </span>
+                  )}
+                </div>
+              </section>
+
+              {/* Branding */}
+              <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <PaletteIcon className="h-4 w-4" />
+                  How {current.name} looks
+                </h3>
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  Applied to everyone on this school&apos;s own domain. Blank fields fall back to the
+                  standard presentation.
+                </p>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <Labeled label="Display name" hint="What students see. The name above is what invoices say.">
+                    <input
+                      value={brand.brandName}
+                      onChange={(e) => setBrand({ ...brand, brandName: e.target.value })}
+                      placeholder={current.name}
+                      className={FIELD}
+                    />
+                  </Labeled>
+                  <div className="space-y-1.5">
+                    <Labeled label="Domain" hint="Save first, then check. CNAME it to cname.vercel-dns.com.">
+                      <input
+                        value={brand.domain}
+                        onChange={(e) => setBrand({ ...brand, domain: e.target.value })}
+                        placeholder="lms.theirschool.com"
+                        className={`${FIELD} font-mono`}
+                      />
+                    </Labeled>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={checkingDomain || !current.domain}
+                        onClick={checkDomain}
+                        className={btnGhost("px-3 py-1 text-xs")}
+                      >
+                        {checkingDomain ? "Checking…" : "Check status"}
+                      </button>
+                      {domainState && (
+                        <span className="text-xs font-semibold">
+                          {domainState.state === "live" && (
+                            <span className="text-[var(--success)]">✓ Live — resolving to this school</span>
+                          )}
+                          {domainState.state === "wrong-tenant" && (
+                            <span className="text-[var(--warning)]">
+                              Points at us, but serves &ldquo;{domainState.servedName}&rdquo; — the
+                              domain field above must exactly match and be saved.
+                            </span>
+                          )}
+                          {domainState.state === "unreachable" && (
+                            <span className="text-[var(--danger)]">
+                              Not reachable — the CNAME isn&apos;t pointed here yet
+                              {domainState.httpStatus ? ` (HTTP ${domainState.httpStatus})` : ""}.
+                            </span>
+                          )}
+                          {domainState.state === "unset" && (
+                            <span className="text-[var(--muted)]">No domain saved yet.</span>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <Labeled
+                    label="Logo URL"
+                    className="sm:col-span-2"
+                    hint="A horizontal lockup, https only. The square emblem stays ours."
+                  >
+                    <input
+                      value={brand.logoUrl}
+                      onChange={(e) => setBrand({ ...brand, logoUrl: e.target.value })}
+                      placeholder="https://… or /uploads/…"
+                      className={`${FIELD} font-mono`}
+                    />
+                  </Labeled>
+                  <Labeled label="Brand colour" hint="One colour. The pairing colour stays fixed.">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={brand.primaryColor || EDUPRIME_BLUE}
+                        onChange={(e) => setBrand({ ...brand, primaryColor: e.target.value })}
+                        className="h-9 w-12 shrink-0 cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--surface)]"
+                        aria-label="Brand colour"
+                      />
+                      <input
+                        value={brand.primaryColor}
+                        onChange={(e) => setBrand({ ...brand, primaryColor: e.target.value })}
+                        placeholder={EDUPRIME_BLUE}
+                        className={`${FIELD} font-mono`}
+                      />
+                    </div>
+                  </Labeled>
+                </div>
+                <div className="mt-4 flex items-center gap-3">
+                  <button type="button" disabled={busy} onClick={saveBranding} className={btnPrimary()}>
+                    Save branding
+                  </button>
+                  {brandSaved && (
+                    <span className="flex items-center gap-1 text-xs font-semibold text-[var(--success)]">
+                      <CheckCircleIcon className="h-4 w-4" />
+                      Saved — live within the minute.
+                    </span>
+                  )}
+                </div>
+              </section>
+
+              {/* Capabilities */}
+              {features && (
+                <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold">
+                    <SparklesIcon className="h-4 w-4" />
+                    What {current.name} can do
+                  </h3>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    Switched on or off for this school specifically. An operator sets these, from a
+                    request.
+                  </p>
+                  <div className="mt-4">
+                    <FeatureToggleList
+                      features={features}
+                      onChange={(next) => {
+                        setFeatures(next);
+                        setFeaturesSaved(false);
+                      }}
+                    />
+                  </div>
+                  <div className="mt-4 flex items-center gap-3">
+                    <button type="button" disabled={busy} onClick={saveFeatures} className={btnPrimary()}>
+                      Save capabilities
+                    </button>
+                    {featuresSaved && (
+                      <span className="flex items-center gap-1 text-xs font-semibold text-[var(--success)]">
+                        <CheckCircleIcon className="h-4 w-4" />
+                        Saved — takes effect within the minute.
+                      </span>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {/* API keys */}
+              <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <KeyIcon className="h-4 w-4" />
+                  API keys
+                </h3>
+
+                {keys.length === 0 ? (
+                  <p className="mt-2 text-xs text-[var(--muted)]">
+                    No keys yet. Nobody can call the API on this school&apos;s behalf.
+                  </p>
+                ) : (
+                  <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+                    <table className="w-full min-w-[560px] text-left text-sm">
+                      <thead>
+                        <tr className="text-[11px] uppercase tracking-wide text-[var(--muted)]">
+                          <th className="px-4 py-2.5 font-semibold">Name</th>
+                          <th className="px-3 py-2.5 font-semibold">Prefix</th>
+                          <th className="px-3 py-2.5 font-semibold">Env</th>
+                          <th className="px-3 py-2.5 font-semibold">Last used</th>
+                          <th className="px-3 py-2.5" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {keys.map((key) => (
+                          <tr key={key.id} className="border-t border-[var(--border)]">
+                            <td className="px-4 py-2.5 font-medium">
+                              {key.name}
+                              {key.revokedAt && (
+                                <span className="ml-2 text-[11px] font-semibold text-[var(--danger)]">
+                                  revoked
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5 font-mono text-xs text-[var(--muted)]">
+                              ewk_{key.environment}_{key.prefix}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <Badge tone={key.environment === "live" ? "green" : "neutral"}>
+                                {key.environment}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-2.5 text-xs text-[var(--muted)]">
+                              {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : "never"}
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              {!key.revokedAt && (
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => revokeKey(key.id)}
+                                  className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--danger)] transition hover:opacity-80"
+                                >
+                                  <TrashIcon className="h-3.5 w-3.5" />
+                                  Revoke
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="mt-4 space-y-3 border-t border-[var(--border)] pt-4">
+                  <p className="text-xs font-semibold text-[var(--muted)]">Issue a key</p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Labeled label="What is it for?">
+                      <input
+                        value={newKey.name}
+                        onChange={(e) => setNewKey({ ...newKey, name: e.target.value })}
+                        placeholder="e.g. Student portal sync"
+                        className={FIELD}
+                      />
+                    </Labeled>
+                    <Labeled label="Environment">
+                      <select
+                        value={newKey.environment}
+                        onChange={(e) => setNewKey({ ...newKey, environment: e.target.value })}
+                        className={FIELD}
+                      >
+                        <option value="test">test — safe to make mistakes in</option>
+                        <option value="live">live — real students, real money</option>
+                      </select>
+                    </Labeled>
+                  </div>
+                  <div>
+                    <span className="mb-1.5 block text-xs font-semibold text-[var(--muted)]">Scopes</span>
+                    <div className="flex flex-wrap gap-2">
+                      {SCOPES.map((scope) => {
+                        const on = newKey.scopes.includes(scope);
+                        return (
+                          <button
+                            key={scope}
+                            type="button"
+                            onClick={() =>
+                              setNewKey({
+                                ...newKey,
+                                scopes: on
+                                  ? newKey.scopes.filter((s) => s !== scope)
+                                  : [...newKey.scopes, scope],
+                              })
+                            }
+                            className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 font-mono text-[11px] font-medium transition ${
+                              on
+                                ? "border-[var(--primary)] bg-[var(--primary)] text-white"
+                                : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--border-strong)]"
+                            }`}
+                          >
+                            {on && <CheckCircleIcon className="h-3 w-3" />}
+                            {scope}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <button type="button" disabled={busy} onClick={issueKey} className={btnPrimary()}>
+                    {busy ? "Issuing…" : "Issue key"}
+                  </button>
+                </div>
+              </section>
             </div>
-          </section>
+          </div>
         )}
+
+        {/* Pricing — one price list for the whole platform */}
+        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+          <div className="border-b border-[var(--border)] px-5 py-4">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <WalletIcon className="h-4 w-4" />
+              Pricing
+            </h2>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              What the nightly rollup bills each meter at. Anything still marked{" "}
+              <span className="font-semibold text-[var(--warning)]">placeholder</span> has never been
+              set against a real provider invoice — quote nobody off it.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] text-left text-sm">
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wide text-[var(--muted)]">
+                  <th className="px-5 py-2.5 font-semibold">Meter</th>
+                  <th className="px-3 py-2.5 font-semibold">Billed per</th>
+                  <th className="px-3 py-2.5 font-semibold">Kobo</th>
+                  <th className="px-3 py-2.5 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rates.map((r) => (
+                  <tr key={r.meter} className="border-t border-[var(--border)]">
+                    <td className="px-5 py-2.5 font-mono text-[13px]">{r.meter}</td>
+                    <td className="px-3 py-2.5 text-xs text-[var(--muted)]">{r.per.toLocaleString()}</td>
+                    <td className="px-3 py-2.5">
+                      <input
+                        value={rateEdits[r.meter] ?? ""}
+                        onChange={(e) => {
+                          setRateEdits({ ...rateEdits, [r.meter]: e.target.value.replace(/[^\d]/g, "") });
+                          setRatesSaved(false);
+                        }}
+                        inputMode="numeric"
+                        className="w-28 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 font-mono text-xs outline-none focus:border-[var(--primary)]"
+                      />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {r.isPlaceholder ? (
+                        <Badge tone="amber">placeholder</Badge>
+                      ) : (
+                        <Badge tone="green">set</Badge>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-3 border-t border-[var(--border)] px-5 py-4">
+            <button type="button" disabled={busy} onClick={saveRates} className={btnPrimary()}>
+              Save pricing
+            </button>
+            {ratesSaved && (
+              <span className="flex items-center gap-1 text-xs font-semibold text-[var(--success)]">
+                <CheckCircleIcon className="h-4 w-4" />
+                Saved — the next rollup uses it.
+              </span>
+            )}
+            <span className="text-[11px] text-[var(--muted)]">
+              Clear a box to revert that meter to its placeholder.
+            </span>
+          </div>
+        </div>
       </div>
     </PlatformShell>
   );

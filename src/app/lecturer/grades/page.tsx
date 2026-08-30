@@ -30,6 +30,7 @@ interface GradeSession {
   courseName: string;
   totalStudents: number;
   gradedStudents: number;
+  resultsReleased: boolean;
 }
 
 export default function LecturerGrades() {
@@ -41,6 +42,7 @@ export default function LecturerGrades() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [releasing, setReleasing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -140,6 +142,32 @@ export default function LecturerGrades() {
     }
   }
 
+  async function toggleRelease() {
+    if (!selectedExam) return;
+    setReleasing(true);
+    setError('');
+    try {
+      const res = await fetch('/api/lecturer/results/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ examId: selectedExam }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || 'Could not update result release');
+      setSessions((current) =>
+        current.map((s) =>
+          s.examId === selectedExam ? { ...s, resultsReleased: payload.resultsReleased } : s,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update result release');
+    } finally {
+      setReleasing(false);
+    }
+  }
+
+  const selectedSession = sessions.find((s) => s.examId === selectedExam);
+
   function calculateGrade(score: number): string {
     if (score >= 90) return 'A';
     if (score >= 80) return 'B';
@@ -237,6 +265,42 @@ export default function LecturerGrades() {
                 </div>
               </div>
             </div>
+
+            {/* Results release. Exam scores stay hidden on the student's
+                results page until this is on — a tutor keys the whole sitting
+                in, checks it, then publishes the lot and every graded student
+                is notified. */}
+            {selectedSession && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <div className="text-sm">
+                  <p className="font-semibold text-[var(--foreground)]">
+                    {selectedSession.resultsReleased
+                      ? 'Results are visible to students'
+                      : 'Results are hidden from students'}
+                  </p>
+                  <p className="text-[var(--muted)]">
+                    {selectedSession.resultsReleased
+                      ? 'Every graded student can see their score on their results page.'
+                      : 'Students cannot see any score for this sitting yet. Classwork marks are not affected.'}
+                  </p>
+                </div>
+                <button
+                  onClick={toggleRelease}
+                  disabled={releasing}
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${
+                    selectedSession.resultsReleased
+                      ? 'bg-[var(--muted)] hover:opacity-90'
+                      : 'bg-[var(--accent)] hover:opacity-90'
+                  }`}
+                >
+                  {releasing
+                    ? 'Saving…'
+                    : selectedSession.resultsReleased
+                      ? 'Hide results'
+                      : 'Release results'}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Grade Guide */}

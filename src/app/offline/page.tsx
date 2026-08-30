@@ -32,6 +32,14 @@ export default function OfflinePage() {
           connection.
         </p>
 
+        <a
+          href="/materials/offline"
+          className="mt-4 inline-block rounded-full border border-[var(--border)] px-6 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+        >
+          Open your downloads
+        </a>
+
+
         {/*
           A plain <a> to the portal root, not a router link and not a
           `location.reload()` button. This page is served by the service worker

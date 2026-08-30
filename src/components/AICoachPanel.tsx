@@ -23,7 +23,6 @@ type WeakWord = { word: string; accuracyScore: number; errorType: string };
 
 export default function AICoachPanel() {
   const [aiTab, setAiTab] = useState<"pronunciation" | "plan">("pronunciation");
-  const [plannerStrategy, setPlannerStrategy] = useState("hybrid");
   const [targetPhrase, setTargetPhrase] = useState("Ich möchte ein Visum beantragen.");
   const [phrase, setPhrase] = useState(targetPhrase);
   const [feedback, setFeedback] = useState<string[]>(["Type a phrase and press Analyze."]);
@@ -57,6 +56,10 @@ export default function AICoachPanel() {
   const [personalizedPlan, setPersonalizedPlan] = useState<any>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planLoaded, setPlanLoaded] = useState(false);
+  // The cold-start seed — one question about how they like to learn, shown
+  // only while the plan is still guessing. `null` until we have checked.
+  const [styleSeed, setStyleSeed] = useState<{ format: string | null; pace: string | null; answered: boolean } | null>(null);
+  const [savingSeed, setSavingSeed] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceLevel, setVoiceLevel] = useState(0.45);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -282,8 +285,9 @@ export default function AICoachPanel() {
 
   // Loaded on first switch to the Plan tab rather than on mount — a student who
   // only ever wants pronunciation practice should not pay for a call they never
-  // asked for.
-  async function loadPlan(strategy: string) {
+  // asked for. The planner strategy is a server-side concern now; nothing here
+  // needs to pick one.
+  async function loadPlan() {
     setPlanLoading(true);
     try {
       const savedPlan = typeof window !== "undefined" ? localStorage.getItem("studentPersonalizedPlan") : null;
@@ -294,13 +298,15 @@ export default function AICoachPanel() {
           // ignore invalid saved plan
         }
       }
-      const compareParam = strategy === "compare" ? "&compare=true" : "";
-      const res = await fetch(`/api/personalize?strategy=${encodeURIComponent(strategy)}${compareParam}`, {
-        cache: "no-store",
-        credentials: "include",
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const [planRes, seedRes] = await Promise.all([
+        fetch("/api/personalize", { cache: "no-store", credentials: "include" }),
+        fetch("/api/student/learning-preferences", { cache: "no-store", credentials: "include" }).catch(() => null),
+      ]);
+      if (seedRes && seedRes.ok) {
+        setStyleSeed(await seedRes.json());
+      }
+      if (!planRes.ok) return;
+      const data = await planRes.json();
       const nextPlan = data.plan || null;
       setPersonalizedPlan(nextPlan);
       if (nextPlan && typeof window !== "undefined") {
@@ -311,6 +317,32 @@ export default function AICoachPanel() {
     } finally {
       setPlanLoading(false);
       setPlanLoaded(true);
+    }
+  }
+
+  // The learner answered the "how do you like to learn" card. Save it, then
+  // pull a fresh plan — the server drops the hour-old cache on save, so this
+  // second call comes back already shaped by the answer.
+  async function saveStyleSeed(patch: { format?: string; pace?: string }) {
+    setSavingSeed(true);
+    try {
+      const res = await fetch("/api/student/learning-preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setStyleSeed({ format: saved.format ?? null, pace: saved.pace ?? null, answered: true });
+        if (typeof window !== "undefined") localStorage.removeItem("studentPersonalizedPlan");
+        setPlanLoaded(false);
+        await loadPlan();
+      }
+    } catch (err) {
+      console.warn("Failed to save learning preference", err);
+    } finally {
+      setSavingSeed(false);
     }
   }
 
@@ -336,7 +368,7 @@ export default function AICoachPanel() {
           type="button"
           onClick={() => {
             setAiTab("plan");
-            if (!planLoaded) void loadPlan(plannerStrategy);
+            if (!planLoaded) void loadPlan();
           }}
           className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition ${aiTab === "plan" ? "bg-[var(--accent)] text-white shadow-[0_6px_18px_-6px_color-mix(in_srgb,var(--accent)_70%,transparent)]" : "bg-[var(--surface-alt)] text-[var(--muted)] hover:text-[var(--foreground)]"}`}
         >
@@ -420,20 +452,54 @@ export default function AICoachPanel() {
         </>
       ) : (
         <>
-          <select
-            value={plannerStrategy}
-            onChange={(e) => {
-              const next = e.target.value;
-              setPlannerStrategy(next);
-              void loadPlan(next);
-            }}
-            className="mt-4 w-full rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-sm text-[var(--foreground)]"
-          >
-            <option value="deterministic">Deterministic</option>
-            <option value="fewshot">Few-shot</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="compare">A/B compare</option>
-          </select>
+          <p className="mt-4 text-sm text-[var(--muted)]">
+            Ordered by what will move you fastest — and shaped by how you actually study, once there is enough of a pattern to read.
+          </p>
+
+          {/* How this plan is personalised — only claims what the reading supports. */}
+          {personalizedPlan?.stylePersonalization?.summary ? (
+            <div className="mt-4 flex items-start gap-3 rounded-3xl border border-[var(--accent)]/25 bg-[var(--accent-soft)] p-4">
+              <Mascot mood="thinking" className="h-12 w-10 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">Why this plan</p>
+                <p className="mt-1 text-sm text-[var(--foreground)]">{personalizedPlan.stylePersonalization.summary}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {/* The cold-start question. Shown only while the plan is still
+              guessing — once behaviour takes over (`answered` and no longer
+              a "seed"/thin summary) it disappears on its own. */}
+          {styleSeed && !styleSeed.answered ? (
+            <div className="mt-4 rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--muted)]">Help it start closer to you</p>
+              <p className="mt-1 text-sm text-[var(--foreground)]">When you have a choice, how do you like to learn?</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[
+                  { key: "watch", label: "Watch" },
+                  { key: "read", label: "Read" },
+                  { key: "practice", label: "Practise" },
+                  { key: "mixed", label: "A mix" },
+                ].map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    disabled={savingSeed}
+                    onClick={() => void saveStyleSeed({ format: option.key })}
+                    className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
+                      styleSeed.format === option.key
+                        ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                        : "border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] hover:border-[var(--accent)]/40"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-[var(--muted)]">You can ignore this — the plan learns from what you do either way.</p>
+            </div>
+          ) : null}
+
           <div className="mt-4 space-y-4">
             {planLoading && !personalizedPlan ? (
               <p className="text-sm text-[var(--muted)]">Building your plan…</p>
@@ -444,11 +510,23 @@ export default function AICoachPanel() {
                   {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                   {(personalizedPlan.lessons || []).slice(0, 4).map((lesson: any, idx: number) => (
                     <div key={lesson.id || idx} className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5 transition-all duration-200 hover:border-[var(--accent)]/30 hover:bg-[var(--surface)]">
-                      <p className="font-semibold text-[var(--foreground)]">{lesson.title}</p>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-semibold text-[var(--foreground)]">{lesson.title}</p>
+                        {lesson.exploratory ? (
+                          <span className="shrink-0 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--accent)]" title="Something new, in to see whether it clicks">
+                            Try
+                          </span>
+                        ) : null}
+                      </div>
                       <p className="mt-2 text-sm text-[var(--muted)]">{lesson.goal}</p>
                     </div>
                   ))}
                 </div>
+                {personalizedPlan.exploration?.reason ? (
+                  <p className="text-xs text-[var(--muted)]">
+                    <span className="font-semibold text-[var(--accent)]">One to try:</span> {personalizedPlan.exploration.reason}
+                  </p>
+                ) : null}
               </>
             ) : (
               <p className="text-sm text-[var(--muted)]">Your personalized plan will appear here once the AI recommendation service loads.</p>

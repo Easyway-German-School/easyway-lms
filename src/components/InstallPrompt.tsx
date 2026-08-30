@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { isInstalledApp } from "@/lib/client/standalone";
 
 /**
  * Registers the service worker, and offers to install the app.
@@ -75,10 +76,10 @@ export default function InstallPrompt() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      (window.navigator as { standalone?: boolean }).standalone === true;
-    if (standalone) return;
+    // Reading this INSIDE the installed app and being asked to install it is
+    // the most common PWA-prompt bug there is. `isInstalledApp` is the shared
+    // check every download affordance also uses.
+    if (isInstalledApp()) return;
 
     let alreadySaidNo = false;
     try {

@@ -6,12 +6,15 @@ import { useSession } from "next-auth/react";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
+import OfflineBanner from "@/components/OfflineBanner";
+import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
 import LiveClassCall from "@/components/live/LiveClassCall";
 import MomentDock from "@/components/MomentDock";
 import GameTurnToast from "@/components/GameTurnToast";
+import DailyBriefing from "@/components/DailyBriefing";
 import LessonCompleteCelebration from "@/components/LessonCompleteCelebration";
 import BetaFeedbackPrompt from "@/components/BetaFeedbackPrompt";
 import StudentUsageTracker from "@/components/StudentUsageTracker";
@@ -195,6 +198,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     // themselves when to open is how a first login came to mean five stacked
     // overlays — see lib/moment-queue.tsx.
     <MomentQueueProvider>
+    <OfflineBanner />
     <ImpersonationBanner />
     {/* Was a hardcoded blue gradient, which is why the portal stayed daylight-
         blue whatever theme was chosen. The themed canvas is the page's job. */}
@@ -425,6 +429,17 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       {/* The old dashboard "waiting on you" games card, now a queued nudge
           instead of a permanent section — see lib/moment-queue.tsx. */}
       <GameTurnToast />
+
+      {/* Becca's once-a-day hello: streak, XP and today's missions, surfaced
+          on the first page of the day instead of waiting to be scrolled to.
+          Queue-managed, so it never fights the tour or a celebration. Only
+          for students actually in the portal — an unpaid lock screen has no
+          missions to brief. */}
+      {hasAccess && <DailyBriefing />}
+
+      {/* Lowest-priority nudge: physical students can't download video, but
+          they can keep their notes offline if they install the app. */}
+      {hasAccess && <InstallForNotesMoment />}
 
       {/* Fires on a genuine server-validated completion — see
           celebrateLessonComplete() in LessonCompleteCelebration.tsx. */}

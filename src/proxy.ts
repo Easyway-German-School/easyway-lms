@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
+import { isPlatformHost } from "@/lib/platform/brand";
 
 /**
  * The outermost layer: headers on every response, and a brake on the routes
@@ -58,12 +59,18 @@ const PORTALS: PortalRule[] = [
   },
   { pagePattern: /^\/parent(\/|$)/, apiPattern: /^\/api\/parent(\/|$)/, allowedRoles: ["parent"], signInPath: "/auth/parent/signin" },
   /**
-   * The operator console. Its own prefix, outside `/admin/**`, and — unlike
-   * `/api/admin/**` — `/api/platform/**` previously had no edge gate at all;
-   * every route relied solely on requirePlatformOperator() inside the
-   * handler. `allowedRoles` only checks the coarse "admin" role here, same as
-   * `/admin` above; requirePlatformOperator() remains the one that checks the
-   * actual platformRole column and 404s a non-operator admin.
+   * EduPrime — the platform, as distinct from any one school. `/platform` is
+   * the operator console and `/platform/billing` the billing view. Its own
+   * prefix, outside `/admin/**`, and — unlike `/api/admin/**` —
+   * `/api/platform/**` previously had no edge gate at all; every route relied
+   * solely on requirePlatformOperator() inside the handler.
+   *
+   * `allowedRoles` only checks the coarse "admin" role here, same as `/admin`
+   * above. That is intentional: `/platform/billing` is a school's own bill and
+   * a school admin must be able to reach it, while `/platform` (the console)
+   * and every `/api/platform/**` route call requirePlatformOperator()
+   * themselves — the one that checks the real platformRole column and 404s a
+   * non-operator admin.
    */
   { pagePattern: /^\/platform(\/|$)/, apiPattern: /^\/api\/platform(\/|$)/, allowedRoles: ["admin"], signInPath: "/auth/admin" },
 ];
@@ -332,13 +339,37 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * On an EduPrime host, the platform IS the site: `/` is the operator console
+ * and `/billing` the billing view, both of which physically live under
+ * `/platform/**`. Rewrite (not redirect) so the short URLs stay in the address
+ * bar. A school host is untouched — `/` there is still the school's own page.
+ *
+ * Returns the internal path to serve, or null to leave the request alone.
+ */
+function platformHostTarget(request: NextRequest, path: string): string | null {
+  const raw = request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
+  const host = raw.split(":")[0].trim().toLowerCase();
+  if (!isPlatformHost(host)) return null;
+
+  if (path === "/" || path === "") return "/platform";
+  if (path === "/billing" || path === "/billing/") return "/platform/billing";
+  // Already under the real prefix, or an auth/api/asset path — serve as-is.
+  return null;
+}
+
+/**
  * Named `proxy` in `src/proxy.ts` rather than `middleware` in
  * `src/middleware.ts`. Next 16 renamed this convention and warns on the old
  * one at every boot; the behaviour is identical, and following the rename now
  * means it does not become a broken deploy on a future upgrade.
  */
 export default async function proxy(request: NextRequest) {
-  const path = request.nextUrl.pathname;
+  const requestedPath = request.nextUrl.pathname;
+
+  const rewriteTarget = platformHostTarget(request, requestedPath);
+  // Gate against the path that will actually be served, so `/` on an EduPrime
+  // host is protected exactly as `/platform` is.
+  const path = rewriteTarget ?? requestedPath;
 
   const portalRejection = await guardPortal(request, path);
   if (portalRejection) return portalRejection;
@@ -359,6 +390,12 @@ export default async function proxy(request: NextRequest) {
     }
   }
 
+  if (rewriteTarget) {
+    const url = request.nextUrl.clone();
+    url.pathname = rewriteTarget;
+    return applySecurityHeaders(NextResponse.rewrite(url));
+  }
+
   return applySecurityHeaders(NextResponse.next());
 }
 
@@ -370,6 +407,6 @@ export const config = {
      * putting the middleware in front of them would add latency to every image
      * on every page to no purpose.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|mp4|webm|woff|woff2)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|mp4|webm|woff|woff2|webmanifest)$).*)",
   ],
 };

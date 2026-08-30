@@ -129,6 +129,11 @@ export async function rollUpUsage(day?: Date): Promise<{
     _sum: { quantity: true },
   });
 
+  // The operator-set price list. Read once for the whole rollup rather than
+  // per group; it changes at most a few times a year.
+  const { ratesKobo } = await import("@/lib/usage/rates");
+  const rates = await ratesKobo();
+
   const tenants = new Set<string>();
   let rows = 0;
   let debitedKobo = 0;
@@ -140,7 +145,7 @@ export async function rollUpUsage(day?: Date): Promise<{
     const meter = group.meter as MeterName;
     if (!METERS[meter]) continue;
 
-    const cost = costKobo(meter, quantity);
+    const cost = costKobo(meter, quantity, rates[meter]);
 
     /**
      * Upsert, so a re-run restates the day rather than adding to it. The
@@ -343,7 +348,7 @@ export async function warnLowBalances(): Promise<{ checked: number; warned: stri
           `and email running. Nothing stops immediately — this is a heads-up, not a cut-off.`,
         kind: "billing-low-balance",
         severity: "warning",
-        link: "/admin/billing",
+        link: "/platform/billing",
         dedupeKey: `low-balance:${credit.tenantId}:${new Date().toISOString().slice(0, 10)}`,
       });
     });

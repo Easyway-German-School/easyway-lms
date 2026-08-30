@@ -106,9 +106,11 @@ export type MomentId =
   | "level-advance"
   | "lesson-complete"
   | "notifications"
+  | "daily-briefing"
   | "journey"
   | "poster"
-  | "game-turn";
+  | "game-turn"
+  | "install-offline-notes";
 
 type Kind = "toast" | "modal";
 
@@ -180,6 +182,19 @@ const MOMENTS: Record<MomentId, Definition> = {
     dockLabel: "Turn on reminders",
     dockBlurb: "So you hear about class and new material without opening the app.",
   },
+  /**
+   * Becca's daily hello — streak, XP, and today's missions, once per day on
+   * the first login. Sits just above the journey moment: both are recurring
+   * motivation, but this is the one framed as "here is your day", so it wins
+   * the first slot on a quiet morning and the journey moment follows or docks.
+   * Never load-bearing — a missed day costs nothing but a nudge.
+   */
+  "daily-briefing": {
+    priority: 52,
+    kind: "modal",
+    dockLabel: "Your day with Becca",
+    dockBlurb: "Your streak, your XP and today's three missions.",
+  },
   journey: {
     priority: 50,
     kind: "modal",
@@ -205,6 +220,19 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Your turn is waiting",
     dockBlurb: "Your class is writing a story and it's your turn to add a line.",
+  },
+  /**
+   * "Install the app to keep your notes offline." A soft upsell shown only to
+   * physical students, who get no video downloads but can still pocket their
+   * notes. Priority below the poster: it is the least urgent thing on the
+   * dashboard, an advert for a convenience, and the two-modal cap should
+   * almost always push it to the dock rather than in front of anyone.
+   */
+  "install-offline-notes": {
+    priority: 25,
+    kind: "modal",
+    dockLabel: "Notes in your pocket",
+    dockBlurb: "Install the app to read your class notes with no signal.",
   },
 };
 

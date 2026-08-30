@@ -23,10 +23,17 @@ export async function GET(request: Request) {
   const denied = await authorise(request);
   if (denied) return denied;
 
-  const plan = await planRetention();
+  const url = new URL(request.url);
+  const olderThanRaw = url.searchParams.get("olderThanDays");
+  const olderThanDays = olderThanRaw != null && Number.isFinite(Number(olderThanRaw)) ? Number(olderThanRaw) : undefined;
+
+  const plan = await planRetention({ olderThanDays });
   return NextResponse.json({
     ok: true,
     policy: RETENTION,
+    // With no ?olderThanDays this is 0 — staff keep every recording forever,
+    // and a purge only ever happens when an admin names an age cutoff.
+    olderThanDays: olderThanDays ?? null,
     reclaimable: plan.reclaimable,
     bytesReclaimable: plan.bytesReclaimable,
     verdicts: plan.verdicts,
@@ -34,18 +41,24 @@ export async function GET(request: Request) {
 }
 
 /**
- * Actually reclaim.
+ * Actually reclaim — a deliberate, manual purge.
  *
- * Requires `{"confirm": true}` in the body. A scheduled job has to state its
- * intent in the same words a person would, which means nobody ever deletes a
- * term's teaching because a cron was pointed at the wrong endpoint.
+ * Requires BOTH `{"confirm": true}` and `{"olderThanDays": N}` in the body.
+ * Nothing is scheduled and there is no age-based auto-deletion any more: staff
+ * keep every recording forever, so a purge only happens when an admin names a
+ * cutoff and confirms it in the same request. Without `olderThanDays` this
+ * reclaims nothing, whatever `confirm` says.
  */
 export async function POST(request: Request) {
   const denied = await authorise(request);
   if (denied) return denied;
 
-  const body = (await request.json().catch(() => ({}))) as { confirm?: boolean };
-  const result = await applyRetention({ dryRun: body.confirm !== true });
+  const body = (await request.json().catch(() => ({}))) as { confirm?: boolean; olderThanDays?: number };
+  const olderThanDays =
+    typeof body.olderThanDays === "number" && Number.isFinite(body.olderThanDays) && body.olderThanDays > 0
+      ? body.olderThanDays
+      : undefined;
+  const result = await applyRetention({ dryRun: body.confirm !== true, olderThanDays });
 
   return NextResponse.json({ ok: true, ...result });
 }

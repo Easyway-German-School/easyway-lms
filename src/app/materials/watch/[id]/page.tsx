@@ -18,6 +18,8 @@ import {
   type LibraryVideo,
 } from "@/lib/video-library";
 import { celebrateLessonComplete } from "@/components/LessonCompleteCelebration";
+import DownloadButton from "@/components/video/DownloadButton";
+import { getMedia, type OfflineMediaMeta } from "@/lib/offline/store";
 
 /** How often the player checkpoints, in seconds of playback. */
 const SAVE_EVERY_SECONDS = 15;
@@ -32,8 +34,41 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
   const [error, setError] = useState<string | null>(null);
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
   const [resumedFrom, setResumedFrom] = useState<number | null>(null);
+  const [canDownload, setCanDownload] = useState(false);
+  const [offline, setOffline] = useState<
+    { url: string; meta: OfflineMediaMeta; expiresAt: number | null } | null
+  >(null);
 
-  const video = useMemo(() => videos.find((item) => item.id === id) ?? null, [videos, id]);
+  const apiVideo = useMemo(() => videos.find((item) => item.id === id) ?? null, [videos, id]);
+
+  // What actually drives the player. The API copy wins when we have it; the
+  // downloaded copy carries the page with no network at all.
+  const video = useMemo<LibraryVideo | null>(() => {
+    if (apiVideo) return apiVideo;
+    if (!offline) return null;
+    return {
+      id,
+      title: offline.meta.title,
+      description: null,
+      fileUrl: offline.url,
+      thumbnailUrl: null,
+      durationSeconds: offline.meta.durationSeconds,
+      kind: offline.meta.kind,
+      level: offline.meta.level,
+      series: null,
+      episodeNumber: null,
+      courseTitle: null,
+      lecturerName: offline.meta.lecturerName,
+      recordedAt: offline.meta.recordedAt,
+      createdAt: offline.meta.recordedAt ?? new Date(0).toISOString(),
+      positionSeconds: 0,
+      completed: false,
+      embedUrl: null,
+      embedLabel: null,
+      isPrivate: offline.meta.isPrivate,
+      expiresAt: offline.expiresAt ? new Date(offline.expiresAt).toISOString() : null,
+    };
+  }, [apiVideo, offline, id]);
 
   // What to watch next: the rest of this series in order, otherwise the newest
   // videos at this level. A student who just watched Tuesday's class should be
@@ -67,6 +102,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
           return;
         }
         setVideos(data.videos || []);
+        setCanDownload(Boolean(data.canDownloadOffline));
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Could not load this video.");
       } finally {
@@ -75,6 +111,24 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
     }
     load();
   }, []);
+
+  // Offline-first: if this video is downloaded, play it straight from the
+  // device and never mind the network. Runs alongside the fetch above so a
+  // downloaded video appears instantly and an online one still refreshes.
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let alive = true;
+    getMedia(id).then((row) => {
+      if (!alive || !row) return;
+      objectUrl = URL.createObjectURL(row.blob);
+      setOffline({ url: objectUrl, meta: row.meta, expiresAt: row.expiresAt });
+      setLoading(false);
+    });
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [id]);
 
   const saveProgress = useCallback(
     (positionSeconds: number, durationSeconds: number, useBeacon = false) => {
@@ -174,16 +228,26 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
       );
     }
 
-    if (error || !video) {
+    if (!video) {
       return (
         <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center">
           <p className="text-lg font-semibold">{error ? "Something went wrong" : "We could not find that video"}</p>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            {error || "It may have been removed, or it belongs to a different level."}
+            {error
+              ? `${error} If you saved this class for offline, open it from your downloads.`
+              : "It may have been removed, it belongs to a different level, or its 2-week window has passed. The notes are still in My Notes."}
           </p>
-          <Link href="/materials" className="mt-6 inline-flex rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white">
-            Back to the library
-          </Link>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <Link href="/materials" className="inline-flex rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white">
+              Back to the library
+            </Link>
+            <Link
+              href="/materials/offline"
+              className="inline-flex rounded-full border border-[var(--border)] px-6 py-2.5 text-sm font-semibold text-[var(--foreground)]"
+            >
+              Your downloads
+            </Link>
+          </div>
         </div>
       );
     }
@@ -287,7 +351,18 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
           {video.description ? (
             <p className="relative mt-4 max-w-3xl text-sm leading-7 text-slate-300">{video.description}</p>
           ) : null}
+
+          {offline ? (
+            <p className="relative mt-4 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
+              ● Playing your offline copy
+            </p>
+          ) : null}
         </div>
+
+        {/* Save-for-offline lives right under the player. Only the installed
+            app shows a real button; a browser tab gets the "install first"
+            nudge, and a physical group student sees nothing here. */}
+        {!video.embedUrl ? <DownloadButton video={video} canDownload={canDownload} /> : null}
 
         {/* The AI-generated summary/vocabulary/transcript only ever exists for a
             recording — a tutor's uploaded lesson video was never transcribed.
@@ -295,7 +370,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
             summary when one exists and starts blank otherwise), so it is
             offered on every video — online, private, AND a physical
             student's assigned lesson videos alike. */}
-        {video.kind === "recording" ? (
+        {video.kind === "recording" && !offline ? (
           <ClassNotesPanel
             materialId={video.id}
             onSeekTo={(seconds) => {
@@ -306,7 +381,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
             }}
           />
         ) : null}
-        <MyNotesEditor materialId={video.id} />
+        {!offline ? <MyNotesEditor materialId={video.id} /> : null}
 
         {upNext.length > 0 ? (
           <div className="space-y-3">

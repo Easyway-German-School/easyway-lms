@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
       amount: amountKobo,
       currency: "NGN",
       reference: `topup-${tenant.slug}-${Date.now()}`,
-      callback_url: `${base}/admin/billing?topup=done`,
+      callback_url: `${base}/platform/billing?topup=done`,
       metadata: {
         /**
          * The discriminator the webhook branches on. Without it this arrives

@@ -47,6 +47,7 @@ export default function MaterialsPage() {
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [recommendations, setRecommendations] = useState<VideoRecommendation[]>([]);
+  const [canDownload, setCanDownload] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -81,6 +82,7 @@ export default function MaterialsPage() {
           const data = await videosRes.json();
           setVideos(data.videos || []);
           setLevel(data.level ?? null);
+          setCanDownload(Boolean(data.canDownloadOffline));
           // Land on whichever tab actually has something in it. A brand-new
           // level has no recordings yet, and an empty hero is a bad first look.
           if ((data.videos || []).length === 0) setTab("documents");
@@ -208,7 +210,7 @@ export default function MaterialsPage() {
                   </div>
                 </section>
               ) : null}
-              <VideoLibrary videos={videos} level={level} />
+              <VideoLibrary videos={videos} level={level} canDownload={canDownload} />
             </div>
           ) : (
             <div className="space-y-6">

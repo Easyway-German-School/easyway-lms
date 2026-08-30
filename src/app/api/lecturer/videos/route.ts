@@ -143,6 +143,9 @@ export async function GET() {
           // The query above only ever matches level-tagged material; a
           // private recording carries no level and never appears here.
           isPrivate: false,
+          // The 14-day window is a student concept — a tutor keeps every
+          // recording forever, so nothing expires off this page.
+          expiresAt: null,
           /** Whether this tutor is the one who taught it — used to badge the tile. */
           mine: record.lecturer?.id === lecturer.id,
         };

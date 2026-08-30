@@ -303,7 +303,8 @@ export default function ResultsPage() {
                   )}
                 </div>
                 <p className="mt-2 truncate text-xs text-[var(--muted)]">
-                  {data.totalResults} recorded score{data.totalResults === 1 ? "" : "s"}
+                  weighted across your skills · {data.totalResults} recorded score
+                  {data.totalResults === 1 ? "" : "s"}
                 </p>
               </div>
 

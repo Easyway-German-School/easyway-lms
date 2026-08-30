@@ -11,6 +11,22 @@ export default function AdminSignInForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const message = searchParams.get("message");
+  /**
+   * Where to land after a successful sign-in. The edge gate (src/proxy.ts) sets
+   * this when it bounces an unauthenticated visitor off a protected page —
+   * `/auth/admin?callbackUrl=%2Fplatform` — and without honouring it every deep
+   * link into an admin-gated area (the EduPrime console at /platform, a
+   * specific /admin/* page) dumps the user on the dashboard instead of the
+   * page they asked for.
+   *
+   * Only a same-site path is accepted: `//evil.com` and `https://evil.com`
+   * are rejected so this can't be turned into an open redirect off the login.
+   */
+  const rawCallback = searchParams.get("callbackUrl");
+  const callbackUrl =
+    rawCallback && rawCallback.startsWith("/") && !rawCallback.startsWith("//")
+      ? rawCallback
+      : "/admin";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
@@ -74,7 +90,7 @@ export default function AdminSignInForm() {
       // Loading stays true here: the page is about to navigate away, so
       // flipping it off would flash the form back for a frame before the
       // redirect lands.
-      router.push("/admin");
+      router.push(callbackUrl);
     } catch {
       // A network hiccup, a slow serverless function, or a non-JSON response
       // from a timed-out request all land here. Without this catch the loader

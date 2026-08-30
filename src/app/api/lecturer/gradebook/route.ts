@@ -6,7 +6,9 @@ import { KIND, notify } from "@/lib/notify";
 import {
   ASSESSMENT_TYPES,
   ASSESSMENT_WEIGHTS as WEIGHTS,
+  REQUIRED_ASSESSMENT_TYPES,
   isAssessmentType,
+  isRequiredAssessmentType,
   resolveRoster,
   UNASSIGNED_MESSAGE,
 } from "@/lib/lecturer-roster";
@@ -157,6 +159,11 @@ export async function GET() {
     let weighted = 0;
     let weight = 0;
     let marked = 0;
+    // Owed marks are counted against the four core skills only. A quiz or a
+    // mock is something a tutor sets when they set it — dropping it into the
+    // "marks owed" figure would light the dashboard tile red for every class
+    // that simply has not run a mock this fortnight.
+    let requiredMarked = 0;
 
     for (const type of ASSESSMENT_TYPES) {
       const cell = cells.get(`${student.id}:${type}`) ?? null;
@@ -165,6 +172,7 @@ export async function GET() {
         weighted += cell.score * WEIGHTS[type];
         weight += WEIGHTS[type];
         marked += 1;
+        if (isRequiredAssessmentType(type)) requiredMarked += 1;
       }
     }
 
@@ -193,7 +201,7 @@ export async function GET() {
       letter: average === null ? null : letterFor(average),
       passing: average === null ? null : average >= PASS_MARK,
       marked,
-      outstanding: ASSESSMENT_TYPES.length - marked,
+      outstanding: REQUIRED_ASSESSMENT_TYPES.length - requiredMarked,
       trend,
       // Oldest→newest, for the sparkline. Capped so one long history cannot
       // make the payload the biggest thing on the page.
@@ -217,6 +225,7 @@ export async function GET() {
       .filter((score): score is number => typeof score === "number");
     return {
       type,
+      required: isRequiredAssessmentType(type),
       marked: scores.length,
       missing: students.length - scores.length,
       average: scores.length

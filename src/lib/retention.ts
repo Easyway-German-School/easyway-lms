@@ -1,41 +1,61 @@
 /**
- * Retention — the library reclaims its own storage.
- *
- * A school that records every class forever pays for every class forever, and
- * a class recording exists to let this week's cohort catch up on this week's
- * lesson — not to become a permanent video archive. The policy is deliberately
- * blunt: a recording lives for one week, then it is gone.
+ * Retention — what happens to a class recording as it ages.
  *
  * ---------------------------------------------------------------------------
- * WHY THIS IS A HARD CUTOFF, NOT AN EVIDENCE-BASED ONE
+ * THE POLICY, AND WHY IT CHANGED
  * ---------------------------------------------------------------------------
- * An earlier version of this policy kept a recording alive past its age if
- * somebody was mid-watch or had watched recently, and only reclaimed it after
- * 45-60 days of genuine idleness. That is the right shape for a video archive.
- * It is the wrong shape for "one week and it's gone" — a rule with exceptions
- * for staying useful is not a one-week rule, it is a "however long it stays
- * useful" rule, which is a different feature. If a week genuinely is not
- * enough for a given cohort, the fix is `keepForever` on that one recording
- * (a human decision, made once), not a blanket exception that quietly extends
- * every recording's life indefinitely.
+ * A class recording is there so THIS week's cohort can catch up on THIS week's
+ * lesson. That need has a short life, so the STUDENT's view of a recording is
+ * capped: 14 days after the class, the video drops off their shelf. This is a
+ * read-side filter — `ClassRecording.studentExpiresAt`, checked in
+ * `/api/student/videos` and the notes access helper. Nothing is deleted, and
+ * the AI class notes plus anything the student wrote survive in their "My
+ * Notes" hub. Only the video itself goes.
  *
- * Only two things argue for keeping a recording past the week:
+ * The assigned tutor and admin keep EVERY recording, forever. There is no
+ * automatic age-based deletion of the files any more — an earlier version of
+ * this module reclaimed the bucket object after a week, which also destroyed
+ * staff access. Deleting a term's teaching is now a deliberate, manual act:
+ * `applyRetention({ olderThanDays })` still exists for an admin who explicitly
+ * asks to purge old files, but nothing schedules it.
  *
- *   1. Marked keep-forever?            keep. A human said so; that ends it.
- *   2. Younger than 7 days?            keep. Its week is not up yet.
- *   3. Otherwise                       reclaim.
+ * `keepForever` still matters: it also pins the video on the STUDENT's shelf
+ * past the 14-day window (a landmark lesson, an exam briefing).
  *
  * `planRetention()` is separate from `applyRetention()` on purpose: you can
- * always ask what it *would* do, and the answer costs nothing.
+ * always ask what a manual purge *would* do, and the answer costs nothing.
  */
 
 import { prisma } from "@/lib/prisma";
 import { deleteRecordingObject } from "@/lib/recording";
 
 export const RETENTION = {
-  /** A recording's whole lifespan. Nothing younger than this is ever touched. */
-  protectedDays: 7,
+  /**
+   * How long a completed recording stays on a STUDENT's shelf, measured from
+   * the class date. Enforced as a query filter, never by deletion.
+   */
+  studentWindowDays: 14,
 } as const;
+
+/** Re-exported flat for callers that just want the number. */
+export const STUDENT_RECORDING_WINDOW_DAYS = RETENTION.studentWindowDays;
+
+/**
+ * The `studentExpiresAt` stamp `class-recorder.ts` writes when a recording is
+ * published, and the value the migration backfills onto old rows.
+ */
+export function studentExpiryFrom(recordedAt: Date): Date {
+  return new Date(recordedAt.getTime() + STUDENT_RECORDING_WINDOW_DAYS * 86_400_000);
+}
+
+/** True when this recording's video should no longer be shown to students. */
+export function isExpiredForStudents(
+  recording: { studentExpiresAt?: Date | null; keepForever?: boolean | null },
+  now: Date = new Date(),
+): boolean {
+  if (recording.keepForever) return false;
+  return Boolean(recording.studentExpiresAt && recording.studentExpiresAt.getTime() <= now.getTime());
+}
 
 export type RetentionDecision = "keep" | "reclaim";
 
@@ -47,6 +67,8 @@ export type RetentionVerdict = {
   ageDays: number;
   sizeBytes: number;
   variant: string;
+  /** Whether the student-side 14-day window has already passed for this one. */
+  expiredForStudents: boolean;
   decision: RetentionDecision;
   /** Plain English, because this list is read by a person deciding to trust it. */
   reason: string;
@@ -63,9 +85,16 @@ function days(from: Date, to: Date): number {
 }
 
 /**
- * What retention would do right now. Reads only — never deletes.
+ * What retention would do. Reads only — never deletes.
+ *
+ * With no `olderThanDays`, every recording is `keep`: staff retention is
+ * forever and there is nothing to reclaim. Pass `olderThanDays` to model a
+ * manual admin purge of files past a certain age.
  */
-export async function planRetention(now: Date = new Date()): Promise<RetentionPlan> {
+export async function planRetention(
+  opts: { olderThanDays?: number; now?: Date } = {},
+): Promise<RetentionPlan> {
+  const now = opts.now ?? new Date();
   const recordings = await prisma.classRecording.findMany({
     where: { status: "completed", materialId: { not: null } },
     select: {
@@ -73,6 +102,7 @@ export async function planRetention(now: Date = new Date()): Promise<RetentionPl
       materialId: true,
       keepForever: true,
       startedAt: true,
+      studentExpiresAt: true,
       sizeBytes: true,
       variant: true,
       material: { select: { title: true, recordedAt: true } },
@@ -85,6 +115,7 @@ export async function planRetention(now: Date = new Date()): Promise<RetentionPl
   const verdicts: RetentionVerdict[] = recordings.map((recording) => {
     const recordedAt = recording.material?.recordedAt ?? recording.startedAt;
     const ageDays = days(recordedAt, now);
+    const expiredForStudents = isExpiredForStudents(recording, now);
 
     const base = {
       recordingId: recording.id,
@@ -94,18 +125,25 @@ export async function planRetention(now: Date = new Date()): Promise<RetentionPl
       ageDays,
       sizeBytes: recording.sizeBytes ?? 0,
       variant: recording.variant,
+      expiredForStudents,
     };
 
     if (recording.keepForever) {
       return { ...base, decision: "keep" as const, reason: "Marked keep-forever" };
     }
-    if (ageDays < RETENTION.protectedDays) {
-      return { ...base, decision: "keep" as const, reason: `Only ${ageDays} of ${RETENTION.protectedDays} days old` };
+    if (opts.olderThanDays != null && ageDays >= opts.olderThanDays) {
+      return {
+        ...base,
+        decision: "reclaim" as const,
+        reason: `${ageDays} days old — past the ${opts.olderThanDays}-day manual purge cutoff`,
+      };
     }
     return {
       ...base,
-      decision: "reclaim" as const,
-      reason: `${ageDays} days old — past its ${RETENTION.protectedDays}-day lifespan`,
+      decision: "keep" as const,
+      reason: expiredForStudents
+        ? "Off students' shelves; kept for staff (delete is manual only)"
+        : "Within the 14-day student window; kept for staff",
     };
   });
 
@@ -129,17 +167,18 @@ export type RetentionResult = {
 /**
  * Reclaim what the plan says is reclaimable.
  *
- * `dryRun` defaults to true. Deleting is the kind of thing that should have to
- * be asked for twice, and a caller that forgets the flag gets a report rather
- * than a bonfire.
+ * Reclaims NOTHING unless `olderThanDays` is given — the default exists so a
+ * caller that forgets every argument gets a no-op report rather than a
+ * bonfire. `dryRun` still defaults to true on top of that.
  *
  * The order matters: the object goes first, then the library row. If the object
  * delete fails we stop and keep the row, so the library never advertises a
- * video that is no longer there. The reverse order would strand files nobody
- * has a record of — invisible storage, paid for forever.
+ * video that is no longer there.
  */
-export async function applyRetention({ dryRun = true }: { dryRun?: boolean } = {}): Promise<RetentionResult> {
-  const plan = await planRetention();
+export async function applyRetention(
+  { dryRun = true, olderThanDays }: { dryRun?: boolean; olderThanDays?: number } = {},
+): Promise<RetentionResult> {
+  const plan = await planRetention({ olderThanDays });
   const targets = plan.verdicts.filter((verdict) => verdict.decision === "reclaim");
 
   const result: RetentionResult = {
@@ -151,7 +190,7 @@ export async function applyRetention({ dryRun = true }: { dryRun?: boolean } = {
     verdicts: plan.verdicts,
   };
 
-  if (dryRun) return result;
+  if (dryRun || olderThanDays == null) return result;
 
   for (const target of targets) {
     const recording = await prisma.classRecording.findUnique({
@@ -167,8 +206,8 @@ export async function applyRetention({ dryRun = true }: { dryRun?: boolean } = {
     }
 
     // Material carries the tile in the library; deleting it is what makes the
-    // recording disappear from the shelf. `ClassRecording` survives as the
-    // audit trail — "was Tuesday recorded?" must stay answerable afterwards.
+    // recording disappear. `ClassRecording` survives as the audit trail —
+    // "was Tuesday recorded?" must stay answerable afterwards.
     if (recording.materialId) {
       await prisma.material.delete({ where: { id: recording.materialId } }).catch(() => {});
     }

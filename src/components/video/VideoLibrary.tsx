@@ -5,6 +5,7 @@ import { FilmIcon, PlayIcon } from "@/components/icons";
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import VideoThumb from "@/components/video/VideoThumb";
+import WeekDownloadButton from "@/components/video/WeekDownloadButton";
 import {
   buildShelves,
   formatDuration,
@@ -132,10 +133,13 @@ export default function VideoLibrary({
   videos,
   level,
   watchHref = DEFAULT_WATCH_HREF,
+  canDownload = false,
 }: {
   videos: LibraryVideo[];
   level?: string | null;
   watchHref?: WatchHref;
+  /** Student is offered offline downloads (online / hybrid / private, in the installed app). */
+  canDownload?: boolean;
 }) {
   const [query, setQuery] = useState("");
   // Off by default, and labelled honestly. Netflix autoplays previews because
@@ -232,6 +236,8 @@ export default function VideoLibrary({
             Play previews on hover <span className="text-slate-500">(uses more data)</span>
           </label>
         </div>
+
+        {canDownload ? <WeekDownloadButton videos={filtered} /> : null}
 
         {shelves.length === 0 ? (
           <p className="py-10 text-center text-sm text-slate-400">Nothing matches “{query}”.</p>

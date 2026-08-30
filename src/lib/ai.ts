@@ -1,6 +1,7 @@
 import { parseModelJson } from "@/lib/safe-json";
 import type { AzurePronunciationAssessment } from "@/lib/azure-pronunciation";
 import type { CoachingMemorySummary } from "@/lib/voice-coach-memory";
+import { levelRank, pickExploration, styleAdjustment, type LearningStyle } from "@/lib/learner-style";
 
 /**
  * AI Service - Supports Claude API, Ollama (local), or mock responses
@@ -1043,13 +1044,40 @@ export async function summarizeText(text: string): Promise<string> {
   return summarizeTextMock(text);
 }
 
-export async function generatePersonalizedPlan(studentProfile: any, candidateLessons: any[], options: { maxLessons?: number; minutesPerDay?: number; strategy?: string } = {}) {
+export async function generatePersonalizedPlan(
+  studentProfile: any,
+  candidateLessons: any[],
+  options: {
+    maxLessons?: number;
+    minutesPerDay?: number;
+    strategy?: string;
+    /**
+     * How this learner actually studies — format taste, session length, grit.
+     * See src/lib/learner-style.ts. When present and past "none" confidence it
+     * adds a BOUNDED nudge to each lesson's score, on top of the academic
+     * ranking; it can reorder near-ties and float a loved format, it can never
+     * remove a lesson the weakest-skill logic put there.
+     */
+    styleSignals?: LearningStyle | null;
+    /**
+     * Reserve a small slice of the plan for deliberately off-profile lessons,
+     * so a settled profile does not calcify into a filter bubble. Only fires
+     * at "fair"/"strong" style confidence. Defaults on; pass false to disable.
+     */
+    explore?: boolean;
+  } = {},
+) {
   const provider = getAIProvider("student");
   const maxLessons = options.maxLessons || 10;
   const strategy = (options.strategy || process.env.PERSONALIZATION_PLANNER_STRATEGY || 'hybrid').toLowerCase();
+  // `fewshot` and `hybrid` are the same code path — kept as distinct labels
+  // only so an A/B comparison can tell which prompt wording produced a plan.
   const useFewShot = strategy === 'fewshot' || strategy === 'hybrid';
   const shouldUseLocalModel = (provider === 'anythingllm' || provider === 'ollama') && strategy !== 'deterministic';
   const shouldUseHostedModel = (provider === 'claude' || provider === 'groq' || provider === 'deepseek') && strategy !== 'deterministic';
+
+  const style = options.styleSignals ?? null;
+  const styleRank = levelRank(studentProfile?.level);
 
   function mapLevelToRank(level: string | undefined) {
     const rank: Record<string, number> = { A1: 1, A2: 2, B1: 3, B2: 4, C1: 5, C2: 6 };
@@ -1097,6 +1125,12 @@ export async function generatePersonalizedPlan(studentProfile: any, candidateLes
     else if (difficultyDelta < 0) score += 4;
     else score -= 8;
 
+    // How this student actually studies — added last and bounded to ~±12, so
+    // it shades the academic ranking above without ever overturning it. A no-op
+    // when there is no style reading yet (a brand-new student ranks on
+    // academics alone).
+    score += styleAdjustment(lesson, style, styleRank);
+
     return score;
   }
 
@@ -1108,10 +1142,53 @@ export async function generatePersonalizedPlan(studentProfile: any, candidateLes
     summary: lesson.summary || lesson.description?.slice(0, 280) || '',
   }));
 
-  const ranked = enrichedLessons
+  const scored = enrichedLessons
     .map((l) => ({ ...l, _score: scoreLesson(l) }))
-    .sort((a, b) => (b._score ?? 0) - (a._score ?? 0))
-    .slice(0, maxLessons);
+    .sort((a, b) => (b._score ?? 0) - (a._score ?? 0));
+
+  /**
+   * EXPLORATION. A recommender that only ever serves what the profile already
+   * likes calcifies — the plan stops surprising anyone and after a month it
+   * reads as the portal no longer paying attention. `pickExploration` spends a
+   * small fixed slice of slots on lessons the taste weighting pushed DOWN, and
+   * only once the profile is settled enough for "off-profile" to mean
+   * something. Those lessons then feed back through completions on the next
+   * rebuild, so a good exploratory pick raises its own format's affinity.
+   */
+  const exploration = options.explore === false
+    ? { picks: [] as typeof scored, reason: "" }
+    : pickExploration(scored, style, { keep: maxLessons });
+  const exploratoryIds = new Set(exploration.picks.map((p) => p.id));
+
+  const ranked = [
+    ...scored.filter((l) => !exploratoryIds.has(l.id)).slice(0, Math.max(0, maxLessons - exploratoryIds.size)),
+    ...exploration.picks,
+  ].slice(0, maxLessons);
+
+  /**
+   * Attach the "why" to whatever plan shape we end up returning — the LLM
+   * paths, the local-model path and the deterministic fallback all pass
+   * through here so the student-facing copy and the exploratory tags are
+   * identical regardless of which engine produced the list.
+   */
+  const decoratePlan = (plan: any) => {
+    const lessons = Array.isArray(plan?.lessons)
+      ? plan.lessons.map((lesson: any) => ({
+          ...lesson,
+          exploratory: exploratoryIds.has(lesson?.id) || lesson?.exploratory === true,
+        }))
+      : plan?.lessons;
+    return {
+      ...plan,
+      lessons,
+      stylePersonalization: style && style.confidence !== 'none'
+        ? { confidence: style.confidence, summary: style.summary, formatAffinity: style.formatAffinity }
+        : null,
+      exploration: exploration.picks.length
+        ? { count: exploration.picks.length, reason: exploration.reason }
+        : null,
+    };
+  };
 
   const profile = {
     level: studentProfile.level || 'A2',
@@ -1191,13 +1268,13 @@ Return valid JSON only in this structure:
         try {
           const parsed = JSON.parse(response);
           if (parsed?.lessons && Array.isArray(parsed.lessons)) {
-            return {
+            return decoratePlan({
               ...parsed,
               strategy,
               variant: 'llm',
               targetDifficulty: getTargetDifficultyRank(),
               adaptiveHint: 'Difficulty is tuned from recent performance and exam readiness.',
-            };
+            });
           }
         } catch {
           // fall back to deterministic
@@ -1213,13 +1290,13 @@ Return valid JSON only in this structure:
       const response = await callHostedText(localModelPrompt, 1400);
       const parsed = parseModelJson<any>(response);
       if (parsed?.lessons && Array.isArray(parsed.lessons)) {
-        return {
+        return decoratePlan({
           ...parsed,
           strategy,
           variant: 'llm',
           targetDifficulty: getTargetDifficultyRank(),
           adaptiveHint: 'Difficulty is tuned from recent performance and exam readiness.',
-        };
+        });
       }
     } catch {
       // fall back to deterministic
@@ -1242,12 +1319,14 @@ Return valid JSON only in this structure:
       difficulty: lesson.difficulty,
       tags: lesson.tags,
       goal: lesson.description?.slice(0, 140) || 'Continue your learning path with this lesson.',
-      reason: lesson.completed ? 'Review completed practice.' : 'Recommended next lesson based on your current progress.',
+      reason: exploratoryIds.has(lesson.id)
+        ? 'Outside your usual pattern — in to see whether it clicks.'
+        : lesson.completed ? 'Review completed practice.' : 'Recommended next lesson based on your current progress.',
       source: lesson.source || 'pathway',
     })),
   };
 
-  return plan;
+  return decoratePlan(plan);
 }
 
 async function summarizeTextWithOllama(text: string) {

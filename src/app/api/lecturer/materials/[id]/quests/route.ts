@@ -28,7 +28,7 @@ async function authorizeMaterial(materialId: string) {
     where: { id: materialId },
     select: {
       id: true, lecturerId: true, title: true, aiSummary: true, aiKeyPoints: true,
-      aiQuests: true, aiState: true, questsReviewedAt: true, questsReviewedBy: true,
+      aiQuests: true, aiNotes: true, aiState: true, questsReviewedAt: true, questsReviewedBy: true,
     },
   });
   if (!material || material.lecturerId !== lecturerId) {
@@ -49,6 +49,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     summary: auth.material.aiSummary,
     keyPoints: auth.material.aiKeyPoints ?? [],
     quests: (auth.material.aiQuests as unknown as MaterialQuest[] | null) ?? [],
+    // The ready-made study note is released to students by the SAME sign-off
+    // as the quests — see the note preview in LecturerQuestReview.
+    notes: auth.material.aiNotes ?? null,
     reviewedAt: auth.material.questsReviewedAt,
   });
 }

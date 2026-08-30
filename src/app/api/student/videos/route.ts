@@ -7,6 +7,7 @@ import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { isPlayableVideo, toPlayableUrl, type LibraryVideo, type VideoKind } from "@/lib/video-library";
 import { isEmbeddedVideo, needsIframe, parseEmbed } from "@/lib/media-embed";
 import { reconcileRecordingsSoon } from "@/lib/class-recorder";
+import { canDownloadOffline } from "@/lib/delivery";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,7 @@ export async function GET() {
     // hangs off a course at their level, or — a private recording, which
     // deliberately carries NO level (see class-recorder.ts) — it was booked
     // for them specifically via the `privateClasses` relation.
+    const now = new Date();
     const records = await prisma.material.findMany({
       where: {
         kind: { in: ["video", "recording"] },
@@ -80,11 +82,17 @@ export async function GET() {
           { course: { level: student.level } },
           { privateClasses: { some: { studentId: student.id } } },
         ],
+        // The 2-week student window: once a recording's `studentExpiresAt` has
+        // passed it drops off the shelf for students (staff keep it forever —
+        // see src/lib/retention.ts). `keepForever` pins it here too. A lesson
+        // video or document has no `recording` relation, so `NOT { recording:
+        // { is: … } }` leaves it untouched.
+        NOT: { recording: { is: { keepForever: false, studentExpiresAt: { lte: now } } } },
       },
       include: {
         course: { select: { title: true, level: true } },
         lecturer: { select: { user: { select: { name: true } } } },
-        recording: { select: { privateClassId: true } },
+        recording: { select: { privateClassId: true, studentExpiresAt: true, keepForever: true } },
       },
       orderBy: [{ recordedAt: "desc" }, { createdAt: "desc" }],
     });
@@ -124,10 +132,23 @@ export async function GET() {
           embedUrl: iframed?.embedUrl ?? null,
           embedLabel: embed?.label ?? null,
           isPrivate: Boolean(record.recording?.privateClassId),
+          // Only a non-keep-forever recording actually expires for students.
+          expiresAt:
+            record.recording && !record.recording.keepForever
+              ? record.recording.studentExpiresAt?.toISOString() ?? null
+              : null,
         };
       });
 
-    return NextResponse.json({ videos, locked: false, level: student.level });
+    return NextResponse.json({
+      videos,
+      locked: false,
+      level: student.level,
+      // Whether this student is offered "save for offline" inside the app —
+      // online, hybrid and private students are; physical group students get
+      // the notes-offline upsell instead.
+      canDownloadOffline: canDownloadOffline(student),
+    });
   } catch (error) {
     console.error("Failed to load the video library", error);
     return NextResponse.json({ error: "Failed to load the video library" }, { status: 500 });

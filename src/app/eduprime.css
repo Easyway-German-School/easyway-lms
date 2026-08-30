@@ -1,0 +1,150 @@
+/* ---------------------------------------------------------------------------
+   EduPrime — the platform's own palette.
+
+   Scoped to `.eduprime`. Every /platform/* screen (the console and the billing
+   view) is wrapped in an element carrying that class (see PlatformShell and
+   app/platform/layout.tsx), so these tokens override the EasyWay school themes
+   from globals.css here and nowhere else. A student portal never sees this file.
+
+   The brief, from the people who own it:
+     - blue and purple for the core — trust, depth, "this is infrastructure"
+     - yellow into orange for the accent — excitement, energy, the feeling of ease
+
+   So: `--primary` is blue, the wordmark's "Prime" and the spectrum carry the
+   purple, and `--accent` is the warm one — orange fill, yellow as its bright
+   partner in gradients and glows.
+
+   `--primary` is defined here on purpose: the console markup already reaches for
+   `var(--primary)` on its buttons and globals.css never defined it, so those
+   buttons rendered with no fill until this scope gave the token a value.
+   --------------------------------------------------------------------------- */
+
+.eduprime {
+  color-scheme: light;
+
+  /* Painted only via .app-canvas (background shorthand) — a gradient dropped
+     into background-color disappears. Same rule as globals.css. */
+  --background:
+    radial-gradient(1100px 640px at 6% -12%, rgba(37, 99, 235, 0.16), transparent 60%),
+    radial-gradient(920px 560px at 98% -4%, rgba(124, 58, 237, 0.14), transparent 60%),
+    radial-gradient(680px 460px at 78% 8%, rgba(249, 115, 22, 0.10), transparent 66%),
+    linear-gradient(180deg, #fbfbfe 0%, #f3f4fb 55%, #fdfbf7 100%);
+
+  --foreground: #0d1220;
+  --foreground-soft: #2c3350;
+  --surface: #ffffff;
+  --surface-alt: #f2f3fb;
+  --surface-strong: #ffffff;
+  --surface-soft: rgba(255, 255, 255, 0.72);
+  --card: #ffffff;
+  --border: rgba(37, 99, 235, 0.16);
+  --border-strong: rgba(37, 99, 235, 0.32);
+  --shadow: 0 30px 80px rgba(15, 20, 45, 0.10);
+
+  /* Core: blue primary. Purple is carried separately for the mark + spectrum. */
+  --primary: #2563EB;
+  --primary-ink: #1d4fd8;
+  --primary-contrast: #ffffff;
+  --eduprime-purple: #7C3AED;
+
+  /* Accent: the warm one. Fill is orange; yellow is its bright partner. The
+     shared .btn-glow / --accent-soft utilities land on this. */
+  --accent: #F97316;
+  --accent-ink: #c2570c;
+  --accent-strong: #FACC15;
+  --accent-soft: rgba(249, 115, 22, 0.14);
+  --accent-contrast: #1a1205;
+
+  --success: #0f9d6b;
+  --success-soft: rgba(16, 185, 129, 0.14);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.12);
+  --warning: #b45309;
+  --warning-soft: rgba(245, 158, 11, 0.16);
+  --muted: #5a6280;
+
+  --scene-ink: 37, 99, 235;
+  --scene-strength: 0.4;
+  --sidebar-glass: rgba(255, 255, 255, 0.82);
+
+  /* EduPrime-only extras, used by the shell and the logo. */
+  --eduprime-beam: #FACC15;
+  --eduprime-spectrum: linear-gradient(120deg, #2563EB 0%, #7C3AED 50%, #F97316 100%);
+  --eduprime-hairline: rgba(37, 99, 235, 0.14);
+}
+
+/* Night. The console is a thing operators stare at; give it a real dark. */
+html.theme-dark .eduprime,
+html.theme-custom .eduprime {
+  color-scheme: dark;
+
+  --background:
+    radial-gradient(1200px 680px at 4% -14%, rgba(59, 130, 246, 0.20), transparent 58%),
+    radial-gradient(920px 560px at 100% -2%, rgba(139, 92, 246, 0.16), transparent 58%),
+    radial-gradient(640px 440px at 82% 6%, rgba(251, 146, 60, 0.12), transparent 64%),
+    linear-gradient(180deg, #090c17 0%, #0c1120 60%, #0a0e1b 100%);
+
+  --foreground: #eef1fb;
+  --foreground-soft: #b8c0dd;
+  --surface: #141a2c;
+  --surface-alt: #1a2138;
+  --surface-strong: #171d32;
+  --surface-soft: rgba(20, 26, 44, 0.72);
+  --card: #141a2c;
+  --border: rgba(96, 165, 250, 0.22);
+  --border-strong: rgba(96, 165, 250, 0.40);
+  --shadow: 0 40px 120px rgba(0, 0, 0, 0.55);
+
+  --primary: #60A5FA;
+  --primary-ink: #bcd6ff;
+  --primary-contrast: #0a0e1b;
+  --eduprime-purple: #A78BFA;
+
+  --accent: #FB923C;
+  --accent-ink: #fdba74;
+  --accent-strong: #FDE047;
+  --accent-soft: rgba(251, 146, 60, 0.18);
+  --accent-contrast: #1a1205;
+
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.16);
+  --muted: #8b93b4;
+
+  --scene-ink: 96, 165, 250;
+  --scene-strength: 0.6;
+  --sidebar-glass: rgba(20, 26, 44, 0.7);
+  --eduprime-beam: #FDE047;
+  --eduprime-spectrum: linear-gradient(120deg, #60A5FA 0%, #A78BFA 50%, #FB923C 100%);
+  --eduprime-hairline: rgba(96, 165, 250, 0.16);
+}
+
+/* The spectral hairline under the shell header — blue, purple, orange. */
+.eduprime-spectrum-rule {
+  height: 2px;
+  border: 0;
+  background: var(--eduprime-spectrum);
+  opacity: 0.9;
+}
+
+/* The one loud button: blue into purple, with light spilling under it. Mirrors
+   globals.css .btn-glow but kept named so callers read clearly. */
+.eduprime-cta {
+  background: linear-gradient(120deg, var(--primary) 0%, var(--eduprime-purple) 100%);
+  color: #fff;
+  box-shadow: 0 16px 40px -12px color-mix(in srgb, var(--eduprime-purple) 60%, transparent);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+.eduprime-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 22px 54px -14px color-mix(in srgb, var(--eduprime-purple) 70%, transparent);
+  filter: brightness(1.05);
+}
+
+.eduprime-grid-bg {
+  background-image:
+    linear-gradient(var(--eduprime-hairline) 1px, transparent 1px),
+    linear-gradient(90deg, var(--eduprime-hairline) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(680px 420px at 50% 0%, #000 0%, transparent 75%);
+          mask-image: radial-gradient(680px 420px at 50% 0%, #000 0%, transparent 75%);
+}

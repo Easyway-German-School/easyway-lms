@@ -6,6 +6,7 @@ import { canAttendLive, deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { isOnlineBranch, initialVideoQualityFor, readOnlineProfile } from "@/lib/online-branch";
 import { ensureRecordingStarted } from "@/lib/class-recorder";
+import { creditGate } from "@/lib/usage/guard";
 import {
   announceLiveSession,
   liveSessionByCode,
@@ -44,6 +45,12 @@ export async function GET(request: Request) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // Live-class participant-minutes are a metered pass-through of the SFU
+    // bill. If this school's credit is exhausted and enforcement is on, the
+    // room is not issued. Default-off, so no existing tenant is affected.
+    const gated = await creditGate();
+    if (gated) return gated;
 
     const url = new URL(request.url);
     const requestedPrivateClassId = url.searchParams.get("privateClassId");
