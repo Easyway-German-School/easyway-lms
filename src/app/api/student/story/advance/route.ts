@@ -3,7 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { goalFor } from "@/lib/germany-goals";
 import { storySeriesFor } from "@/lib/story/content";
-import { advanceStoryPosition, describeAccessAfterMutation, getPlayableEpisode, saveSeriesProgress } from "@/lib/story-progress";
+import { advanceStoryPosition, bumpTrust, describeAccessAfterMutation, getPlayableEpisode, saveSeriesProgress } from "@/lib/story-progress";
 
 export const dynamic = "force-dynamic";
 
@@ -44,11 +44,16 @@ export async function POST(request: NextRequest) {
   if (beat.type === "write") return NextResponse.json({ error: "Use /api/student/story/write for this beat." }, { status: 400 });
 
   let nextBeatId: string | null;
+  let trustChange: { characterId: string; delta: number; newValue: number } | null = null;
   if (beat.type === "choice") {
     const option = beat.options.find((candidate) => candidate.id === choiceOptionId);
     if (!option) return NextResponse.json({ error: "Invalid choice." }, { status: 400 });
     nextBeatId = option.next;
     progress.choices.push({ sceneId, beatId, optionId: option.id, at: new Date().toISOString() });
+    if (option.trustDelta) {
+      const newValue = bumpTrust(seriesProgress, beat.speakerId, option.trustDelta);
+      trustChange = { characterId: beat.speakerId, delta: option.trustDelta, newValue };
+    }
   } else {
     nextBeatId = beat.next;
   }
@@ -58,5 +63,5 @@ export async function POST(request: NextRequest) {
 
   const access = describeAccessAfterMutation(series, seriesProgress);
   await saveSeriesProgress(student.id, goalId, seriesProgress);
-  return NextResponse.json({ access });
+  return NextResponse.json({ access, trustChange });
 }

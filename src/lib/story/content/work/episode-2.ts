@@ -52,6 +52,16 @@ export const workEpisode2: StoryChapter = {
           expression: "neutral",
           text: "Guten Morgen! Bevor wir weitermachen — es gibt eine kleine Sache, die wir besprechen sollten.",
           translation: "Good morning! Before we continue — there's a small matter we should discuss.",
+          // Callback to episode 1: only shows if the student left Frau Hoffmann
+          // genuinely impressed last time — trust is carried across episodes.
+          variants: [
+            {
+              minTrust: 58,
+              expression: "warm",
+              text: "Guten Morgen! Schön, Sie wiederzusehen — bevor wir weitermachen, gibt es eine kleine Sache, die wir besprechen sollten.",
+              translation: "Good morning! Good to see you again — before we continue, there's a small matter we should discuss.",
+            },
+          ],
           next: "c2",
         },
         c2: {
@@ -74,6 +84,7 @@ export const workEpisode2: StoryChapter = {
               translation: "Yes, of course. We documented everything carefully.",
               next: "c4",
               flavorNote: "Frau Hoffmann nickt — das beruhigt sie ein wenig.",
+              trustDelta: 5,
             },
             {
               id: "worried-already",
@@ -81,6 +92,7 @@ export const workEpisode2: StoryChapter = {
               translation: "Yes... is something wrong?",
               next: "c4",
               flavorNote: "Frau Hoffmann bemerkt Ihre Sorge und bleibt ruhig.",
+              trustDelta: 3,
             },
           ],
           next: null,

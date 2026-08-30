@@ -33,6 +33,8 @@ export type LineBeat = BeatBase & {
   expression: ExpressionKey;
   text: string;
   translation?: string;
+  /** Higher-trust rewrites of this line, checked highest-first. See LineVariant. */
+  variants?: LineVariant[];
 };
 
 export type YourLineBeat = BeatBase & {
@@ -47,10 +49,37 @@ export type ChoiceOption = {
   id: string;
   text: string;
   translation?: string;
-  /** Both real, valid German responses — this is flavor branching, not a right/wrong fork. */
+  /**
+   * Both real, valid German responses — neither is "wrong". They may point at
+   * the same next beat or genuinely diverge into a different short run of
+   * beats before the scene reconverges; either is fine, this is not a
+   * pass/fail fork.
+   */
   next: string;
   /** One-line reaction shown before the next beat plays. */
   flavorNote?: string;
+  /**
+   * How this choice moves the needle with the character it was said to,
+   * clamped to 0-100 on a 0-100 relationship scale that persists across the
+   * whole series (not just this episode). Omit for choices that are pure
+   * flavor with no relationship weight.
+   */
+  trustDelta?: number;
+};
+
+/**
+ * A relationship-gated alternative reading of a `line` beat. The engine picks
+ * the highest `minTrust` variant the player currently qualifies for against
+ * `speakerId`'s trust score, falling back to the beat's own base text when no
+ * variant qualifies (including for a first playthrough with no history at
+ * all). This is how a character can visibly remember how you've treated them
+ * without branching the scene graph itself.
+ */
+export type LineVariant = {
+  minTrust: number;
+  text: string;
+  translation?: string;
+  expression?: ExpressionKey;
 };
 
 export type ChoiceBeat = BeatBase & {
@@ -81,6 +110,26 @@ export type StoryScene = {
   startBeatId: string;
   beats: Record<string, StoryBeat>;
 };
+
+/**
+ * Picks what a `line` beat should actually render for this player: the
+ * highest-`minTrust` variant they currently qualify for against the beat's
+ * speaker (from the series-wide relationships map), or the beat's own base
+ * text/expression when nothing qualifies — a first playthrough, or a beat
+ * with no variants at all. Pure and side-effect-free so both the client
+ * component and any future server-side use can call it the same way.
+ */
+export function pickLineVariant(
+  relationships: Record<CharacterId, number>,
+  beat: LineBeat,
+): { text: string; translation?: string; expression: ExpressionKey } {
+  const trust = relationships[beat.speakerId] ?? 50;
+  const qualifying = (beat.variants ?? [])
+    .filter((variant) => trust >= variant.minTrust)
+    .sort((a, b) => b.minTrust - a.minTrust)[0];
+  if (!qualifying) return { text: beat.text, translation: beat.translation, expression: beat.expression };
+  return { text: qualifying.text, translation: qualifying.translation ?? beat.translation, expression: qualifying.expression ?? beat.expression };
+}
 
 export type StoryChapter = {
   id: string;

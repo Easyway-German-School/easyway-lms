@@ -52,6 +52,15 @@ export const studyEpisode2: StoryChapter = {
           expression: "warm",
           text: "Na, bereit für Runde zwei? Ich hab gehört, heute wird's spannend.",
           translation: "So, ready for round two? I heard today's going to be interesting.",
+          // Callback to episode 1: only shows if the student left Lena
+          // genuinely warm last time — trust is carried across episodes.
+          variants: [
+            {
+              minTrust: 58,
+              text: "Na, bereit für Runde zwei? Ehrlich, ich hab mich schon richtig auf dich gefreut heute.",
+              translation: "So, ready for round two? Honestly, I was really looking forward to seeing you today.",
+            },
+          ],
           next: "b2",
         },
         b2: {
@@ -74,6 +83,7 @@ export const studyEpisode2: StoryChapter = {
               translation: "I'm more excited — I like challenges.",
               next: "b4",
               flavorNote: "Lena grinst — das gefällt ihr.",
+              trustDelta: 4,
             },
             {
               id: "nervous",
@@ -81,6 +91,7 @@ export const studyEpisode2: StoryChapter = {
               translation: "Honestly, a little nervous.",
               next: "b4",
               flavorNote: "Lena drückt beruhigend deinen Arm.",
+              trustDelta: 6,
             },
           ],
           next: null,

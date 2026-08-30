@@ -9,6 +9,14 @@
 
 export const XP_PER_LEVEL = 250;
 
+/**
+ * XP a finished story episode is worth — exported (not just inlined in
+ * calculateXp) so the "+50 XP" the story UI shows on an episode-complete
+ * screen is read from the same number the server formula actually pays out,
+ * rather than a second copy that could drift.
+ */
+export const STORY_EPISODE_XP = 50;
+
 /** Nobody starts on an empty bar; showing 0 XP on day one is discouraging. */
 export const XP_FLOOR = 180;
 
@@ -36,6 +44,14 @@ export type XpInputs = {
   quizGamesPlayed?: number;
   /** Self-marked correct on a quest generated from a tutor's material. */
   materialQuestsCompleted?: number;
+  /**
+   * Finished episodes of the personalized visual-novel story (real spoken
+   * line scored by Whisper/Azure, real written line graded by Claude, plus
+   * an actual choice made) — see story-progress.ts. Weighted above a plain
+   * submission because one episode bundles a graded speaking AND writing
+   * artifact, not just one.
+   */
+  storyEpisodesCompleted?: number;
 };
 
 export type GamificationSummary = {
@@ -90,6 +106,9 @@ export function calculateXp(inputs: XpInputs): number {
     // Same weight as a mission tick — a five-minute self-marked task, not a
     // graded artifact like a submission.
     (inputs.materialQuestsCompleted ?? 0) * 20 +
+    // Above a plain submission (30): a finished episode is a scored speaking
+    // line plus a Claude-graded writing line plus a choice made, not one artifact.
+    (inputs.storyEpisodesCompleted ?? 0) * STORY_EPISODE_XP +
     gradeBonus;
 
   return Math.max(XP_FLOOR, raw);

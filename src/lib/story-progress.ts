@@ -42,18 +42,45 @@ export type StorySeriesProgress = {
   /** Progress for the currently-active episode only — past episodes keep just the light record below. */
   progress: StoryProgress;
   completedEpisodes: Array<{ chapterId: string; completedAt: string }>;
+  /**
+   * 0-100 trust score per characterId, SERIES-scoped — unlike `progress`,
+   * this survives `freshProgress()` on episode rollover on purpose. A
+   * character remembering how you treated them last episode is the entire
+   * point; keying it here (not inside StoryProgress) is what makes that
+   * survive the reset. Missing entries read as 50 (neutral) — see
+   * `trustFor()`.
+   */
+  relationships: Record<string, number>;
 };
 
 type ChapterSummary = { id: string; title: string; synopsis: string };
 
 export type StoryAccessState =
   | { state: "unavailable" }
-  | { state: "playable"; chapter: StoryChapter; progress: StoryProgress; episodeIndex: number; episodeCount: number }
+  | { state: "playable"; chapter: StoryChapter; progress: StoryProgress; episodeIndex: number; episodeCount: number; relationships: Record<string, number> }
   | { state: "locked"; completedChapter: ChapterSummary; nextChapter: Omit<ChapterSummary, "id">; unlocksAt: string }
   | { state: "season-complete"; completedChapter: ChapterSummary };
 
 const HISTORY_CAP = 60;
 const COMPLETED_EPISODES_CAP = 50;
+export const NEUTRAL_TRUST = 50;
+
+/** A character's series-wide trust score, or the neutral default before any choice has touched it. */
+export function trustFor(sp: StorySeriesProgress, characterId: string): number {
+  return sp.relationships[characterId] ?? NEUTRAL_TRUST;
+}
+
+/** Moves a character's trust score by `delta`, clamped to 0-100. Mutates `sp` in place, same convention as advanceStoryPosition. */
+export function bumpTrust(sp: StorySeriesProgress, characterId: string, delta: number): number {
+  const next = Math.max(0, Math.min(100, trustFor(sp, characterId) + delta));
+  sp.relationships = { ...sp.relationships, [characterId]: next };
+  return next;
+}
+
+// Which variant a `line` beat should render for a given trust map lives in
+// story/types.ts as `pickLineVariant` — pure data logic, no prisma import, so
+// the client component can call it directly instead of pulling this
+// server-only module (with its prisma import) into the client bundle.
 
 function dayKey(now = new Date()): string {
   return now.toISOString().slice(0, 10);
@@ -106,7 +133,11 @@ async function readPlan(studentId: string): Promise<Record<string, unknown>> {
  */
 function coerceSeriesProgress(raw: unknown, series: StoryChapter[]): StorySeriesProgress {
   if (raw && typeof raw === "object" && "currentEpisodeIndex" in raw) {
-    return raw as StorySeriesProgress;
+    // `relationships` shipped after currentEpisodeIndex — backfill it on read
+    // for anyone whose saved progress predates the trust meter, rather than
+    // migrating stored rows.
+    const sp = raw as StorySeriesProgress;
+    return sp.relationships ? sp : { ...sp, relationships: {} };
   }
   if (raw && typeof raw === "object" && "chapterId" in raw) {
     const legacy = raw as StoryProgress;
@@ -116,9 +147,9 @@ function coerceSeriesProgress(raw: unknown, series: StoryChapter[]): StorySeries
     if (isChapterComplete(chapter, legacy)) {
       completedEpisodes.push({ chapterId: chapter.id, completedAt: legacy.lastPlayedAt });
     }
-    return { currentEpisodeIndex: episodeIndex, progress: legacy, completedEpisodes };
+    return { currentEpisodeIndex: episodeIndex, progress: legacy, completedEpisodes, relationships: {} };
   }
-  return { currentEpisodeIndex: 0, progress: freshProgress(series[0]), completedEpisodes: [] };
+  return { currentEpisodeIndex: 0, progress: freshProgress(series[0]), completedEpisodes: [], relationships: {} };
 }
 
 /**
@@ -138,7 +169,7 @@ function resolveAccess(series: StoryChapter[], sp: StorySeriesProgress): StoryAc
 
   const done = sp.completedEpisodes.find((e) => e.chapterId === active.id);
   if (!done) {
-    return { state: "playable", chapter: active, progress: sp.progress, episodeIndex: sp.currentEpisodeIndex, episodeCount: series.length };
+    return { state: "playable", chapter: active, progress: sp.progress, episodeIndex: sp.currentEpisodeIndex, episodeCount: series.length, relationships: sp.relationships };
   }
 
   const next = series[sp.currentEpisodeIndex + 1];
@@ -147,7 +178,7 @@ function resolveAccess(series: StoryChapter[], sp: StorySeriesProgress): StoryAc
   if (dayKey(new Date()) > dayKey(new Date(done.completedAt))) {
     sp.currentEpisodeIndex += 1;
     sp.progress = freshProgress(next);
-    return { state: "playable", chapter: next, progress: sp.progress, episodeIndex: sp.currentEpisodeIndex, episodeCount: series.length };
+    return { state: "playable", chapter: next, progress: sp.progress, episodeIndex: sp.currentEpisodeIndex, episodeCount: series.length, relationships: sp.relationships };
   }
 
   const unlocksAt = new Date();
@@ -164,7 +195,7 @@ function resolveAccess(series: StoryChapter[], sp: StorySeriesProgress): StoryAc
 export async function getStoryAccess(studentId: string, goalId: string, series: StoryChapter[]): Promise<StoryAccessState> {
   const plan = await readPlan(studentId);
   const stored = plan.storyProgress && typeof plan.storyProgress === "object" ? (plan.storyProgress as Record<string, unknown>)[goalId] : undefined;
-  if (!stored) return { state: "playable", chapter: series[0], progress: freshProgress(series[0]), episodeIndex: 0, episodeCount: series.length };
+  if (!stored) return { state: "playable", chapter: series[0], progress: freshProgress(series[0]), episodeIndex: 0, episodeCount: series.length, relationships: {} };
   const sp = coerceSeriesProgress(stored, series);
   return resolveAccess(series, sp);
 }
@@ -177,7 +208,7 @@ export async function getPlayableEpisode(
 ): Promise<{ seriesProgress: StorySeriesProgress; chapter: StoryChapter } | null> {
   const plan = await readPlan(studentId);
   const stored = plan.storyProgress && typeof plan.storyProgress === "object" ? (plan.storyProgress as Record<string, unknown>)[goalId] : undefined;
-  const sp = stored ? coerceSeriesProgress(stored, series) : { currentEpisodeIndex: 0, progress: freshProgress(series[0]), completedEpisodes: [] };
+  const sp = stored ? coerceSeriesProgress(stored, series) : { currentEpisodeIndex: 0, progress: freshProgress(series[0]), completedEpisodes: [], relationships: {} };
 
   const access = resolveAccess(series, sp);
   await saveSeriesProgress(studentId, goalId, sp);
@@ -236,4 +267,23 @@ export async function saveSeriesProgress(studentId: string, goalId: string, sp: 
     update: { plan: JSON.stringify(plan) },
     create: { studentId, plan: JSON.stringify(plan) },
   });
+}
+
+/**
+ * Total finished story episodes across every goal this student has ever
+ * played — including a goal they've since switched away from, so XP earned
+ * from a finished episode is never taken back by a later goal change. Fed
+ * into calculateXp() the same way quizGamesPlayed/materialQuestsCompleted
+ * are: a real count from stored history, not a field someone sets.
+ */
+export async function countCompletedStoryEpisodes(studentId: string): Promise<number> {
+  const plan = await readPlan(studentId);
+  const storyProgress = plan.storyProgress;
+  if (!storyProgress || typeof storyProgress !== "object") return 0;
+  return Object.values(storyProgress as Record<string, unknown>).reduce<number>((total, raw) => {
+    if (raw && typeof raw === "object" && Array.isArray((raw as StorySeriesProgress).completedEpisodes)) {
+      return total + (raw as StorySeriesProgress).completedEpisodes.length;
+    }
+    return total;
+  }, 0);
 }

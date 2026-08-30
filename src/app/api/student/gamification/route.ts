@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateStreak, deriveBadges, summarizeGamification } from "@/lib/gamification";
+import { countCompletedStoryEpisodes } from "@/lib/story-progress";
 
 /**
  * XP, level, streak and badges for the signed-in student.
@@ -64,6 +65,8 @@ export async function GET() {
     where: { studentId: student.id, correct: true },
   });
 
+  const storyEpisodesCompleted = await countCompletedStoryEpisodes(student.id);
+
   const presentDays = student.attendances.filter(
     (record) => record.present || record.status === "present" || record.status === "late",
   );
@@ -85,6 +88,7 @@ export async function GET() {
     missionsCompleted,
     quizGamesPlayed,
     materialQuestsCompleted,
+    storyEpisodesCompleted,
   });
 
   const badges = deriveBadges({
@@ -116,6 +120,7 @@ export async function GET() {
       missionsCompleted,
       quizGamesPlayed,
       materialQuestsCompleted,
+      storyEpisodesCompleted,
       examReadiness: student.examReadiness ?? 0,
       memberSince: student.createdAt.toISOString(),
     },
