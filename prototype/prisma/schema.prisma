@@ -581,6 +581,17 @@ model Student {
   feeRemindersScheduled Json? // tracks which reminders (7d, 14d, 30d) have been sent
   emailPreferences      Json? // user preferences for notification types
 
+  /**
+   * The cold-start seed for the personalised study plan — what the learner
+   * said about how they like to learn before the portal had any behaviour to
+   * go on. Shape: `{ format?: "watch"|"read"|"practice"|"mixed", pace?:
+   * "short"|"standard"|"deep", setAt?: string }`. Read by
+   * src/lib/learner-style.ts as a gentle prior; real behaviour overrules it
+   * within a fortnight. Null until the student answers the one-question card
+   * on the study-plan tab.
+   */
+  learningPreferences   Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
