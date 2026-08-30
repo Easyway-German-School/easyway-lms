@@ -63,9 +63,18 @@ export const PLACEHOLDER_RATES_KOBO: Record<MeterName, number> = {
   "students.active_monthly": 25000,
 };
 
-export function costKobo(meter: MeterName, quantity: number): number {
+export function costKobo(
+  meter: MeterName,
+  quantity: number,
+  /**
+   * The live rate for this meter, from usage/rates.ts. Omitted, it falls back
+   * to the placeholder above — fine for a rough `quote()`, not for the bill,
+   * which is why the nightly rollup passes the real value.
+   */
+  rateKobo: number = PLACEHOLDER_RATES_KOBO[meter],
+): number {
   const { per } = METERS[meter];
-  const rate = PLACEHOLDER_RATES_KOBO[meter];
+  const rate = rateKobo;
   /**
    * Rounded up, per billing period, not per event. Rounding each event up
    * turns a thousand one-token calls into a thousand roundings — a customer

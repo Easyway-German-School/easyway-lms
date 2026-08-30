@@ -13,6 +13,7 @@ import {
   RefreshIcon,
   SparklesIcon,
   TrashIcon,
+  UserPlusIcon,
   UsersIcon,
   WalletIcon,
 } from "@/components/icons";
@@ -68,6 +69,14 @@ type ApiKeyRow = {
   revokedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
+};
+
+type Owner = {
+  id: string;
+  name: string | null;
+  email: string;
+  createdAt: string;
+  passwordClaimed: boolean;
 };
 
 const SCOPES = [
@@ -330,6 +339,31 @@ export default function PlatformConsolePage() {
     environment: "test",
     scopes: [],
   });
+  const [owners, setOwners] = useState<Owner[]>([]);
+  const [newOwner, setNewOwner] = useState({ name: "", email: "" });
+  const [ownerSetupUrl, setOwnerSetupUrl] = useState<string | null>(null);
+  const [ownerCopied, setOwnerCopied] = useState(false);
+
+  const [billing, setBilling] = useState<{ enforce: boolean; graceKobo: string }>({
+    enforce: false,
+    graceKobo: "0",
+  });
+  const [billingSaved, setBillingSaved] = useState(false);
+  const [domainState, setDomainState] = useState<{
+    state: string;
+    cnameTarget?: string;
+    servedName?: string;
+    expectedName?: string;
+    httpStatus?: number;
+  } | null>(null);
+  const [checkingDomain, setCheckingDomain] = useState(false);
+
+  const [rates, setRates] = useState<
+    Array<{ meter: string; kobo: number; per: number; isPlaceholder: boolean }>
+  >([]);
+  const [rateEdits, setRateEdits] = useState<Record<string, string>>({});
+  const [ratesSaved, setRatesSaved] = useState(false);
+
   const [busy, setBusy] = useState(false);
 
   const loadTenants = useCallback(async () => {
@@ -366,19 +400,55 @@ export default function PlatformConsolePage() {
     setFeaturesSaved(false);
   }, []);
 
+  const loadOwners = useCallback(async (tenantId: string) => {
+    const response = await fetch(`/api/platform/tenants/${tenantId}/owner`);
+    if (!response.ok) return;
+    const data = await response.json();
+    setOwners(data.owners ?? []);
+  }, []);
+
+  const loadBilling = useCallback(async (tenantId: string) => {
+    const response = await fetch(`/api/platform/tenants/${tenantId}/billing`);
+    if (!response.ok) return;
+    const data = await response.json();
+    setBilling(data.settings ?? { enforce: false, graceKobo: "0" });
+    setBillingSaved(false);
+  }, []);
+
+  const loadRates = useCallback(async () => {
+    const response = await fetch("/api/platform/rates");
+    if (!response.ok) return;
+    const data = await response.json();
+    setRates(data.rates ?? []);
+    setRateEdits(
+      Object.fromEntries(
+        (data.rates ?? []).map((r: { meter: string; kobo: number }) => [r.meter, String(r.kobo)]),
+      ),
+    );
+    setRatesSaved(false);
+  }, []);
+
   useEffect(() => {
     loadTenants();
-  }, [loadTenants]);
+    loadRates();
+  }, [loadTenants, loadRates]);
 
   useEffect(() => {
     if (selected) {
       loadKeys(selected);
       loadFeatures(selected);
+      loadOwners(selected);
+      loadBilling(selected);
+      setNewOwner({ name: "", email: "" });
+      setOwnerSetupUrl(null);
+      setOwnerCopied(false);
+      setDomainState(null);
     } else {
       setKeys([]);
       setFeatures(null);
+      setOwners([]);
     }
-  }, [selected, loadKeys, loadFeatures]);
+  }, [selected, loadKeys, loadFeatures, loadOwners, loadBilling]);
 
   async function createTenant() {
     setBusy(true);
@@ -429,6 +499,88 @@ export default function PlatformConsolePage() {
     try {
       await fetch(`/api/platform/keys/${keyId}`, { method: "DELETE" });
       if (selected) await loadKeys(selected);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createOwner() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/platform/tenants/${selected}/owner`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newOwner),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not create the owner.");
+      setOwnerSetupUrl(data.setupUrl ?? null);
+      setOwnerCopied(false);
+      setNewOwner({ name: "", email: "" });
+      await loadOwners(selected);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create the owner.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveBilling() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/platform/tenants/${selected}/billing`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(billing),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not save.");
+      setBilling(data.settings ?? billing);
+      setBillingSaved(true);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkDomain() {
+    if (!selected) return;
+    setCheckingDomain(true);
+    setDomainState(null);
+    try {
+      const response = await fetch(`/api/platform/tenants/${selected}/domain-check`);
+      const data = await response.json();
+      if (response.ok) setDomainState(data);
+    } finally {
+      setCheckingDomain(false);
+    }
+  }
+
+  async function saveRates() {
+    setBusy(true);
+    try {
+      const payload: Record<string, number | null> = {};
+      for (const r of rates) {
+        const raw = rateEdits[r.meter];
+        payload[r.meter] = raw === "" || raw == null ? null : Number(raw);
+      }
+      const response = await fetch("/api/platform/rates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rates: payload }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not save the rates.");
+      setRates(data.rates ?? []);
+      setRatesSaved(true);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save the rates.");
     } finally {
       setBusy(false);
     }
@@ -801,6 +953,148 @@ export default function PlatformConsolePage() {
             </div>
 
             <div className="space-y-5 p-5">
+              {/* School owner — the account that can actually sign in */}
+              <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <UserPlusIcon className="h-4 w-4" />
+                  School owner
+                </h3>
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  The administrator account for this school. Creating the school does not create one —
+                  without this, nobody can sign in. They get a set-password link by email.
+                </p>
+
+                {owners.length > 0 && (
+                  <ul className="mt-3 space-y-1.5">
+                    {owners.map((o) => (
+                      <li
+                        key={o.id}
+                        className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                      >
+                        <span className="font-medium">{o.name || "—"}</span>
+                        <span className="font-mono text-xs text-[var(--muted)]">{o.email}</span>
+                        <span className="ml-auto">
+                          {o.passwordClaimed ? (
+                            <Badge tone="green">active</Badge>
+                          ) : (
+                            <Badge tone="amber">invite pending</Badge>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {ownerSetupUrl && (
+                  <div className="mt-3 rounded-lg border border-[var(--primary)]/40 bg-[color-mix(in_srgb,var(--primary)_6%,var(--surface))] p-3">
+                    <p className="text-xs font-semibold text-[var(--foreground)]">
+                      Invite sent. Share this link directly if their email is slow:
+                    </p>
+                    <code className="mt-1.5 block overflow-x-auto rounded border border-[var(--border)] bg-[var(--surface)] p-2 font-mono text-[11px]">
+                      {ownerSetupUrl}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(ownerSetupUrl);
+                        setOwnerCopied(true);
+                      }}
+                      className={btnGhost("mt-2 px-3 py-1 text-xs")}
+                    >
+                      {ownerCopied ? "Copied" : "Copy link"}
+                    </button>
+                  </div>
+                )}
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <Labeled label="Owner name">
+                    <input
+                      value={newOwner.name}
+                      onChange={(e) => setNewOwner({ ...newOwner, name: e.target.value })}
+                      placeholder="Dr. Amaka Obi"
+                      className={FIELD}
+                    />
+                  </Labeled>
+                  <Labeled label="Owner email" hint="Must not already have an account anywhere on the platform.">
+                    <input
+                      type="email"
+                      value={newOwner.email}
+                      onChange={(e) => setNewOwner({ ...newOwner, email: e.target.value })}
+                      placeholder="amaka@theirschool.edu.ng"
+                      className={`${FIELD} font-mono`}
+                    />
+                  </Labeled>
+                </div>
+                <button
+                  type="button"
+                  disabled={busy || !newOwner.name.trim() || !newOwner.email.trim()}
+                  onClick={createOwner}
+                  className={btnPrimary("mt-4")}
+                >
+                  {busy ? "Creating…" : owners.length ? "Add another owner" : "Create owner & send invite"}
+                </button>
+              </section>
+
+              {/* Billing enforcement */}
+              <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <WalletIcon className="h-4 w-4" />
+                  Billing
+                </h3>
+                <div className="mt-3 flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                  <span className="text-xs text-[var(--muted)]">Current balance</span>
+                  <MoneyChip kobo={current.credit?.balanceKobo} />
+                </div>
+
+                <label className="mt-4 flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={billing.enforce}
+                    onChange={(e) => {
+                      setBilling({ ...billing, enforce: e.target.checked });
+                      setBillingSaved(false);
+                    }}
+                    className="mt-0.5 h-4 w-4 accent-[var(--primary)]"
+                  />
+                  <span className="text-sm">
+                    <span className="font-semibold">Enforce a spent-through balance</span>
+                    <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                      Off (default), a negative balance is only a warning. On, metered work — live
+                      classes, AI, email — is refused once the balance and the grace below are both
+                      used up. Turn this on only after topping up or agreeing terms.
+                    </span>
+                  </span>
+                </label>
+
+                <Labeled
+                  className="mt-3 max-w-xs"
+                  label="Extra grace (kobo)"
+                  hint="Headroom past zero before blocking. 100000 = ₦1,000."
+                >
+                  <input
+                    value={billing.graceKobo}
+                    onChange={(e) => {
+                      setBilling({ ...billing, graceKobo: e.target.value.replace(/[^\d-]/g, "") });
+                      setBillingSaved(false);
+                    }}
+                    className={`${FIELD} font-mono`}
+                    inputMode="numeric"
+                  />
+                </Labeled>
+
+                <div className="mt-4 flex items-center gap-3">
+                  <button type="button" disabled={busy} onClick={saveBilling} className={btnPrimary()}>
+                    Save billing
+                  </button>
+                  {billingSaved && (
+                    <span className="flex items-center gap-1 text-xs font-semibold text-[var(--success)]">
+                      <CheckCircleIcon className="h-4 w-4" />
+                      Saved — within the minute.
+                    </span>
+                  )}
+                </div>
+              </section>
+
               {/* Branding */}
               <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
                 <h3 className="flex items-center gap-2 text-sm font-semibold">
@@ -820,14 +1114,48 @@ export default function PlatformConsolePage() {
                       className={FIELD}
                     />
                   </Labeled>
-                  <Labeled label="Domain" hint="Nothing below applies until they point this at us.">
-                    <input
-                      value={brand.domain}
-                      onChange={(e) => setBrand({ ...brand, domain: e.target.value })}
-                      placeholder="lms.theirschool.com"
-                      className={`${FIELD} font-mono`}
-                    />
-                  </Labeled>
+                  <div className="space-y-1.5">
+                    <Labeled label="Domain" hint="Save first, then check. CNAME it to cname.vercel-dns.com.">
+                      <input
+                        value={brand.domain}
+                        onChange={(e) => setBrand({ ...brand, domain: e.target.value })}
+                        placeholder="lms.theirschool.com"
+                        className={`${FIELD} font-mono`}
+                      />
+                    </Labeled>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={checkingDomain || !current.domain}
+                        onClick={checkDomain}
+                        className={btnGhost("px-3 py-1 text-xs")}
+                      >
+                        {checkingDomain ? "Checking…" : "Check status"}
+                      </button>
+                      {domainState && (
+                        <span className="text-xs font-semibold">
+                          {domainState.state === "live" && (
+                            <span className="text-[var(--success)]">✓ Live — resolving to this school</span>
+                          )}
+                          {domainState.state === "wrong-tenant" && (
+                            <span className="text-[var(--warning)]">
+                              Points at us, but serves &ldquo;{domainState.servedName}&rdquo; — the
+                              domain field above must exactly match and be saved.
+                            </span>
+                          )}
+                          {domainState.state === "unreachable" && (
+                            <span className="text-[var(--danger)]">
+                              Not reachable — the CNAME isn&apos;t pointed here yet
+                              {domainState.httpStatus ? ` (HTTP ${domainState.httpStatus})` : ""}.
+                            </span>
+                          )}
+                          {domainState.state === "unset" && (
+                            <span className="text-[var(--muted)]">No domain saved yet.</span>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                   <Labeled
                     label="Logo URL"
                     className="sm:col-span-2"
@@ -1030,6 +1358,73 @@ export default function PlatformConsolePage() {
             </div>
           </div>
         )}
+
+        {/* Pricing — one price list for the whole platform */}
+        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+          <div className="border-b border-[var(--border)] px-5 py-4">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <WalletIcon className="h-4 w-4" />
+              Pricing
+            </h2>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              What the nightly rollup bills each meter at. Anything still marked{" "}
+              <span className="font-semibold text-[var(--warning)]">placeholder</span> has never been
+              set against a real provider invoice — quote nobody off it.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] text-left text-sm">
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wide text-[var(--muted)]">
+                  <th className="px-5 py-2.5 font-semibold">Meter</th>
+                  <th className="px-3 py-2.5 font-semibold">Billed per</th>
+                  <th className="px-3 py-2.5 font-semibold">Kobo</th>
+                  <th className="px-3 py-2.5 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rates.map((r) => (
+                  <tr key={r.meter} className="border-t border-[var(--border)]">
+                    <td className="px-5 py-2.5 font-mono text-[13px]">{r.meter}</td>
+                    <td className="px-3 py-2.5 text-xs text-[var(--muted)]">{r.per.toLocaleString()}</td>
+                    <td className="px-3 py-2.5">
+                      <input
+                        value={rateEdits[r.meter] ?? ""}
+                        onChange={(e) => {
+                          setRateEdits({ ...rateEdits, [r.meter]: e.target.value.replace(/[^\d]/g, "") });
+                          setRatesSaved(false);
+                        }}
+                        inputMode="numeric"
+                        className="w-28 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 font-mono text-xs outline-none focus:border-[var(--primary)]"
+                      />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {r.isPlaceholder ? (
+                        <Badge tone="amber">placeholder</Badge>
+                      ) : (
+                        <Badge tone="green">set</Badge>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-3 border-t border-[var(--border)] px-5 py-4">
+            <button type="button" disabled={busy} onClick={saveRates} className={btnPrimary()}>
+              Save pricing
+            </button>
+            {ratesSaved && (
+              <span className="flex items-center gap-1 text-xs font-semibold text-[var(--success)]">
+                <CheckCircleIcon className="h-4 w-4" />
+                Saved — the next rollup uses it.
+              </span>
+            )}
+            <span className="text-[11px] text-[var(--muted)]">
+              Clear a box to revert that meter to its placeholder.
+            </span>
+          </div>
+        </div>
       </div>
     </PlatformShell>
   );

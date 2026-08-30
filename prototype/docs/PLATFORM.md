@@ -215,28 +215,51 @@ a student payment and gets credited to a student who never paid.
 
 ---
 
+## Onboarding, end to end
+
+1. **Create the tenant** — `/platform` → *Onboard school*. Name, slug, optional
+   domain, branding, capabilities. One transaction: `Tenant` + `TenantCredit` +
+   feature flags.
+2. **Create the owner** — select the school → *School owner* → name + email.
+   Makes a `super` admin scoped to that tenant and emails a `/auth/reset` link
+   (also shown in the console to copy). Without this, nobody can sign in — the
+   one step that used to require a manual DB insert.
+3. **Point the domain** — CNAME `theirhost` → `cname.vercel-dns.com`, add it as
+   a domain on the Vercel project, save it in the console's *Domain* field, then
+   *Check status* (verifies it resolves here **and** to the right tenant).
+4. **Issue API keys** — select the school → *Issue key*. Test first.
+5. **Enforcement** (optional) — *Billing* → *Enforce a spent-through balance*.
+   Off for every tenant by default; a negative balance is only a warning until
+   an operator turns this on for that school.
+
+The owner does everything else from the ordinary admin portal on their domain:
+more admins, branches, tutors, students. Students can also self-register on the
+domain.
+
 ## What is not built yet
 
 Be straight with anybody you're selling to about these.
 
-- **Nothing is enforced.** A tenant at zero or negative balance is *warned* and
-  then **served normally**. `graceKobo` exists on the row but is only read for
-  display — no route checks a balance before doing work. There is no suspension
-  path.
-- **The rates are placeholders.** `PLACEHOLDER_RATES_KOBO` is marked as such in
-  the source so nobody quotes it by accident. They need real provider invoices
-  and a margin decision before a customer sees a number.
+- **The rates need real numbers.** `/platform` → *Pricing* is now editable, but
+  every meter still shows **placeholder** until an operator sets it against a
+  real provider invoice + a margin decision. The nightly rollup bills at
+  whatever is there.
+- **Enforcement coverage is partial.** The mechanism is done and opt-in
+  (`usage/billing-settings.ts`, default off). It gates the `/v1` API (via
+  `requireApiKey`) and the live-class token route (`creditGate()`). The browser
+  AI routes under `/api/ai/**` are **not** gated yet — add `creditGate()` to
+  each before turning enforcement on for a school that uses them heavily.
+- **`POST /v1/students` is minimal.** It creates User + Student + code in one
+  transaction and returns a set-password link. It does **not** do the photo,
+  branch-tier pricing, or lead-close that the internal signup does — those are
+  the partner's to handle, or a follow-up.
 - **No self-service signup.** A school is onboarded by an operator, by hand.
-  The EduPrime marketing site has a "book a demo" form (`/api/platform/enquiry`)
-  that logs the enquiry and optionally pings `PLATFORM_ENQUIRY_WEBHOOK` — it
-  creates **nothing**. No User, no Tenant, no lead row (leads are tenant-scoped
-  and a platform enquiry belongs to no tenant).
-- **No `POST /v1/students`.** Enrolment writes a User, a Student, a student
-  code and an office alert together, and has photo-upload and branch-pricing
-  steps. Half of that over the API produces accounts the school's own screens
-  cannot finish setting up, so it returns an explanatory 400 instead.
-- **RLS is not on.** `02_rls_DANGEROUS.sql` is written and deliberately not
-  run. Isolation is currently application-level only.
+- **Domain add to Vercel is manual.** The console verifies a domain but does not
+  add it to the Vercel project — do that in the Vercel dashboard (or wire
+  `VERCEL_API_TOKEN` and the Domains API).
+- **RLS is not on.** `02_rls_DANGEROUS.sql` is written and deliberately not run.
+  Isolation is application-level only (and solid). Turning RLS on is a real
+  rollout — see `docs/RLS_ROLLOUT.md`.
 - **The repo is public.** See the commercial note before putting anything
   customer-identifying in it.
 
