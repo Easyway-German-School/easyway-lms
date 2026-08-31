@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { listGroups, upsertSubscriber } from "@/lib/mailerlite";
 
 /**
@@ -71,7 +71,7 @@ export async function syncStudentsToMailerLite(options?: {
       studentCode: true,
       branch: { select: { name: true } },
       user: { select: { name: true, email: true } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
 

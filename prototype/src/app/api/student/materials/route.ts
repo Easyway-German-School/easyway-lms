@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment } from "@/lib/payment";
 import { toPlayableUrl } from "@/lib/video-library";
 
 export async function GET() {
@@ -28,7 +28,7 @@ export async function GET() {
     const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const totalPaid = student.payments
-      .filter((payment) => payment.status === "completed")
+      .filter((payment) => isReceivedPayment(payment.status))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const requiredDeposit = requiredDepositFor(feeLookup);
     const canUnlockMaterials = totalPaid >= requiredDeposit;

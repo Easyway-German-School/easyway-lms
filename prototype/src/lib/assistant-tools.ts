@@ -42,7 +42,7 @@
 
 import { prisma } from "@/lib/prisma";
 import type { AdminContext, Capability } from "@/lib/admin-roles";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { goalFor } from "@/lib/germany-goals";
 import { LEVELS } from "@/lib/levels";
 import type { ToolSpec } from "@/lib/ollama";
@@ -222,7 +222,7 @@ export async function loadStudents(filters: Filters, admin: AdminContext): Promi
       // may not see them and discarding the field afterwards is one refactor
       // away from a leak.
       ...(canSeeMoney
-        ? { payments: { where: { status: "completed" }, select: { amount: true } } }
+        ? { payments: { where: receivedPaymentFilter(), select: { amount: true } } }
         : {}),
       ...(canSeeAttendance
         ? {
@@ -559,7 +559,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       const collectedThisMonth = await prisma.payment
         .aggregate({
           _sum: { amount: true },
-          where: { status: "completed", createdAt: { gte: monthStart } },
+          where: { ...receivedPaymentFilter(), createdAt: { gte: monthStart } },
         })
         .then((r) => r._sum.amount ?? 0);
 

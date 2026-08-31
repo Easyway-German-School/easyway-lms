@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 
 /**
  * The one question every gated page asks: may this student see class content yet?
@@ -33,7 +33,7 @@ export async function GET() {
       // would compute an Abuja student's gate at the cheaper Lagos price.
       branch: { select: { name: true } },
       payments: {
-        where: { status: "completed" },
+        where: receivedPaymentFilter(),
         select: { amount: true },
       },
     },

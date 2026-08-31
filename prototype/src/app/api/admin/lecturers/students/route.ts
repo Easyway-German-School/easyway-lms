@@ -8,7 +8,7 @@ import {
   readAssignment,
   studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment } from "@/lib/payment";
 import { setStudentTutor } from "@/lib/tutor-pairing";
 
 /**
@@ -82,7 +82,7 @@ type RawStudent = {
 
 function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
   const totalPaid = student.payments
-    .filter((payment) => payment.status === "completed")
+    .filter((payment) => isReceivedPayment(payment.status))
     .reduce((sum, payment) => sum + payment.amount, 0);
 
   const feeLookup = {

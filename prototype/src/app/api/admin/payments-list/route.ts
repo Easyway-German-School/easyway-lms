@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
+import { isValidPaymentStatus, PAYMENT_STATUSES } from "@/lib/payment";
 
 export async function GET(request: Request) {
   const gate = await requireCapability("payments");
@@ -105,6 +106,13 @@ export async function PATCH(request: Request) {
   const status = typeof body.status === "string" ? body.status : undefined;
 
   if (!paymentId) return NextResponse.json({ error: "Payment ID is required" }, { status: 400 });
+
+  if (status !== undefined && !isValidPaymentStatus(status)) {
+    return NextResponse.json(
+      { error: `status must be one of: ${PAYMENT_STATUSES.join(", ")}` },
+      { status: 400 },
+    );
+  }
 
   try {
     const payment = await prisma.payment.findUnique({ where: { id: paymentId } });

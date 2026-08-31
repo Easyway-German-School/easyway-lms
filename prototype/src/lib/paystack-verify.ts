@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { classifyPaymentTransaction } from "@/lib/payment";
+import { classifyPaymentTransaction, isReceivedPayment } from "@/lib/payment";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { safeJson } from "@/lib/safe-json";
 
@@ -61,6 +61,11 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     paymentType,
   });
   const effectivePaymentType = paymentClassification.paymentType;
+  // A 60% deposit is real money that has cleared, but the account is not
+  // settled — it lands as `partial` so the ledger stays honest about the
+  // outstanding balance. `isReceivedPayment` counts `partial` everywhere a
+  // paid total is summed, so access / certificates / finance are unaffected.
+  const settledStatus = effectivePaymentType === "deposit" ? "partial" : "completed";
 
   if (!studentId || !reference || paymentAmount <= 0) {
     console.error("Paystack persist skipped: invalid metadata", { studentId, reference, paymentAmount, metadata });
@@ -73,14 +78,15 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
   });
 
   if (existingPayment) {
-    if (existingPayment.status === "completed") {
+    // Money already recorded (full, or a deposit that landed as `partial`).
+    if (isReceivedPayment(existingPayment.status)) {
       return;
     }
 
     await prisma.payment.update({
       where: { id: existingPayment.id },
       data: {
-        status: "completed",
+        status: settledStatus,
         amount: paymentAmount,
         currency,
         method: "paystack",
@@ -134,7 +140,7 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
       invoiceId: invoice.id,
       amount: paymentAmount,
       currency,
-      status: "completed",
+      status: settledStatus,
       method: "paystack",
       description: getPaymentDescription(effectivePaymentType, pathwayName),
       stripeSessionId: reference,

@@ -83,19 +83,6 @@ function PaymentsLedger() {
     }
   }
 
-  async function loadPayments() {
-    try {
-      const res = await fetch("/api/admin/payments");
-      if (!res.ok) throw new Error("Unable to load payments");
-      const data = await res.json();
-      setPayments(data.payments ?? []);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function loadStudents() {
     try {
       const res = await fetch("/api/admin/students");
@@ -169,13 +156,13 @@ function PaymentsLedger() {
 
       setStudentId("");
       setAmount(0);
-      setCurrency("usd");
-      setMethod("card");
+      setCurrency("ngn");
+      setMethod("bank_transfer");
       setDescription("");
       setStatus("pending");
       setShowForm(false);
       setLoading(true);
-      await loadPayments();
+      await loadPaymentsList();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Unable to create payment");
     } finally {
@@ -222,6 +209,7 @@ function PaymentsLedger() {
             >
               <option value="">All statuses</option>
               <option value="completed">Completed</option>
+              <option value="partial">Partial (60% deposit)</option>
               <option value="pending">Pending</option>
               <option value="failed">Failed</option>
               <option value="not_paid">Not paid</option>
@@ -328,8 +316,9 @@ function PaymentsLedger() {
                   onChange={(event) => setStatus(event.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="pending">Pending</option>
-                  <option value="completed">Completed</option>
+                  <option value="pending">Pending — money not in yet</option>
+                  <option value="partial">Partial — 60% deposit cleared, balance owed</option>
+                  <option value="completed">Completed — account settled</option>
                 </select>
               </label>
             </div>
@@ -396,10 +385,11 @@ function PaymentsLedger() {
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
                           payment.status === "completed" ? "bg-green-100 text-green-700" :
+                          payment.status === "partial" ? "bg-amber-100 text-amber-700" :
                           payment.status === "pending" ? "bg-yellow-100 text-yellow-700" :
                           payment.status === "failed" ? "bg-red-100 text-red-700" : "bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
                         }`}>
-                          {payment.status}
+                          {payment.status === "partial" ? "partial (60%)" : payment.status}
                         </span>
                       </td>
                       <td className="px-4 py-3">{payment.description ?? "—"}</td>
@@ -413,6 +403,15 @@ function PaymentsLedger() {
                             Record payment
                           </button>
                         ) : null}
+                        {payment.status !== "partial" && payment.status !== "completed" && payment.status !== "not_paid" && (
+                          <button
+                            className="rounded-lg border border-amber-500 text-amber-600 px-2 py-1 text-xs"
+                            onClick={() => handleStatusUpdate(payment.id, "partial")}
+                            title="Deposit cleared — unlocks classes, balance still owed"
+                          >
+                            Mark 60%
+                          </button>
+                        )}
                         {payment.status !== "completed" && payment.status !== "not_paid" && (
                           <button
                             className="rounded-lg border border-green-500 text-green-600 px-2 py-1 text-xs"
@@ -421,7 +420,7 @@ function PaymentsLedger() {
                             Complete
                           </button>
                         )}
-                        {payment.status !== "failed" && (
+                        {payment.status !== "failed" && payment.status !== "not_paid" && (
                           <button
                             className="rounded-lg border border-red-500 text-red-600 px-2 py-1 text-xs"
                             onClick={() => handleStatusUpdate(payment.id, "failed")}

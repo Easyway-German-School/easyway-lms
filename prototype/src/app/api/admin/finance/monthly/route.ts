@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { receivedPaymentFilter } from "@/lib/payment";
 import { requireCapability } from "@/lib/admin-roles";
 
 function startOfMonth(dt: Date) {
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
 
   for (const m of months) {
     const agg = await prisma.payment.aggregate({
-      where: { status: "completed", createdAt: { gte: m.start, lte: m.end } },
+      where: { ...receivedPaymentFilter(), createdAt: { gte: m.start, lte: m.end } },
       _sum: { amount: true },
     });
     results.push({ label: m.label, revenue: agg._sum.amount || 0 });

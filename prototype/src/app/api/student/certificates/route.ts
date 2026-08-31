@@ -8,7 +8,7 @@ import {
   issueCertificateForStudent,
   toCertificateView,
 } from "@/lib/certificates";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 import { parseCertificateTemplate } from "@/lib/certificate-template";
 
 /**
@@ -45,7 +45,7 @@ export async function GET() {
       // placeholder name would defeat the entire point of showing it.
       user: { select: { name: true } },
       tutor: { select: { user: { select: { name: true } } } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
 

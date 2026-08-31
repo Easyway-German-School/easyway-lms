@@ -7,6 +7,7 @@ import {
   DEPOSIT_RATE,
   isLevelSellable,
   PRIVATE_CLASS_UPGRADE_PRICE,
+  receivedPaymentFilter,
   REGISTRATION_FEE,
   requiredDepositFor,
   tuitionFeeFor,
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
         levelCompletedFor: true,
         levelCompletedAt: true,
         branch: { select: { name: true } },
-        payments: { where: { status: "completed" }, select: { amount: true } },
+        payments: { where: receivedPaymentFilter(), select: { amount: true } },
       },
     });
 

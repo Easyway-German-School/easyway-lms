@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSpaceScope } from "@/lib/community-spaces";
 import { createMatch, turnsAwaiting } from "@/lib/satzkette-server";
 import { parseConstraint, type Constraint } from "@/lib/satzkette";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ async function canUseStudentGames(userId: string) {
       classType: true,
       level: true,
       branch: { select: { name: true } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
   if (!student) return false;

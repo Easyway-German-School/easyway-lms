@@ -12,7 +12,7 @@ import {
   canBrainAct,
   type BrainMessage,
 } from "@/lib/assistant-brain";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 
 export const dynamic = "force-dynamic";
 
@@ -143,7 +143,7 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
         classType: true,
         branch: { select: { name: true } },
         user: { select: { name: true, email: true } },
-        payments: { where: { status: "completed" }, select: { amount: true, createdAt: true } },
+        payments: { where: receivedPaymentFilter(), select: { amount: true, createdAt: true } },
       },
     });
 

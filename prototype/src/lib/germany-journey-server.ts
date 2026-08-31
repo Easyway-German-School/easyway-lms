@@ -14,7 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notify";
 import { LEVELS, nextLevelAfter } from "@/lib/levels";
 import { goalFor, isKnownGoal } from "@/lib/germany-goals";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, isReceivedPayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import {
   buildCountdown,
   buildJourney,
@@ -141,7 +141,7 @@ export async function loadJourney(
   const branchName = student.branch?.name ?? null;
 
   const totalPaid = student.payments
-    .filter((payment) => payment.status === "completed")
+    .filter((payment) => isReceivedPayment(payment.status))
     .reduce((sum, payment) => sum + payment.amount, 0);
 
   const feeLookup = { level: student.level, branch: branchName, classType: student.classType };
@@ -802,7 +802,7 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
 
     const branchName = student.branch?.name ?? null;
     const totalPaid = student.payments
-      .filter((payment) => payment.status === "completed")
+      .filter((payment) => isReceivedPayment(payment.status))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const feeLookup = { level: student.level, branch: branchName, classType: student.classType };
     const tuitionFee = tuitionFeeFor(feeLookup);

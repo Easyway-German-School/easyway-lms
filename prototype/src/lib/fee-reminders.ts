@@ -17,6 +17,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { feeReminderEmailTemplate } from "@/lib/email-templates";
+import { receivedPaymentFilter } from "@/lib/payment";
 
 export type FeeReminderResult = {
   sentCount: number;
@@ -46,7 +47,7 @@ export async function sendDueFeeReminders(options: {
     },
     include: {
       student: { include: { user: true } },
-      payments: { where: { status: "completed" } },
+      payments: { where: receivedPaymentFilter() },
     },
   });
 

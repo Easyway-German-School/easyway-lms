@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { KIND, notify } from "@/lib/notify";
 
 /**
@@ -78,7 +78,7 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
       createdAt: true,
       branch: { select: { name: true } },
       user: { select: { id: true, name: true } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
 

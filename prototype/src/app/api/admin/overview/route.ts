@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { receivedPaymentFilter } from "@/lib/payment";
 import { requireAdmin } from "@/lib/admin-roles";
 import { activeTransport } from "@/lib/mailer";
 import {
@@ -65,7 +66,7 @@ export async function GET() {
         createdAt: true,
         branch: { select: { id: true, name: true } },
         user: { select: { name: true, email: true } },
-        payments: { where: { status: "completed" }, select: { amount: true } },
+        payments: { where: receivedPaymentFilter(), select: { amount: true } },
         // Churn-risk inputs — see lib/student-risk.ts.
         notStartedCount: true,
         attendances: { where: { date: { gte: riskWindowStart } }, select: { present: true, status: true } },
@@ -93,7 +94,7 @@ export async function GET() {
       select: { id: true, name: true, enabled: true, status: true, lastSyncAt: true, lastError: true, itemsSynced: true },
     }).catch(() => []),
     prisma.payment.findMany({
-      where: { status: "completed", createdAt: { gte: sixMonthsAgo } },
+      where: { ...receivedPaymentFilter(), createdAt: { gte: sixMonthsAgo } },
       select: {
         amount: true,
         createdAt: true,

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isReceivedPayment, receivedPaymentFilter } from "@/lib/payment";
 import { requireCapability } from "@/lib/admin-roles";
 import { FINANCE_STUDENT_SELECT, computeAll, summariseReceivables } from "@/lib/finance/receivables";
 
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
     prisma.invoice.aggregate({ _sum: { totalAmount: true }, _count: { id: true } }),
     prisma.invoice.count({ where: { status: { in: ["draft", "partial", "open", "unpaid"] } } }),
     prisma.payment.findMany({
-      where: { status: "completed" },
+      where: receivedPaymentFilter(),
       orderBy: { createdAt: "desc" },
       take: 12,
       select: {
@@ -74,7 +75,7 @@ export async function GET(request: Request) {
 
   /* ---- Cash actually received ------------------------------------------ */
 
-  const completed = payments.filter((payment) => payment.status === "completed");
+  const completed = payments.filter((payment) => isReceivedPayment(payment.status));
 
   const trend = new Map<string, { key: string; label: string; amount: number; count: number }>();
   for (let index = MONTHS_OF_TREND - 1; index >= 0; index -= 1) {

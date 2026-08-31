@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { isLevelSellable, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { isLevelSellable, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 import {
   deriveFullPaymentOffer,
   isSocialProofPublishable,
@@ -38,7 +38,7 @@ export async function GET() {
       createdAt: true,
       branch: { select: { name: true } },
       payments: {
-        where: { status: "completed" },
+        where: receivedPaymentFilter(),
         orderBy: { createdAt: "asc" },
         select: { amount: true, createdAt: true },
       },
@@ -100,7 +100,7 @@ async function branchFullPaymentRate(branchId: string | null): Promise<BranchFul
     select: {
       level: true,
       branch: { select: { name: true } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
 

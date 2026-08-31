@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment } from "@/lib/payment";
 import { isPlayableVideo, toPlayableUrl, type LibraryVideo, type VideoKind } from "@/lib/video-library";
 import { isEmbeddedVideo, needsIframe, parseEmbed } from "@/lib/media-embed";
 import { reconcileRecordingsSoon } from "@/lib/class-recorder";
@@ -50,7 +50,7 @@ export async function GET() {
 
     const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const totalPaid = student.payments
-      .filter((payment) => payment.status === "completed")
+      .filter((payment) => isReceivedPayment(payment.status))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const access = deriveStudentAccess({
       totalPaid,

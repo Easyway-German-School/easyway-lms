@@ -1,6 +1,49 @@
 export type PaymentStatus = "Pending" | "Partial" | "Completed";
 
 /**
+ * `Payment.status` is a per-TRANSACTION lifecycle field, distinct from the
+ * per-STUDENT aggregate that `derivePaymentStatus` returns (capitalised
+ * `PaymentStatus` above).
+ *
+ *   pending    recorded but the money is not in yet
+ *   partial    a cleared DEPOSIT — the 60% the school enrols on. The cash is
+ *              real and counts towards everything, but the student still owes
+ *              the balance, so the ledger keeps it visually distinct from a
+ *              fully-settled account.
+ *   completed  a cleared payment that settles the account (full fee, or a
+ *              registration fee, or the balance after a deposit)
+ *   failed     the charge did not go through
+ *
+ * `partial` and `completed` are the two statuses that mean "money received".
+ * Every sum of what a student has paid must count BOTH — see
+ * `receivedPaymentFilter` / `isReceivedPayment`, which are the single source
+ * of truth for that set.
+ */
+export const PAYMENT_STATUSES = ["pending", "partial", "completed", "failed"] as const;
+export type TransactionStatus = (typeof PAYMENT_STATUSES)[number];
+
+export const RECEIVED_PAYMENT_STATUSES: string[] = ["completed", "partial"];
+
+/**
+ * Prisma `where` fragment: payments that count towards a student's paid total.
+ * A getter, so every call site receives a fresh plain object — a shared
+ * `as const` literal is a readonly tuple that Prisma's `in` type rejects, and a
+ * shared mutable singleton risks being spread into and mutated.
+ */
+export function receivedPaymentFilter() {
+  return { status: { in: [...RECEIVED_PAYMENT_STATUSES] } };
+}
+
+/** In-memory equivalent of `receivedPaymentFilter`, for arrays already loaded. */
+export function isReceivedPayment(status?: string | null): boolean {
+  return RECEIVED_PAYMENT_STATUSES.includes(String(status ?? ""));
+}
+
+export function isValidPaymentStatus(status: unknown): status is TransactionStatus {
+  return typeof status === "string" && (PAYMENT_STATUSES as readonly string[]).includes(status);
+}
+
+/**
  * Tuition pricing.
  *
  * Two things decide a fee: the level and the BRANCH. Abuja charges more than

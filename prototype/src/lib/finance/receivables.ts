@@ -1,4 +1,10 @@
-import { DEPOSIT_RATE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import {
+  DEPOSIT_RATE,
+  isReceivedPayment,
+  RECEIVED_PAYMENT_STATUSES,
+  requiredDepositFor,
+  tuitionFeeFor,
+} from "@/lib/payment";
 
 /**
  * ONE DEFINITION OF WHAT A STUDENT OWES.
@@ -102,7 +108,7 @@ export const FINANCE_STUDENT_SELECT = {
   branch: { select: { id: true, name: true } },
   user: { select: { name: true, email: true } },
   payments: {
-    where: { status: "completed" },
+    where: { status: { in: RECEIVED_PAYMENT_STATUSES } },
     select: { amount: true, createdAt: true, method: true },
   },
 } as const;
@@ -164,14 +170,15 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
 
   /**
    * Defensive filter on `status`. `FINANCE_STUDENT_SELECT` already narrows to
-   * completed payments, but a caller passing its own shape must not be able to
-   * count a pending or failed transaction as money in the bank — that is the
-   * difference between an accurate collection rate and an optimistic one.
+   * received payments (completed + partial deposits), but a caller passing its
+   * own shape must not be able to count a pending or failed transaction as
+   * money in the bank — that is the difference between an accurate collection
+   * rate and an optimistic one.
    */
-  const completed = student.payments.filter(
-    (payment) => payment.status == null || payment.status === "completed",
+  const received = student.payments.filter(
+    (payment) => payment.status == null || isReceivedPayment(payment.status),
   );
-  const paid = completed.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+  const paid = received.reduce((sum, payment) => sum + (payment.amount || 0), 0);
 
   const fullPaid = paid >= tuitionFee;
   const depositPaid = paid >= requiredDeposit;
@@ -180,7 +187,7 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
 
   const daysEnrolled = Math.max(0, Math.floor((now.getTime() - student.createdAt.getTime()) / DAY_MS));
 
-  const lastPaymentAt = completed.reduce<Date | null>((latest, payment) => {
+  const lastPaymentAt = received.reduce<Date | null>((latest, payment) => {
     if (!payment.createdAt) return latest;
     return !latest || payment.createdAt > latest ? payment.createdAt : latest;
   }, null);
@@ -211,7 +218,7 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     behindOnTuition: !depositPaid && daysEnrolled >= BEHIND_TUITION_MIN_DAYS,
     agingBucket: agingBucketFor(daysEnrolled),
     lastPaymentAt: lastPaymentAt?.toISOString() ?? null,
-    paymentCount: completed.length,
+    paymentCount: received.length,
   };
 }
 

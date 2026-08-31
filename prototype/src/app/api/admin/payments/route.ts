@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
+import { isValidPaymentStatus, PAYMENT_STATUSES } from "@/lib/payment";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -34,6 +35,13 @@ export async function POST(request: Request) {
 
   if (!studentId || !amount || !method) {
     return NextResponse.json({ error: "studentId, amount, and method are required" }, { status: 400 });
+  }
+
+  if (!isValidPaymentStatus(status)) {
+    return NextResponse.json(
+      { error: `status must be one of: ${PAYMENT_STATUSES.join(", ")}` },
+      { status: 400 },
+    );
   }
 
   try {

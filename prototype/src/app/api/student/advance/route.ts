@@ -4,7 +4,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { monthsSinceBatchStart } from "@/lib/promotion";
 import { nextLevelAfter, SESSION_MONTHS, WEEKS_OF_TEACHING } from "@/lib/levels";
-import { isLevelSellable, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { isLevelSellable, requiredDepositFor, tuitionFeeFor, isReceivedPayment } from "@/lib/payment";
 import { ADVANCE_PERKS, perWeekCost, type LevelAdvanceOffer } from "@/lib/level-advance";
 import { buildCountdown } from "@/lib/germany-journey";
 import { KIND, notify } from "@/lib/notify";
@@ -71,7 +71,7 @@ export async function GET() {
     const eligible = student.levelCompletedFor === currentLevel && student.levelCompletedAt !== null;
 
     const totalPaid = student.payments
-      .filter((payment) => payment.status === "completed")
+      .filter((payment) => isReceivedPayment(payment.status))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const currentFee = tuitionFeeFor({ level: currentLevel, branch: branchName });
     const currentLevelOutstanding = Math.max(0, currentFee - totalPaid);

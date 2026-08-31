@@ -11,7 +11,7 @@ import {
   renderEmailBlocks,
   type EmailBlock,
 } from "@/lib/email-blocks";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 
 /**
  * An announcement from the office, to a selected audience.
@@ -133,7 +133,7 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
       // Needed for the fee: Abuja is priced above the other branches.
       branch: { select: { name: true } },
       user: { select: { id: true, name: true, email: true } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
 

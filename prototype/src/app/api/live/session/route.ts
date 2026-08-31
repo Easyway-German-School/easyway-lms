@@ -3,7 +3,7 @@ import { AccessToken } from "livekit-server-sdk";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAttendLive, deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment } from "@/lib/payment";
 import { isOnlineBranch, initialVideoQualityFor, readOnlineProfile } from "@/lib/online-branch";
 import { ensureRecordingStarted } from "@/lib/class-recorder";
 import { creditGate } from "@/lib/usage/guard";
@@ -176,7 +176,7 @@ export async function GET(request: Request) {
 
       const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
       const totalPaid = student.payments
-        .filter((payment) => payment.status === "completed")
+        .filter((payment) => isReceivedPayment(payment.status))
         .reduce((sum, payment) => sum + payment.amount, 0);
       const access = deriveStudentAccess({
         totalPaid,

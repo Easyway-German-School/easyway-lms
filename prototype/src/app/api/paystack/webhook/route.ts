@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
-import { classifyPaymentTransaction } from "@/lib/payment";
+import { classifyPaymentTransaction, isReceivedPayment } from "@/lib/payment";
 import { settleExamFee } from "@/lib/exam-payments";
 import { enrollIfPathwayExists } from "@/lib/paystack-verify";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
@@ -218,6 +218,11 @@ async function handlePOST(request: Request) {
       paymentType,
     });
     const effectivePaymentType = paymentClassification.paymentType;
+    // A 60% deposit clears as `partial`: real money in, account not yet
+    // settled. `isReceivedPayment` counts it wherever a paid total is summed,
+    // so the paywall / certificates / finance are unaffected — only the ledger
+    // label and the "still owes the balance" signal change.
+    const settledStatus = effectivePaymentType === "deposit" ? "partial" : "completed";
 
     // Only the student is required. Dropping the payment because no pathway id
     // came back would now discard most of them — `initialize` sends an empty
@@ -251,14 +256,17 @@ async function handlePOST(request: Request) {
       : null;
 
     if (existingPayment) {
-      if (existingPayment.status === "completed") {
+      // Already recorded as money received (a full payment, or a deposit that
+      // landed as `partial`) — nothing to do. A `pending` row still falls
+      // through to be settled below.
+      if (isReceivedPayment(existingPayment.status)) {
         return NextResponse.json({ received: true });
       }
 
       await prisma.payment.update({
         where: { id: existingPayment.id },
         data: {
-          status: "completed",
+          status: settledStatus,
           amount: paymentAmount,
           currency: "NGN",
           method: "paystack",
@@ -329,7 +337,7 @@ async function handlePOST(request: Request) {
         invoiceId: invoice.id,
         amount: paymentAmount,
         currency: "NGN",
-        status: "completed",
+        status: settledStatus,
         method: "paystack",
         description: getPaymentDescription(effectivePaymentType, pathwayName),
         stripeSessionId: paymentReference,

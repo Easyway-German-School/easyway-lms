@@ -93,7 +93,9 @@ async function handlePOST(request: NextRequest) {
             invoiceId: invoice.id,
             amount: paymentAmount,
             currency: (session.currency ?? "usd") as string,
-            status: "completed",
+            // A deposit clears as `partial` — real money in, balance still
+            // owed. Counted everywhere via `isReceivedPayment`.
+            status: paymentType === "deposit" ? "partial" : "completed",
             method: "card",
             description:
               paymentType === "deposit"

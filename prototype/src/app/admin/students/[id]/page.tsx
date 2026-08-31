@@ -915,12 +915,14 @@ export default function StudentDossierPage() {
                         className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
                           payment.status === "completed"
                             ? "bg-emerald-100 text-emerald-700"
-                            : payment.status === "pending"
-                              ? "bg-amber-100 text-amber-700"
-                              : "bg-red-100 text-red-700"
+                            : payment.status === "partial"
+                              ? "bg-amber-100 text-amber-800"
+                              : payment.status === "pending"
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-red-100 text-red-700"
                         }`}
                       >
-                        {payment.status}
+                        {payment.status === "partial" ? "partial (60%)" : payment.status}
                       </span>
                     </div>
                   ))}

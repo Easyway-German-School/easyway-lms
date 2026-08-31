@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolvePlayer } from "@/lib/live-quiz-views";
 import { assignTeam, gameByPin, joinableGameForStudent, normalisePin } from "@/lib/live-quiz";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +29,7 @@ export async function GET() {
       sessionSlot: true,
       classType: true,
       branch: { select: { name: true } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
   if (!student) return NextResponse.json({ game: null });
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
       level: true,
       classType: true,
       branch: { select: { name: true } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
   if (!student) return NextResponse.json({ error: "Student profile not found" }, { status: 404 });

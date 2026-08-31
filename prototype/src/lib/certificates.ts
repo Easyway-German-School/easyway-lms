@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { awardFor, hasPassed, weightedCourseworkAverage, type Award } from "@/lib/grading";
 import { SESSION_MONTHS } from "@/lib/levels";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { resolveBatchWindow } from "@/lib/batch";
 
 /**
@@ -186,7 +186,7 @@ export async function issueCertificateForStudent(
         orderBy: { createdAt: "desc" },
         select: { score: true, type: true },
       },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
 

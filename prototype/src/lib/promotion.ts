@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { resolveBatchAbsolute } from "@/lib/batch";
 import { nextLevelAfter, SESSION_MONTHS } from "@/lib/levels";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, isReceivedPayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 /**
  * Who has finished a level but is still sitting in it.
@@ -113,7 +113,7 @@ export async function findPromotionCandidates(opts: {
     if (monthsElapsed < SESSION_MONTHS) continue;
 
     const totalPaid = student.payments
-      .filter((p) => p.status === "completed")
+      .filter((p) => isReceivedPayment(p.status))
       .reduce((sum, p) => sum + p.amount, 0);
 
     // Abuja charges more for the same level, so the branch has to go in.

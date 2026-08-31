@@ -38,12 +38,13 @@ describe("computeStudentFinance", () => {
     expect(abuja.tuitionFee).toBe(180_000);
   });
 
-  it("counts only completed payments as money in the bank", () => {
+  it("counts completed and partial (deposit) payments as money in the bank", () => {
     const row = computeStudentFinance(
       student({
         id: "a",
         payments: [
-          { amount: 90_000, status: "completed" },
+          { amount: 40_000, status: "completed" },
+          { amount: 50_000, status: "partial" },
           { amount: 60_000, status: "pending" },
           { amount: 50_000, status: "failed" },
         ],
@@ -51,6 +52,7 @@ describe("computeStudentFinance", () => {
       NOW,
     );
 
+    // completed + partial count; pending and failed do not.
     expect(row.paid).toBe(90_000);
     expect(row.owed).toBe(60_000);
   });
