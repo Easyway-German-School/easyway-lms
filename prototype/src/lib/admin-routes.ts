@@ -29,6 +29,9 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   { prefix: "/admin/enquiries", capability: "students" },
   { prefix: "/admin/journey", capability: "students" },
   { prefix: "/admin/promotions", capability: "students" },
+  // A read-only roll-call of who has finished a batch / level. Same desk as
+  // the cohort console it links out to.
+  { prefix: "/admin/completions", capability: "students" },
 
   { prefix: "/admin/attendance", capability: "attendance" },
   { prefix: "/admin/schedule", capability: "classes" },

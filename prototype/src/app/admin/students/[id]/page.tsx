@@ -659,6 +659,12 @@ export default function StudentDossierPage() {
               <EyeIcon className="h-3.5 w-3.5" />
               Remote view
             </Link>
+            <Link
+              href={`/admin/students/${id}/sheet`}
+              className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-[var(--surface)]"
+            >
+              Result sheet
+            </Link>
             <button
               type="button"
               onClick={openEdit}

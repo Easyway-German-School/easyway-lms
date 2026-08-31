@@ -38,10 +38,25 @@ type Tutor = {
   students: Student[];
 };
 
+type ExamSitting = {
+  id: string;
+  name: string;
+  level: string | null;
+  examBody: string;
+  examDate: string;
+  tutor: string;
+  course: string | null;
+  resultsReleased: boolean;
+  graded: number;
+  passed: number;
+  average: number | null;
+};
+
 type Payload = {
   passMark: number;
   requiredTypes: string[];
   tutors: Tutor[];
+  examSittings: ExamSitting[];
   totals: { tutors: number; students: number; owed: number; unmarkedStudents: number };
 };
 
@@ -263,6 +278,67 @@ export default function AdminGradebookPage() {
                 </tbody>
               </table>
             </div>
+
+            {data.examSittings.length > 0 && (
+              <section className="space-y-2">
+                <h2 className="text-lg font-bold text-[var(--foreground)]">Exam sittings</h2>
+                <p className="text-sm text-[var(--muted)]">
+                  Formal sittings with marks entered. &ldquo;Released&rdquo; means the students can see
+                  their score — the tutor flips that on the{" "}
+                  <a className="underline" href="/lecturer/grades">grades</a> screen.
+                </p>
+                <div className="overflow-hidden rounded-2xl border border-[var(--border)]">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-[var(--surface-alt)] text-xs uppercase tracking-wide text-[var(--muted)]">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Sitting</th>
+                        <th className="px-3 py-3 font-semibold">Tutor</th>
+                        <th className="px-3 py-3 text-center font-semibold">Date</th>
+                        <th className="px-3 py-3 text-center font-semibold">Graded</th>
+                        <th className="px-3 py-3 text-center font-semibold">Passed</th>
+                        <th className="px-3 py-3 text-center font-semibold">Average</th>
+                        <th className="px-3 py-3 text-center font-semibold">Results</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.examSittings.map((sitting) => (
+                        <tr key={sitting.id} className="border-t border-[var(--border)]/60">
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-[var(--foreground)]">{sitting.name}</p>
+                            <p className="text-xs text-[var(--muted)]">
+                              {sitting.level ? `${sitting.level} · ` : ""}
+                              {sitting.course ?? sitting.examBody}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3 text-[var(--muted)]">{sitting.tutor}</td>
+                          <td className="px-3 py-3 text-center text-xs text-[var(--muted)]">
+                            {sitting.examDate.slice(0, 10)}
+                          </td>
+                          <td className="px-3 py-3 text-center tabular-nums">{sitting.graded}</td>
+                          <td className="px-3 py-3 text-center tabular-nums">
+                            {sitting.passed}/{sitting.graded}
+                          </td>
+                          <td className="px-3 py-3 text-center font-bold tabular-nums">
+                            {sitting.average ?? "—"}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span
+                              className={`rounded-full px-2 py-1 text-xs font-bold ${
+                                sitting.resultsReleased
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "bg-amber-100 text-amber-800"
+                              }`}
+                            >
+                              {sitting.resultsReleased ? "Released" : "Held"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
           </>
         )}
       </div>

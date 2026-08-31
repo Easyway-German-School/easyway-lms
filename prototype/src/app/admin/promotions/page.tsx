@@ -32,6 +32,9 @@ type Candidate = {
   totalPaid: number;
   tuitionFee: number;
   atTopOfLadder: boolean;
+  courseworkAverage: number | null;
+  courseworkGrade: string | null;
+  belowPassMark: boolean;
 };
 
 type Branch = { id: string; name: string };
@@ -45,7 +48,8 @@ const PAYMENT_TONE: Record<string, string> = {
 function toCsv(rows: Candidate[]): string {
   const header = [
     "Student ID", "Name", "Email", "Branch", "Current level", "Next level",
-    "Session", "Batch", "Months elapsed", "Months overdue", "Payment", "Paid", "Tuition",
+    "Session", "Batch", "Months elapsed", "Months overdue", "Coursework avg", "Below pass mark",
+    "Payment", "Paid", "Tuition",
   ];
 
   // Quote every field and double any inner quote — names and branches can
@@ -54,7 +58,9 @@ function toCsv(rows: Candidate[]): string {
 
   const lines = rows.map((r) => [
     r.studentCode, r.name, r.email, r.branchName, r.level, r.nextLevel ?? "top of ladder",
-    r.sessionSlot, r.batch, r.monthsElapsed, r.monthsOverdue, r.paymentStatus, r.totalPaid, r.tuitionFee,
+    r.sessionSlot, r.batch, r.monthsElapsed, r.monthsOverdue,
+    r.courseworkAverage ?? "", r.belowPassMark ? "yes" : "no",
+    r.paymentStatus, r.totalPaid, r.tuitionFee,
   ].map(escape).join(","));
 
   return [header.map(escape).join(","), ...lines].join("\n");
@@ -223,7 +229,9 @@ export default function AdminPromotionsPage() {
                   <th className="px-4 py-3 font-semibold">Move</th>
                   <th className="px-4 py-3 font-semibold">Session</th>
                   <th className="px-4 py-3 font-semibold">Overdue</th>
+                  <th className="px-4 py-3 font-semibold">Coursework</th>
                   <th className="px-4 py-3 font-semibold">Payment</th>
+                  <th className="px-4 py-3 font-semibold">Sheet</th>
                 </tr>
               </thead>
               <tbody>
@@ -260,9 +268,30 @@ export default function AdminPromotionsPage() {
                         : `${c.monthsOverdue} month${c.monthsOverdue === 1 ? "" : "s"}`}
                     </td>
                     <td className="px-4 py-3">
+                      {c.courseworkAverage === null ? (
+                        <span className="text-xs text-[var(--muted)]">no marks</span>
+                      ) : c.belowPassMark ? (
+                        <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
+                          {c.courseworkAverage} · below pass
+                        </span>
+                      ) : (
+                        <span className="text-xs font-semibold text-[var(--foreground)]">
+                          {c.courseworkAverage} ({c.courseworkGrade})
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       <span className={`rounded-full px-2 py-1 text-xs font-semibold ${PAYMENT_TONE[c.paymentStatus]}`}>
                         {c.paymentStatus}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <a
+                        href={`/admin/students/${c.studentId}/sheet`}
+                        className="text-xs font-semibold text-[var(--accent)] underline"
+                      >
+                        Open
+                      </a>
                     </td>
                   </tr>
                 ))}

@@ -260,14 +260,24 @@ export default function ResultsPage() {
     <StudentShell>
       {/* min-w-0 so a long exam name can never widen the page past the screen. */}
       <div className="min-w-0 px-3 py-6 sm:px-6 sm:py-8">
-        <div className="mb-5 sm:mb-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--accent)] sm:text-sm sm:tracking-[0.24em]">
-            Your progress
-          </p>
-          <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Grades and results</h1>
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            Every score from your classes and exams, and what they say about where to put your time.
-          </p>
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3 sm:mb-6">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--accent)] sm:text-sm sm:tracking-[0.24em]">
+              Your progress
+            </p>
+            <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Grades and results</h1>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              Every score from your classes and exams, and what they say about where to put your time.
+            </p>
+          </div>
+          {data && data.totalResults > 0 ? (
+            <a
+              href="/results/sheet"
+              className="shrink-0 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] hover:bg-[var(--surface-alt)]"
+            >
+              Download result sheet
+            </a>
+          ) : null}
         </div>
 
         {loading ? (

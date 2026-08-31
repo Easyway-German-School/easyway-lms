@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import {
   letterFor,
+  hasPassed,
   PASS_MARK,
   REQUIRED_ASSESSMENT_TYPES,
   weightedCourseworkAverage,
@@ -116,10 +117,49 @@ export async function GET() {
     .filter((tutor) => tutor.studentCount > 0)
     .sort((a, b) => b.owedTotal - a.owedTotal || a.name.localeCompare(b.name));
 
+  // Exam sittings — the formal side of the gradebook. The tutor keys a whole
+  // sitting in and releases it in one go, so "are the results in, and are they
+  // released" is a per-sitting question the office had no screen for.
+  const examRows = await prisma.exam.findMany({
+    where: { grades: { some: {} } },
+    orderBy: { examDate: "desc" },
+    select: {
+      id: true,
+      name: true,
+      level: true,
+      examDate: true,
+      examBody: true,
+      resultsReleased: true,
+      lecturer: { select: { user: { select: { name: true, email: true } } } },
+      course: { select: { title: true } },
+      grades: { select: { score: true } },
+    },
+  });
+
+  const examSittings = examRows.map((exam) => {
+    const scores = exam.grades.map((grade) => grade.score);
+    return {
+      id: exam.id,
+      name: exam.name,
+      level: exam.level,
+      examBody: exam.examBody,
+      examDate: exam.examDate.toISOString(),
+      tutor: exam.lecturer?.user?.name || exam.lecturer?.user?.email || "Unassigned",
+      course: exam.course?.title ?? null,
+      resultsReleased: exam.resultsReleased,
+      graded: scores.length,
+      passed: scores.filter((score) => hasPassed(score)).length,
+      average: scores.length
+        ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length)
+        : null,
+    };
+  });
+
   return NextResponse.json({
     passMark: PASS_MARK,
     requiredTypes: REQUIRED_ASSESSMENT_TYPES,
     tutors,
+    examSittings,
     totals: {
       tutors: tutors.length,
       students: tutors.reduce((sum, tutor) => sum + tutor.studentCount, 0),

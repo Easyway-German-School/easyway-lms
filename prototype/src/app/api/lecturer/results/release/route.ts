@@ -29,7 +29,13 @@ export async function POST(request: Request) {
 
   const exam = await prisma.exam.findFirst({
     where: { id: examId, ...(role === "lecturer" ? { lecturer: { userId: session.user.id } } : {}) },
-    select: { id: true, name: true, resultsReleased: true },
+    select: {
+      id: true,
+      name: true,
+      level: true,
+      resultsReleased: true,
+      lecturer: { select: { user: { select: { name: true } } } },
+    },
   });
   if (!exam) return NextResponse.json({ error: "Exam not found" }, { status: 404 });
 
@@ -58,6 +64,20 @@ export async function POST(request: Request) {
         push: true,
       }).catch((error) => console.error("Result release notification failed", error));
     }
+
+    // The office watches the gradebook, not the student inbox — tell it too, so
+    // "results are in for this sitting" is a fact somebody at a desk can see.
+    const tutorName = exam.lecturer?.user?.name;
+    await notify({
+      to: { audience: "admin", capability: "exams" },
+      kind: KIND.resultPublished,
+      severity: "info",
+      title: `${exam.name} results released`,
+      message:
+        `${tutorName ? `${tutorName} released` : "Released"} ${exam.name}` +
+        `${exam.level ? ` (${exam.level})` : ""} — ${studentIds.length} student${studentIds.length === 1 ? "" : "s"} graded.`,
+      link: "/admin/gradebook",
+    }).catch((error) => console.error("Result release admin notification failed", error));
   }
 
   return NextResponse.json({ examId: updated.id, resultsReleased: updated.resultsReleased });
