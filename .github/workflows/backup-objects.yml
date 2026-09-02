@@ -83,7 +83,7 @@ jobs:
             --stats-one-line \
             --stats 30s \
             --log-level INFO \
-            --json-log 2> mirror.log || { cat mirror.log; exit 1; }
+            --use-json-log 2> mirror.log || { cat mirror.log; exit 1; }
 
           BYTES="$(rclone size "DST:${{ secrets.BACKUP_OBJECTS_BUCKET }}/current" --json | grep -o '"bytes":[0-9]*' | cut -d: -f2)"
           COUNT="$(rclone size "DST:${{ secrets.BACKUP_OBJECTS_BUCKET }}/current" --json | grep -o '"count":[0-9]*' | cut -d: -f2)"

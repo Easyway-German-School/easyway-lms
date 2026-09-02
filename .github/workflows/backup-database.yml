@@ -136,10 +136,29 @@ jobs:
             | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc > /dev/null
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends postgresql-client-17 restic
+          # Update ONLY the pgdg list and fail loudly if that repo is
+          # unreachable — the old version let an apt-get update warning slide
+          # and silently fell back to the runner's preinstalled client 16,
+          # which then refused Neon (now on PG 18) with a version mismatch.
+          sudo apt-get update -qq \
+            -o Dir::Etc::sourcelist="sources.list.d/pgdg.list" \
+            -o Dir::Etc::sourceparts="-" \
+            -o APT::Get::List-Cleanup="0"
+          # Neon runs Postgres 18. pg_dump refuses to dump a server newer than
+          # itself, so track Neon's major here. On the next Neon major bump this
+          # number changes and the assertion below is what makes that obvious.
+          sudo apt-get install -y --no-install-recommends postgresql-client-18 restic
           pg_dump --version
           restic version
+
+          # pg_wrapper picks the highest installed client, but if -18 somehow
+          # did not land we must not proceed to produce a dump that silently
+          # disagrees with itself.
+          PGDUMP_MAJOR="$(pg_dump --version | grep -oE '[0-9]+' | head -1)"
+          if [ "${PGDUMP_MAJOR:-0}" -lt 18 ]; then
+            echo "::error::pg_dump is v${PGDUMP_MAJOR}, need >= 18 to dump this Neon server. The PGDG install did not take."
+            exit 1
+          fi
 
       - name: Dump
         id: dump
