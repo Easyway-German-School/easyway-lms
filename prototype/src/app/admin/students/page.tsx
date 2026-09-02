@@ -62,34 +62,48 @@ const admissionLabelMap: Record<string, string> = {
  *
  * The point is that somebody arriving from a dashboard tile can see at a glance
  * which rows the number was about, without reading a single value — so the
- * treatment is a left bar, a tinted background and bold text together rather
- * than colour alone. Colour alone excludes anyone who cannot distinguish it,
- * and this is a list people act on: ringing a student, chasing a fee.
+ * treatment is a left bar, a faint tinted background and a weight change
+ * together rather than colour alone. Colour alone excludes anyone who cannot
+ * distinguish it, and this is a list people act on: ringing a student, chasing
+ * a fee.
+ *
+ * Every value is a theme token, not a raw Tailwind palette class. The old
+ * `bg-red-50` / `text-red-700` set was built for a white page and turned into a
+ * flat pink slab with shouting text on the dark themes. `--danger-soft` and
+ * friends already carry a low alpha tuned per theme, so the tint stays a
+ * whisper on any background.
  */
-const FOCUS_TONE: Record<string, { row: string; text: string; chip: string; bar: string }> = {
+const FOCUS_TONE: Record<
+  string,
+  { row: string; text: string; bar: string; accent: string; soft: string }
+> = {
   danger: {
-    row: "bg-red-50/80",
-    text: "text-red-700",
-    chip: "bg-red-100 text-red-700 border-red-300",
-    bar: "before:bg-red-500",
+    row: "bg-[var(--danger-soft)]",
+    text: "text-[var(--danger)]",
+    bar: "before:bg-[var(--danger)]",
+    accent: "var(--danger)",
+    soft: "var(--danger-soft)",
   },
   warn: {
-    row: "bg-amber-50/80",
-    text: "text-amber-800",
-    chip: "bg-amber-100 text-amber-800 border-amber-300",
-    bar: "before:bg-amber-500",
+    row: "bg-[var(--warning-soft)]",
+    text: "text-[var(--warning)]",
+    bar: "before:bg-[var(--warning)]",
+    accent: "var(--warning)",
+    soft: "var(--warning-soft)",
   },
   good: {
-    row: "bg-emerald-50/70",
-    text: "text-emerald-700",
-    chip: "bg-emerald-100 text-emerald-700 border-emerald-300",
-    bar: "before:bg-emerald-500",
+    row: "bg-[var(--success-soft)]",
+    text: "text-[var(--success)]",
+    bar: "before:bg-[var(--success)]",
+    accent: "var(--success)",
+    soft: "var(--success-soft)",
   },
   info: {
-    row: "bg-sky-50/70",
-    text: "text-sky-700",
-    chip: "bg-sky-100 text-sky-700 border-sky-300",
-    bar: "before:bg-sky-500",
+    row: "bg-[var(--accent-soft)]",
+    text: "text-[var(--accent-ink)]",
+    bar: "before:bg-[var(--accent-strong)]",
+    accent: "var(--accent-strong)",
+    soft: "var(--accent-soft)",
   },
 };
 
@@ -709,18 +723,34 @@ function StudentsRoster() {
           and offers one click out of it.
         */}
         {focusMeta && (
-          <div className={`flex flex-wrap items-center justify-between gap-4 rounded-3xl border p-5 ${tone.chip}`}>
-            <div className="min-w-0">
-              <p className="text-sm font-black uppercase tracking-[0.14em]">{focusMeta.label}</p>
-              <p className="mt-1 text-sm opacity-90">
-                {focusMeta.hint}. Showing {totalCount} {totalCount === 1 ? "student" : "students"} of the whole roster,
-                highlighted below.
-              </p>
+          <div
+            className="flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-4 pl-5 pr-4 shadow-sm"
+            style={{ borderLeft: `3px solid ${tone.accent}` }}
+          >
+            <div className="flex min-w-0 items-start gap-3">
+              <span
+                aria-hidden="true"
+                className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                style={{ background: tone.soft, color: tone.accent }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 5h16l-6.4 8v5.5L10.4 21v-8L4 5Z" />
+                </svg>
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: tone.accent }}>
+                  {focusMeta.label}
+                </p>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  {focusMeta.hint}. Showing {totalCount} {totalCount === 1 ? "student" : "students"} of the whole roster,
+                  highlighted below.
+                </p>
+              </div>
             </div>
             <button
               type="button"
               onClick={clearFocus}
-              className="shrink-0 rounded-full border border-current px-4 py-2 text-sm font-bold transition hover:bg-[var(--surface-soft)]"
+              className="shrink-0 rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-soft)]"
             >
               Clear focus
             </button>
@@ -1278,7 +1308,7 @@ function StudentsRoster() {
                     key={student.id}
                     className={
                       highlighted
-                        ? `relative ${tone.row} before:absolute before:inset-y-0 before:left-0 before:w-1 ${tone.bar}`
+                        ? `relative ${tone.row} before:absolute before:inset-y-0 before:left-0 before:w-[3px] ${tone.bar}`
                         : undefined
                     }
                   >
@@ -1291,7 +1321,7 @@ function StudentsRoster() {
                       <Link
                         href={`/admin/students/${student.id}`}
                         className={`underline-offset-4 hover:underline ${
-                          highlighted ? `font-black ${tone.text}` : "font-semibold hover:text-[var(--accent)]"
+                          highlighted ? "font-bold" : "font-semibold hover:text-[var(--accent)]"
                         }`}
                       >
                         {student.user.name}
@@ -1306,7 +1336,7 @@ function StudentsRoster() {
                         </span>
                       ) : null}
                       {highlighted && money && (
-                        <p className={`mt-0.5 text-xs font-bold ${tone.text}`}>
+                        <p className={`mt-0.5 text-xs font-semibold ${tone.text}`}>
                           {money.daysEnrolled}d enrolled
                           {canSeeMoney && money.owedOnDeposit != null && money.owedOnDeposit > 0
                             ? ` · ₦${money.owedOnDeposit.toLocaleString("en-NG")} short of deposit`
