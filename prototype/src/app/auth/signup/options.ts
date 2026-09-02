@@ -108,6 +108,7 @@ export const nigerianStates = [
   "Edo",
   "Ekiti",
   "Enugu",
+  "Federal Capital Territory (Abuja)",
   "Gombe",
   "Imo",
   "Jigawa",

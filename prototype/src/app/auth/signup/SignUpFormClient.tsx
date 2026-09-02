@@ -33,6 +33,21 @@ const branchGuidanceMap: Record<string, string> = {
 };
 
 /**
+ * The home state a campus branch sits in, used to PREFILL (not lock) the state
+ * field once a branch is chosen. Someone walking into the Abuja campus almost
+ * always lives in the FCT, and the old form dropped them at a "Select state"
+ * step with no Abuja option at all. They can still change it — an Abuja-campus
+ * student who lives in Nasarawa picks Nasarawa. The Online branch is absent on
+ * purpose: those students are anywhere.
+ * Keys match Branch.name; values must be entries in `nigerianStates`.
+ */
+const BRANCH_DEFAULT_STATE: Record<string, string> = {
+  Lagos: "Lagos",
+  Abuja: "Federal Capital Territory (Abuja)",
+  "Port Harcourt": "Rivers",
+};
+
+/**
  * Class times are quoted in Nigerian time because that is when the tutors
  * teach. Shown as a fixed WAT label rather than converted per student: a
  * timetable that silently reads differently for two classmates is worse than
@@ -116,11 +131,24 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   const stepCount = 4;
   const router = useRouter();
   const selectedBranch = branches.find((branch) => branch.id === branchId) || null;
+  // Once the student edits the state field by hand we stop prefilling it from
+  // the branch — their choice wins from then on.
+  const stateTouchedRef = useRef(false);
 
   // The one switch the whole form turns on. Everything below reads from it
   // rather than testing the branch name again, so an online student never sees
   // a campus question and a campus student never sees a bandwidth one.
   const isOnline = isOnlineBranch(selectedBranch);
+
+  // Prefill the state from the chosen campus branch — see BRANCH_DEFAULT_STATE.
+  // Only while the student has not touched the field, only inside Nigeria, and
+  // never for the Online branch.
+  useEffect(() => {
+    if (stateTouchedRef.current) return;
+    if (country !== "Nigeria" || isOnline) return;
+    const preset = selectedBranch ? BRANCH_DEFAULT_STATE[selectedBranch.name] : undefined;
+    if (preset) setStateField(preset);
+  }, [selectedBranch, country, isOnline]);
 
   /**
    * The three milestones, in the guide's voice.
@@ -822,14 +850,19 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 <div>
                   <label htmlFor="state" className="block text-sm font-semibold text-[var(--muted)]">{usesNigerianStates ? "State" : "State / region"}</label>
                   {usesNigerianStates ? (
-                    <select id="state" name="state" value={stateField} onChange={(e) => setStateField(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white">
+                    <select id="state" name="state" value={stateField} onChange={(e) => { stateTouchedRef.current = true; setStateField(e.target.value); }} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white">
                       <option value="">Select state</option>
+                      {/* A prefilled or legacy value that is not in the list still
+                          needs an option to sit on, or the select renders blank. */}
+                      {stateField && !nigerianStates.includes(stateField) ? (
+                        <option value={stateField}>{stateField}</option>
+                      ) : null}
                       {nigerianStates.map((state) => (
                         <option key={state} value={state}>{state}</option>
                       ))}
                     </select>
                   ) : (
-                    <input id="state" name="state" value={stateField} onChange={(e) => setStateField(e.target.value)} placeholder="e.g. Nordrhein-Westfalen" className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
+                    <input id="state" name="state" value={stateField} onChange={(e) => { stateTouchedRef.current = true; setStateField(e.target.value); }} placeholder="e.g. Nordrhein-Westfalen" className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
                   )}
                 </div>
                 <div>
@@ -843,6 +876,9 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                       // stale Nigerian state must not survive a move abroad.
                       setCountry(e.target.value);
                       setStateField("");
+                      // Re-enable branch prefill: whatever they had typed was
+                      // for the old country.
+                      stateTouchedRef.current = false;
                     }}
                     className="mt-1 w-full rounded-xl border px-3 py-2 bg-white"
                   >

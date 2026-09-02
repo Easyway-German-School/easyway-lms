@@ -15,6 +15,11 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
 
+// The "Reset roster" path soft-deletes every student in the tenant in chunks;
+// on Neon that is a few hundred round trips and comfortably outruns the default
+// serverless budget.
+export const maxDuration = 60;
+
 export async function GET(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
@@ -253,6 +258,9 @@ export async function GET(request: Request) {
     students: enriched,
     totalCount,
     canSeeMoney,
+    // The roster uses this to decide whether to offer "Reset roster" — the
+    // bulk wipe is super-admin only, and the server enforces that too.
+    adminRole: gate.admin.adminRole,
     // Echoed so the page can title and explain itself without keeping its own
     // copy of the wording — one edit to the preset changes both ends. Finance
     // and churn-risk presets share this one slot since a request only ever
@@ -429,7 +437,9 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    if (gate.session.user.tenantId && student.branch?.tenantId !== gate.session.user.tenantId) {
+    // Same ownership rule as GET/DELETE — a no-branch student is still ours if
+    // their user account or their own row carries the tenant.
+    if (!ownedByTenant(student, gate.session.user.tenantId ?? null)) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
@@ -530,11 +540,114 @@ export async function PATCH(request: Request) {
   }
 }
 
+/**
+ * Does this student belong to the acting admin's tenant?
+ *
+ * A student is owned by the tenant when ANY of their tenant anchors match — the
+ * student row's own `tenantId`, their branch's, or their user account's. The
+ * three can disagree: imported and SQLite-era students have no branch at all
+ * (`branch` is null), so a branch-only check — which this handler used to do —
+ * treated every one of them as foreign and 404'd. The GET query already reads
+ * them via the `user.tenantId` arm of its OR; delete has to see the same set.
+ */
+function ownedByTenant(
+  student: { tenantId?: string | null; branch?: { tenantId: string | null } | null; user?: { tenantId: string | null } | null },
+  tenantId: string | null | undefined,
+): boolean {
+  if (!tenantId) return true;
+  return (
+    student.tenantId === tenantId ||
+    student.branch?.tenantId === tenantId ||
+    student.user?.tenantId === tenantId
+  );
+}
+
 export async function DELETE(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const body = await request.json().catch(() => ({}));
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const tenantId = gate.session.user.tenantId ?? null;
+
+  // ---------------------------------------------------------------------------
+  // "Reset roster" — soft-delete every student that matches the current view.
+  //
+  // This is the switchover tool: pilot data out, real students in. It stays
+  // super-admin only and needs its own confirmation phrase so it can never be
+  // reached by the ordinary row/multi-row delete below. Everything it removes
+  // is restorable from the audit trail (see src/lib/prisma-guard.ts).
+  // ---------------------------------------------------------------------------
+  if (body.scope === "all") {
+    if (gate.admin.adminRole !== "super") {
+      return NextResponse.json({ error: "Only a super admin can reset the roster" }, { status: 403 });
+    }
+    if (body.confirmation !== "RESET STUDENTS") {
+      return NextResponse.json({ error: "Confirmation phrase RESET STUDENTS is required" }, { status: 400 });
+    }
+
+    const filters = (body.filters ?? {}) as Record<string, unknown>;
+    const resetWhere: any = {};
+    if (typeof filters.branchId === "string" && filters.branchId) resetWhere.branchId = filters.branchId;
+    if (typeof filters.level === "string" && filters.level) resetWhere.level = filters.level;
+    if (typeof filters.status === "string" && filters.status) resetWhere.status = filters.status;
+
+    // Same tenant fence as GET: match on branch OR user OR the student's own
+    // tenant column, so no-branch students are in scope.
+    if (tenantId) {
+      resetWhere.OR = [
+        { tenantId },
+        { branch: { tenantId } },
+        { user: { tenantId } },
+      ];
+    }
+
+    // A branch-scoped admin can only clear their own branches, whatever filter
+    // they pass — mirrors the GET route.
+    const allowedBranchIds = scopedBranchIds(gate.admin);
+    if (allowedBranchIds) {
+      resetWhere.branchId = resetWhere.branchId
+        ? (allowedBranchIds.includes(resetWhere.branchId) ? resetWhere.branchId : "__no-branch-access__")
+        : { in: allowedBranchIds };
+    }
+
+    try {
+      const targets = await prisma.student.findMany({ where: resetWhere, select: { id: true, userId: true } });
+      if (targets.length === 0) {
+        return NextResponse.json({ success: true, deleted: 0 });
+      }
+
+      // Chunks of 150 keep each statement under the guard's 200-row
+      // blast-radius cap (src/lib/prisma-guard.ts), so no unscoped-write
+      // escape hatch is needed and every chunk still lands a restorable audit
+      // row attributed to the real admin.
+      //
+      // Session rows are deliberately left alone here: once the User is
+      // soft-deleted the auth lookup returns null (the guard hides deleted
+      // rows), so any live session is already inert — and a `session.deleteMany`
+      // over 150 users is the one statement whose row count we cannot bound
+      // ahead of the blast-radius check.
+      const CHUNK = 150;
+      let deleted = 0;
+      for (let i = 0; i < targets.length; i += CHUNK) {
+        const slice = targets.slice(i, i + CHUNK);
+        const studentIdChunk = slice.map((s) => s.id);
+        const userIdChunk = slice.map((s) => s.userId);
+        await prisma.student.deleteMany({ where: { id: { in: studentIdChunk } } });
+        await prisma.user.deleteMany({ where: { id: { in: userIdChunk } } });
+        deleted += slice.length;
+      }
+      return NextResponse.json({ success: true, deleted });
+    } catch (error) {
+      return NextResponse.json(
+        { error: "Unable to reset the roster", detail: error instanceof Error ? error.message : "Unknown" },
+        { status: 500 },
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Explicit one-or-many delete by id.
+  // ---------------------------------------------------------------------------
   const studentIds: string[] = [];
   if (Array.isArray(body.studentIds)) {
     for (const id of body.studentIds as unknown[]) {
@@ -554,24 +667,38 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const students = await prisma.student.findMany({
+    const found = await prisma.student.findMany({
       where: { id: { in: studentIds } },
-      select: { id: true, userId: true, branch: { select: { tenantId: true } } },
+      select: {
+        id: true,
+        userId: true,
+        tenantId: true,
+        branch: { select: { tenantId: true } },
+        user: { select: { tenantId: true } },
+      },
     });
-    if (students.length !== studentIds.length) {
-      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+
+    // A row that is missing (already deleted) or outside the tenant is skipped,
+    // not fatal — one stale id in a 20-row selection used to 404 the whole
+    // batch and nothing got removed.
+    const deletable = found.filter((student) => ownedByTenant(student, tenantId));
+    const deletableIds = new Set(deletable.map((s) => s.id));
+    const skipped = studentIds.filter((id) => !deletableIds.has(id));
+
+    if (deletable.length === 0) {
+      return NextResponse.json(
+        { error: found.length === 0 ? "Student not found" : "None of those students are in your tenant" },
+        { status: 404 },
+      );
     }
 
-    if (gate.session.user.tenantId && students.some((student) => student.branch?.tenantId !== gate.session.user.tenantId)) {
-      return NextResponse.json({ error: "Student not found" }, { status: 404 });
-    }
-
-    for (const student of students) {
+    for (const student of deletable) {
       await prisma.session.deleteMany({ where: { userId: student.userId } });
       await prisma.student.delete({ where: { id: student.id } });
       await prisma.user.delete({ where: { id: student.userId } });
     }
-    return NextResponse.json({ success: true, deleted: students.length });
+
+    return NextResponse.json({ success: true, deleted: deletable.length, skipped });
   } catch (error) {
     return NextResponse.json({ error: "Unable to delete student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
   }

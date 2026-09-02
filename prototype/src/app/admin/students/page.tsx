@@ -172,6 +172,15 @@ function StudentsRoster() {
   const [selectedAdmission, setSelectedAdmission] = useState<AdmissionData>(null);
   const [selectedStudentName, setSelectedStudentName] = useState("");
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+  /** Set once the reader has ticked "select every student that matches", not just the page. */
+  const [selectAllMatching, setSelectAllMatching] = useState(false);
+  /** Which admin sub-role is signed in — "super" unlocks the Reset roster tool. */
+  const [adminRole, setAdminRole] = useState<string>("");
+  /** Short outcome line after a bulk delete: "Removed 18. 2 were already gone." */
+  const [deleteFeedback, setDeleteFeedback] = useState<string>("");
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetPhrase, setResetPhrase] = useState("");
+  const [resetting, setResetting] = useState(false);
 
   const loadBranches = useCallback(async () => {
     const [branchesRes, lecturersRes] = await Promise.all([
@@ -217,6 +226,7 @@ function StudentsRoster() {
       setFocusMeta(data.focus ?? null);
       setMatchedIds(Array.isArray(data.matchedIds) ? new Set<string>(data.matchedIds) : null);
       setCanSeeMoney(data.canSeeMoney !== false);
+      setAdminRole(typeof data.adminRole === "string" ? data.adminRole : "");
     }
     setLoading(false);
   }, [agingBucket, filterBatch, filterBranchId, filterClassType, filterLevel, filterPaymentStatus, filterSessionSlot, filterStatus, filterTutorId, focus, focusIds, page, pageSize, search]);
@@ -592,22 +602,95 @@ function StudentsRoster() {
     await loadStudents();
   }
 
+  /** The filters currently narrowing the roster, in the shape the reset endpoint reads. */
+  function currentFilterPayload() {
+    return {
+      ...(filterBranchId ? { branchId: filterBranchId } : {}),
+      ...(filterLevel ? { level: filterLevel } : {}),
+      ...(filterStatus ? { status: filterStatus } : {}),
+    };
+  }
+
   async function handleDeleteSelectedStudents() {
+    setStudentError("");
+    setDeleteFeedback("");
+
+    // "Select all matching" hands the job to the server so it is not capped by
+    // one page of ids — it re-resolves the set from the same filters.
+    if (selectAllMatching) {
+      if (!confirm(`Remove all ${totalCount} students that match the current filters? They can be restored from Security → Audit trail.`)) return;
+      const res = await fetch("/api/admin/students", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "all", confirmation: "RESET STUDENTS", filters: currentFilterPayload() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStudentError(data?.error || "Unable to remove the selected students.");
+        return;
+      }
+      setDeleteFeedback(`Removed ${data.deleted ?? 0} student${(data.deleted ?? 0) === 1 ? "" : "s"}.`);
+      setSelectAllMatching(false);
+      setSelectedStudentIds(new Set());
+      setPage(1);
+      await loadStudents();
+      return;
+    }
+
     const ids = [...selectedStudentIds];
     if (!ids.length) return;
-    if (!confirm(`Are you sure you want to delete ${ids.length} students? This action is not reversible from the portal and will log them out everywhere.`)) return;
+    if (!confirm(`Delete ${ids.length} student${ids.length === 1 ? "" : "s"}? They can be restored from Security → Audit trail.`)) return;
     const res = await fetch("/api/admin/students", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ studentIds: ids, confirmation: "DELETE STUDENTS" }),
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
       setStudentError(data?.error || "Unable to delete selected students.");
       return;
     }
-    setSelectedStudentIds(new Set());
+    const deleted: number = typeof data.deleted === "number" ? data.deleted : ids.length;
+    const skipped: string[] = Array.isArray(data.skipped) ? data.skipped : [];
+    setDeleteFeedback(
+      `Removed ${deleted} student${deleted === 1 ? "" : "s"}.` +
+        (skipped.length ? ` ${skipped.length} were already gone or outside your access.` : ""),
+    );
+    // Drop only what actually went, so anything skipped stays visible/selectable.
+    setSelectedStudentIds((current) => {
+      const next = new Set(current);
+      for (const id of ids) if (!skipped.includes(id)) next.delete(id);
+      return next;
+    });
     await loadStudents();
+  }
+
+  async function handleResetRoster() {
+    if (resetPhrase !== "RESET STUDENTS") return;
+    setResetting(true);
+    setStudentError("");
+    setDeleteFeedback("");
+    try {
+      const res = await fetch("/api/admin/students", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "all", confirmation: "RESET STUDENTS" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStudentError(data?.error || "Unable to reset the roster.");
+        return;
+      }
+      setDeleteFeedback(`Roster reset — removed ${data.deleted ?? 0} student${(data.deleted ?? 0) === 1 ? "" : "s"}. Restore any of them from Security → Audit trail.`);
+      setShowResetModal(false);
+      setResetPhrase("");
+      setSelectAllMatching(false);
+      setSelectedStudentIds(new Set());
+      setPage(1);
+      await loadStudents();
+    } finally {
+      setResetting(false);
+    }
   }
 
   const tone = FOCUS_TONE[focusMeta?.tone ?? "danger"] ?? FOCUS_TONE.danger;
@@ -817,9 +900,59 @@ function StudentsRoster() {
               >
                 {showStudentForm ? "Close form" : "Add student"}
               </button>
+              {/* The switchover tool: clear the whole roster in one deliberate,
+                  restorable action. Super admin only — the server enforces it
+                  too. */}
+              {adminRole === "super" ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-red-500 px-4 py-3 text-sm font-semibold text-red-600"
+                  onClick={() => { setResetPhrase(""); setShowResetModal(true); }}
+                >
+                  Reset roster
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
+
+        {showResetModal ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md space-y-4 rounded-3xl border border-red-300 bg-[var(--surface)] p-6 shadow-xl">
+              <h2 className="text-xl font-bold text-red-600">Reset the student roster</h2>
+              <p className="text-sm text-[var(--foreground-soft)]">
+                This removes <strong>every student currently in the LMS</strong>
+                {totalCount ? <> — <strong>{totalCount}</strong> right now</> : null}. They stop being able to sign
+                in immediately. Every one of them can be restored from{" "}
+                <span className="font-semibold">Security → Audit trail</span> afterwards.
+              </p>
+              <p className="text-sm text-[var(--muted)]">Type <span className="font-mono font-bold">RESET STUDENTS</span> to confirm.</p>
+              <input
+                value={resetPhrase}
+                onChange={(event) => setResetPhrase(event.target.value)}
+                placeholder="RESET STUDENTS"
+                className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+              />
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setShowResetModal(false); setResetPhrase(""); }}
+                  className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={resetPhrase !== "RESET STUDENTS" || resetting}
+                  onClick={handleResetRoster}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {resetting ? "Removing…" : "Remove all students"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {/* Sits beside the one-at-a-time form on purpose: the moment somebody
             realises they have fourteen students to add is the moment they are
@@ -1055,10 +1188,48 @@ function StudentsRoster() {
           </div>
         ) : null}
 
-        {selectedStudentIds.size > 0 ? (
+        {deleteFeedback ? (
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <span>{deleteFeedback}</span>
+            <button type="button" onClick={() => setDeleteFeedback("")} className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-semibold">Dismiss</button>
+          </div>
+        ) : null}
+
+        {selectedStudentIds.size > 0 || selectAllMatching ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-            <span>{selectedStudentIds.size} student{selectedStudentIds.size === 1 ? "" : "s"} selected</span>
-            <button type="button" onClick={handleDeleteSelectedStudents} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">Delete selected</button>
+            <div className="flex flex-wrap items-center gap-2">
+              <span>
+                {selectAllMatching
+                  ? `All ${totalCount} student${totalCount === 1 ? "" : "s"} matching the current filters are selected`
+                  : `${selectedStudentIds.size} student${selectedStudentIds.size === 1 ? "" : "s"} selected`}
+              </span>
+              {/* Every visible row ticked but there are more pages behind the
+                  filter — offer the whole matching set, Gmail-style. */}
+              {!selectAllMatching &&
+              students.length > 0 &&
+              students.every((student) => selectedStudentIds.has(student.id)) &&
+              totalCount > students.length ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectAllMatching(true)}
+                  className="rounded-lg border border-red-400 px-3 py-1.5 text-xs font-semibold underline-offset-2 hover:underline"
+                >
+                  Select all {totalCount} matching
+                </button>
+              ) : null}
+              {selectAllMatching ? (
+                <button
+                  type="button"
+                  onClick={() => { setSelectAllMatching(false); setSelectedStudentIds(new Set()); }}
+                  className="rounded-lg border border-red-400 px-3 py-1.5 text-xs font-semibold"
+                >
+                  Clear selection
+                </button>
+              ) : null}
+            </div>
+            <button type="button" onClick={handleDeleteSelectedStudents} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">
+              {selectAllMatching ? `Remove all ${totalCount}` : "Delete selected"}
+            </button>
           </div>
         ) : null}
         <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] shadow-sm">
@@ -1066,7 +1237,7 @@ function StudentsRoster() {
             <table className="min-w-full divide-y divide-[var(--border)]">
             <thead className="bg-[var(--surface)] text-left text-sm uppercase tracking-[0.16em] text-[var(--muted)]">
               <tr>
-                <th className="px-6 py-4"><input type="checkbox" aria-label="Select all visible students" checked={students.length > 0 && students.every((student) => selectedStudentIds.has(student.id))} onChange={(event) => setSelectedStudentIds(event.target.checked ? new Set(students.map((student) => student.id)) : new Set())} /></th>
+                <th className="px-6 py-4"><input type="checkbox" aria-label="Select all visible students" checked={students.length > 0 && students.every((student) => selectedStudentIds.has(student.id))} onChange={(event) => { setSelectAllMatching(false); setSelectedStudentIds(event.target.checked ? new Set(students.map((student) => student.id)) : new Set()); }} /></th>
                 <th className="px-6 py-4">Name</th>
                 <th className="px-6 py-4">Email</th>
                 <th className="px-6 py-4">Branch</th>
@@ -1111,7 +1282,7 @@ function StudentsRoster() {
                         : undefined
                     }
                   >
-                    <td className="px-6 py-4"><input type="checkbox" aria-label={`Select ${student.user.name || student.user.email}`} checked={selectedStudentIds.has(student.id)} onChange={(event) => setSelectedStudentIds((current) => { const next = new Set(current); if (event.target.checked) next.add(student.id); else next.delete(student.id); return next; })} /></td>
+                    <td className="px-6 py-4"><input type="checkbox" aria-label={`Select ${student.user.name || student.user.email}`} checked={selectAllMatching || selectedStudentIds.has(student.id)} onChange={(event) => { setSelectAllMatching(false); setSelectedStudentIds((current) => { const next = new Set(current); if (event.target.checked) next.add(student.id); else next.delete(student.id); return next; }); }} /></td>
                     {/* The name is the way into the person's file. It was plain
                         text, so the only thing a row could do was be edited —
                         the roster could tell you a student existed and nothing
