@@ -77,7 +77,14 @@ export async function POST(request: Request) {
 
       const secretKey = process.env.PAYSTACK_SECRET_KEY;
       if (!secretKey) {
-        return NextResponse.json({ error: "Paystack is not configured" }, { status: 500 });
+        console.error("Paystack checkout blocked: PAYSTACK_SECRET_KEY is not set");
+        return NextResponse.json(
+          {
+            error:
+              "Online payment is temporarily unavailable. Please try again in a few minutes — if it keeps happening, contact your branch office and they can take the payment directly.",
+          },
+          { status: 503 },
+        );
       }
 
       const callbackUrlBase = process.env.PAYSTACK_CALLBACK_URL || `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/enrollment/success`;
@@ -226,7 +233,14 @@ export async function POST(request: Request) {
       : null;
 
     if (!secretKey) {
-      return NextResponse.json({ error: "Paystack is not configured" }, { status: 500 });
+      console.error("Paystack checkout blocked: PAYSTACK_SECRET_KEY is not set");
+      return NextResponse.json(
+        {
+          error:
+            "Online payment is temporarily unavailable. Please try again in a few minutes — if it keeps happening, contact your branch office and they can take the payment directly.",
+        },
+        { status: 503 },
+      );
     }
 
     if (!paystackEmail) {
@@ -283,6 +297,9 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Paystack initialization error:", error);
-    return NextResponse.json({ error: "Payment processing failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: "We couldn't start your payment just now. Please try again — if it keeps failing, contact your branch office." },
+      { status: 500 },
+    );
   }
 }

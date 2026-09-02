@@ -18,6 +18,21 @@ import { isReceivedPayment, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor 
 import { useGamification } from "@/lib/useGamification";
 import { useLiveClass } from "@/lib/useLiveClass";
 
+/** Paystack transaction statuses that will never become "success". A stored
+ *  reference in one of these is dead, so its dashboard breadcrumbs should be
+ *  cleared rather than left showing a "payment processing" band forever. */
+const TERMINAL_PAYSTACK_FAILURE = new Set(["failed", "abandoned", "reversed", "cancelled"]);
+
+function clearPendingPaystackBreadcrumbs() {
+  try {
+    window.localStorage.removeItem("pendingPaystackReference");
+    window.localStorage.removeItem("pendingPaystackAmount");
+    window.localStorage.removeItem("pendingPaystackPathwayName");
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 type Mission = {
   id?: string;
   title: string;
@@ -324,9 +339,22 @@ function DashboardContent() {
       const verifyData = await verifyResponse.json().catch(() => null);
 
       if (verifyResponse.ok && verifyData?.paid) {
-        window.localStorage.removeItem("pendingPaystackReference");
-        window.localStorage.removeItem("pendingPaystackAmount");
-        window.localStorage.removeItem("pendingPaystackPathwayName");
+        clearPendingPaystackBreadcrumbs();
+        setPendingPayment(null);
+      } else if (
+        verifyResponse.ok &&
+        TERMINAL_PAYSTACK_FAILURE.has(String(verifyData?.transactionStatus || ""))
+      ) {
+        // Paystack answered and the charge is dead (abandoned / failed /
+        // reversed). Nothing is ever coming for this reference. A student who
+        // closed the tab on Paystack's failure screen never reaches
+        // /enrollment/success, so without this the "payment processing" band
+        // would follow them on every visit from here on.
+        console.info("Discarding dead Paystack reference", {
+          pendingReference,
+          transactionStatus: verifyData?.transactionStatus,
+        });
+        clearPendingPaystackBreadcrumbs();
         setPendingPayment(null);
       } else {
         console.warn("Pending Paystack reference has not cleared yet", {
@@ -540,7 +568,11 @@ function DashboardContent() {
   if (status === "loading" && !student && !dashboardError && !fastFallback) {
     return (
       <StudentShell>
-        <PaymentSuccessToastClient />
+        {/* PaymentSuccessToastClient is deliberately NOT rendered here. It
+            consumes the one-shot `paystackPaymentSuccess` flag on mount; if it
+            mounts behind the loader and this branch then unmounts once the
+            dashboard is ready, the flag is already gone and the real instance
+            below never shows the toast. It renders once, after load. */}
         <BrandLoader />
       </StudentShell>
     );

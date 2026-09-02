@@ -225,7 +225,8 @@ export async function verifyPaystackTransaction(reference: string): Promise<Pays
 
   const secretKey = process.env.PAYSTACK_SECRET_KEY;
   if (!secretKey) {
-    return { success: false, status: 500, error: "Paystack secret not configured" };
+    console.error("Paystack verify blocked: PAYSTACK_SECRET_KEY is not set");
+    return { success: false, status: 503, error: "Payment checking is temporarily unavailable." };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

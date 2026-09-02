@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
 import { verifyPaystackTransaction } from "@/lib/paystack-verify";
 import LoadingExperience from "@/components/LoadingExperience";
 import PaystackAutoRedirectClient from "@/components/PaystackAutoRedirectClient";
+import PaystackClearPendingClient from "@/components/PaystackClearPendingClient";
 import PaystackManualVerifyClient from "@/components/PaystackManualVerifyClient";
+import PaystackSuccessRedirect from "@/components/PaystackSuccessRedirect";
 import { CheckCircleIcon, CrossIcon, LockIcon } from "@/components/icons";
 
 /**
@@ -75,11 +76,30 @@ export default async function EnrollmentSuccessPage({ searchParams }: Enrollment
   const amount = typeof transaction?.amount === "number" ? transaction.amount / 100 : null;
   const currency = String(transaction?.currency || "NGN");
 
-  // Paid and recorded: the enrolment is persisted and classes are open, so
-  // there is nothing to read on this page. (redirect() throws NEXT_REDIRECT and
-  // must not sit inside a try/catch.)
+  // Paid and recorded: the enrolment is persisted and classes are open. Hand
+  // straight over to the dashboard — but on the CLIENT (see
+  // PaystackSuccessRedirect), so the "payment confirmed" toast flag is set and
+  // the pending-payment breadcrumbs are cleared on the way through. A server
+  // redirect() cannot touch localStorage, which is why the toast never fired
+  // on the ordinary first-time-success path. The visible screen is a fallback
+  // for the beat before the client navigation lands.
   if (result.success && !result.persistFailed && transactionStatus === "success") {
-    redirect("/dashboard?paymentRefresh=1");
+    return (
+      <Shell>
+        <Outcome
+          tone="good"
+          icon={<CheckCircleIcon className="h-7 w-7" />}
+          title="Payment confirmed"
+          body="Your payment went through and your classes are unlocked. Taking you to your dashboard now…"
+        />
+        <Reference reference={reference} amount={amount} currency={currency} status={transactionStatus} />
+        <Actions
+          primary={{ href: "/dashboard?paymentRefresh=1", label: "Go to my dashboard" }}
+          secondary={{ href: "/payments", label: "See my payments" }}
+        />
+        <PaystackSuccessRedirect />
+      </Shell>
+    );
   }
 
   // Charged, but we could not write it down. Do not tell them to try again —
@@ -139,6 +159,10 @@ export default async function EnrollmentSuccessPage({ searchParams }: Enrollment
         />
         <Reference reference={reference} amount={amount} currency={currency} status={transactionStatus || "unknown"} />
         <Actions primary={{ href: "/programs", label: "Try payment again" }} secondary={{ href: "/payments", label: "See my payments" }} />
+        {/* This reference is dead — drop the dashboard breadcrumbs so it does
+            not keep showing a "payment processing" band the student can never
+            resolve. */}
+        <PaystackClearPendingClient />
       </Shell>
     );
   }
