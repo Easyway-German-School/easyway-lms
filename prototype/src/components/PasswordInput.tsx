@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { CheckIcon } from "@/components/icons";
+import { passwordProblem } from "@/lib/password-rules";
 
 /**
  * Password field with a show/hide toggle.
@@ -43,30 +45,51 @@ type Props = {
   required?: boolean;
   autoComplete?: string;
   disabled?: boolean;
+  /**
+   * Show a live "at least 8 characters" guide under the field, ticking green
+   * the moment the rule is met. Off by default — a sign-in field has nothing
+   * to validate, and turning this on everywhere this component is used would
+   * put a length counter under a password an admin is merely re-typing to
+   * confirm. Reads `passwordProblem` from lib/password-rules.ts, the same
+   * rule the signup API itself enforces, so the hint can never promise a
+   * password the server then rejects.
+   */
+  showRequirements?: boolean;
 };
 
-export default function PasswordInput({ className = "", ...props }: Props) {
+export default function PasswordInput({ className = "", showRequirements = false, value, ...props }: Props) {
   const [visible, setVisible] = useState(false);
+  const problem = showRequirements ? passwordProblem(value) : null;
+  const met = showRequirements && value.length > 0 && !problem;
 
   return (
-    <div className="relative">
-      <input
-        {...props}
-        type={visible ? "text" : "password"}
-        // Room on the right so the toggle never sits on top of the text.
-        className={`${className} pr-11`}
-      />
-      <button
-        type="button"
-        onClick={() => setVisible((v) => !v)}
-        // Not a tab stop: keyboard users move straight from password to submit.
-        tabIndex={-1}
-        aria-label={visible ? "Hide password" : "Show password"}
-        aria-pressed={visible}
-        className="absolute inset-y-0 right-0 flex items-center px-3 text-[var(--muted)] transition hover:text-[var(--foreground-soft)]"
-      >
-        {visible ? <EyeOffIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
-      </button>
+    <div>
+      <div className="relative">
+        <input
+          {...props}
+          value={value}
+          type={visible ? "text" : "password"}
+          // Room on the right so the toggle never sits on top of the text.
+          className={`${className} pr-11`}
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          // Not a tab stop: keyboard users move straight from password to submit.
+          tabIndex={-1}
+          aria-label={visible ? "Hide password" : "Show password"}
+          aria-pressed={visible}
+          className="absolute inset-y-0 right-0 flex items-center px-3 text-[var(--muted)] transition hover:text-[var(--foreground-soft)]"
+        >
+          {visible ? <EyeOffIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
+        </button>
+      </div>
+      {showRequirements ? (
+        <p className={`mt-1.5 flex items-center gap-1.5 text-xs transition-colors ${met ? "text-emerald-600" : "text-[var(--muted)]"}`}>
+          {met ? <CheckIcon className="h-3.5 w-3.5 shrink-0" /> : <span aria-hidden="true" className="inline-block h-1 w-1 shrink-0 rounded-full bg-current" />}
+          {met ? "Good — that's a valid password" : `At least 8 characters (${value.length}/8 so far)`}
+        </p>
+      ) : null}
     </div>
   );
 }

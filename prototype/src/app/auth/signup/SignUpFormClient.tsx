@@ -743,7 +743,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
                 </div>
                 <div>
                   <label htmlFor="password" className="block text-sm font-semibold text-[var(--muted)]">Create password</label>
-                  <PasswordInput id="password" name="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
+                  <PasswordInput id="password" name="password" value={password} onChange={(e) => setPassword(e.target.value)} showRequirements className="mt-1 w-full rounded-xl border px-3 py-2 bg-white" />
                 </div>
               </div>
             </div>
