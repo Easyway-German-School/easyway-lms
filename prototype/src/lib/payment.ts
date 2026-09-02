@@ -72,6 +72,13 @@ export type FeeTier = "premium" | "standard" | "online";
 const PREMIUM_BRANCH_KEYWORDS = ["abuja"] as const;
 const ONLINE_BRANCH_KEYWORDS = ["online", "virtual", "remote"] as const;
 
+/**
+ * Prices confirmed 2026-09 for the live launch. A1–B2 vary by tier; C1 is a
+ * flat ₦350,000 at every branch (it runs as private / online tuition). C2 is
+ * retired — not offered (see OFFERED_LEVELS in levels.ts) and deliberately not
+ * priced here. Edit ONLY this table: checkout, the paywall, admin price lists,
+ * invoices and reminder emails all read from it.
+ */
 const FEE_TABLE: Record<FeeTier, Record<string, number>> = {
   // Abuja
   premium: {
@@ -79,49 +86,36 @@ const FEE_TABLE: Record<FeeTier, Record<string, number>> = {
     A2: 180000,
     B1: 200000,
     B2: 200000,
-    C1: 220000,
-    C2: 240000,
+    C1: 350000,
   },
-  // Lagos, Port Harcourt, and any campus branch added later
+  // Lagos, Port Harcourt, Ghana, and any campus branch added later
   standard: {
     A1: 150000,
     A2: 150000,
     B1: 180000,
     B2: 180000,
-    C1: 200000,
-    C2: 220000,
+    C1: 350000,
   },
-  // ---------------------------------------------------------------------
-  // ONLINE BRANCH — PLACEHOLDER PRICES.
-  //
-  // These numbers are a template, NOT a decision. They sit ~10% under the
-  // standard campus tier on the reasoning that there is no campus overhead to
-  // pass on, which is the usual shape, but nobody has signed off on them.
-  //
-  // To set the real prices, edit ONLY this block. Every quote in the app —
-  // checkout, the paywall, admin price lists, invoices, reminder emails —
-  // reads from here, so there is nowhere else to change.
-  // ---------------------------------------------------------------------
+  // Online cohort. A1–B2 currently match the standard campus tier.
   online: {
-    A1: 135000,
-    A2: 135000,
-    B1: 160000,
-    B2: 160000,
-    C1: 180000,
-    C2: 200000,
+    A1: 150000,
+    A2: 150000,
+    B1: 180000,
+    B2: 180000,
+    C1: 350000,
   },
 };
 
-/** True while the online tier is still carrying the placeholder numbers above. */
-export const ONLINE_PRICES_ARE_PLACEHOLDER = true;
+/** Online-tier prices were confirmed for launch (2026-09), no longer provisional. */
+export const ONLINE_PRICES_ARE_PLACEHOLDER = false;
 
 /**
- * PRIVATE (one-to-one) TUITION — ONE FLAT PRICE, PLACEHOLDER FIGURE.
+ * PRIVATE (one-to-one) TUITION — ONE FLAT PRICE.
  *
- * ₦300,000 whatever the branch and whatever the level, quoted by the school
- * pending a real table. Change this constant and the upsell card, the paywall's
- * second option, the checkout, the webhook and the receivables ledger all
- * follow — it is the single number private tuition is worth anywhere in the app.
+ * ₦350,000 whatever the branch and whatever the level (confirmed 2026-09).
+ * Change this constant and the upsell card, the paywall's second option, the
+ * checkout, the webhook and the receivables ledger all follow — it is the
+ * single number private tuition is worth anywhere in the app.
  *
  * ---------------------------------------------------------------------------
  * THIS REPLACED A 2x MULTIPLIER, and the two could not coexist.
@@ -139,18 +133,17 @@ export const ONLINE_PRICES_ARE_PLACEHOLDER = true;
  * it is a bug that only appears at one branch. One number now serves both.
  * ---------------------------------------------------------------------------
  */
-export const PRIVATE_CLASS_UPGRADE_PRICE = 300000;
+export const PRIVATE_CLASS_UPGRADE_PRICE = 350000;
 
-/** True while private tuition is still carrying the placeholder figure above. */
-export const PRIVATE_PRICES_ARE_PLACEHOLDER = true;
+/** Private tuition price was confirmed for launch (2026-09), no longer provisional. */
+export const PRIVATE_PRICES_ARE_PLACEHOLDER = false;
 
 /**
- * Levels a student may buy through the portal. C1 and C2 are quoted by the
- * branch office for now, so they are priced in FEE_TABLE (the paywall still
- * needs a number for a C1 student who was enrolled by hand) but kept out of
- * self-service checkout.
+ * Levels a student may buy through the portal. A1–C1 are all self-service now —
+ * C1 runs as private / online tuition at the flat ₦350,000 in FEE_TABLE. C2 is
+ * retired: not offered (see OFFERED_LEVELS in levels.ts) and not sold here.
  */
-export const SELLABLE_LEVELS = ["A1", "A2", "B1", "B2"] as const;
+export const SELLABLE_LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
 
 export const REGISTRATION_FEE = 5000;
 
@@ -197,7 +190,9 @@ export function tuitionFeeFor({ level, branch, classType }: FeeLookup): number {
   if (isPrivateClassType(classType)) return PRIVATE_CLASS_UPGRADE_PRICE;
 
   const tier = FEE_TABLE[feeTierForBranch(branch)];
-  return tier[normaliseLevel(level)] ?? tier.A1;
+  // A level not in the table is either junk input or retired C2. Fall back to
+  // the C1 price rather than A1 so an advanced level is never under-quoted.
+  return tier[normaliseLevel(level)] ?? tier.C1 ?? tier.A1;
 }
 
 export function requiredDepositFor(lookup: FeeLookup): number {
