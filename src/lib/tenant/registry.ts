@@ -134,7 +134,6 @@ export const TENANT_OWNED_MODELS = [
   "IntegrationConnector",
   "AdminAction",
   "AuditLog",
-  "BackupRun",
 
   /**
    * Both already carry a non-null `tenantId`, so the column script skips them.
@@ -215,6 +214,28 @@ export const GLOBAL_MODELS = {
    * the operator who has to administer all of them.
    */
   Tenant: "the tenant registry; access is controlled by operator role, not by tenant",
+
+  /**
+   * Backup runs are database-wide infrastructure, not a per-school record.
+   * `pg_dump` writes every tenant's rows into one artifact, the restore drill
+   * restores the whole database, and there is one Neon instance behind the
+   * platform — "this school's backup" is not a real unit.
+   *
+   * It was tenant-owned until 2026-09-03, and that was a live bug, not a
+   * defensible call: the jobs that record a run — the GitHub Actions check-in
+   * at POST /api/backup/report, and scripts/snapshot-db.mjs — run with no user
+   * session and therefore no tenant in context, so every row they wrote landed
+   * with `tenantId = NULL`. The security page reads through the tenant-scoped
+   * client, which filters them straight back out, so /admin/security sat frozen
+   * on the last row that predated the tenant column and reported every backup
+   * since as "Overdue" / "Never run" no matter how well the jobs ran. Global is
+   * the classification that matches how the data is actually produced and read.
+   *
+   * The health check is a per-database operational signal; on a multi-tenant
+   * platform every operator should see the one true backup status, not a
+   * separate always-empty card each.
+   */
+  BackupRun: "database-wide infrastructure; recorded by sessionless jobs, read as one operational signal",
 
   /**
    * Keyed by sha256 of task + input, so two tenants asking to summarise the
