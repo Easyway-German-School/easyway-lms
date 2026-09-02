@@ -32,7 +32,7 @@ jobs:
 
     services:
       scratch:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: drill
           POSTGRES_DB: drill
@@ -62,6 +62,9 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends postgresql-client-18 restic
+          # /usr/bin/pg_restore stays pinned to the runner's preinstalled
+          # client 16 even with 18 installed; call the versioned binary.
+          echo "PG_BIN=/usr/lib/postgresql/18/bin" >> "$GITHUB_ENV"
 
       - name: Fetch the newest snapshot
         id: fetch
@@ -83,7 +86,7 @@ jobs:
           # --no-owner / --no-privileges because the roles Neon uses do not
           # exist here, and a drill that fails on role names has told you
           # nothing about whether the data survived.
-          pg_restore \
+          "$PG_BIN/pg_restore" \
             --dbname "$SCRATCH_URL" \
             --no-owner \
             --no-privileges \
@@ -108,9 +111,9 @@ jobs:
           ORDER BY table_name;
           SQL
 
-          psql "$SCRATCH_URL" -At -F',' -f count.sql > restored.csv
+          "$PG_BIN/psql" "$SCRATCH_URL" -At -F',' -f count.sql > restored.csv
           # Read-only against production: this is a COUNT, nothing else.
-          psql "${{ secrets.DIRECT_DATABASE_URL }}" -At -F',' -f count.sql > live.csv
+          "$PG_BIN/psql" "${{ secrets.DIRECT_DATABASE_URL }}" -At -F',' -f count.sql > live.csv
 
           wc -l restored.csv live.csv
 
