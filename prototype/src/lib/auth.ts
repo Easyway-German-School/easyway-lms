@@ -280,6 +280,36 @@ export const authOptions: AuthOptions = {
         }
       }
 
+      /**
+       * The account being DELETED must end the sessions it already holds.
+       *
+       * Same 30-day-JWT problem as the password reset above: an admin removes a
+       * student — one row, or a whole roster via "Reset roster" — and without
+       * this that person keeps a working portal until their token happens to
+       * lapse. Sign-in already refuses them (`User` is a soft-delete model, so
+       * the guarded lookup returns null once `deletedAt` is set); this closes
+       * the same door on the live session, reusing the `revoked` → route-refusal
+       * seam the password-reset path already established.
+       *
+       * Its own throttle key rather than `pwCheckedAt`, so that when one of the
+       * two queries fails its retry cadence does not drag the other's with it.
+       */
+      const userCheckedAt = Number(token.userCheckedAt ?? 0);
+      if (token.id && Date.now() - userCheckedAt > CHECK_EVERY_MS) {
+        try {
+          const stillHere = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { id: true },
+          });
+          // findUnique on a soft-delete model returns null once the row carries
+          // a deletedAt — see src/lib/prisma-guard.ts. No row, no session.
+          if (!stillHere) token.revoked = true;
+          token.userCheckedAt = Date.now();
+        } catch {
+          // Fail open: a transient database error must not sign people out.
+        }
+      }
+
       if (token.id && normalizeRole(token.role) === "admin") {
         try {
           const admin = await prisma.user.findUnique({
