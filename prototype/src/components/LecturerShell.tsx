@@ -223,13 +223,26 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
         } w-[17rem] ${collapsed ? 'lg:w-20' : 'lg:w-72'}`}
       >
         <div className="border-b border-[var(--border)] p-4">
-          <div className="flex items-center justify-between gap-3">
-            {collapsed && (
-              <Link href="/lecturer/dashboard" aria-label="Go to dashboard" className="hidden lg:block">
-                <BrandLogo variant="mark" className="h-10 w-10" />
+          {/* Collapsed rail (desktop only): the brand mark stacked over a
+              full-width expand control, both centred so nothing is crammed
+              against the edge of the 80px rail. */}
+          {collapsed && (
+            <div className="hidden flex-col items-center gap-3 lg:flex">
+              <Link href="/lecturer/dashboard" aria-label="Go to dashboard">
+                <BrandLogo variant="mark" className="h-9 w-9" />
               </Link>
-            )}
-            <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
+              <button
+                onClick={() => setCollapsed(false)}
+                aria-label="Expand sidebar"
+                className="flex w-full items-center justify-center rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)]"
+              >
+                <ChevronRightIcon />
+              </button>
+            </div>
+          )}
+
+          <div className={`flex items-center justify-between gap-3 ${collapsed ? 'lg:hidden' : ''}`}>
+            <div className="min-w-0">
               <Link href="/lecturer/dashboard" aria-label="Go to dashboard">
                 <BrandLogo variant="wordmark" className="h-9" />
               </Link>
@@ -239,10 +252,10 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
             </div>
             <button
               onClick={() => setCollapsed(!collapsed)}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label="Collapse sidebar"
               className="hidden rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:block"
             >
-              {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+              <ChevronLeftIcon />
             </button>
             <button
               onClick={() => setDrawerOpen(false)}
@@ -264,12 +277,14 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
                   onClick={() => router.push(item.href)}
                   title={collapsed ? item.label : ''}
                   className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition-all duration-200 ${
+                    collapsed ? 'lg:justify-center lg:gap-0 lg:px-0' : ''
+                  } ${
                     active
                       ? 'bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_8px_24px_rgba(10,124,255,0.12)]'
                       : 'text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]'
                   }`}
                 >
-                  <span className={`flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'}`}>{item.icon}</span>
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'}`}>{item.icon}</span>
                   {!collapsed && <span className="font-medium">{item.label}</span>}
                 </button>
               );

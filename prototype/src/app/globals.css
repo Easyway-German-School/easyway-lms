@@ -344,6 +344,29 @@ html.theme-custom ::selection {
   box-shadow: var(--shadow), inset -1px 0 0 var(--border);
 }
 
+/* The sidebar nav scrolls with a hairline, not the bold orange/teal track the
+   rest of the app uses. That track is right for a dense data table and wrong
+   for a column of nav icons — at the 80px collapsed width it swallows a third
+   of the rail and shoves every icon off-centre. */
+.sidebar-glass nav {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+}
+.sidebar-glass nav::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-glass nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-glass nav::-webkit-scrollbar-thumb {
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground) 20%, transparent);
+}
+.sidebar-glass nav::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--foreground) 34%, transparent);
+}
+
 .floating-ring {
   position: absolute;
   right: 0;
