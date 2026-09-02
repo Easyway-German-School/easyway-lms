@@ -150,6 +150,13 @@ export const REGISTRATION_FEE = 5000;
 /** Share of tuition that must be paid before classes open. */
 export const DEPOSIT_RATE = 0.6;
 
+/**
+ * Smallest top-up we will take once the 60% deposit is already in. A student
+ * past the gate can pay any amount toward the balance, but a ₦5 "payment" is
+ * just noise in the ledger and below what Paystack itself will process.
+ */
+export const MIN_PART_PAYMENT = 1000;
+
 export function isLevelSellable(level?: string | null): boolean {
   return (SELLABLE_LEVELS as readonly string[]).includes(normaliseLevel(level));
 }
@@ -197,6 +204,73 @@ export function tuitionFeeFor({ level, branch, classType }: FeeLookup): number {
 
 export function requiredDepositFor(lookup: FeeLookup): number {
   return Math.round(tuitionFeeFor(lookup) * DEPOSIT_RATE);
+}
+
+const naira = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
+
+export type PartialPaymentResolution =
+  | { ok: true; amount: number; settlesAccount: boolean }
+  | { ok: false; error: string };
+
+/**
+ * THE ONE GATE FOR A STUDENT-CHOSEN PART-PAYMENT AMOUNT.
+ *
+ * A student may now type how much of their tuition to pay, not just take the
+ * 60% deposit. This decides what that request is actually worth, and it is the
+ * only thing standing between "pay what you like" and "pay less than the 60%
+ * the school enrols on".
+ *
+ * Rules, in order:
+ *   - The account must have something outstanding. Nothing owing → reject.
+ *   - CEILING: never more than the balance. A request over it is clamped down,
+ *     not rejected — paying the whole balance through this field is fine.
+ *   - FLOOR: on the payment that has to clear the 60% gate (i.e. the running
+ *     total is still under the deposit), the request must at least reach it.
+ *     Anything short is rejected with a message that states the figure. Once
+ *     the deposit is in, the floor drops to MIN_PART_PAYMENT so top-ups are
+ *     free-form.
+ *
+ * Every figure is caller-supplied and must be SERVER-DERIVED from the student's
+ * own level, branch and payment history — never a number off the request body.
+ * `requestedAmount` is the only client value, and it is treated purely as a
+ * ceiling-clamped ask that has to clear the floor.
+ */
+export function resolvePartialPaymentAmount({
+  requestedAmount,
+  tuitionFee,
+  requiredDeposit,
+  alreadyPaid,
+}: {
+  requestedAmount: unknown;
+  tuitionFee: number;
+  requiredDeposit: number;
+  alreadyPaid: number;
+}): PartialPaymentResolution {
+  const fee = Math.max(0, Math.round(Number(tuitionFee) || 0));
+  const deposit = Math.min(fee, Math.max(0, Math.round(Number(requiredDeposit) || 0)));
+  const paid = Math.max(0, Math.round(Number(alreadyPaid) || 0));
+  const requested = Math.max(0, Math.round(Number(requestedAmount) || 0));
+
+  const outstanding = Math.max(0, fee - paid);
+  if (outstanding <= 0) {
+    return { ok: false, error: "There is nothing outstanding on your tuition for this level." };
+  }
+
+  const depositShortfall = Math.max(0, deposit - paid);
+  const floor = depositShortfall > 0 ? depositShortfall : Math.min(MIN_PART_PAYMENT, outstanding);
+
+  if (requested < floor) {
+    const reason =
+      depositShortfall > 0
+        ? `The smallest payment we can accept right now is ${naira(floor)} — that brings you to the ${Math.round(
+            DEPOSIT_RATE * 100,
+          )}% deposit (${naira(deposit)} of ${naira(fee)}) the school starts classes on. To arrange anything less, please speak to your branch office.`
+        : `The smallest top-up we can accept is ${naira(floor)}.`;
+    return { ok: false, error: reason };
+  }
+
+  const amount = Math.min(requested, outstanding);
+  return { ok: true, amount, settlesAccount: paid + amount >= fee };
 }
 
 /** Every level and its price at one branch — for checkout and admin price lists. */

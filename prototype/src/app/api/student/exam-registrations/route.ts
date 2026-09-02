@@ -83,12 +83,16 @@ export async function POST(request: Request) {
       totalPaid,
       tuitionFee: tuitionFeeFor(feeLookup),
       requiredDeposit: requiredDepositFor(feeLookup),
+      classesStartedAt: student.classesStartedAt,
+      enrolledAt: student.createdAt,
+      paymentGraceUntil: student.paymentGraceUntil,
     });
     if (!access.hasAccess) {
-      return NextResponse.json(
-        { error: `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} before registering for an exam.` },
-        { status: 402 },
-      );
+      const error =
+        access.lockReason === "unsettled_balance"
+          ? `Settle your tuition balance of ₦${access.outstandingBalance.toLocaleString()} before registering for an exam.`
+          : `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} before registering for an exam.`;
+      return NextResponse.json({ error }, { status: 402 });
     }
 
     const exam = await prisma.exam.findUnique({

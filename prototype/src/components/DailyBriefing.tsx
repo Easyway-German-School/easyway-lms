@@ -63,7 +63,23 @@ type Gamification = {
   tier?: { label?: string } | null;
 } | null;
 
-type Brief = { headline: string; lines: string[]; personalNote: string | null } | null;
+type PaymentNote = {
+  outstanding: number;
+  lockDate: string;
+  daysToLock: number;
+  urgent: boolean;
+  locked: boolean;
+  graceUntil: string | null;
+} | null;
+
+type Brief = {
+  headline: string;
+  lines: string[];
+  personalNote: string | null;
+  paymentNote?: PaymentNote;
+} | null;
+
+const naira = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
 
 /** Local calendar day — the briefing is a once-a-day thing, not a to-the-second one. */
 function todayKey(): string {
@@ -142,8 +158,8 @@ export default function DailyBriefing() {
         setBrief(b);
         // Nothing to say if the student is not a real student (no gamification
         // row) and has no missions — better to stay silent than greet an empty
-        // shell.
-        setDue(m.length > 0 || Boolean(g));
+        // shell. A tuition balance to chase is always worth showing.
+        setDue(m.length > 0 || Boolean(g) || Boolean(b?.paymentNote));
       } catch {
         /* Offline. The dashboard cards are the backstop. */
       } finally {
@@ -309,6 +325,48 @@ export default function DailyBriefing() {
                 </motion.div>
               </div>
             </div>
+
+            {/* Tuition balance — a part-payer sees this every day until it clears. */}
+            {brief?.paymentNote ? (
+              <div
+                className={`mx-6 mt-6 rounded-2xl border p-4 ${
+                  brief.paymentNote.locked || brief.paymentNote.urgent
+                    ? "border-rose-400/40 bg-rose-500/[0.08]"
+                    : "border-amber-400/40 bg-amber-400/[0.08]"
+                }`}
+              >
+                <p className="text-sm font-semibold text-[var(--foreground)]">
+                  {brief.paymentNote.locked
+                    ? `Your access is on hold — ${naira(brief.paymentNote.outstanding)} tuition still owing.`
+                    : `${naira(brief.paymentNote.outstanding)} of your tuition is still owing.`}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
+                  {brief.paymentNote.locked
+                    ? "Settle it from Payments and your classes unlock again straight away."
+                    : brief.paymentNote.graceUntil
+                      ? `Your branch office has held your access until ${new Date(
+                          brief.paymentNote.lockDate,
+                        ).toLocaleDateString("en-NG", { day: "numeric", month: "long" })}.`
+                      : `Clear it from Payments to keep your seat past ${new Date(
+                          brief.paymentNote.lockDate,
+                        ).toLocaleDateString("en-NG", { day: "numeric", month: "long" })}${
+                          brief.paymentNote.urgent ? ` — that's ${brief.paymentNote.daysToLock} day${
+                            brief.paymentNote.daysToLock === 1 ? "" : "s"
+                          } away.` : "."
+                        }`}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismiss();
+                    router.push("/payments");
+                  }}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-4 py-2 text-xs font-bold text-white"
+                >
+                  Pay now <ArrowRightIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : null}
 
             {/* Today's missions. */}
             <div className="space-y-4 p-6">

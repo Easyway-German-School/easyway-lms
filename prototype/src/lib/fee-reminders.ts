@@ -18,6 +18,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { feeReminderEmailTemplate } from "@/lib/email-templates";
 import { receivedPaymentFilter } from "@/lib/payment";
+import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 
 export type FeeReminderResult = {
   sentCount: number;
@@ -25,7 +26,7 @@ export type FeeReminderResult = {
   errors: string[];
 };
 
-type ReminderTracking = { "7d"?: boolean; "14d"?: boolean; "30d"?: boolean };
+type ReminderTracking = { "7d"?: boolean; "14d"?: boolean; "30d"?: boolean; locked?: boolean };
 
 const STAGES: Array<{ days: number; key: keyof ReminderTracking }> = [
   { days: 7, key: "7d" },
@@ -33,22 +34,37 @@ const STAGES: Array<{ days: number; key: keyof ReminderTracking }> = [
   { days: 30, key: "30d" },
 ];
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export async function sendDueFeeReminders(options: {
   studentId?: string;
   /** Ignore the schedule and the already-sent marks. For the "send now" button. */
   forceSend?: boolean;
 } = {}): Promise<FeeReminderResult> {
   const { studentId, forceSend = false } = options;
+  const now = Date.now();
 
-  const invoices = await prisma.invoice.findMany({
+  const allInvoices = await prisma.invoice.findMany({
     where: {
       status: "partial",
       ...(studentId && { studentId }),
     },
+    orderBy: { createdAt: "asc" },
     include: {
       student: { include: { user: true } },
       payments: { where: receivedPaymentFilter() },
     },
+  });
+
+  // A student who part-paid more than once could carry two open invoices for
+  // one balance (older data — the checkout now folds top-ups into one). Chase
+  // the oldest open invoice per student and ignore the rest, so nobody is
+  // emailed twice for the same money.
+  const seenStudents = new Set<string>();
+  const invoices = allInvoices.filter((invoice) => {
+    if (seenStudents.has(invoice.studentId)) return false;
+    seenStudents.add(invoice.studentId);
+    return true;
   });
 
   let sentCount = 0;
@@ -62,30 +78,53 @@ export async function sendDueFeeReminders(options: {
 
       if (!studentEmail) continue;
 
+      // An admin grace date in the future silences every stage.
+      const graceUntil = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;
+      if (!forceSend && graceUntil && now < graceUntil.getTime()) continue;
+
       const tracking: ReminderTracking =
         student.feeRemindersScheduled && typeof student.feeRemindersScheduled === "object"
           ? (student.feeRemindersScheduled as ReminderTracking)
           : {};
 
-      const daysSinceCreation = Math.floor(
-        (Date.now() - new Date(invoice.createdAt).getTime()) / (1000 * 60 * 60 * 24),
-      );
+      const daysSinceCreation = Math.floor((now - new Date(invoice.createdAt).getTime()) / DAY_MS);
 
-      for (const stage of STAGES) {
-        const due = forceSend || daysSinceCreation >= stage.days;
-        const unsent = forceSend || !tracking[stage.key];
-        if (!due || !unsent) continue;
+      // The date portal access pauses for an unsettled balance — 30 days after
+      // classes start, falling back to enrolment.
+      const anchor = student.classesStartedAt ?? student.createdAt;
+      const lockAt = new Date(new Date(anchor).getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS);
+
+      const paid = (invoice.payments || []).reduce((sum, payment) => sum + payment.amount, 0);
+      const outstandingAmount = invoice.totalAmount - paid;
+      if (outstandingAmount <= 0) continue;
+
+      type Send = { key: keyof ReminderTracking; stage: number | "locked"; type: string; due: boolean };
+      const sends: Send[] = [
+        ...STAGES.map((s) => ({
+          key: s.key,
+          stage: s.days as number | "locked",
+          type: `fee_reminder_${s.days}d`,
+          due: forceSend || daysSinceCreation >= s.days,
+        })),
+        {
+          key: "locked" as const,
+          stage: "locked" as const,
+          type: "fee_reminder_locked",
+          due: forceSend || now >= lockAt.getTime(),
+        },
+      ];
+
+      for (const send of sends) {
+        const unsent = forceSend || !tracking[send.key];
+        if (!send.due || !unsent) continue;
 
         try {
-          const paid = (invoice.payments || []).reduce((sum, payment) => sum + payment.amount, 0);
-          const outstandingAmount = invoice.totalAmount - paid;
-          if (outstandingAmount <= 0) continue;
-
           const template = feeReminderEmailTemplate(
             studentName || "Student",
-            stage.days,
+            send.stage,
             outstandingAmount,
             invoice.currency,
+            lockAt,
           );
 
           await sendEmail({ to: studentEmail, subject: template.subject, html: template.html });
@@ -94,16 +133,16 @@ export async function sendDueFeeReminders(options: {
             data: {
               studentId: student.id,
               recipientEmail: studentEmail,
-              type: `fee_reminder_${stage.days}d`,
+              type: send.type,
               subject: template.subject,
               status: "sent",
             },
           });
 
-          tracking[stage.key] = true;
+          tracking[send.key] = true;
           sentCount++;
         } catch (error) {
-          errors.push(`Failed to send ${stage.days}d reminder to ${studentEmail}: ${error}`);
+          errors.push(`Failed to send ${send.type} to ${studentEmail}: ${error}`);
         }
       }
 

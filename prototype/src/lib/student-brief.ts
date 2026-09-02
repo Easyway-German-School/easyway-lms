@@ -3,6 +3,8 @@ import { calculateStreak } from "@/lib/gamification";
 import { cached } from "@/lib/ai-cache";
 import { callModel, activeModelName } from "@/lib/ai";
 import { profileFor } from "@/lib/learner-intelligence";
+import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
+import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 
 /**
  * Becca's brief — daily / weekly / monthly, hosted rather than generated.
@@ -27,12 +29,32 @@ import { profileFor } from "@/lib/learner-intelligence";
 
 export type BriefPeriod = "daily" | "weekly" | "monthly";
 
+/**
+ * The tuition-balance nudge for a part-payer. Becca surfaces it every day (the
+ * brief is daily) until the balance is cleared. Null for everyone who has paid
+ * in full or is still registration-only.
+ */
+export type PaymentNote = {
+  /** Still owed against the full fee. */
+  outstanding: number;
+  /** ISO date access pauses (or an admin grace date, if one is set and still ahead). */
+  lockDate: string;
+  daysToLock: number;
+  /** Within a week of the lock — render it louder. */
+  urgent: boolean;
+  /** The lock has already landed (the student is seeing this through a still-open page). */
+  locked: boolean;
+  graceUntil: string | null;
+};
+
 export type Brief = {
   period: BriefPeriod;
   headline: string;
   lines: string[];
   /** Becca's own line, from Claude — null when unfunded/unreachable. Never a fact, just framing. */
   personalNote: string | null;
+  /** Tuition-balance reminder for a part-payer — null otherwise. */
+  paymentNote: PaymentNote | null;
 };
 
 function periodStart(period: BriefPeriod, now = new Date()): Date {
@@ -59,8 +81,15 @@ export async function buildBrief(userId: string, period: BriefPeriod): Promise<B
     select: {
       id: true,
       examReadiness: true,
+      level: true,
+      classType: true,
+      createdAt: true,
+      classesStartedAt: true,
+      paymentGraceUntil: true,
+      branch: { select: { name: true } },
       user: { select: { name: true } },
       attendances: { select: { date: true, present: true, status: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
   if (!student) return null;
@@ -110,7 +139,45 @@ export async function buildBrief(userId: string, period: BriefPeriod): Promise<B
     activitySummary: describeActivity(lessonsDone, quizzesPlayed, missionsDone),
   }).catch(() => null);
 
-  return { period, headline, lines, personalNote };
+  return { period, headline, lines, personalNote, paymentNote: buildPaymentNote(student) };
+}
+
+/**
+ * The daily tuition-balance nudge — see PaymentNote. Only a part-payer (past
+ * the 60% deposit, short of the full fee) gets one; everyone else gets null.
+ */
+function buildPaymentNote(student: {
+  level: string;
+  classType: string | null;
+  createdAt: Date;
+  classesStartedAt: Date | null;
+  paymentGraceUntil: Date | null;
+  branch: { name: string } | null;
+  payments: Array<{ amount: number }>;
+}): PaymentNote | null {
+  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+  const tuitionFee = tuitionFeeFor(feeLookup);
+  const requiredDeposit = requiredDepositFor(feeLookup);
+  const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
+  const { depositPaid, fullPaid } = derivePaymentStatus({ totalPaid, tuitionFee, requiredDeposit });
+  if (!depositPaid || fullPaid) return null;
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const anchor = student.classesStartedAt ?? student.createdAt;
+  const lockAt = new Date(new Date(anchor).getTime() + PART_PAYMENT_LOCK_DAYS * dayMs);
+  const graceUntil = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;
+  const graceActive = graceUntil ? Date.now() < graceUntil.getTime() : false;
+  const effectiveLockAt = graceActive ? graceUntil! : lockAt;
+  const daysToLock = Math.ceil((effectiveLockAt.getTime() - Date.now()) / dayMs);
+
+  return {
+    outstanding: Math.max(0, tuitionFee - totalPaid),
+    lockDate: effectiveLockAt.toISOString(),
+    daysToLock,
+    urgent: daysToLock <= 7,
+    locked: !graceActive && Date.now() >= lockAt.getTime(),
+    graceUntil: graceUntil ? graceUntil.toISOString() : null,
+  };
 }
 
 /**

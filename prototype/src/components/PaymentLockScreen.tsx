@@ -138,9 +138,17 @@ export default function PaymentLockScreen({
   const [revealed, setRevealed] = useState(false);
   const reduceMotion = useReducedMotion();
 
-  const outstanding = access?.outstanding ?? 0;
-  const progress = access?.progressPercent ?? 0;
+  // Two locks share this screen. The default is a registration-only student who
+  // never cleared the 60% deposit. `unsettled_balance` is a student who DID
+  // start class on a part-payment and then let the 30-day balance grace run
+  // out — a different message, different figures (against the full fee, not the
+  // deposit) and no "study one-to-one instead" offer, since they are already
+  // enrolled.
+  const balanceLock = access?.lockReason === "unsettled_balance";
+  const outstanding = balanceLock ? access?.outstandingBalance ?? 0 : access?.outstanding ?? 0;
+  const progress = balanceLock ? access?.feeProgressPercent ?? 0 : access?.progressPercent ?? 0;
   const registrationPaid = access?.registrationPaid ?? true;
+  const lockedSince = balanceLock && access?.lockAt ? new Date(access.lockAt) : null;
 
   return (
     <>
@@ -305,27 +313,74 @@ export default function PaymentLockScreen({
                 <span className="absolute -left-2 top-1/2 hidden h-5 w-5 -translate-y-1/2 rotate-45 border-b border-l border-white/15 bg-white/[0.07] sm:block" />
 
                 <p className="text-2xl font-semibold leading-snug text-white sm:text-[26px]">
-                  Please proceed to pay the tuition fee to start your classes.
+                  {balanceLock
+                    ? "Please settle your tuition balance to keep going."
+                    : "Please proceed to pay the tuition fee to start your classes."}
                 </p>
 
                 <div className="mt-6 space-y-3">
-                  <div className="flex items-center gap-3 text-sm text-emerald-200">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/20">
-                      <CheckIcon className="h-3.5 w-3.5" strokeWidth={2.6} />
-                    </span>
-                    Registration fee received
-                  </div>
-                  <div className="flex items-center gap-3 text-sm text-amber-100">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-400/20 text-xs">
-                      !
-                    </span>
-                    {registrationPaid && outstanding > 0
-                      ? `${naira(outstanding)} left to unlock your class`
-                      : "Tuition fee outstanding"}
-                  </div>
+                  {balanceLock ? (
+                    <>
+                      <div className="flex items-center gap-3 text-sm text-emerald-200">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/20">
+                          <CheckIcon className="h-3.5 w-3.5" strokeWidth={2.6} />
+                        </span>
+                        Deposit paid — you have been in class
+                      </div>
+                      <div className="flex items-center gap-3 text-sm text-amber-100">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-400/20 text-xs">
+                          !
+                        </span>
+                        {outstanding > 0
+                          ? `${naira(outstanding)} balance outstanding${
+                              lockedSince
+                                ? ` since ${lockedSince.toLocaleDateString("en-NG", { day: "numeric", month: "long" })}`
+                                : ""
+                            }`
+                          : "Tuition balance outstanding"}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-3 text-sm text-emerald-200">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/20">
+                          <CheckIcon className="h-3.5 w-3.5" strokeWidth={2.6} />
+                        </span>
+                        Registration fee received
+                      </div>
+                      <div className="flex items-center gap-3 text-sm text-amber-100">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-400/20 text-xs">
+                          !
+                        </span>
+                        {registrationPaid && outstanding > 0
+                          ? `${naira(outstanding)} left to unlock your class`
+                          : "Tuition fee outstanding"}
+                      </div>
+                    </>
+                  )}
                 </div>
 
-                {access && access.requiredDeposit > 0 && (
+                {balanceLock && access && access.tuitionFee > 0 ? (
+                  <div className="mt-6">
+                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-white/60">
+                      <span>Tuition paid</span>
+                      <span>{progress}%</span>
+                    </div>
+                    <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/10">
+                      <motion.div
+                        className="h-full rounded-full bg-gradient-to-r from-[#FF6600] to-[#0D7C7E]"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${Math.max(progress, 3)}%` }}
+                        transition={{ duration: 1, delay: 0.8, ease: "easeOut" }}
+                      />
+                    </div>
+                    <p className="mt-2 text-xs text-white/60">
+                      {naira(access.totalPaid)} of {naira(access.tuitionFee)} paid
+                    </p>
+                  </div>
+                ) : null}
+
+                {!balanceLock && access && access.requiredDeposit > 0 && (
                   <div className="mt-6">
                     <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-white/60">
                       <span>Towards your seat</span>
@@ -350,7 +405,7 @@ export default function PaymentLockScreen({
                     href="/programs"
                     className="rounded-full bg-[#FF6600] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[#FF6600]/30 transition hover:-translate-y-0.5 hover:brightness-110"
                   >
-                    Pay tuition now
+                    {balanceLock ? "Pay my balance" : "Pay tuition now"}
                   </Link>
                   <Link
                     href="/payments"
@@ -361,21 +416,16 @@ export default function PaymentLockScreen({
                 </div>
 
                 {/*
-                  THE OTHER DOOR.
+                  THE OTHER DOOR — registration-only students only.
 
                   One-to-one tuition is an ALTERNATIVE to the group fee, not an
-                  extra on top of it, and this screen is the one moment a
-                  student is actively deciding how to pay for the course. The
-                  upsell used to live only on the dashboard — which this student
-                  cannot reach, because they have not paid — so the people most
-                  likely to be weighing "is the group class right for me" were
-                  the only people never shown the other option.
-
-                  Deliberately quieter than the tuition button. Somebody who has
-                  hit a wall over money must not be sold at; the offer is there
-                  to be found, not pushed.
+                  extra on top of it, and the deposit screen is the one moment a
+                  student is actively deciding how to pay for the course. A
+                  student locked out over an unpaid BALANCE is already enrolled
+                  on a track, so switching them to private here makes no sense —
+                  they just need to settle what they owe.
                 */}
-                <PrivateClassAlternative />
+                {!balanceLock && <PrivateClassAlternative />}
               </motion.div>
             </motion.div>
           )}
@@ -383,7 +433,9 @@ export default function PaymentLockScreen({
 
         {!revealed && (
           <p className="mt-10 max-w-md text-sm leading-7 text-white/60">
-            Your registration is confirmed — pay the tuition fee to unlock {areaLabel.toLowerCase()}.
+            {balanceLock
+              ? `Your tuition balance is outstanding — settle it to unlock ${areaLabel.toLowerCase()} again.`
+              : `Your registration is confirmed — pay the tuition fee to unlock ${areaLabel.toLowerCase()}.`}
           </p>
         )}
 

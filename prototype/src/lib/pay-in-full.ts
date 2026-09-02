@@ -1,5 +1,5 @@
 import { WEEKS_OF_TEACHING } from "@/lib/levels";
-import { DEPOSIT_RATE, REGISTRATION_FEE } from "@/lib/payment";
+import { DEPOSIT_RATE, MIN_PART_PAYMENT, REGISTRATION_FEE } from "@/lib/payment";
 
 /**
  * The pay-in-full offer.
@@ -210,6 +210,32 @@ export function paymentOptionsFor(offer: FullPaymentOffer, opts?: { now?: Date }
     month: "long",
   });
 
+  /**
+   * Bounds for the "choose your own amount" field. `min` is whatever it takes
+   * to clear the 60% deposit (the school's enrolment gate); once that is in it
+   * drops to MIN_PART_PAYMENT so top-ups are free-form. `max` is the balance —
+   * paying it all through this field is just paying in full. The server
+   * re-checks all of this in resolvePartialPaymentAmount; these are for the UI.
+   */
+  const customMax = fullAmount;
+  const customMin = depositAmount > 0 ? depositAmount : Math.min(MIN_PART_PAYMENT, customMax);
+  const clampToRange = (value: number) => Math.min(customMax, Math.max(customMin, Math.round(value)));
+  const custom = {
+    min: customMin,
+    max: customMax,
+    depositFloor: offer.requiredDeposit,
+    // Honest waypoints between the 60% floor and the full balance — not
+    // discounts, just round fractions of the fee the student can tap instead
+    // of doing the arithmetic.
+    suggested: Array.from(
+      new Set([
+        clampToRange(offer.tuitionFee * 0.75 - offer.totalPaid),
+        clampToRange(offer.tuitionFee * 0.9 - offer.totalPaid),
+      ]),
+    ).filter((value) => value > customMin && value < customMax),
+    available: customMax > 0,
+  };
+
   return {
     full: {
       id: "full" as const,
@@ -228,6 +254,7 @@ export function paymentOptionsFor(offer: FullPaymentOffer, opts?: { now?: Date }
       recommended: false,
       available: depositAmount > 0,
     },
+    custom,
     registrationFee: REGISTRATION_FEE,
     windowNote: offer.windowOpen
       ? `${offer.daysLeftInWindow} day${offer.daysLeftInWindow === 1 ? "" : "s"} left to claim the pay-in-full extras`

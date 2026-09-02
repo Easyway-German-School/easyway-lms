@@ -49,6 +49,7 @@ function PaymentsLedger() {
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState("pending");
   const [formError, setFormError] = useState("");
+  const [formNotice, setFormNotice] = useState("");
   const [formBusy, setFormBusy] = useState(false);
   // Seeded from the URL: the finance workspace links straight to the pending
   // and failed transactions, and to one payment method at a time.
@@ -127,6 +128,7 @@ function PaymentsLedger() {
 
   async function handleCreatePayment() {
     setFormError("");
+    setFormNotice("");
 
     if (!studentId || amount <= 0 || !method.trim()) {
       setFormError("Student, amount, and payment method are required.");
@@ -149,10 +151,11 @@ function PaymentsLedger() {
         }),
       });
 
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Unable to create payment");
       }
+      if (data.warning) setFormNotice(String(data.warning));
 
       setStudentId("");
       setAmount(0);
@@ -188,6 +191,15 @@ function PaymentsLedger() {
           </button>
         </div>
 
+        {formNotice ? (
+          <div className="flex items-start justify-between gap-4 rounded-2xl border border-amber-400/40 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            <p>{formNotice}</p>
+            <button type="button" onClick={() => setFormNotice("")} className="shrink-0 font-semibold">
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
             <label htmlFor="search" className="block text-sm font-semibold text-[var(--muted)]">Search</label>
@@ -209,7 +221,7 @@ function PaymentsLedger() {
             >
               <option value="">All statuses</option>
               <option value="completed">Completed</option>
-              <option value="partial">Partial (60% deposit)</option>
+              <option value="partial">Part-payment (balance owed)</option>
               <option value="pending">Pending</option>
               <option value="failed">Failed</option>
               <option value="not_paid">Not paid</option>
@@ -317,7 +329,7 @@ function PaymentsLedger() {
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="pending">Pending — money not in yet</option>
-                  <option value="partial">Partial — 60% deposit cleared, balance owed</option>
+                  <option value="partial">Part-payment — deposit cleared, balance owed</option>
                   <option value="completed">Completed — account settled</option>
                 </select>
               </label>
@@ -389,7 +401,7 @@ function PaymentsLedger() {
                           payment.status === "pending" ? "bg-yellow-100 text-yellow-700" :
                           payment.status === "failed" ? "bg-red-100 text-red-700" : "bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
                         }`}>
-                          {payment.status === "partial" ? "partial (60%)" : payment.status}
+                          {payment.status === "partial" ? "part-payment" : payment.status}
                         </span>
                       </td>
                       <td className="px-4 py-3">{payment.description ?? "—"}</td>
@@ -409,7 +421,7 @@ function PaymentsLedger() {
                             onClick={() => handleStatusUpdate(payment.id, "partial")}
                             title="Deposit cleared — unlocks classes, balance still owed"
                           >
-                            Mark 60%
+                            Mark part-paid
                           </button>
                         )}
                         {payment.status !== "completed" && payment.status !== "not_paid" && (

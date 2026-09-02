@@ -5,6 +5,7 @@ import {
   requiredDepositFor,
   tuitionFeeFor,
 } from "@/lib/payment";
+import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 
 /**
  * ONE DEFINITION OF WHAT A STUDENT OWES.
@@ -105,6 +106,10 @@ export const FINANCE_STUDENT_SELECT = {
   status: true,
   classType: true,
   createdAt: true,
+  // The clock the part-payment lock runs on, and the admin's override date —
+  // so the roster can show "locks 12 Oct" / "LOCKED" / "grace to 20 Oct".
+  classesStartedAt: true,
+  paymentGraceUntil: true,
   branch: { select: { id: true, name: true } },
   user: { select: { name: true, email: true } },
   payments: {
@@ -119,6 +124,8 @@ export type FinanceStudentInput = {
   status?: string | null;
   classType?: string | null;
   createdAt: Date;
+  classesStartedAt?: Date | null;
+  paymentGraceUntil?: Date | null;
   branch?: { id: string; name: string } | null;
   user?: { name?: string | null; email?: string | null } | null;
   payments: Array<{ amount: number; status?: string | null; createdAt?: Date; method?: string | null }>;
@@ -153,6 +160,16 @@ export type StudentFinance = {
   agingBucket: AgingBucketId;
   lastPaymentAt: string | null;
   paymentCount: number;
+
+  /**
+   * Part-payment lock (deposit-paid, balance still open). `lockAt` is 30 days
+   * after classes started, falling back to enrolment; null when the student is
+   * not a part-payer. `lockActive` is whether that date has passed with no
+   * grace. `graceUntil` is the admin override, if any.
+   */
+  lockAt: string | null;
+  lockActive: boolean;
+  graceUntil: string | null;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -192,6 +209,18 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     return !latest || payment.createdAt > latest ? payment.createdAt : latest;
   }, null);
 
+  // Part-payment lock — only a student past the deposit but short of the fee.
+  const graceDate = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;
+  const isPartPayer = depositPaid && !fullPaid;
+  const lockAnchor = student.classesStartedAt ?? student.createdAt;
+  const lockAt = isPartPayer
+    ? new Date(new Date(lockAnchor).getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS)
+    : null;
+  const lockActive =
+    !!lockAt &&
+    now.getTime() >= lockAt.getTime() &&
+    !(graceDate && now.getTime() < graceDate.getTime());
+
   return {
     id: student.id,
     name: student.user?.name ?? "Unnamed",
@@ -219,6 +248,10 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     agingBucket: agingBucketFor(daysEnrolled),
     lastPaymentAt: lastPaymentAt?.toISOString() ?? null,
     paymentCount: received.length,
+
+    lockAt: lockAt?.toISOString() ?? null,
+    lockActive,
+    graceUntil: graceDate?.toISOString() ?? null,
   };
 }
 
@@ -291,6 +324,20 @@ export const FOCUS_PRESETS: Record<string, FocusPreset> = {
     hint: "Classes unlocked, balance still outstanding",
     tone: "info",
     matches: (row) => row.cohort === "deposit_paid",
+  },
+  part_payers: {
+    id: "part_payers",
+    label: "Part-paid — balance owed",
+    hint: "Started on a part-payment and have not settled the balance",
+    tone: "warn",
+    matches: (row) => row.depositPaid && !row.fullPaid,
+  },
+  part_payers_locked: {
+    id: "part_payers_locked",
+    label: "Part-paid — access on hold",
+    hint: "Balance still open past the 30-day grace after classes started",
+    tone: "danger",
+    matches: (row) => row.lockActive,
   },
   full_paid: {
     id: "full_paid",

@@ -88,6 +88,24 @@ export function isLiveOnlyRoute(pathname: string): boolean {
   return LIVE_ONLY_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 }
 
+/**
+ * How long after classes start a part-payer keeps portal access while the
+ * balance is unpaid. One month into the two-month session: reminders run
+ * through it, the lock lands at the end (see runPaymentWarnings /
+ * sendDueFeeReminders for the escalation, and PaymentLockScreen for the wall).
+ */
+export const PART_PAYMENT_LOCK_DAYS = 30;
+
+const LOCK_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Why the portal is locked, when it is:
+ *   unpaid_deposit     registration-only — never cleared the 60% to start
+ *   unsettled_balance  paid the deposit, never cleared the balance, and the
+ *                      30-day grace after classes started has run out
+ */
+export type PaymentLockReason = "unpaid_deposit" | "unsettled_balance" | null;
+
 export type StudentAccess = {
   /** physical | hybrid | online — see DeliveryMode. */
   deliveryMode: DeliveryMode;
@@ -107,14 +125,35 @@ export type StudentAccess = {
   requiredDeposit: number;
   /** What is still owed before classes open. */
   outstanding: number;
+  /** Against the FULL fee — what a part-payer must clear to lift the balance lock. */
+  outstandingBalance: number;
   /** Progress towards the deposit (not the full fee) — that is the gate. */
   progressPercent: number;
+  /** Progress towards the full fee — what the settle-your-balance screen shows. */
+  feeProgressPercent: number;
+  /** Set when hasAccess is false, so the lock screen can say why. */
+  lockReason: PaymentLockReason;
+  /** ISO date the balance lock lands (or landed). Null when it does not apply. */
+  lockAt: string | null;
+  /** ISO date an admin has granted grace until. Null when none. */
+  graceUntil: string | null;
   currency: string;
 };
+
+function toDate(value: unknown): Date | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 
 /**
  * Access opens at the DEPOSIT, not the full fee, matching how the school
  * actually enrols: pay 60% and you start class while the balance runs.
+ *
+ * It then CLOSES again for a part-payer who never clears the balance: 30 days
+ * after classes start (see PART_PAYMENT_LOCK_DAYS) the portal locks until the
+ * balance is settled, unless an admin has set `paymentGraceUntil`. A
+ * fully-paid student is never touched by any of this.
  */
 export function deriveStudentAccess({
   totalPaid,
@@ -122,27 +161,69 @@ export function deriveStudentAccess({
   requiredDeposit,
   deliveryMode,
   classType,
+  classesStartedAt,
+  enrolledAt,
+  paymentGraceUntil,
+  now = new Date(),
 }: {
   totalPaid: number;
   tuitionFee: number;
   requiredDeposit: number;
   deliveryMode?: unknown;
   classType?: unknown;
+  /** Confirmed first day of classes — the clock the lock runs on. */
+  classesStartedAt?: unknown;
+  /** Enrolment date — fallback anchor when the first day was never confirmed. */
+  enrolledAt?: unknown;
+  /** Admin override date; lock and balance reminders suppressed until it passes. */
+  paymentGraceUntil?: unknown;
+  now?: Date;
 }): StudentAccess {
   const paid = Math.max(0, Math.round(Number(totalPaid) || 0));
   const fee = Math.max(0, Math.round(Number(tuitionFee) || 0));
   const deposit = Math.max(0, Math.round(Number(requiredDeposit) || 0));
 
+  const depositPaid = deposit > 0 ? paid >= deposit : paid >= fee;
+  const fullPaid = fee > 0 ? paid >= fee : depositPaid;
+  const outstandingBalance = Math.max(0, fee - paid);
+
+  // The balance lock only exists for a student who is past the deposit gate
+  // but has not settled the fee.
+  const graceDate = toDate(paymentGraceUntil);
+  const graceActive = graceDate ? now.getTime() < graceDate.getTime() : false;
+
+  let lockAt: Date | null = null;
+  let balanceLocked = false;
+  if (depositPaid && !fullPaid) {
+    const anchor = toDate(classesStartedAt) ?? toDate(enrolledAt);
+    if (anchor) {
+      lockAt = new Date(anchor.getTime() + PART_PAYMENT_LOCK_DAYS * LOCK_DAY_MS);
+      balanceLocked = !graceActive && now.getTime() >= lockAt.getTime();
+    }
+  }
+
+  const hasAccess = depositPaid && !balanceLocked;
+  const lockReason: PaymentLockReason = hasAccess
+    ? null
+    : balanceLocked
+      ? "unsettled_balance"
+      : "unpaid_deposit";
+
   return {
     deliveryMode: normaliseDeliveryMode(deliveryMode),
     classType: normaliseClassType(classType),
-    hasAccess: deposit > 0 ? paid >= deposit : paid >= fee,
+    hasAccess,
     registrationPaid: paid > 0,
     totalPaid: paid,
     tuitionFee: fee,
     requiredDeposit: deposit,
     outstanding: Math.max(0, deposit - paid),
+    outstandingBalance,
     progressPercent: deposit > 0 ? Math.min(100, Math.round((paid / deposit) * 100)) : 0,
+    feeProgressPercent: fee > 0 ? Math.min(100, Math.round((paid / fee) * 100)) : 0,
+    lockReason,
+    lockAt: lockAt ? lockAt.toISOString() : null,
+    graceUntil: graceDate ? graceDate.toISOString() : null,
     currency: "NGN",
   };
 }

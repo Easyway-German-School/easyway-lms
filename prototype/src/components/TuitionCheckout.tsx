@@ -31,6 +31,13 @@ type OfferResponse = {
   options: {
     full: { amount: number; headline: string; subline: string };
     deposit: { amount: number; headline: string; subline: string; available: boolean };
+    custom: {
+      min: number;
+      max: number;
+      depositFloor: number;
+      suggested: number[];
+      available: boolean;
+    };
     windowNote: string;
   };
   socialProof: { percent: number; sample: number } | null;
@@ -43,7 +50,10 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [partPayOpen, setPartPayOpen] = useState(false);
-  const [busy, setBusy] = useState<"full" | "deposit" | null>(null);
+  const [busy, setBusy] = useState<"full" | "deposit" | "custom" | null>(null);
+  // The amount in the "choose an amount" field. 0 until the drawer is opened,
+  // then seeded to the 60% minimum so the field is never left blank.
+  const [customAmount, setCustomAmount] = useState<number>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,17 +74,24 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
     };
   }, []);
 
-  async function startCheckout(stage: "full" | "deposit") {
+  async function startCheckout(stage: "full" | "deposit" | "custom", amount?: number) {
     setBusy(stage);
     setError(null);
     try {
-      // Only the stage goes over the wire. The route prices it from the
-      // student's own record, so the amount cannot be edited in devtools.
+      // The stage goes over the wire, and for "custom" a requested amount. The
+      // route re-derives the fee, the 60% floor and the balance from the
+      // student's own record and runs resolvePartialPaymentAmount — the amount
+      // here is only a request, never trusted as-is.
       const res = await fetch("/api/paystack/initialize", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pathwayName, pathwayId: pathwayName, paymentStage: stage }),
+        body: JSON.stringify({
+          pathwayName,
+          pathwayId: pathwayName,
+          paymentStage: stage,
+          ...(stage === "custom" ? { amount } : {}),
+        }),
       });
       const json = await safeJson(res);
       if (!res.ok || !json?.authorization_url) {
@@ -202,15 +219,22 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
         ) : null}
 
         {/* ---- Part-payment: available, but never the path of least resistance ---- */}
-        {options.deposit.available ? (
+        {options.custom.available ? (
           <div className="mt-8 border-t border-[var(--border)] pt-6">
             <button
               type="button"
-              onClick={() => setPartPayOpen((open) => !open)}
+              onClick={() => {
+                if (!partPayOpen && customAmount <= 0) setCustomAmount(options.custom.min);
+                setPartPayOpen((open) => !open);
+              }}
               aria-expanded={partPayOpen}
               className="text-sm font-medium text-[var(--muted)] underline decoration-slate-600 underline-offset-4 transition hover:text-slate-200"
             >
-              {partPayOpen ? "Hide part-payment" : "I can only part-pay right now"}
+              {partPayOpen
+                ? "Hide part-payment"
+                : offer.depositPaid
+                  ? "Pay part of the balance"
+                  : "I can only part-pay right now"}
             </button>
 
             <AnimatePresence initial={false}>
@@ -223,20 +247,111 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
                   className="overflow-hidden"
                 >
                   <div className="mt-5 rounded-3xl border border-[var(--border)] bg-[var(--surface)]/[0.03] p-6">
-                    <p className="text-base font-semibold text-slate-200">{options.deposit.headline}</p>
-                    <p className="mt-2 text-sm text-[var(--muted)]">{options.deposit.subline}</p>
+                    <p className="text-base font-semibold text-slate-200">
+                      {offer.depositPaid ? "Pay part of the balance" : "Pay part of your tuition now"}
+                    </p>
+                    <p className="mt-2 text-sm text-[var(--muted)]">
+                      {offer.depositPaid
+                        ? `You can put any amount toward the ${naira(offer.outstanding)} still owing — the more you clear, the sooner the reminders stop.`
+                        : `The minimum is ${naira(options.custom.depositFloor)} — the 60% deposit the school starts classes on. Pay more to shrink the balance; anything less has to be arranged with your branch office.`}
+                    </p>
+
+                    {/* Quick picks — the 60% floor (first payment only), then round fractions of the fee. */}
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {[
+                        ...(options.deposit.amount > 0
+                          ? [{ amount: options.deposit.amount, label: "60% — minimum" }]
+                          : []),
+                        ...options.custom.suggested.map((amount) => ({
+                          amount,
+                          label: `${Math.round(((offer.totalPaid + amount) / Math.max(1, offer.tuitionFee)) * 100)}%`,
+                        })),
+                      ].map((chip) => {
+                        const selected = customAmount === chip.amount;
+                        return (
+                          <button
+                            key={chip.label}
+                            type="button"
+                            onClick={() => setCustomAmount(chip.amount)}
+                            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                              selected
+                                ? "border-[#c8a24a] bg-[#c8a24a]/15 text-[#e8cf8f]"
+                                : "border-[var(--border)] text-[var(--muted)] hover:text-slate-200"
+                            }`}
+                          >
+                            {chip.label} · {naira(chip.amount)}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <label
+                      htmlFor="custom-tuition-amount"
+                      className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]"
+                    >
+                      Or choose an amount
+                    </label>
+                    <div className="mt-2 flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5">
+                      <span className="text-lg text-[var(--muted)]">₦</span>
+                      <input
+                        id="custom-tuition-amount"
+                        type="number"
+                        inputMode="numeric"
+                        min={options.custom.min}
+                        max={options.custom.max}
+                        value={customAmount || ""}
+                        onChange={(event) => setCustomAmount(Math.round(Number(event.target.value) || 0))}
+                        className="w-full bg-transparent text-lg font-semibold text-white outline-none"
+                      />
+                    </div>
+
+                    {(() => {
+                      const leftOwing = Math.max(0, offer.tuitionFee - offer.totalPaid - customAmount);
+                      if (customAmount < options.custom.min) {
+                        return (
+                          <p className="mt-2 text-xs text-rose-300">
+                            The minimum first payment is {naira(options.custom.min)}.
+                          </p>
+                        );
+                      }
+                      if (customAmount > options.custom.max) {
+                        return (
+                          <p className="mt-2 text-xs text-rose-300">
+                            That is more than your balance — the most you can pay here is{" "}
+                            {naira(options.custom.max)}.
+                          </p>
+                        );
+                      }
+                      return (
+                        <p className="mt-2 text-xs text-[var(--muted)]">
+                          Leaves <span className="font-semibold text-slate-200">{naira(leftOwing)}</span>{" "}
+                          {leftOwing === 0 ? "— that settles your tuition in full." : "owing."}
+                        </p>
+                      );
+                    })()}
+
+                    <p className="mt-3 rounded-2xl bg-[#c8a24a]/10 px-4 py-2.5 text-xs text-[#e8cf8f]">
+                      Becca: paying more now means a smaller balance later — and the reminders stop
+                      sooner.
+                    </p>
+
                     <ul className="mt-4 space-y-2 text-sm text-[var(--muted)]">
-                      <li>· Your certificate is stamped PROVISIONAL with the balance printed on it.</li>
-                      <li>· Fee reminders begin after 14 days and escalate at 30 and 45.</li>
+                      <li>· Your certificate stays stamped PROVISIONAL, with the balance on it, until it is cleared.</li>
+                      <li>· Balance reminders begin after 14 days, and your portal locks 30 days after classes start if it is still open.</li>
                       <li>· The {offer.perks.length} extras above are not included.</li>
                     </ul>
+
                     <button
                       type="button"
-                      onClick={() => startCheckout("deposit")}
-                      disabled={busy !== null}
+                      onClick={() => startCheckout("custom", customAmount)}
+                      disabled={
+                        busy !== null ||
+                        customAmount < options.custom.min ||
+                        customAmount > options.custom.max
+                      }
                       className="mt-5 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] px-5 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:bg-[var(--surface-alt)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {busy === "deposit" ? "Opening…" : `Pay ${naira(options.deposit.amount)} and owe the rest`}
+                      {busy === "custom" ? "Opening…" : `Pay ${naira(customAmount)} now`}
                     </button>
                   </div>
                 </motion.div>

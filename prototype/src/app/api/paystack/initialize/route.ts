@@ -4,12 +4,12 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { safeJson } from "@/lib/safe-json";
 import {
-  DEPOSIT_RATE,
   isLevelSellable,
   PRIVATE_CLASS_UPGRADE_PRICE,
   receivedPaymentFilter,
   REGISTRATION_FEE,
   requiredDepositFor,
+  resolvePartialPaymentAmount,
   tuitionFeeFor,
 } from "@/lib/payment";
 import { nextLevelAfter } from "@/lib/levels";
@@ -176,14 +176,40 @@ export async function POST(request: Request) {
 
     // What is genuinely still owed at each stage — never more, so a student who
     // has already deposited is charged the balance instead of the whole fee again.
-    const paymentType =
-      requestedStage === "registration" ? "registration" : requestedStage === "deposit" ? "deposit" : "full";
-    const amountToCharge =
-      paymentType === "registration"
-        ? REGISTRATION_FEE
-        : paymentType === "deposit"
-        ? Math.max(0, requiredDeposit - alreadyPaid)
-        : Math.max(0, normalizedTuitionFee - alreadyPaid);
+    //
+    // "custom" is a student-chosen amount toward tuition. It is resolved through
+    // resolvePartialPaymentAmount, which is the ONLY thing enforcing the 60%
+    // floor and the 100% ceiling — the request body's `amount` is otherwise
+    // never trusted. The resolved amount is then re-labelled as a plain
+    // "deposit" or "full" so the webhook / verify path needs no change: a
+    // custom amount that clears the fee is "full" (→ status completed), a
+    // custom amount short of it is a (larger) "deposit" (→ status partial).
+    const isCustom = requestedStage === "custom";
+    let effectivePaymentType: "registration" | "deposit" | "full";
+    let amountToCharge: number;
+
+    if (requestedStage === "registration") {
+      effectivePaymentType = "registration";
+      amountToCharge = REGISTRATION_FEE;
+    } else if (isCustom) {
+      const resolved = resolvePartialPaymentAmount({
+        requestedAmount: body?.amount,
+        tuitionFee: normalizedTuitionFee,
+        requiredDeposit,
+        alreadyPaid,
+      });
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 409 });
+      }
+      amountToCharge = resolved.amount;
+      effectivePaymentType = resolved.settlesAccount ? "full" : "deposit";
+    } else if (requestedStage === "deposit") {
+      effectivePaymentType = "deposit";
+      amountToCharge = Math.max(0, requiredDeposit - alreadyPaid);
+    } else {
+      effectivePaymentType = "full";
+      amountToCharge = Math.max(0, normalizedTuitionFee - alreadyPaid);
+    }
 
     if (amountToCharge <= 0) {
       return NextResponse.json(
@@ -192,8 +218,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const normalizedDepositPercent = paymentType === "deposit" ? Math.round(DEPOSIT_RATE * 100) : 100;
-    const requiredThreshold = paymentType === "deposit" ? requiredDeposit : normalizedTuitionFee;
+    // The running total this payment would take the student to, as a share of
+    // the fee — real percentage for a custom amount, not just 60 or 100.
+    const normalizedDepositPercent =
+      effectivePaymentType === "full"
+        ? 100
+        : Math.max(
+            1,
+            Math.min(100, Math.round(((alreadyPaid + amountToCharge) / Math.max(1, normalizedTuitionFee)) * 100)),
+          );
+    const requiredThreshold = effectivePaymentType === "deposit" ? requiredDeposit : normalizedTuitionFee;
 
     const resolvedPathway = await prisma.pathway.findFirst({
       where: {
@@ -276,8 +310,8 @@ export async function POST(request: Request) {
           tuitionFee: String(normalizedTuitionFee),
           requiredThreshold: String(requiredThreshold),
           depositPercent: String(normalizedDepositPercent),
-          paymentType,
-          paymentStage: paymentType,
+          paymentType: effectivePaymentType,
+          paymentStage: effectivePaymentType,
           forNextLevel: forNextLevel ? "true" : "false",
           targetLevel: billingLevel,
         },
@@ -293,7 +327,7 @@ export async function POST(request: Request) {
       authorization_url: paystackData.data.authorization_url,
       reference: paystackData.data.reference,
       amount: amountToCharge,
-      paymentType,
+      paymentType: effectivePaymentType,
     });
   } catch (error) {
     console.error("Paystack initialization error:", error);

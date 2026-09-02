@@ -578,8 +578,17 @@ model Student {
   germanyGoalSetAt DateTime?
 
   // Email tracking for scheduled reminders
-  feeRemindersScheduled Json? // tracks which reminders (7d, 14d, 30d) have been sent
+  feeRemindersScheduled Json? // tracks which reminders (7d, 14d, 30d, locked) have been sent
   emailPreferences      Json? // user preferences for notification types
+
+  /**
+   * Admin override for the part-payment lock. A student who has paid the 60%
+   * deposit but not the balance is locked out 30 days after classes start
+   * (see PART_PAYMENT_LOCK_DAYS in src/lib/access.ts). Setting a future date
+   * here — "payment plan agreed", "cheque in the post" — suppresses that lock
+   * and the balance reminders until it passes. Null means no override.
+   */
+  paymentGraceUntil DateTime?
 
   /**
    * The cold-start seed for the personalised study plan — what the learner

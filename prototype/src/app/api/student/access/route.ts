@@ -32,6 +32,12 @@ export async function GET() {
       // The fee depends on the branch as well as the level — leaving it out
       // would compute an Abuja student's gate at the cheaper Lagos price.
       branch: { select: { name: true } },
+      // The clock the part-payment lock runs on: 30 days after the confirmed
+      // first day of classes (falling back to enrolment), unless an admin has
+      // granted grace.
+      classesStartedAt: true,
+      createdAt: true,
+      paymentGraceUntil: true,
       payments: {
         where: receivedPaymentFilter(),
         select: { amount: true },
@@ -56,6 +62,9 @@ export async function GET() {
       // could not tell a private student from a group one — and hid the live
       // classroom from private students the server was happy to admit.
       classType: student.classType,
+      classesStartedAt: student.classesStartedAt,
+      enrolledAt: student.createdAt,
+      paymentGraceUntil: student.paymentGraceUntil,
     }),
   );
 }

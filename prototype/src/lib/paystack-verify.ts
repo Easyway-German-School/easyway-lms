@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { classifyPaymentTransaction, isReceivedPayment } from "@/lib/payment";
+import { classifyPaymentTransaction, isReceivedPayment, RECEIVED_PAYMENT_STATUSES } from "@/lib/payment";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { safeJson } from "@/lib/safe-json";
 
@@ -118,26 +118,60 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     return;
   }
 
-  const invoice = await prisma.invoice.create({
-    data: {
-      studentId,
-      totalAmount: Math.max(totalAmount || paymentAmount, paymentAmount),
-      currency,
-      status: paymentClassification.invoiceStatus,
-      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      lineItems: {
-        pathwayId,
-        pathwayName,
-        paymentType: effectivePaymentType,
-        depositPercent,
+  /**
+   * A student may now make more than one part-payment toward the same level's
+   * tuition (a 60% deposit today, another 20% next month). Every such payment
+   * used to open its OWN invoice, leaving the student with two `partial`
+   * invoices for one balance and the fee-reminder job chasing both. So a
+   * top-up attaches to the invoice already open for this student instead.
+   *
+   * A next-level payment is explicitly excluded — that IS a new balance and
+   * deserves its own invoice (see the note on `alreadyPaid` in the checkout
+   * route about why a fresh level starts its own ledger).
+   */
+  const forNextLevel = String(metadata.forNextLevel || "") === "true";
+  const openInvoice = forNextLevel
+    ? null
+    : await prisma.invoice.findFirst({
+        where: { studentId, status: "partial" },
+        orderBy: { createdAt: "asc" },
+      });
+
+  let invoiceId: string;
+  if (openInvoice) {
+    const priorPaid = await prisma.payment.aggregate({
+      where: { invoiceId: openInvoice.id, status: { in: [...RECEIVED_PAYMENT_STATUSES] } },
+      _sum: { amount: true },
+    });
+    const runningPaid = (priorPaid._sum.amount ?? 0) + paymentAmount;
+    await prisma.invoice.update({
+      where: { id: openInvoice.id },
+      data: { status: runningPaid >= openInvoice.totalAmount ? "paid" : "partial" },
+    });
+    invoiceId = openInvoice.id;
+  } else {
+    const invoice = await prisma.invoice.create({
+      data: {
+        studentId,
+        totalAmount: Math.max(totalAmount || paymentAmount, paymentAmount),
+        currency,
+        status: paymentClassification.invoiceStatus,
+        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        lineItems: {
+          pathwayId,
+          pathwayName,
+          paymentType: effectivePaymentType,
+          depositPercent,
+        },
       },
-    },
-  });
+    });
+    invoiceId = invoice.id;
+  }
 
   await prisma.payment.create({
     data: {
       studentId,
-      invoiceId: invoice.id,
+      invoiceId,
       amount: paymentAmount,
       currency,
       status: settledStatus,

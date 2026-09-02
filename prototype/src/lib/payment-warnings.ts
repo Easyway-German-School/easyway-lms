@@ -1,24 +1,28 @@
 import { prisma } from "@/lib/prisma";
 import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { KIND, notify } from "@/lib/notify";
 
 /**
- * Warns students before their account locks for non-payment.
+ * Warns students before their portal access is paused for non-payment.
  *
- * Access to classes, assignments, attendance and certificates is gated on
- * tuition being paid (see PaymentLockScreen). Locking someone out with
- * no warning is the kind of thing that loses a student rather than collecting
- * a fee, so this gives three escalating notices first.
+ * There are two ways to end up locked out (see deriveStudentAccess /
+ * PaymentLockScreen), and each gets its own escalation:
  *
- * Tiers are based on how long the student has been enrolled with an
- * outstanding balance:
+ *  1. REGISTRATION-ONLY — never cleared the 60% deposit, so classes never
+ *     opened. Nudged at 14 / 30 / 45 days from enrolment (WARNING_TIERS).
+ *     Nothing is "paused" here because nothing was ever unlocked; the final
+ *     notice is a prompt, not a threat.
  *
- *   notice   14 days   friendly nudge, nothing restricted
- *   warning  30 days   states the lock date plainly
- *   final    45 days   last notice before access is restricted
+ *  2. PART-PAID, BALANCE OPEN — started class on a part-payment and never
+ *     settled. Access genuinely pauses PART_PAYMENT_LOCK_DAYS (30) days after
+ *     classes start, so the notices are aimed at that date: 10 days before,
+ *     3 days before, and on the day (BALANCE_TIERS). The final one is now a
+ *     true statement — access is actually paused.
  *
- * Each tier fires at most once per student — the sent Notification row is the
- * record, so re-running is safe and will not spam anyone.
+ * An admin `paymentGraceUntil` in the future suppresses the balance track
+ * entirely. Each tier fires at most once per student — the sent Notification
+ * row (dedupeKey) is the record, so re-running is safe.
  */
 
 export const WARNING_TIERS = [
@@ -28,6 +32,21 @@ export const WARNING_TIERS = [
 ] as const;
 
 export type WarningTier = (typeof WARNING_TIERS)[number]["tier"];
+
+/**
+ * Balance-track tiers, measured as days remaining until the lock lands (so a
+ * negative value means the lock has already landed). Ordered most-urgent-first
+ * for the "highest tier reached" pick.
+ */
+export const BALANCE_TIERS = [
+  { tier: "balance-final", withinDays: 0 },
+  { tier: "balance-warning", withinDays: 3 },
+  { tier: "balance-notice", withinDays: 10 },
+] as const;
+
+export type BalanceTier = (typeof BALANCE_TIERS)[number]["tier"];
+
+const DAY_MS = 86_400_000;
 
 function titleFor(tier: WarningTier) {
   if (tier === "notice") return "Tuition balance outstanding";
@@ -58,10 +77,28 @@ function markerFor(tier: WarningTier) {
   return `payment-${tier}`;
 }
 
+function balanceTitleFor(tier: BalanceTier) {
+  if (tier === "balance-notice") return "Tuition balance due soon";
+  if (tier === "balance-warning") return "3 days until your access pauses";
+  return "Your portal access is paused";
+}
+
+function balanceMessageFor(tier: BalanceTier, balance: number, lockAt: Date): string {
+  const amount = `₦${balance.toLocaleString()}`;
+  const lockDate = lockAt.toLocaleDateString("en-NG", { day: "numeric", month: "long" });
+  if (tier === "balance-notice") {
+    return `You still owe ${amount} on your tuition. Please clear it from the Payments page before ${lockDate}, when access to your classes, assignments and certificates pauses until the balance is settled.`;
+  }
+  if (tier === "balance-warning") {
+    return `${amount} is still outstanding on your tuition. Access to your classes, assignments and certificates pauses on ${lockDate} unless it is settled. Pay from the Payments page or speak to your branch office today.`;
+  }
+  return `Access to your classes, assignments and certificates is now paused: ${amount} of your tuition is still outstanding. Settle it from the Payments page or with your branch office and your access is restored immediately.`;
+}
+
 export type WarningRun = {
   checked: number;
   atRisk: number;
-  created: Array<{ studentId: string; name: string; tier: WarningTier; balance: number }>;
+  created: Array<{ studentId: string; name: string; tier: WarningTier | BalanceTier; balance: number }>;
   skipped: number;
 };
 
@@ -76,6 +113,8 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
       level: true,
       classType: true,
       createdAt: true,
+      classesStartedAt: true,
+      paymentGraceUntil: true,
       branch: { select: { name: true } },
       user: { select: { id: true, name: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
@@ -89,12 +128,68 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     const tuitionFee = tuitionFeeFor(feeLookup);
     const requiredDeposit = requiredDepositFor(feeLookup);
     const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
-    const { fullPaid } = derivePaymentStatus({ totalPaid, tuitionFee, requiredDeposit });
+    const { fullPaid, depositPaid } = derivePaymentStatus({ totalPaid, tuitionFee, requiredDeposit });
 
     if (fullPaid) continue;
     run.atRisk++;
 
-    const daysEnrolled = Math.floor((now.getTime() - student.createdAt.getTime()) / 86_400_000);
+    const balance = Math.max(0, tuitionFee - totalPaid);
+
+    // -------- Balance track: part-paid, aimed at the 30-day post-start lock --------
+    if (depositPaid) {
+      const graceUntil = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;
+      if (graceUntil && now.getTime() < graceUntil.getTime()) {
+        run.skipped++;
+        continue;
+      }
+
+      const anchor = student.classesStartedAt ?? student.createdAt;
+      const lockAt = new Date(anchor.getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS);
+      const daysUntilLock = Math.ceil((lockAt.getTime() - now.getTime()) / DAY_MS);
+
+      // Most-urgent tier currently reached (BALANCE_TIERS is ordered final→notice).
+      const dueBalance = BALANCE_TIERS.find((t) => daysUntilLock <= t.withinDays);
+      if (!dueBalance) continue;
+
+      const marker = dueBalance.tier;
+      const already = await prisma.notification.findFirst({
+        where: { studentId: student.id, OR: [{ dedupeKey: marker }, { channel: marker }] },
+        select: { id: true },
+      });
+      if (already) {
+        run.skipped++;
+        continue;
+      }
+
+      if (!dryRun) {
+        await notify({
+          to: { studentIds: [student.id] },
+          kind: KIND.tuitionReminder,
+          severity:
+            dueBalance.tier === "balance-final"
+              ? "critical"
+              : dueBalance.tier === "balance-warning"
+                ? "warning"
+                : "info",
+          title: balanceTitleFor(dueBalance.tier),
+          message: balanceMessageFor(dueBalance.tier, balance, lockAt),
+          link: "/payments",
+          dedupeKey: marker,
+          push: true,
+        });
+      }
+
+      run.created.push({
+        studentId: student.id,
+        name: student.user.name ?? "(unnamed)",
+        tier: dueBalance.tier,
+        balance,
+      });
+      continue;
+    }
+
+    // -------- Registration-only track: never cleared the deposit --------
+    const daysEnrolled = Math.floor((now.getTime() - student.createdAt.getTime()) / DAY_MS);
 
     // Highest tier the student has reached; only that one is sent.
     const due = [...WARNING_TIERS].reverse().find((t) => daysEnrolled >= t.afterDays);
@@ -111,7 +206,6 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
       continue;
     }
 
-    const balance = Math.max(0, tuitionFee - totalPaid);
     const finalTier = WARNING_TIERS[WARNING_TIERS.length - 1];
     const daysLeft = Math.max(0, finalTier.afterDays - daysEnrolled);
     const title = titleFor(due.tier);

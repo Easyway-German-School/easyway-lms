@@ -49,42 +49,66 @@ export function welcomeEmailTemplate(studentName: string, pathwayName: string): 
 
 export function feeReminderEmailTemplate(
   studentName: string,
-  daysOverdue: number,
+  /** Days since the invoice was raised (7 | 14 | 30), or "locked" once access has actually paused. */
+  stage: number | "locked",
   amountDue: number,
-  currency: string = "NGN"
+  currency: string = "NGN",
+  /** When portal access pauses (or paused). Named in the 30-day and locked emails. */
+  lockDate?: Date | null,
 ): EmailTemplate {
   const name = studentName || "there";
-  const dayLabel = daysOverdue === 7 ? "one week" : daysOverdue === 14 ? "two weeks" : "one month";
-  
+  const money =
+    currency === "NGN" || currency === "ngn"
+      ? `₦${Math.round(amountDue).toLocaleString("en-NG")}`
+      : `${Math.round(amountDue).toLocaleString("en-NG")} ${currency}`;
+  const payUrl = `${(process.env.NEXTAUTH_URL || "").replace(/\/$/, "")}/payments`;
+  const lockLabel = lockDate
+    ? lockDate.toLocaleDateString("en-NG", { day: "numeric", month: "long", year: "numeric" })
+    : null;
+  const isLocked = stage === "locked";
+  const dayLabel = stage === 7 ? "one week" : stage === 14 ? "two weeks" : stage === 30 ? "one month" : "";
+
+  const heading = isLocked ? "Your portal access is paused" : "Payment reminder";
+  const lead = isLocked
+    ? `Your tuition balance of <strong>${money}</strong> is still outstanding, so access to your classes, assignments and certificates is now paused.`
+    : `This is a reminder that your tuition balance of <strong>${money}</strong> has been outstanding for ${dayLabel || "a while"}.`;
+  const consequence = isLocked
+    ? `As soon as the balance is settled — from the Payments page or with your branch office — your access is restored straight away.`
+    : lockLabel
+      ? `If it is not settled by <strong>${lockLabel}</strong>, access to your classes, assignments and certificates will pause until it is.`
+      : `Please settle it to keep uninterrupted access to your classes.`;
+
   return {
-    subject: `⏰ Payment reminder: ${amountDue} ${currency} due for your program`,
+    subject: isLocked
+      ? `Access paused — ${money} tuition balance outstanding`
+      : `⏰ Payment reminder: ${money} tuition balance due`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
-        <h1 style="color: #FF9800; margin-bottom: 20px;">Payment Reminder</h1>
-        
+        <h1 style="color: #FF9800; margin-bottom: 20px;">${heading}</h1>
+
         <p>Hello ${name},</p>
-        
-        <p>This is a friendly reminder that your outstanding balance of <strong>${amountDue} ${currency}</strong> is now due.</p>
-        
-        <p>To maintain uninterrupted access to your program, please complete your payment within the next few days.</p>
-        
-        <p style="margin: 20px 0;">
-          <a href="https://easyway.test/student/payments" style="background-color: #FF9800; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
-            Make Payment Now
+
+        <p>${lead}</p>
+
+        <p>${consequence}</p>
+
+        ${
+          payUrl
+            ? `<p style="margin: 20px 0;">
+          <a href="${payUrl}" style="background-color: #FF9800; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
+            ${isLocked ? "Settle my balance" : "Make a payment"}
           </a>
-        </p>
-        
+        </p>`
+            : ""
+        }
+
         <p style="background-color: #FFF3E0; border-left: 4px solid #FF9800; padding: 15px; margin: 20px 0;">
-          <strong>Why pay now?</strong> Avoid study interruptions and maintain your learning momentum!
+          You can pay any amount toward the balance — you do not have to clear it all at once.
         </p>
-        
-        <p style="margin-top: 20px; font-size: 14px; color: #666;">
-          Questions? Contact our billing team at support@easyway.test
-        </p>
-        
+
         <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
           Best regards,<br/>
-          The Easyway LMS Team
+          The EasyWay team
         </p>
       </div>
     `,

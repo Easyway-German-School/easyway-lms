@@ -152,6 +152,19 @@ const CSV_COLUMNS: Array<{ header: string; value: (row: StudentFinance) => strin
   { header: "Days enrolled", value: (row) => row.daysEnrolled },
   { header: "Ageing", value: (row) => AGING_BUCKETS.find((b) => b.id === row.agingBucket)?.label ?? row.agingBucket },
   { header: "Behind on tuition", value: (row) => (row.behindOnTuition ? "yes" : "no") },
+  { header: "Lock date", value: (row) => (row.lockAt ? row.lockAt.slice(0, 10) : "") },
+  {
+    header: "Lock status",
+    value: (row) =>
+      row.lockActive
+        ? "on hold"
+        : row.graceUntil && new Date(row.graceUntil) > new Date()
+          ? "grace"
+          : row.lockAt
+            ? "scheduled"
+            : "",
+  },
+  { header: "Grace until", value: (row) => (row.graceUntil ? row.graceUntil.slice(0, 10) : "") },
 ];
 
 function csvResponse(rows: StudentFinance[]): Response {

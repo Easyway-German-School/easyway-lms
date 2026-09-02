@@ -182,6 +182,9 @@ export async function GET(request: Request) {
         totalPaid,
         tuitionFee: tuitionFeeFor(feeLookup),
         requiredDeposit: requiredDepositFor(feeLookup),
+        classesStartedAt: student.classesStartedAt,
+        enrolledAt: student.createdAt,
+        paymentGraceUntil: student.paymentGraceUntil,
       });
 
       if (!access.hasAccess) {
@@ -189,7 +192,10 @@ export async function GET(request: Request) {
           {
             error: "Locked",
             locked: true,
-            message: `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} to join live classes.`,
+            message:
+              access.lockReason === "unsettled_balance"
+                ? `Settle your tuition balance of ₦${access.outstandingBalance.toLocaleString()} to rejoin live classes.`
+                : `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} to join live classes.`,
             access,
           },
           { status: 403 },

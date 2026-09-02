@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { isValidPaymentStatus, PAYMENT_STATUSES } from "@/lib/payment";
+import {
+  isValidPaymentStatus,
+  isReceivedPayment,
+  PAYMENT_STATUSES,
+  requiredDepositFor,
+} from "@/lib/payment";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -57,7 +62,45 @@ export async function POST(request: Request) {
       },
     });
 
-    return NextResponse.json({ payment }, { status: 201 });
+    /**
+     * The office can record any amount at any status (cash and bank-transfer
+     * desks need that freedom). But a `partial` payment that does not actually
+     * reach the 60% deposit will NOT unlock the student's classes — the paywall
+     * gates on the cumulative received total, not on the status label — so a
+     * non-blocking warning is returned when that is the case, to catch an
+     * under-deposit being mistaken for an unlock.
+     */
+    let warning: string | null = null;
+    if (status === "partial") {
+      const student = await prisma.student.findUnique({
+        where: { id: studentId },
+        select: {
+          level: true,
+          classType: true,
+          branch: { select: { name: true } },
+          payments: { select: { amount: true, status: true } },
+        },
+      });
+      if (student) {
+        const received = student.payments
+          .filter((p) => isReceivedPayment(p.status))
+          .reduce((sum, p) => sum + p.amount, 0);
+        const deposit = requiredDepositFor({
+          level: student.level,
+          branch: student.branch?.name ?? null,
+          classType: student.classType,
+        });
+        if (received < deposit) {
+          warning = `Recorded, but this is below the 60% deposit (₦${deposit.toLocaleString(
+            "en-NG",
+          )}). The student's classes will NOT unlock until the received total reaches it — currently ₦${received.toLocaleString(
+            "en-NG",
+          )}.`;
+        }
+      }
+    }
+
+    return NextResponse.json({ payment, warning }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: "Unable to create payment", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
   }

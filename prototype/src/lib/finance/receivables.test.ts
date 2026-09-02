@@ -82,9 +82,67 @@ describe("computeStudentFinance", () => {
     expect(overdue.behindOnTuition).toBe(true);
   });
 
-  it("doubles the fee for a private student", () => {
+  it("charges the flat private-tuition price for a private student", () => {
+    // Private is one flat fee at every branch and level (₦350,000, confirmed
+    // 2026-09) — no longer a 2x multiple of the group fee. See
+    // PRIVATE_CLASS_UPGRADE_PRICE in src/lib/payment.ts.
     const row = computeStudentFinance(student({ id: "a", classType: "private" }), NOW);
-    expect(row.tuitionFee).toBe(300_000);
+    expect(row.tuitionFee).toBe(350_000);
+  });
+
+  it("does not compute a lock for a fully-paid or unpaid student", () => {
+    const fullyPaid = computeStudentFinance(
+      student({ id: "a", payments: [{ amount: 150_000 }] }),
+      NOW,
+    );
+    const unpaid = computeStudentFinance(student({ id: "b", payments: [] }), NOW);
+    expect(fullyPaid.lockAt).toBeNull();
+    expect(unpaid.lockAt).toBeNull();
+  });
+
+  it("locks a part-payer 30 days after classes start", () => {
+    const notYet = computeStudentFinance(
+      student({
+        id: "a",
+        payments: [{ amount: 90_000 }],
+        classesStartedAt: new Date(NOW.getTime() - 20 * DAY),
+      }),
+      NOW,
+    );
+    const past = computeStudentFinance(
+      student({
+        id: "b",
+        payments: [{ amount: 90_000 }],
+        classesStartedAt: new Date(NOW.getTime() - 31 * DAY),
+      }),
+      NOW,
+    );
+    expect(notYet.lockActive).toBe(false);
+    expect(notYet.lockAt).not.toBeNull();
+    expect(past.lockActive).toBe(true);
+  });
+
+  it("an admin grace date in the future suppresses the lock", () => {
+    const withGrace = computeStudentFinance(
+      student({
+        id: "a",
+        payments: [{ amount: 90_000 }],
+        classesStartedAt: new Date(NOW.getTime() - 31 * DAY),
+        paymentGraceUntil: new Date(NOW.getTime() + 10 * DAY),
+      }),
+      NOW,
+    );
+    expect(withGrace.lockActive).toBe(false);
+    expect(withGrace.graceUntil).not.toBeNull();
+  });
+
+  it("falls back to enrolment date when the first day was never confirmed", () => {
+    const row = computeStudentFinance(
+      // default createdAt is NOW - 30d, so the lock lands exactly at NOW
+      student({ id: "a", payments: [{ amount: 90_000 }] }),
+      NOW,
+    );
+    expect(row.lockActive).toBe(true);
   });
 });
 

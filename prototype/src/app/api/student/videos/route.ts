@@ -56,14 +56,21 @@ export async function GET() {
       totalPaid,
       tuitionFee: tuitionFeeFor(feeLookup),
       requiredDeposit: requiredDepositFor(feeLookup),
+      classesStartedAt: student.classesStartedAt,
+      enrolledAt: student.createdAt,
+      paymentGraceUntil: student.paymentGraceUntil,
     });
 
     if (!access.hasAccess) {
+      const message =
+        access.lockReason === "unsettled_balance"
+          ? `Settle your tuition balance of ₦${access.outstandingBalance.toLocaleString()} to restore the video library.`
+          : `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} to unlock the video library.`;
       return NextResponse.json(
         {
           videos: [],
           locked: true,
-          message: `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} to unlock the video library.`,
+          message,
         },
         { status: 403 },
       );
