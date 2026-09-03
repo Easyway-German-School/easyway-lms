@@ -38,6 +38,12 @@ export default function AdminEmailManagementPage() {
   // string-match to pick a colour. The flag is the state now; the icon follows it.
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // Manual "push the outbound queue now" — for when a student page is showing
+  // "message still sitting in the queue" and nobody wants to wait for the
+  // nightly sweep.
+  const [isDraining, setIsDraining] = useState(false);
+  const [drainMsg, setDrainMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
   useEffect(() => {
     checkAdmin();
     loadStats();
@@ -69,6 +75,36 @@ export default function AdminEmailManagementPage() {
       }
     } catch (error) {
       console.error("Failed to load stats:", error);
+    }
+  };
+
+  const handleDrainQueue = async () => {
+    setIsDraining(true);
+    setDrainMsg(null);
+
+    try {
+      // Admin caller keeps their own tenant scope, so this sends this school's
+      // queued mail and nobody else's (see /api/cron/email-queue).
+      const response = await fetch("/api/cron/email-queue", { method: "POST" });
+      const data = await response.json();
+
+      if (response.ok) {
+        setDrainMsg({
+          ok: true,
+          text:
+            `${data.sent} sent` +
+            (data.retrying ? `, ${data.retrying} will retry` : "") +
+            (data.failed ? `, ${data.failed} failed` : "") +
+            (data.skipped ? `, ${data.skipped} skipped` : "") +
+            ` (${data.processed} processed).`,
+        });
+      } else {
+        setDrainMsg({ ok: false, text: data.error || "Queue drain failed" });
+      }
+    } catch (error) {
+      setDrainMsg({ ok: false, text: `Error: ${error}` });
+    } finally {
+      setIsDraining(false);
     }
   };
 
@@ -216,6 +252,40 @@ export default function AdminEmailManagementPage() {
                 <li>• <strong>Graduation:</strong> Sent when student completes program</li>
                 <li>• <strong>Fee Reminders:</strong> Sent at 7, 14, and 30 days for partial payments</li>
               </ul>
+            </div>
+
+            {/* Manual queue flush */}
+            <div className="mt-6 max-w-md rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+              <h3 className="mb-1 flex items-center gap-2 font-semibold">
+                <RefreshIcon /> Outbound queue
+              </h3>
+              <p className="mb-3 text-xs text-[var(--muted)]">
+                Emails send automatically moments after they are queued, with a nightly sweep as a
+                backstop. Use this to push anything still waiting — e.g. a student page showing
+                &ldquo;message still sitting in the queue&rdquo;.
+              </p>
+              <button
+                onClick={handleDrainQueue}
+                disabled={isDraining}
+                className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-[var(--surface)] disabled:opacity-50"
+              >
+                {isDraining ? "Draining…" : "Drain queue now"}
+              </button>
+
+              {drainMsg && (
+                <div
+                  className={`mt-3 flex items-center gap-2 rounded-lg p-3 text-sm ${
+                    drainMsg.ok ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                  }`}
+                >
+                  {drainMsg.ok ? (
+                    <CheckCircleIcon className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <CrossCircleIcon className="h-4 w-4 shrink-0" />
+                  )}
+                  {drainMsg.text}
+                </div>
+              )}
             </div>
           </div>
         )}
