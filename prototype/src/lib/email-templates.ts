@@ -317,6 +317,86 @@ export function examResultsEmailTemplate(
   };
 }
 
+export function pretestReminderEmailTemplate(
+  studentName: string,
+  level: string,
+  examDate: Date,
+  tutorName?: string,
+): EmailTemplate {
+  const name = studentName || "there";
+  const formattedDate = new Date(examDate).toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  return {
+    subject: `Mock exam reminder: your ${level} pretest on ${formattedDate}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+        <h1 style="color: #2196F3; margin-bottom: 20px;">Mock exam coming up</h1>
+
+        <p>Hello ${name},</p>
+
+        <p>Your <strong>${level}</strong> class sits a mock exam soon. It is built like the real paper &mdash; same sections, same timing &mdash; so the real sitting feels familiar rather than new.</p>
+
+        <div style="background-color: #E3F2FD; border-left: 4px solid #2196F3; padding: 15px; margin: 20px 0;">
+          <p style="margin: 5px 0;"><strong>Mock exam:</strong> ${level}</p>
+          <p style="margin: 5px 0;"><strong>Date:</strong> ${formattedDate}</p>
+          ${tutorName ? `<p style="margin: 5px 0;"><strong>Your tutor:</strong> ${tutorName}</p>` : ""}
+        </div>
+
+        <p>The score is practice. It does not go on your certificate and it does not change your level &mdash; it tells you and your tutor exactly where to spend the last few weeks.</p>
+
+        <p>Prepare the way you would for the real thing: one past paper, a full night's sleep, arrive early.</p>
+
+        <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
+          Best of luck,<br/>
+          The Easyway team
+        </p>
+      </div>
+    `,
+  };
+}
+
+export function resultsReleasedEmailTemplate(
+  recipientName: string,
+  examName: string,
+  { forParent = false, studentName }: { forParent?: boolean; studentName?: string } = {},
+): EmailTemplate {
+  const name = recipientName || "there";
+  const whose = forParent ? `${studentName || "your child"}'s` : "your";
+
+  return {
+    subject: forParent
+      ? `${studentName || "Your child"}'s results for ${examName} are ready`
+      : `Your results for ${examName} are ready`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+        <h1 style="color: #4CAF50; margin-bottom: 20px;">Results are ready</h1>
+
+        <p>Hello ${name},</p>
+
+        <p>The results for ${whose} <strong>${examName}</strong> have been released. The score on every skill, the overall mark and the tutor's notes are in the portal now.</p>
+
+        <p style="margin: 20px 0;">
+          <a href="${(process.env.NEXTAUTH_URL || "").replace(/\/$/, "")}/results" style="background-color: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
+            View the results
+          </a>
+        </p>
+
+        <p>Read the per-skill breakdown, not just the total &mdash; it is the fastest way to see where the next few weeks are best spent. If anything looks wrong, reply to this email and the office will check it with the tutor.</p>
+
+        <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 12px; color: #999;">
+          Best regards,<br/>
+          The Easyway team
+        </p>
+      </div>
+    `,
+  };
+}
+
 /**
  * The reset link.
  *

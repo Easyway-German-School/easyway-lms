@@ -31,6 +31,14 @@ export const KIND = {
   gatewayError: "gateway.error",
   tuitionReminder: "tuition.reminder",
   examRegistered: "exam.registered",
+  /** A mock / pretest sitting is coming up — sent to the class and the tutor. */
+  examPretest: "exam.pretest",
+  /**
+   * Internal, to the tutor (and the office if it drags): a sitting has marks
+   * in the gradebook but the results have not been released to students. The
+   * nudge the auto-release flow falls back to. See src/lib/result-release.ts.
+   */
+  resultReleaseNudge: "result.release_nudge",
   levelAdvance: "level.advance",
   materialPublished: "material.published",
   assignmentDue: "assignment.due",

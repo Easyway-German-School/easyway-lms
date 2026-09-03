@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { KIND, notify } from "@/lib/notify";
+import { setExamResultsReleased } from "@/lib/result-release";
 
 /**
  * Release (or hide) an exam sitting's results.
@@ -12,9 +12,11 @@ import { KIND, notify } from "@/lib/notify";
  * one classmate at a time. Coursework marks are not gated this way; they show
  * the moment they are saved.
  *
- * On release the graded students are notified, the same as a coursework mark —
- * without this a tutor flips the toggle and nobody finds out their result is
- * up.
+ * The flip and every notification that rides on it — the graded students, THEIR
+ * PARENTS, and the office — live in `setExamResultsReleased` so this manual
+ * toggle and the automatic release sweep (src/lib/result-release.ts) can never
+ * drift apart. This route only decides whether the caller is allowed to flip
+ * THIS sitting.
  */
 export async function POST(request: Request) {
   const session = await requireAuthSession();
@@ -29,56 +31,14 @@ export async function POST(request: Request) {
 
   const exam = await prisma.exam.findFirst({
     where: { id: examId, ...(role === "lecturer" ? { lecturer: { userId: session.user.id } } : {}) },
-    select: {
-      id: true,
-      name: true,
-      level: true,
-      resultsReleased: true,
-      lecturer: { select: { user: { select: { name: true } } } },
-    },
+    select: { id: true, resultsReleased: true },
   });
   if (!exam) return NextResponse.json({ error: "Exam not found" }, { status: 404 });
 
-  const updated = await prisma.exam.update({
-    where: { id: exam.id },
-    data: { resultsReleased: !exam.resultsReleased },
-    select: { id: true, resultsReleased: true },
-  });
+  const next = !exam.resultsReleased;
+  await setExamResultsReleased(exam.id, next).catch((error) =>
+    console.error("Result release failed", error),
+  );
 
-  // Tell the students only when results have just gone live, and only those
-  // who actually have a mark for this sitting.
-  if (updated.resultsReleased) {
-    const graded = await prisma.grade.findMany({
-      where: { examId: exam.id },
-      select: { studentId: true },
-    });
-    const studentIds = [...new Set(graded.map((row) => row.studentId))];
-    if (studentIds.length) {
-      await notify({
-        to: { studentIds },
-        kind: KIND.resultPublished,
-        severity: "info",
-        title: `${exam.name} results are out`,
-        message: "Your tutor has released this exam's results. Open your results to see your score.",
-        link: "/results",
-        push: true,
-      }).catch((error) => console.error("Result release notification failed", error));
-    }
-
-    // The office watches the gradebook, not the student inbox — tell it too, so
-    // "results are in for this sitting" is a fact somebody at a desk can see.
-    const tutorName = exam.lecturer?.user?.name;
-    await notify({
-      to: { audience: "admin", capability: "exams" },
-      kind: KIND.resultPublished,
-      severity: "info",
-      title: `${exam.name} results released`,
-      message:
-        `${tutorName ? `${tutorName} released` : "Released"} ${exam.name}` +
-        `${exam.level ? ` (${exam.level})` : ""} — ${studentIds.length} student${studentIds.length === 1 ? "" : "s"} graded.`,
-      link: "/admin/gradebook",
-    }).catch((error) => console.error("Result release admin notification failed", error));
-  }
-
-  return NextResponse.json({ examId: updated.id, resultsReleased: updated.resultsReleased });
+  return NextResponse.json({ examId: exam.id, resultsReleased: next });
 }

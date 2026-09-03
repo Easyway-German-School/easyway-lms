@@ -306,6 +306,24 @@ model Tenant {
   refundRequests   RefundRequest[]
   tuitionCharges   TuitionCharge[]
   paymentPlans     PaymentPlan[]
+
+  /// Back-relations for the Work Drive tables. See docs/WORK_DRIVE.md.
+  workspaces        Workspace[]
+  workspaceMembers  WorkspaceMember[]
+  driveFolders      DriveFolder[]
+  driveFiles        DriveFile[]
+  driveFileVersions DriveFileVersion[]
+  driveFileTexts    DriveFileText[]
+  fileShares        FileShare[]
+  fileActivity      FileActivity[]
+  fileComments      FileComment[]
+  workEvents        WorkEvent[]
+  eventAttendees    EventAttendee[]
+  eventTasks        EventTask[]
+  eventResources    EventResource[]
+  webinars             Webinar[]
+  webinarQuestions     WebinarQuestion[]
+  webinarQuestionVotes WebinarQuestionVote[]
 }
 
 /// School-wide configuration the office edits instead of asking for a deploy.
@@ -2223,6 +2241,14 @@ model Exam {
    */
   examBody String  @default("internal")
   /**
+   * standard | mock — a mock (pretest) is a practice sitting built like the
+   * real paper. It feeds the pre-test reminder sweep (src/lib/pretest-reminders.ts)
+   * and the automatic result-release flow (src/lib/result-release.ts), and its
+   * score never touches a certificate or a level. A mock is created with
+   * resultsReleased=false so the auto-release delay is meaningful.
+   */
+  kind     String  @default("standard")
+  /**
    * CEFR level the sitting is for.
    */
   level    String?
@@ -2246,6 +2272,12 @@ model Exam {
    */
   published       Boolean @default(false)
   resultsReleased Boolean @default(true)
+  /**
+   * When results were last released to students — set by the manual toggle and
+   * by the automatic release sweep. Lets both tell "released" from "released
+   * just now", so a re-run of the cron does not re-notify a whole cohort.
+   */
+  resultsReleasedAt DateTime?
 
   /**
    * Per-skill minimum (0-100) to pass this sitting. A candidate passes only
@@ -4944,4 +4976,553 @@ model SignupToken {
 
   @@index([email])
   @@index([used])
+}
+
+/// ===========================================================================
+/// WORK DRIVE  —  Phase 0 (files pillar).  See docs/WORK_DRIVE.md
+/// ===========================================================================
+/// A staff-only file store + calendar + webinars area of the admin portal. The
+/// organising unit is a Workspace: a team hub that holds files, a calendar and
+/// (later) a live room. `Space` was already taken by community chat, hence the
+/// name.
+///
+/// Every table here carries `tenantId` directly — child tables included — so
+/// the Prisma guard's per-model tenant scoping (src/lib/prisma-guard.ts)
+/// covers them with no join, the same way ChannelRead and MessageReaction do.
+///
+/// "Who did this" columns (createdById, uploadedById, actorId, assigneeId) are
+/// plain user-id strings with NO relation, matching Material.uploadedBy and
+/// ClassRecording.startedByUserId: the person can be soft-deleted while the
+/// file they uploaded lives on, and the audit trail — not a foreign key — is
+/// the record of who did what.
+
+model Workspace {
+  id          String  @id @default(cuid())
+  name        String
+  /// URL-safe, unique per tenant. The workspace's address under /admin/work-drive.
+  slug        String
+  description String?
+  /// A name from the shared icon set (components/icons.tsx), never an emoji.
+  icon        String  @default("folder")
+  /// A theme token key ("sky" | "amber" | ...), resolved through the theme so
+  /// it stays legible in Tag/Nacht/Daemmerung. Never a raw hex.
+  color       String  @default("slate")
+  /// general | department | project | event — grouping plus which empty state
+  /// and defaults to show. An `event` workspace is built around one WorkEvent
+  /// and archived with it.
+  kind        String  @default("general")
+  /// private | staff | branch
+  ///   private  only WorkspaceMembers
+  ///   staff    every admin/lecturer in the tenant (read-only unless a member)
+  ///   branch   staff at `branchId`
+  /// Fail closed: an unknown value is read as `private`.
+  visibility  String  @default("private")
+  /// Set only when visibility = branch.
+  branchId    String?
+  createdById String?
+  /// Soft archive: hidden from the default list, files intact. Distinct from
+  /// deletedAt, which is the trash.
+  archivedAt  DateTime?
+  /// Denormalised sum of live DriveFile.sizeBytes here, kept in step on
+  /// upload/delete so the quota meter needs no aggregate.
+  storageUsedBytes BigInt @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  members  WorkspaceMember[]
+  folders  DriveFolder[]
+  files    DriveFile[]
+  activity FileActivity[]
+  events   WorkEvent[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@index([tenantId, visibility])
+}
+
+/// Who is in a private workspace and at what level. Absent for staff/branch
+/// workspaces unless someone is pinned in with a higher role than the default.
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// Plain user id, no relation — the same convention as the actor columns
+  /// above. A membership row for a since-deleted account is harmless and is
+  /// swept by the workspace-member cleanup, not a database cascade.
+  userId      String
+  /// owner | editor | viewer
+  role        String    @default("viewer")
+  addedById   String?
+  createdAt   DateTime  @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([tenantId])
+}
+
+/// A folder in a workspace's tree.
+model DriveFolder {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parentId    String?
+  parent      DriveFolder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children    DriveFolder[] @relation("FolderTree")
+  name        String
+  /// Materialised path from the workspace root, e.g. "/Finance/2026/Q3". Kept
+  /// in step on move/rename so breadcrumbs and prefix search need no recursion.
+  path        String   @default("/")
+  createdById String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  files DriveFile[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, parentId, name])
+  @@index([workspaceId])
+  @@index([workspaceId, parentId])
+  @@index([tenantId])
+}
+
+/// One file. The bytes live in the object bucket at `storageKey`; this row is
+/// the metadata everything else reads.
+model DriveFile {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folderId    String?
+  folder      DriveFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  name        String
+  mimeType    String   @default("application/octet-stream")
+  sizeBytes   BigInt   @default(0)
+  /// R2 object key under the `work-drive/` prefix. See src/lib/storage.ts.
+  storageKey  String
+  /// sha256 of the current bytes — integrity checks and duplicate detection.
+  checksum    String?
+  /// document | spreadsheet | image | video | audio | pdf | archive | other —
+  /// derived from mimeType on upload, drives the icon and the type filter.
+  kind        String   @default("other")
+  /// FK to the current DriveFileVersion. Null until the first version row is
+  /// written (which happens on upload). @unique so a version is "current" for
+  /// exactly one file.
+  currentVersionId String? @unique
+  currentVersion   DriveFileVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+
+  createdById      String?
+  lastModifiedById String?
+
+  /// A capped slice of the file's extracted text, denormalised here so search
+  /// hits one table. Null = not extracted yet, or a format with no text (an
+  /// image, a video). The fuller copy is in DriveFileText. Filled by a
+  /// background job after upload — see src/lib/work-drive/index-file.ts.
+  textContent String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  versions DriveFileVersion[] @relation("FileVersions")
+  text     DriveFileText?
+  comments FileComment[]
+  eventResources EventResource[]
+
+  /// Full-text search vector over the FILENAME only — a Postgres generated
+  /// column (see 20260903140000_work_drive_files). Content search is a second
+  /// GIN index over `to_tsvector(textContent)` added in the Phase 2 migration;
+  /// the search route ORs the two. Unsupported so Prisma leaves it alone.
+  searchVector Unsupported("tsvector")?
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, folderId])
+  @@index([tenantId])
+  @@index([checksum])
+}
+
+/// An immutable prior state of a file. The newest is also pointed at by
+/// DriveFile.currentVersionId. Never soft-deleted; a retention job prunes old
+/// ones (Phase 5).
+model DriveFileVersion {
+  id            String    @id @default(cuid())
+  fileId        String
+  file          DriveFile @relation("FileVersions", fields: [fileId], references: [id], onDelete: Cascade)
+  /// 1, 2, 3 … monotonic per file.
+  versionNumber Int
+  storageKey    String
+  sizeBytes     BigInt    @default(0)
+  checksum      String?
+  uploadedById  String?
+  /// Optional "what changed" note from whoever uploaded it.
+  note          String?
+  createdAt     DateTime  @default(now())
+
+  currentOf DriveFile? @relation("CurrentVersion")
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, versionNumber])
+  @@index([fileId])
+  @@index([tenantId])
+}
+
+/// Extracted plain text for search, kept off the hot DriveFile row because it
+/// can be large and is read only by the indexer. Populated by a background job
+/// in Phase 2.
+model DriveFileText {
+  id          String    @id @default(cuid())
+  fileId      String    @unique
+  file        DriveFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  content     String
+  extractedAt DateTime  @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+/// Grants one staff user access to one file or folder they are not otherwise a
+/// member of. No public link tokens in v1 — sharing is always to a named
+/// person inside the tenant.
+model FileShare {
+  id         String @id @default(cuid())
+  /// file | folder
+  targetType String
+  targetId   String
+  sharedById String?
+  /// The recipient's user id. Plain string, no relation — matches the actor
+  /// columns. A revoke or the account's deletion is what ends a share; an
+  /// orphaned row is filtered out at read time by the recipient lookup.
+  sharedWithUserId String
+  /// view | edit
+  permission String   @default("view")
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([targetType, targetId, sharedWithUserId])
+  @@index([sharedWithUserId, revokedAt])
+  @@index([tenantId])
+}
+
+/// The in-UI activity feed for a workspace. Deliberately separate from the
+/// security AuditLog: this is "what happened in here lately" for the people
+/// working in the workspace, not the tamper-evident record.
+model FileActivity {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fileId      String?
+  folderId    String?
+  actorId     String?
+  /// uploaded | renamed | moved | new_version | deleted | restored | shared |
+  /// downloaded | commented
+  action      String
+  /// Shape depends on the action: { from, to } for renamed/moved, { name } etc.
+  meta        Json?
+  createdAt   DateTime  @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([fileId])
+  @@index([tenantId])
+}
+
+/// A comment thread on a file.
+model FileComment {
+  id        String    @id @default(cuid())
+  fileId    String
+  file      DriveFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  authorId  String?
+  body      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([fileId, createdAt])
+  @@index([tenantId])
+}
+
+/// ===========================================================================
+/// WORK DRIVE  —  Phase 3 (staff calendar & events).  See docs/WORK_DRIVE.md
+/// ===========================================================================
+/// The office's own calendar: staff meetings, deadlines, training days, events,
+/// and (Phase 4) webinars. An event can belong to a Workspace or stand alone
+/// for the whole tenant. Same conventions as the files pillar — tenantId on
+/// every row, plain user-id strings for "who", explicit IANA `timezone` on
+/// every datetime (never trust server-local time).
+
+model WorkEvent {
+  id          String     @id @default(cuid())
+  /// Null = a tenant-wide event. Set = it lives in this workspace.
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  /// Scopes a `branch`-visible event. Plain string, no relation (matches the
+  /// files pillar).
+  branchId    String?
+
+  title       String
+  description String?
+  /// meeting | deadline | holiday | training | event | webinar
+  kind        String  @default("meeting")
+  /// Free text: a room, an address, or "Online".
+  location    String?
+
+  startAt DateTime
+  /// Null for a point-in-time entry (a deadline). Otherwise the end.
+  endAt   DateTime?
+  allDay  Boolean  @default(false)
+  /// RFC 5545 recurrence string, or null for a one-off. Expanded at read time.
+  rrule    String?
+  /// IANA zone the times are anchored to, e.g. "Africa/Lagos".
+  timezone String  @default("UTC")
+
+  /// workspace | staff | branch | public
+  ///   workspace  members of `workspaceId`
+  ///   staff      every admin in the tenant
+  ///   branch     staff at `branchId`
+  ///   public     also has a landing page (webinars) — see Phase 4
+  visibility String @default("staff")
+
+  /// draft | scheduled | live | ended | cancelled
+  status String @default("scheduled")
+
+  /// R2 key for a cover image on the event / webinar landing.
+  coverImageKey String?
+
+  createdById String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  attendees EventAttendee[]
+  tasks     EventTask[]
+  resources EventResource[]
+  webinar   Webinar?
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, startAt])
+  @@index([workspaceId])
+  @@index([tenantId, status])
+}
+
+/// An invitee or registrant — internal staff (userId) or an external guest
+/// (externalName / externalEmail, used by public webinar registration).
+model EventAttendee {
+  id      String    @id @default(cuid())
+  eventId String
+  event   WorkEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  /// Set for a staff attendee. Plain string, no relation.
+  userId        String?
+  externalName  String?
+  externalEmail String?
+
+  /// invited | accepted | declined | tentative | attended | no_show
+  response String @default("invited")
+  /// host | co_host | presenter | attendee
+  role     String @default("attendee")
+
+  checkInAt      DateTime?
+  reminderSentAt DateTime?
+  /// landing_page | manual | import
+  registrationSource String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@unique([eventId, externalEmail])
+  @@index([eventId])
+  @@index([tenantId])
+}
+
+/// The "plan the event" checklist.
+model EventTask {
+  id         String    @id @default(cuid())
+  eventId    String
+  event      WorkEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  title      String
+  assigneeId String?
+  dueAt      DateTime?
+  done       Boolean   @default(false)
+  doneAt     DateTime?
+  doneById   String?
+  order      Int       @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@index([tenantId])
+}
+
+/// A Work Drive file attached to an event — an agenda deck, a handout.
+model EventResource {
+  id      String    @id @default(cuid())
+  eventId String
+  event   WorkEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  fileId  String
+  file    DriveFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  label   String?
+  /// Publish this file to registrants after the event.
+  visibleToAttendees Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, fileId])
+  @@index([eventId])
+  @@index([tenantId])
+}
+
+/// ===========================================================================
+/// WORK DRIVE  —  Phase 4 (webinars).  See docs/WORK_DRIVE.md
+/// ===========================================================================
+/// A webinar is a WorkEvent(kind="webinar") with a delivery side. The event
+/// owns the schedule and the attendee list (registrations are EventAttendee
+/// rows with externalEmail); this row owns the room, the landing page and the
+/// Q&A. Rides on the same LiveKit SFU and recording pipeline the live
+/// classroom uses.
+
+model Webinar {
+  id      String    @id @default(cuid())
+  /// 1:1 with the WorkEvent that carries scheduling + attendees.
+  eventId String    @unique
+  event   WorkEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  /// LiveKit room name. Unique across the platform.
+  roomName String @unique
+
+  /// webinar | meeting
+  ///   webinar  a stage: hosts/presenters publish, the audience is muted and
+  ///            raises a hand to be promoted
+  ///   meeting  everyone can talk (a big internal call)
+  mode String @default("webinar")
+
+  /// staff | students | branch | public | mixed — who the room is for. `public`
+  /// gets the landing page and external registration.
+  audience String @default("staff")
+
+  registrationRequired   Boolean   @default(true)
+  registrationOpensAt    DateTime?
+  registrationClosesAt   DateTime?
+  /// Null = no cap.
+  capacity               Int?
+
+  /// The public page lives at /w/<landingSlug>. Set only for a `public`
+  /// audience. Unique per tenant.
+  landingSlug   String?
+  /// Headline, speaker bios, agenda — free-form JSON the landing page renders.
+  landingConfig Json?
+
+  allowQuestions Boolean @default(true)
+  allowChat      Boolean @default(true)
+
+  /// Start a LiveKit egress capture when the host joins, the same as a class.
+  recordAutomatically Boolean @default(true)
+  /// The Material row for the finished recording, once there is one.
+  recordingId String?
+
+  startedAt DateTime?
+  endedAt   DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  questions WebinarQuestion[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([landingSlug])
+}
+
+/// A question in the webinar Q&A panel, with upvotes.
+model WebinarQuestion {
+  id        String  @id @default(cuid())
+  webinarId String
+  webinar   Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  /// One of these is set. A staff asker has a userId; an audience member on the
+  /// public page gives a name.
+  askedByUserId String?
+  askedByName   String?
+
+  body String
+
+  /// Denormalised count; the real votes are WebinarQuestionVote rows.
+  upvotes Int @default(0)
+
+  /// pending | answered | dismissed
+  status     String  @default("pending")
+  answeredById String?
+  answeredAt   DateTime?
+  answerText   String?
+
+  createdAt DateTime @default(now())
+
+  votes WebinarQuestionVote[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId, status])
+  @@index([tenantId])
+}
+
+/// One person's upvote on a question. Keyed by voter so a reload can't stack.
+model WebinarQuestionVote {
+  id         String          @id @default(cuid())
+  questionId String
+  question   WebinarQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  /// A user id for staff, or a stable anon key (hashed) for a public viewer.
+  voterKey   String
+  createdAt  DateTime        @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, voterKey])
+  @@index([questionId])
+  @@index([tenantId])
 }

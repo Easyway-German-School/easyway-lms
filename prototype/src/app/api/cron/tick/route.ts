@@ -108,6 +108,38 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * The class-wide reminder for a mock / pretest sitting, three days out. Fires
+   * on a single calendar day so one tick a day is one reminder. See
+   * src/lib/pretest-reminders.ts.
+   */
+  results.push(
+    await run("pretest-reminders", async () => {
+      const { sendDuePretestReminders } = await import("@/lib/pretest-reminders");
+      return sendDuePretestReminders();
+    }),
+  );
+
+  /**
+   * Results releasing themselves. A mock sitting that is fully marked and past
+   * its tenant's delay publishes to students AND their parents without a tutor
+   * touching anything; one that is graded but still sitting there gets the
+   * tutor (and, if it drags, the office) a nudge. See src/lib/result-release.ts.
+   */
+  results.push(
+    await run("auto-release-results", async () => {
+      const { autoReleaseDueResults } = await import("@/lib/result-release");
+      return autoReleaseDueResults();
+    }),
+  );
+
+  results.push(
+    await run("result-release-nudge", async () => {
+      const { nudgeUnreleasedResults } = await import("@/lib/result-release");
+      return nudgeUnreleasedResults();
+    }),
+  );
+
+  /**
    * A tutor's students going quiet — low attendance, no portal activity, or
    * repeated "not yet" answers — used to be invisible until somebody in the
    * office happened to notice. This flags it to the tutor directly, at most
@@ -254,6 +286,29 @@ async function handleGET(request: NextRequest) {
     await run("satzkette-turns", async () => {
       const { openLapsedTurns, archiveStaleMatches } = await import("@/lib/satzkette-server");
       return { opened: await openLapsedTurns(), archived: await archiveStaleMatches() };
+    }),
+  );
+
+  /**
+   * Work Drive calendar: remind attendees of an event that starts soon, once
+   * per attendee per event (dedupe on EventAttendee.reminderSentAt). See
+   * src/lib/work-drive/event-reminders.ts.
+   */
+  results.push(
+    await run("work-drive-event-reminders", async () => {
+      const { sendDueEventReminders } = await import("@/lib/work-drive/event-reminders");
+      return sendDueEventReminders();
+    }),
+  );
+
+  /**
+   * Work Drive housekeeping: hard-delete files 30 days into a workspace trash,
+   * and prune surplus old file versions. Both bounded per tick.
+   */
+  results.push(
+    await run("work-drive-retention", async () => {
+      const { purgeExpiredTrash, pruneOldVersions } = await import("@/lib/work-drive/retention");
+      return { trash: await purgeExpiredTrash(), versions: await pruneOldVersions() };
     }),
   );
 

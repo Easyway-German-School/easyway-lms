@@ -18,6 +18,11 @@ type NotificationRecord = {
 
 type StudentOption = { id: string; user: { name?: string | null; email: string } };
 type BranchOption = { id: string; name: string };
+type LecturerOption = {
+  id: string;
+  user: { id: string; name?: string | null; email: string };
+  assignmentLabel?: string | null;
+};
 
 export default function AdminNotificationsPage() {
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
@@ -28,6 +33,7 @@ export default function AdminNotificationsPage() {
   /** students | lecturers | everyone. See /api/admin/notifications. */
   const [audience, setAudience] = useState("students");
   const [studentId, setStudentId] = useState("");
+  const [lecturerId, setLecturerId] = useState("");
   const [branchId, setBranchId] = useState("");
   const [level, setLevel] = useState("");
   const [link, setLink] = useState("");
@@ -38,11 +44,14 @@ export default function AdminNotificationsPage() {
   const [formBusy, setFormBusy] = useState(false);
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [lecturers, setLecturers] = useState<LecturerOption[]>([]);
 
-  // The three student filters are meaningless for staff — a tutor has no level
-  // and no single branch — so the server rejects the combination and the form
-  // hides it rather than letting an admin build a send that cannot work.
+  // Students and tutors each get branch + level, plus their own "one person"
+  // picker. "Everyone" takes no filter — the server rejects any combination the
+  // form should not have offered, and the form hides what does not apply.
   const targetingStudents = audience === "students";
+  const targetingLecturers = audience === "lecturers";
+  const targetingEveryone = audience === "everyone";
 
   async function loadNotifications() {
     try {
@@ -59,9 +68,10 @@ export default function AdminNotificationsPage() {
 
   async function loadRelationships() {
     try {
-      const [studentsRes, branchesRes] = await Promise.all([
+      const [studentsRes, branchesRes, lecturersRes] = await Promise.all([
         fetch("/api/admin/students"),
         fetch("/api/admin/branches"),
+        fetch("/api/admin/lecturers"),
       ]);
 
       if (studentsRes.ok) {
@@ -72,6 +82,11 @@ export default function AdminNotificationsPage() {
       if (branchesRes.ok) {
         const data = await branchesRes.json();
         setBranches(data.branches || []);
+      }
+
+      if (lecturersRes.ok) {
+        const data = await lecturersRes.json();
+        setLecturers(data.lecturers || []);
       }
     } catch (error) {
       console.error(error);
@@ -101,10 +116,13 @@ export default function AdminNotificationsPage() {
       link: link.trim() || null,
       alsoEmail,
       alsoPush,
-      // Only meaningful for students; the server refuses them otherwise.
+      // Branch and level narrow students or tutors; the single-person pickers
+      // are role-specific. "Everyone" sends all of it as null. The server
+      // refuses any combination that does not belong to the chosen audience.
       studentId: targetingStudents ? studentId || null : null,
-      branchId: targetingStudents ? branchId || null : null,
-      level: targetingStudents ? level || null : null,
+      lecturerId: targetingLecturers ? lecturerId || null : null,
+      branchId: targetingEveryone ? null : branchId || null,
+      level: targetingEveryone ? null : level || null,
     };
 
     try {
@@ -129,6 +147,7 @@ export default function AdminNotificationsPage() {
       setTitle("");
       setMessage("");
       setStudentId("");
+      setLecturerId("");
       setBranchId("");
       setLevel("");
       setLink("");
@@ -149,7 +168,7 @@ export default function AdminNotificationsPage() {
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Admin</p>
             <h1 className="text-3xl font-bold">Notifications</h1>
-            <p className="mt-2 text-sm text-[var(--muted)]">Create and monitor messages for students, branches, and levels.</p>
+            <p className="mt-2 text-sm text-[var(--muted)]">Create and monitor messages — to students or tutors, filtered by branch, level, or one person.</p>
           </div>
           <button
             type="button"
@@ -197,38 +216,57 @@ export default function AdminNotificationsPage() {
                 </select>
               </label>
               {targetingStudents ? (
-                <>
-                  <label className="space-y-2 text-sm">
-                    <span className="font-semibold text-[var(--muted)]">Student</span>
-                    <select
-                      value={studentId}
-                      onChange={(event) => setStudentId(event.target.value)}
-                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                    >
-                      <option value="">All students</option>
-                      {students.map((student) => (
-                        <option key={student.id} value={student.id}>
-                          {student.user.name || student.user.email}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="space-y-2 text-sm">
-                    <span className="font-semibold text-[var(--muted)]">Branch</span>
-                    <select
-                      value={branchId}
-                      onChange={(event) => setBranchId(event.target.value)}
-                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                    >
-                      <option value="">All branches</option>
-                      {branches.map((branch) => (
-                        <option key={branch.id} value={branch.id}>
-                          {branch.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </>
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Student</span>
+                  <select
+                    value={studentId}
+                    onChange={(event) => setStudentId(event.target.value)}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    <option value="">All students</option>
+                    {students.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.user.name || student.user.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {targetingLecturers ? (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Tutor</span>
+                  <select
+                    value={lecturerId}
+                    onChange={(event) => setLecturerId(event.target.value)}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    <option value="">All tutors</option>
+                    {lecturers.map((lecturer) => (
+                      <option key={lecturer.id} value={lecturer.id}>
+                        {lecturer.user.name || lecturer.user.email}
+                        {lecturer.assignmentLabel ? ` — ${lecturer.assignmentLabel}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {!targetingEveryone ? (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Branch</span>
+                  <select
+                    value={branchId}
+                    onChange={(event) => setBranchId(event.target.value)}
+                    disabled={targetingLecturers && lecturerId !== ""}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    <option value="">All branches</option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               ) : null}
               <label className="space-y-2 text-sm md:col-span-2">
                 <span className="font-semibold text-[var(--muted)]">Message</span>
@@ -239,14 +277,15 @@ export default function AdminNotificationsPage() {
                   className="w-full rounded-3xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 text-sm"
                 />
               </label>
-              {targetingStudents ? (
+              {!targetingEveryone ? (
                 <label className="space-y-2 text-sm">
                   <span className="font-semibold text-[var(--muted)]">Level</span>
                   <input
                     value={level}
                     onChange={(event) => setLevel(event.target.value)}
-                    placeholder="All levels or e.g. B1"
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    disabled={targetingLecturers && lecturerId !== ""}
+                    placeholder={targetingLecturers ? "Any assigned level or e.g. B1" : "All levels or e.g. B1"}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
                   />
                 </label>
               ) : null}

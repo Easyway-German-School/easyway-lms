@@ -39,6 +39,8 @@ export const CAPABILITIES = [
   "staff",        // inviting lecturers, assigning admin roles
   "integrations",
   "security",     // the audit trail, restoring deleted records, backup health
+  "work_drive",   // the staff file store — workspaces, folders, files, sharing
+  "events",       // the staff calendar, events, and webinars
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -67,8 +69,10 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   super: "all",
 
   // Front desk: the student lifecycle and the paperwork around it. No access
-  // to money, staffing or bulk communications.
-  secretary: ["students", "attendance", "classes", "exams", "materials", "branches"],
+  // to money, staffing or bulk communications. `events` because the front desk
+  // is who books the staff meeting and the open day; `work_drive` is left
+  // hand-granted for now (see docs/WORK_DRIVE.md open questions).
+  secretary: ["students", "attendance", "classes", "exams", "materials", "branches", "events"],
 
   /**
    * The fee book and what explains it. Narrow on purpose.
@@ -84,7 +88,8 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   accountant: ["payments", "reports"],
 
   // Owns communications and the numbers, not the student records or the money.
-  data_comm: ["community", "emails", "reports", "integrations"],
+  // `events` too: a webinar is a broadcast, and the open day is a comms job.
+  data_comm: ["community", "emails", "reports", "integrations", "events"],
 };
 
 /**

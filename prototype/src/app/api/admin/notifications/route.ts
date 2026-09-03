@@ -77,6 +77,7 @@ export async function POST(request: NextRequest) {
   const title = typeof body.title === "string" ? body.title.trim() : "";
   const message = typeof body.message === "string" ? body.message.trim() : "";
   const studentId = typeof body.studentId === "string" && body.studentId.trim() ? body.studentId : null;
+  const lecturerId = typeof body.lecturerId === "string" && body.lecturerId.trim() ? body.lecturerId : null;
   const branchId = typeof body.branchId === "string" && body.branchId.trim() ? body.branchId : null;
   const level = typeof body.level === "string" && body.level.trim() ? body.level.trim().toUpperCase() : null;
   const link = typeof body.link === "string" && body.link.trim() ? body.link.trim() : null;
@@ -92,21 +93,34 @@ export async function POST(request: NextRequest) {
   }
 
   /**
-   * The form's three filters only mean anything for students — a tutor has no
-   * level and no single branch — so picking "tutors" with a branch selected is
-   * a contradiction rather than a narrower send. Named explicitly here so the
-   * admin is told, instead of the filters being quietly dropped.
+   * The `studentId` filter only means anything for students; `lecturerId` only
+   * for tutors. Branch and level now narrow BOTH audiences (a tutor's branch
+   * and level come from the assignment an admin set — see the `lecturers`
+   * target in notify.ts). "Everyone" takes no filter at all — a school-wide
+   * notice that quietly went to one branch would be the worst kind of wrong.
    */
-  if (audience !== "students" && (studentId || branchId || level)) {
+  if (audience === "everyone" && (studentId || lecturerId || branchId || level)) {
     return NextResponse.json(
-      { error: "Branch, level and single-student filters only apply when sending to students." },
+      { error: "Sending to everyone takes no filters — pick Students or Tutors to narrow it." },
+      { status: 400 },
+    );
+  }
+  if (studentId && audience !== "students") {
+    return NextResponse.json(
+      { error: "The single-student filter only applies when sending to students." },
+      { status: 400 },
+    );
+  }
+  if (lecturerId && audience !== "lecturers") {
+    return NextResponse.json(
+      { error: "The single-tutor filter only applies when sending to tutors." },
       { status: 400 },
     );
   }
 
   let target: NotifyTarget;
   if (audience === "lecturers") {
-    target = { audience: "lecturer" };
+    target = { lecturers: { branchId, level, lecturerIds: lecturerId ? [lecturerId] : undefined } };
   } else if (audience === "everyone") {
     target = { audience: "all" };
   } else if (studentId) {
