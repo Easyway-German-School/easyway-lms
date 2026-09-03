@@ -106,6 +106,8 @@ export type Ledger = {
   /** Same, restricted to go-forward charges — the clock the portal lock runs on. */
   oldestOpenGoForwardLevel: string | null;
   oldestOpenGoForwardAgeDays: number | null;
+  /** ISO date the oldest open go-forward charge was raised — the lock anchor. */
+  oldestOpenGoForwardChargeAt: string | null;
 };
 
 /**
@@ -181,6 +183,7 @@ export function buildLedger(
     oldestOpenAgeDays: firstOpen?.ageDays ?? null,
     oldestOpenGoForwardLevel: firstOpenGoForward?.level ?? null,
     oldestOpenGoForwardAgeDays: firstOpenGoForward?.ageDays ?? null,
+    oldestOpenGoForwardChargeAt: firstOpenGoForward?.createdAt ?? null,
   };
 }
 

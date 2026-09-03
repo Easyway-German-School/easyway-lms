@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
+import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { KIND, notify } from "@/lib/notify";
 
 /**
@@ -118,6 +119,10 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
       branch: { select: { name: true } },
       user: { select: { id: true, name: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+      },
     },
   });
 
@@ -130,20 +135,56 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
     const { fullPaid, depositPaid } = derivePaymentStatus({ totalPaid, tuitionFee, requiredDeposit });
 
-    if (fullPaid) continue;
+    // The per-level ledger. When populated it decides both what is owed and
+    // which clock the lock runs on; legacy arrears (levels passed before the
+    // ledger existed) are chased on a gentle track, never with a lock threat.
+    const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now);
+    const hasLedger = ledgerIsPopulated(ledger);
+    const goForwardOwed = hasLedger ? ledger.goForwardOutstanding : Math.max(0, tuitionFee - totalPaid);
+
+    if (hasLedger ? goForwardOwed <= 0 && ledger.legacyOutstanding <= 0 : fullPaid) continue;
     run.atRisk++;
 
-    const balance = Math.max(0, tuitionFee - totalPaid);
+    const graceUntil = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;
+    const graceActive = !!graceUntil && now.getTime() < graceUntil.getTime();
+
+    // -------- Legacy-arrears track: gentle, no lock language, fires once --------
+    if (hasLedger && ledger.legacyOutstanding > 0 && !graceActive) {
+      const marker = "legacy-arrears";
+      const already = await prisma.notification.findFirst({
+        where: { studentId: student.id, OR: [{ dedupeKey: marker }, { channel: marker }] },
+        select: { id: true },
+      });
+      if (!already) {
+        if (!dryRun) {
+          await notify({
+            to: { studentIds: [student.id] },
+            kind: KIND.tuitionReminder,
+            severity: "info",
+            title: "An earlier tuition balance is on your account",
+            message: `Our records show ₦${ledger.legacyOutstanding.toLocaleString()} still outstanding from an earlier level. Nothing is restricted — please settle it from the Payments page or arrange a plan with your branch office when you can.`,
+            link: "/payments",
+            dedupeKey: marker,
+            push: true,
+          });
+        }
+        run.created.push({ studentId: student.id, name: student.user.name ?? "(unnamed)", tier: "balance-notice", balance: ledger.legacyOutstanding });
+      }
+    }
+
+    const balance = goForwardOwed;
 
     // -------- Balance track: part-paid, aimed at the 30-day post-start lock --------
-    if (depositPaid) {
-      const graceUntil = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;
-      if (graceUntil && now.getTime() < graceUntil.getTime()) {
+    if (depositPaid && goForwardOwed > 0) {
+      if (graceActive) {
         run.skipped++;
         continue;
       }
 
-      const anchor = student.classesStartedAt ?? student.createdAt;
+      const anchor =
+        (hasLedger && ledger.oldestOpenGoForwardChargeAt
+          ? new Date(ledger.oldestOpenGoForwardChargeAt)
+          : null) ?? student.classesStartedAt ?? student.createdAt;
       const lockAt = new Date(anchor.getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS);
       const daysUntilLock = Math.ceil((lockAt.getTime() - now.getTime()) / DAY_MS);
 
@@ -189,6 +230,11 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     }
 
     // -------- Registration-only track: never cleared the deposit --------
+    // A student who has cleared the current-level deposit is handled by the
+    // balance track above (even if all they owe now is legacy arrears) — they
+    // are not "registration only".
+    if (depositPaid) continue;
+
     const daysEnrolled = Math.floor((now.getTime() - student.createdAt.getTime()) / DAY_MS);
 
     // Highest tier the student has reached; only that one is sent.

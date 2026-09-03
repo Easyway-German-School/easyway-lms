@@ -226,3 +226,96 @@ describe("the dashboard count and the roster it links to", () => {
     expect(summary.aging.reduce((sum, bucket) => sum + bucket.amount, 0)).toBe(summary.outstanding);
   });
 });
+
+describe("the per-level ledger", () => {
+  const DAY_AGO = (n: number) => new Date(NOW.getTime() - n * DAY);
+
+  it("with no charges, owed stays the single current-level figure", () => {
+    const row = computeStudentFinance(student({ id: "a", payments: [{ amount: 40_000 }] }), NOW);
+    expect(row.ledgerPopulated).toBe(false);
+    expect(row.owed).toBe(150_000 - 40_000);
+  });
+
+  it("sums what is owed across every level once charges exist", () => {
+    // On B1 now. Part-paid A1 and A2, nothing on B1 yet. Payments allocate FIFO.
+    const row = computeStudentFinance(
+      student({
+        id: "rider",
+        level: "B1",
+        payments: [{ amount: 90_000 }, { amount: 90_000 }],
+        tuitionCharges: [
+          { id: "c-a1", level: "A1", amount: 150_000, createdAt: DAY_AGO(180) },
+          { id: "c-a2", level: "A2", amount: 150_000, createdAt: DAY_AGO(120) },
+          { id: "c-b1", level: "B1", amount: 180_000, createdAt: DAY_AGO(60) },
+        ],
+      }),
+      NOW,
+    );
+
+    expect(row.ledgerPopulated).toBe(true);
+    // ₦180k paid: clears A1, ₦30k into A2. Outstanding: ₦120k on A2 + ₦180k on B1.
+    expect(row.owed).toBe(120_000 + 180_000);
+    expect(row.lifetimeCharged).toBe(150_000 + 150_000 + 180_000);
+    expect(row.owesPriorLevel).toBe(true);
+    expect(row.oldestOpenLevel).toBe("A2");
+  });
+
+  it("flags legacy arrears separately and keeps them out of the go-forward figure", () => {
+    const row = computeStudentFinance(
+      student({
+        id: "cutover",
+        level: "B1",
+        payments: [{ amount: 150_000 }],
+        tuitionCharges: [
+          { id: "c-a1", level: "A1", amount: 150_000, legacyArrears: true, createdAt: DAY_AGO(200) },
+          { id: "c-a2", level: "A2", amount: 150_000, legacyArrears: true, createdAt: DAY_AGO(200) },
+          { id: "c-b1", level: "B1", amount: 180_000, legacyArrears: false, createdAt: DAY_AGO(20) },
+        ],
+      }),
+      NOW,
+    );
+
+    // ₦150k clears legacy A1; ₦150k legacy A2 and ₦180k B1 still open.
+    expect(row.legacyOutstanding).toBe(150_000);
+    expect(row.goForwardOutstanding).toBe(180_000);
+    expect(row.owed).toBe(330_000);
+  });
+
+  it("the roster count and the owes_prior_level / legacy_arrears filters agree", () => {
+    const ctx = { now: NOW, startOfMonth: new Date(2026, 7, 1) };
+    const cohort: FinanceStudentInput[] = [
+      student({
+        id: "owes-prior",
+        level: "A2",
+        payments: [{ amount: 60_000 }],
+        tuitionCharges: [
+          { id: "p-a1", level: "A1", amount: 150_000, createdAt: DAY_AGO(120) },
+          { id: "p-a2", level: "A2", amount: 150_000, createdAt: DAY_AGO(50) },
+        ],
+      }),
+      student({
+        id: "legacy-only",
+        level: "A2",
+        payments: [{ amount: 60_000 }],
+        tuitionCharges: [
+          { id: "l-a1", level: "A1", amount: 150_000, legacyArrears: true, createdAt: DAY_AGO(120) },
+          { id: "l-a2", level: "A2", amount: 150_000, legacyArrears: false, createdAt: DAY_AGO(50) },
+        ],
+      }),
+      student({ id: "clean", level: "A1", payments: [{ amount: 150_000 }], tuitionCharges: [{ id: "cl", level: "A1", amount: 150_000, createdAt: DAY_AGO(30) }] }),
+    ];
+    const rows = computeAll(cohort, NOW);
+    const summary = summariseReceivables(rows);
+
+    const owesPrior = rows.filter((r) => FOCUS_PRESETS.owes_prior_level.matches(r, ctx, cohort.find((c) => c.id === r.id)!));
+    expect(owesPrior.map((r) => r.id)).toEqual(["owes-prior"]);
+    expect(summary.owesPriorLevel).toBe(1);
+
+    const legacy = rows.filter((r) => FOCUS_PRESETS.legacy_arrears.matches(r, ctx, cohort.find((c) => c.id === r.id)!));
+    expect(legacy.map((r) => r.id)).toEqual(["legacy-only"]);
+    // legacy-only paid ₦60k, all of it FIFO'd onto the older legacy A1 charge.
+    expect(summary.outstandingLegacy).toBe(90_000);
+    // owes-prior: ₦240k go-forward; legacy-only: ₦150k go-forward (its A2).
+    expect(summary.outstandingGoForward).toBe(240_000 + 150_000);
+  });
+});

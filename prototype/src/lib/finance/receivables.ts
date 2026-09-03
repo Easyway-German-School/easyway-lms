@@ -6,6 +6,7 @@ import {
   tuitionFeeFor,
 } from "@/lib/payment";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
+import { buildLedger, ledgerIsPopulated, type LedgerLine } from "@/lib/finance/ledger";
 
 /**
  * ONE DEFINITION OF WHAT A STUDENT OWES.
@@ -116,6 +117,21 @@ export const FINANCE_STUDENT_SELECT = {
     where: { status: { in: RECEIVED_PAYMENT_STATUSES } },
     select: { amount: true, createdAt: true, method: true },
   },
+  // The per-level ledger — the debit side. Present for every student once the
+  // cutover backfill has run; a student with none yet falls back to the
+  // single-level figure below. Soft-deleted charges are filtered out.
+  tuitionCharges: {
+    where: { deletedAt: null },
+    select: {
+      id: true,
+      level: true,
+      amount: true,
+      waivedAmount: true,
+      legacyArrears: true,
+      createdAt: true,
+      settledAt: true,
+    },
+  },
 } as const;
 
 export type FinanceStudentInput = {
@@ -129,6 +145,15 @@ export type FinanceStudentInput = {
   branch?: { id: string; name: string } | null;
   user?: { name?: string | null; email?: string | null } | null;
   payments: Array<{ amount: number; status?: string | null; createdAt?: Date; method?: string | null }>;
+  tuitionCharges?: Array<{
+    id: string;
+    level: string;
+    amount: number;
+    waivedAmount?: number | null;
+    legacyArrears?: boolean | null;
+    createdAt: Date | string;
+    settledAt?: Date | string | null;
+  }>;
 };
 
 export type StudentFinance = {
@@ -170,6 +195,39 @@ export type StudentFinance = {
   lockAt: string | null;
   lockActive: boolean;
   graceUntil: string | null;
+
+  /* ---- Per-level ledger (src/lib/finance/ledger.ts) ---------------------- */
+
+  /** True once this student has at least one TuitionCharge. When false, every
+   *  figure below falls back to the single current-level calculation and
+   *  `owed` is `tuitionFee - paid`. */
+  ledgerPopulated: boolean;
+  /** Σ (charge amount − waived) across every level. */
+  lifetimeCharged: number;
+  /** Σ outstanding across every level — the true "what the school is owed".
+   *  `owed` mirrors this whenever `ledgerPopulated`. */
+  lifetimeOutstanding: number;
+  /** Outstanding on go-forward charges — the figure the lock and the promotion
+   *  gate act on. */
+  goForwardOutstanding: number;
+  /** Outstanding on pre-ledger levels backfilled at cutover. Chased, never walled. */
+  legacyOutstanding: number;
+  /** Paid beyond every charge (a genuine credit / pay-ahead). */
+  creditBalance: number;
+  /** Per-level breakdown, oldest first. */
+  openCharges: Array<{
+    level: string;
+    charged: number;
+    allocated: number;
+    outstanding: number;
+    legacyArrears: boolean;
+    settled: boolean;
+  }>;
+  /** Oldest charge with anything outstanding — the ageing anchor. */
+  oldestOpenLevel: string | null;
+  oldestOpenAgeDays: number | null;
+  /** Whether a completed EARLIER level still carries a go-forward balance. */
+  owesPriorLevel: boolean;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -204,6 +262,36 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
 
   const daysEnrolled = Math.max(0, Math.floor((now.getTime() - student.createdAt.getTime()) / DAY_MS));
 
+  /**
+   * The per-level ledger. Payments are allocated across the student's charges
+   * oldest-first; `lifetimeOutstanding` is what that leaves owed across every
+   * level they have passed through — the figure a single-level calculation
+   * cannot see once someone has been promoted.
+   *
+   * A student with no charges yet (mid-rollout, or a brand-new record before
+   * `ensureChargeForLevel` runs) keeps the old behaviour: `owed` stays
+   * `tuitionFee - paid` and the ageing clock stays on the enrolment date.
+   */
+  const ledger = buildLedger(student.tuitionCharges ?? [], paid, now);
+  const ledgerPopulated = ledgerIsPopulated(ledger);
+  const openCharges = ledger.lines.map((line: LedgerLine) => ({
+    level: line.level,
+    charged: line.net,
+    allocated: line.allocated,
+    outstanding: line.outstanding,
+    legacyArrears: line.legacyArrears,
+    settled: line.settled,
+  }));
+  const owesPriorLevel =
+    ledgerPopulated &&
+    ledger.lines.some(
+      (line) => line.outstanding > 0 && !line.legacyArrears && line.level !== student.level,
+    );
+
+  const owed = ledgerPopulated ? ledger.lifetimeOutstanding : Math.max(0, tuitionFee - paid);
+  const agingAnchorDays =
+    ledgerPopulated && ledger.oldestOpenAgeDays !== null ? ledger.oldestOpenAgeDays : daysEnrolled;
+
   const lastPaymentAt = received.reduce<Date | null>((latest, payment) => {
     if (!payment.createdAt) return latest;
     return !latest || payment.createdAt > latest ? payment.createdAt : latest;
@@ -234,7 +322,7 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     tuitionFee,
     requiredDeposit,
     paid,
-    owed: Math.max(0, tuitionFee - paid),
+    owed,
     owedOnDeposit: Math.max(0, requiredDeposit - paid),
     progressPercent: tuitionFee > 0 ? Math.min(100, Math.round((paid / tuitionFee) * 100)) : 0,
 
@@ -245,13 +333,24 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
 
     daysEnrolled,
     behindOnTuition: !depositPaid && daysEnrolled >= BEHIND_TUITION_MIN_DAYS,
-    agingBucket: agingBucketFor(daysEnrolled),
+    agingBucket: agingBucketFor(agingAnchorDays),
     lastPaymentAt: lastPaymentAt?.toISOString() ?? null,
     paymentCount: received.length,
 
     lockAt: lockAt?.toISOString() ?? null,
     lockActive,
     graceUntil: graceDate?.toISOString() ?? null,
+
+    ledgerPopulated,
+    lifetimeCharged: ledger.lifetimeCharged,
+    lifetimeOutstanding: ledger.lifetimeOutstanding,
+    goForwardOutstanding: ledger.goForwardOutstanding,
+    legacyOutstanding: ledger.legacyOutstanding,
+    creditBalance: ledger.creditBalance,
+    openCharges,
+    oldestOpenLevel: ledger.oldestOpenLevel,
+    oldestOpenAgeDays: ledger.oldestOpenAgeDays,
+    owesPriorLevel,
   };
 }
 
@@ -339,6 +438,20 @@ export const FOCUS_PRESETS: Record<string, FocusPreset> = {
     tone: "danger",
     matches: (row) => row.lockActive,
   },
+  owes_prior_level: {
+    id: "owes_prior_level",
+    label: "Owing on an earlier level",
+    hint: "Moved up the ladder with a balance still open on a level they finished",
+    tone: "danger",
+    matches: (row) => row.owesPriorLevel,
+  },
+  legacy_arrears: {
+    id: "legacy_arrears",
+    label: "Legacy arrears",
+    hint: "Owes on a level passed before the tuition ledger existed — chased, not walled",
+    tone: "warn",
+    matches: (row) => row.legacyOutstanding > 0,
+  },
   full_paid: {
     id: "full_paid",
     label: COHORT_LABELS.full_paid,
@@ -388,9 +501,22 @@ export function focusPreset(id: string | null | undefined): FocusPreset | null {
 export type ReceivablesSummary = ReturnType<typeof summariseReceivables>;
 
 export function summariseReceivables(rows: StudentFinance[]) {
-  const expected = rows.reduce((sum, row) => sum + row.tuitionFee, 0);
+  // Expected is what the school was ever owed across every level a student has
+  // passed through — the ledger's `lifetimeCharged` once it is populated, the
+  // single current-level fee until then. Using the current-level fee alone
+  // undercounts by a whole level's tuition for everyone who has been promoted,
+  // which made the collection rate read far higher than it was.
+  const expected = rows.reduce(
+    (sum, row) => sum + (row.ledgerPopulated ? row.lifetimeCharged : row.tuitionFee),
+    0,
+  );
   const collected = rows.reduce((sum, row) => sum + row.paid, 0);
   const outstanding = rows.reduce((sum, row) => sum + row.owed, 0);
+  const outstandingGoForward = rows.reduce(
+    (sum, row) => sum + (row.ledgerPopulated ? row.goForwardOutstanding : row.owed),
+    0,
+  );
+  const outstandingLegacy = rows.reduce((sum, row) => sum + row.legacyOutstanding, 0);
   const depositShortfall = rows.reduce((sum, row) => sum + row.owedOnDeposit, 0);
 
   const cohortCounts = COHORTS.reduce<Record<Cohort, number>>(
@@ -424,11 +550,16 @@ export function summariseReceivables(rows: StudentFinance[]) {
     expected,
     collected,
     outstanding,
+    /** Outstanding on charges the lock and promotion gate act on. */
+    outstandingGoForward,
+    /** Outstanding on pre-ledger levels — chased separately, never walled. */
+    outstandingLegacy,
     depositShortfall,
     collectionRate: expected > 0 ? Math.round((collected / expected) * 100) : 0,
     cohortCounts,
     lockedOut: rows.filter((row) => row.lockedOut).length,
     behindOnTuition: rows.filter((row) => row.behindOnTuition).length,
+    owesPriorLevel: rows.filter((row) => row.owesPriorLevel).length,
     aging,
     byBranch,
     byLevel,
@@ -446,7 +577,7 @@ function groupRollup(
     const key = keyOf(row);
     const entry = groups.get(key) ?? { key, name: labelOf(row), students: 0, expected: 0, collected: 0, outstanding: 0 };
     entry.students += 1;
-    entry.expected += row.tuitionFee;
+    entry.expected += row.ledgerPopulated ? row.lifetimeCharged : row.tuitionFee;
     entry.collected += row.paid;
     entry.outstanding += row.owed;
     groups.set(key, entry);

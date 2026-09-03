@@ -129,6 +129,12 @@ export async function GET(request: Request) {
     invoices: {
       include: { payments: true },
     },
+    // The per-level tuition ledger — so the roster's money figures and the
+    // owes_prior_level / legacy_arrears focus presets see the whole ladder.
+    tuitionCharges: {
+      where: { deletedAt: null },
+      select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+    },
     // Churn-risk inputs — see lib/student-risk.ts. Kept lightweight: a bounded
     // window for attendance, and only the single most recent row for the two
     // recency signals.
@@ -174,6 +180,7 @@ export async function GET(request: Request) {
         branch: student.branch ? { id: student.branch.id, name: student.branch.name } : null,
         user: student.user,
         payments: student.payments,
+        tuitionCharges: student.tuitionCharges,
       },
       now,
     );
@@ -204,6 +211,7 @@ export async function GET(request: Request) {
         branch: entry.raw.branch ? { id: entry.raw.branch.id, name: entry.raw.branch.name } : null,
         user: entry.raw.user,
         payments: entry.raw.payments,
+        tuitionCharges: entry.raw.tuitionCharges,
       }),
     );
   }

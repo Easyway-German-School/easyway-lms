@@ -19,6 +19,7 @@ import { sendEmail } from "@/lib/mailer";
 import { feeReminderEmailTemplate } from "@/lib/email-templates";
 import { receivedPaymentFilter } from "@/lib/payment";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
+import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 
 export type FeeReminderResult = {
   sentCount: number;
@@ -51,7 +52,16 @@ export async function sendDueFeeReminders(options: {
     },
     orderBy: { createdAt: "asc" },
     include: {
-      student: { include: { user: true } },
+      student: {
+        include: {
+          user: true,
+          tuitionCharges: {
+            where: { deletedAt: null },
+            select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+          },
+          payments: { where: receivedPaymentFilter(), select: { amount: true } },
+        },
+      },
       payments: { where: receivedPaymentFilter() },
     },
   });
@@ -89,13 +99,25 @@ export async function sendDueFeeReminders(options: {
 
       const daysSinceCreation = Math.floor((now - new Date(invoice.createdAt).getTime()) / DAY_MS);
 
+      // The per-level ledger, when the student has one. It moves the lock clock
+      // onto the oldest still-open GO-FORWARD charge and reports what is owed
+      // across every level rather than just this invoice.
+      const studentPaid = (student.payments || []).reduce((sum, p) => sum + p.amount, 0);
+      const ledger = buildLedger(student.tuitionCharges ?? [], studentPaid, new Date(now));
+      const hasLedger = ledgerIsPopulated(ledger);
+
       // The date portal access pauses for an unsettled balance — 30 days after
-      // classes start, falling back to enrolment.
-      const anchor = student.classesStartedAt ?? student.createdAt;
+      // classes start (or the newest level's charge), falling back to enrolment.
+      const anchor =
+        (hasLedger && ledger.oldestOpenGoForwardChargeAt
+          ? new Date(ledger.oldestOpenGoForwardChargeAt)
+          : null) ?? student.classesStartedAt ?? student.createdAt;
       const lockAt = new Date(new Date(anchor).getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS);
 
-      const paid = (invoice.payments || []).reduce((sum, payment) => sum + payment.amount, 0);
-      const outstandingAmount = invoice.totalAmount - paid;
+      const invoicePaid = (invoice.payments || []).reduce((sum, payment) => sum + payment.amount, 0);
+      const outstandingAmount = hasLedger
+        ? ledger.goForwardOutstanding
+        : invoice.totalAmount - invoicePaid;
       if (outstandingAmount <= 0) continue;
 
       type Send = { key: keyof ReminderTracking; stage: number | "locked"; type: string; due: boolean };

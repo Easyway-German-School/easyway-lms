@@ -67,6 +67,13 @@ export async function GET() {
         branch: { select: { id: true, name: true } },
         user: { select: { name: true, email: true } },
         payments: { where: receivedPaymentFilter(), select: { amount: true } },
+        // The per-level tuition ledger — so "outstanding" on the dashboard
+        // reflects everything owed across the ladder, not just the current
+        // level's shortfall. See src/lib/finance/ledger.ts.
+        tuitionCharges: {
+          where: { deletedAt: null },
+          select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+        },
         // Churn-risk inputs — see lib/student-risk.ts.
         notStartedCount: true,
         attendances: { where: { date: { gte: riskWindowStart } }, select: { present: true, status: true } },
@@ -140,6 +147,7 @@ export async function GET() {
       branch: student.branch,
       user: student.user,
       payments: student.payments,
+      tuitionCharges: student.tuitionCharges,
     })),
     now,
   );

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { awardFor, hasPassed, weightedCourseworkAverage, type Award } from "@/lib/grading";
 import { SESSION_MONTHS } from "@/lib/levels";
 import { receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { resolveBatchWindow } from "@/lib/batch";
 
 /**
@@ -187,6 +188,10 @@ export async function issueCertificateForStudent(
         select: { score: true, type: true },
       },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+      },
     },
   });
 
@@ -201,6 +206,7 @@ export async function issueCertificateForStudent(
 
   const feeLookup = { level, branch: student.branch?.name ?? null, classType: student.classType };
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now);
 
   const eligibility = certificateEligibility({
     batch,
@@ -245,7 +251,9 @@ export async function issueCertificateForStudent(
       branchName: student.branch?.name ?? null,
       tutorName: student.tutor?.user?.name ?? null,
       batch,
-      outstandingAtIssue: Math.max(0, tuitionFeeFor(feeLookup) - totalPaid),
+      outstandingAtIssue: ledgerIsPopulated(ledger)
+        ? ledger.lifetimeOutstanding
+        : Math.max(0, tuitionFeeFor(feeLookup) - totalPaid),
       // Snapshotted like every other field here: a student who repeats the
       // level or moves batch must not change the dates on a document already
       // printed and in somebody's hand.
