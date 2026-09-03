@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import { normalizeStorageEndpoint, objectStorage, publicUrlFor, storageKey } from "@/lib/storage";
 import { checkRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { ALLOWED_CONTENT_TYPES, MAX_FILE_BYTES, WORK_DRIVE_PREFIX } from "@/lib/work-drive/files";
+import { workDriveConfig } from "@/lib/work-drive/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +60,30 @@ export async function POST(request: NextRequest) {
       { error: `That file is over the ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB limit.` },
       { status: 413 },
     );
+  }
+
+  /**
+   * Storage quota. A soft check at presign time — a burst of concurrent
+   * uploads can still nudge slightly over, which the doc accepts for v1; the
+   * point is that a tenant near the ceiling is stopped, not that the ceiling
+   * is exact to the byte.
+   */
+  const tenantId = gate.session.user.tenantId ?? null;
+  if (tenantId && Number.isFinite(size) && size > 0) {
+    const { quotaBytes } = await workDriveConfig(tenantId);
+    const agg = await prisma.workspace.aggregate({
+      where: { deletedAt: null },
+      _sum: { storageUsedBytes: true },
+    });
+    const used = Number(agg._sum.storageUsedBytes ?? 0);
+    if (used + size > quotaBytes) {
+      return NextResponse.json(
+        {
+          error: `The Work Drive is at its storage limit (${(quotaBytes / 1024 ** 3).toFixed(0)} GB). Delete some files or ask an admin to raise the limit.`,
+        },
+        { status: 507 },
+      );
+    }
   }
 
   const storage = objectStorage();

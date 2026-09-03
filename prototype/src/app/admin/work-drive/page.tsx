@@ -11,6 +11,7 @@ import {
   LockIcon,
   UnlockIcon,
   BranchIcon,
+  SlidersIcon,
 } from "@/components/icons";
 
 /**
@@ -124,15 +125,24 @@ export default function WorkDrivePage() {
               </p>
             </div>
           </div>
-          {enabled && (
-            <button
-              onClick={() => setCreating(true)}
-              className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110"
+          <div className="flex gap-2">
+            <Link
+              href="/admin/work-drive/settings"
+              className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3.5 py-2.5 text-sm font-semibold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)]"
             >
-              <PlusIcon className="h-4 w-4" />
-              New workspace
-            </button>
-          )}
+              <SlidersIcon className="h-4 w-4" />
+              Settings
+            </Link>
+            {enabled && (
+              <button
+                onClick={() => setCreating(true)}
+                className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110"
+              >
+                <PlusIcon className="h-4 w-4" />
+                New workspace
+              </button>
+            )}
+          </div>
         </header>
 
         {!enabled && !loading && (

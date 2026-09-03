@@ -114,6 +114,7 @@ export default function WorkspacePage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [drawerFile, setDrawerFile] = useState<DrawerFile | null>(null);
   const [showMembers, setShowMembers] = useState(false);
+  const [trash, setTrash] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [searchResults, setSearchResults] = useState<SearchHit[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -121,7 +122,10 @@ export default function WorkspacePage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const qs = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
+      const params = new URLSearchParams();
+      if (trash) params.set("trash", "1");
+      else if (folderId) params.set("folderId", folderId);
+      const qs = params.toString() ? `?${params.toString()}` : "";
       const res = await fetch(`/api/admin/work-drive/workspaces/${slug}${qs}`, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Could not open this workspace.");
@@ -132,7 +136,18 @@ export default function WorkspacePage() {
     } finally {
       setLoading(false);
     }
-  }, [slug, folderId]);
+  }, [slug, folderId, trash]);
+
+  async function restore(file: DriveFile) {
+    setBusyId(file.id);
+    await fetch(`/api/admin/work-drive/files/${file.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ restore: true }),
+    });
+    setBusyId(null);
+    load();
+  }
 
   useEffect(() => {
     load();
@@ -257,7 +272,18 @@ export default function WorkspacePage() {
                   <UsersIcon className="h-4 w-4" />
                   Members
                 </button>
-                {canEdit && (
+                <button
+                  onClick={() => setTrash((t) => !t)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm font-semibold transition ${
+                    trash
+                      ? "border-[var(--accent)] text-[var(--accent)]"
+                      : "border-[var(--border)] text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)]"
+                  }`}
+                >
+                  <TrashIcon className="h-4 w-4" />
+                  {trash ? "Back to files" : "Trash"}
+                </button>
+                {canEdit && !trash && (
                   <>
                     <button
                       onClick={newFolder}
@@ -382,7 +408,7 @@ export default function WorkspacePage() {
                   </div>
                 ) : (
                   <ul className="divide-y divide-[var(--border)]">
-                    {childFolders.map((f) => (
+                    {!trash && childFolders.map((f) => (
                       <li key={f.id}>
                         <button
                           onClick={() => setFolderId(f.id)}
@@ -406,6 +432,7 @@ export default function WorkspacePage() {
                         </span>
                         <button
                           onClick={() =>
+                            !trash &&
                             setDrawerFile({
                               id: file.id,
                               name: file.name,
@@ -416,40 +443,56 @@ export default function WorkspacePage() {
                               updatedAt: file.updatedAt,
                             })
                           }
-                          className="min-w-0 flex-1 text-left"
+                          className={`min-w-0 flex-1 text-left ${trash ? "cursor-default" : ""}`}
                         >
-                          <p className="truncate font-medium text-[var(--foreground)]">{file.name}</p>
+                          <p className={`truncate font-medium text-[var(--foreground)] ${trash ? "line-through opacity-70" : ""}`}>
+                            {file.name}
+                          </p>
                           <p className="text-xs text-[var(--muted)]">
                             {bytes(file.sizeBytes)} · {when(file.updatedAt)}
                             {file.version > 1 ? ` · v${file.version}` : ""}
                           </p>
                         </button>
                         <div className="flex items-center gap-1">
-                          <a
-                            href={`/api/admin/work-drive/files/${file.id}/download`}
-                            className="rounded-lg p-2 text-[var(--muted)] transition hover:bg-[var(--surface)] hover:text-[var(--accent)]"
-                            title="Download"
-                          >
-                            <DownloadIcon className="h-4 w-4" />
-                          </a>
-                          {canEdit && (
+                          {trash ? (
+                            canEdit && (
+                              <button
+                                onClick={() => restore(file)}
+                                disabled={busyId === file.id}
+                                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--accent)] transition hover:bg-[var(--surface)] disabled:opacity-40"
+                              >
+                                Restore
+                              </button>
+                            )
+                          ) : (
                             <>
-                              <button
-                                onClick={() => rename(file)}
-                                disabled={busyId === file.id}
-                                className="rounded-lg p-2 text-[var(--muted)] transition hover:bg-[var(--surface)] hover:text-[var(--accent)] disabled:opacity-40"
-                                title="Rename"
+                              <a
+                                href={`/api/admin/work-drive/files/${file.id}/download`}
+                                className="rounded-lg p-2 text-[var(--muted)] transition hover:bg-[var(--surface)] hover:text-[var(--accent)]"
+                                title="Download"
                               >
-                                <PencilIcon className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() => remove(file)}
-                                disabled={busyId === file.id}
-                                className="rounded-lg p-2 text-[var(--muted)] transition hover:bg-[var(--surface)] hover:text-rose-500 disabled:opacity-40"
-                                title="Delete"
-                              >
-                                <TrashIcon className="h-4 w-4" />
-                              </button>
+                                <DownloadIcon className="h-4 w-4" />
+                              </a>
+                              {canEdit && (
+                                <>
+                                  <button
+                                    onClick={() => rename(file)}
+                                    disabled={busyId === file.id}
+                                    className="rounded-lg p-2 text-[var(--muted)] transition hover:bg-[var(--surface)] hover:text-[var(--accent)] disabled:opacity-40"
+                                    title="Rename"
+                                  >
+                                    <PencilIcon className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => remove(file)}
+                                    disabled={busyId === file.id}
+                                    className="rounded-lg p-2 text-[var(--muted)] transition hover:bg-[var(--surface)] hover:text-rose-500 disabled:opacity-40"
+                                    title="Delete"
+                                  >
+                                    <TrashIcon className="h-4 w-4" />
+                                  </button>
+                                </>
+                              )}
                             </>
                           )}
                         </div>

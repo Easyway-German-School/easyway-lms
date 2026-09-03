@@ -1,7 +1,39 @@
 # Work Drive
 
-_Status: in build. Design doc — mark it up._
+_Status: Phases 0–5 built on `feat/work-drive`. Migrations applied to Neon.
+Not merged / deployed. Design doc below — mark it up._
 _Owner: engineering. Requested by: Jason (Sept 2026)._
+
+---
+
+## Build log
+
+| Phase | Commit | What landed |
+|---|---|---|
+| 0 | `c67241e` | 9 file models, capabilities (`work_drive`, `events`), settings lib, tenant-isolation registry, hand-written migration. |
+| 1 | `ab6d3be` | `/admin/work-drive` — workspace list + create, file browser (folders, breadcrumb, activity), direct-to-R2 upload, capability-checked download, nav entry. |
+| 2 | `4127704` + `fde0f7f` | Members, per-file sharing (view/edit, cross-workspace), "shared with me", comment threads with notify(), version history + upload, content search (tsvector on `textContent` + a second GIN index), background text extraction via `after()`. |
+| 3 | `fa0732f` | Staff calendar `/admin/calendar` — WorkEvent/Attendee/Task/Resource, month grid + day agenda + event drawer, RRULE subset, per-admin `.ics` feed, cron reminder job. |
+| 4 | `b950834` | Webinars — Webinar/Question/Vote, `/admin/webinars` + host console, LiveKit token minting reusing `LiveKitClassroom`, public landing `/w/[slug]` + `/api/public/webinar/*` registration + confirmation email. |
+| 5 | _pending commit_ | Storage quota enforced at presign (507 over limit), `/admin/work-drive/settings` (flag + quota, gated on `staff`), storage meter, per-workspace Trash view + restore, cron retention (30-day trash purge + version prune). |
+
+Migrations run against Neon: `20260903140000_work_drive_files`,
+`…150000_work_drive_phase2`, `…160000_work_drive_events`,
+`…170000_work_drive_webinars`. `work_drive.enabled` is on for
+`tenant_easyway_root` only.
+
+### Deferred — Phase 4b (needs a live LiveKit room to build against)
+
+- Webinar-mode video affordances: stage layout, audience muted by default,
+  raise-hand → promote-to-presenter. Today the host console mounts the
+  existing classroom component against the webinar's room.
+- Public in-room Q&A submission from the `/w/` landing (staff-side Q&A
+  moderation with upvotes is done).
+- Double opt-in on public registration (currently single opt-in + a
+  confirmation email).
+- Backup: `pg_dump` covers every Work Drive **row**; the R2 **objects** ride
+  on whatever the bucket's own lifecycle/replication is — confirm that
+  covers `work-drive/` the same as `recordings/`.
 
 ---
 
