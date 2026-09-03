@@ -17,12 +17,25 @@ import {
   PackageIcon,
   PencilIcon,
   PlusIcon,
+  SearchIcon,
   TrashIcon,
   UploadIcon,
+  UsersIcon,
 } from "@/components/icons";
 import { uploadWorkDriveFile } from "@/lib/work-drive/upload-client";
+import FileDrawer, { type DrawerFile } from "./FileDrawer";
+import MembersModal from "./MembersModal";
 
 type Folder = { id: string; name: string; parentId: string | null; path: string };
+type SearchHit = {
+  id: string;
+  name: string;
+  kind: string;
+  sizeBytes: number;
+  updatedAt: string;
+  workspaceName: string | null;
+  workspaceSlug: string | null;
+};
 type DriveFile = {
   id: string;
   name: string;
@@ -99,6 +112,10 @@ export default function WorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [drawerFile, setDrawerFile] = useState<DrawerFile | null>(null);
+  const [showMembers, setShowMembers] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchHit[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -120,6 +137,20 @@ export default function WorkspacePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const q = searchQ.trim();
+    if (q.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+    const t = setTimeout(async () => {
+      const res = await fetch(`/api/admin/work-drive/search?q=${encodeURIComponent(q)}`, { cache: "no-store" });
+      const json = await res.json();
+      setSearchResults(res.ok ? json.files ?? [] : []);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [searchQ]);
 
   const childFolders = useMemo(
     () => (data?.folders ?? []).filter((f) => f.parentId === folderId),
@@ -218,33 +249,92 @@ export default function WorkspacePage() {
                   <p className="mt-1 text-sm text-[var(--muted)]">{data.workspace.description}</p>
                 )}
               </div>
-              {canEdit && (
-                <div className="flex gap-2">
-                  <button
-                    onClick={newFolder}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3.5 py-2 text-sm font-semibold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)]"
-                  >
-                    <PlusIcon className="h-4 w-4" />
-                    Folder
-                  </button>
-                  <button
-                    onClick={() => fileInput.current?.click()}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-bold text-white transition hover:brightness-110"
-                  >
-                    <UploadIcon className="h-4 w-4" />
-                    Upload
-                  </button>
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    multiple
-                    hidden
-                    onChange={(e) => onPick(e.target.files)}
-                  />
-                </div>
-              )}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setShowMembers(true)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3.5 py-2 text-sm font-semibold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)]"
+                >
+                  <UsersIcon className="h-4 w-4" />
+                  Members
+                </button>
+                {canEdit && (
+                  <>
+                    <button
+                      onClick={newFolder}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3.5 py-2 text-sm font-semibold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)]"
+                    >
+                      <PlusIcon className="h-4 w-4" />
+                      Folder
+                    </button>
+                    <button
+                      onClick={() => fileInput.current?.click()}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-bold text-white transition hover:brightness-110"
+                    >
+                      <UploadIcon className="h-4 w-4" />
+                      Upload
+                    </button>
+                    <input
+                      ref={fileInput}
+                      type="file"
+                      multiple
+                      hidden
+                      onChange={(e) => onPick(e.target.files)}
+                    />
+                  </>
+                )}
+              </div>
             </header>
 
+            {/* Search — across every workspace this admin can see */}
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
+              <input
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                placeholder="Search files by name or content…"
+                className="w-full rounded-full border border-[var(--border)] bg-[var(--surface)] py-2 pl-9 pr-3 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+
+            {searchResults !== null ? (
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
+                {searchResults.length === 0 ? (
+                  <p className="p-8 text-center text-sm text-[var(--muted)]">No files match “{searchQ}”.</p>
+                ) : (
+                  <ul className="divide-y divide-[var(--border)]">
+                    {searchResults.map((hit) => (
+                      <li key={hit.id} className="flex items-center gap-3 px-4 py-3 transition hover:bg-[var(--surface-alt)]">
+                        <span className="text-[var(--muted)]">
+                          <KindIcon kind={hit.kind} className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-[var(--foreground)]">{hit.name}</p>
+                          <p className="text-xs text-[var(--muted)]">
+                            {bytes(hit.sizeBytes)}
+                            {hit.workspaceName ? ` · in ${hit.workspaceName}` : ""}
+                          </p>
+                        </div>
+                        {hit.workspaceSlug && hit.workspaceSlug !== slug && (
+                          <Link
+                            href={`/admin/work-drive/${hit.workspaceSlug}`}
+                            className="rounded-lg px-2 py-1 text-xs font-semibold text-[var(--muted)] transition hover:text-[var(--accent)]"
+                          >
+                            Open
+                          </Link>
+                        )}
+                        <a
+                          href={`/api/admin/work-drive/files/${hit.id}/download`}
+                          className="rounded-lg p-2 text-[var(--muted)] transition hover:text-[var(--accent)]"
+                        >
+                          <DownloadIcon className="h-4 w-4" />
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : (
+             <>
             {/* Breadcrumb */}
             <nav className="flex flex-wrap items-center gap-1 text-sm">
               <button
@@ -314,13 +404,26 @@ export default function WorkspacePage() {
                         <span className="text-[var(--muted)]">
                           <KindIcon kind={file.kind} className="h-5 w-5" />
                         </span>
-                        <div className="min-w-0 flex-1">
+                        <button
+                          onClick={() =>
+                            setDrawerFile({
+                              id: file.id,
+                              name: file.name,
+                              kind: file.kind,
+                              sizeBytes: file.sizeBytes,
+                              mimeType: file.mimeType,
+                              version: file.version,
+                              updatedAt: file.updatedAt,
+                            })
+                          }
+                          className="min-w-0 flex-1 text-left"
+                        >
                           <p className="truncate font-medium text-[var(--foreground)]">{file.name}</p>
                           <p className="text-xs text-[var(--muted)]">
                             {bytes(file.sizeBytes)} · {when(file.updatedAt)}
                             {file.version > 1 ? ` · v${file.version}` : ""}
                           </p>
-                        </div>
+                        </button>
                         <div className="flex items-center gap-1">
                           <a
                             href={`/api/admin/work-drive/files/${file.id}/download`}
@@ -380,9 +483,31 @@ export default function WorkspacePage() {
                 )}
               </aside>
             </div>
+             </>
+            )}
           </>
         )}
       </div>
+
+      {drawerFile && data && (
+        <FileDrawer
+          file={drawerFile}
+          workspaceSlug={slug}
+          canEdit={data.access.canEdit}
+          onClose={() => setDrawerFile(null)}
+          onChanged={() => {
+            load();
+            setDrawerFile(null);
+          }}
+        />
+      )}
+      {showMembers && (
+        <MembersModal
+          workspaceSlug={slug}
+          canEdit={data?.access.canEdit ?? false}
+          onClose={() => setShowMembers(false)}
+        />
+      )}
     </AdminShell>
   );
 }
