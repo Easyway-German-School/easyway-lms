@@ -5,6 +5,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 
 /**
  * The one question every gated page asks: may this student see class content yet?
@@ -24,6 +25,7 @@ export async function GET() {
   const student = await prisma.student.findUnique({
     where: { userId: session.user.id as string },
     select: {
+      id: true,
       level: true,
       classType: true,
       // Drives which pages exist for this student at all — the live classroom
@@ -42,6 +44,13 @@ export async function GET() {
         where: receivedPaymentFilter(),
         select: { amount: true },
       },
+      // The per-level ledger drives the deposit gate and the balance lock — a
+      // student promoted with a balance open below must not walk into the next
+      // level for free. See src/lib/finance/ledger.ts.
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+      },
     },
   });
 
@@ -51,6 +60,9 @@ export async function GET() {
 
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
   const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+
+  // An on-track tuition payment plan holds the balance lock back, like grace.
+  const planStatus = await planStatusForStudent(student.id);
 
   return NextResponse.json(
     deriveStudentAccess({
@@ -62,9 +74,12 @@ export async function GET() {
       // could not tell a private student from a group one — and hid the live
       // classroom from private students the server was happy to admit.
       classType: student.classType,
+      level: student.level,
+      charges: student.tuitionCharges,
       classesStartedAt: student.classesStartedAt,
       enrolledAt: student.createdAt,
       paymentGraceUntil: student.paymentGraceUntil,
+      paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
     }),
   );
 }

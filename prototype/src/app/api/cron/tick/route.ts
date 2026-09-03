@@ -64,6 +64,23 @@ async function handleGET(request: NextRequest) {
   );
 
   results.push(
+    await run("payment-plans", async () => {
+      // Move plans to completed/defaulted BEFORE the reminder jobs, so a plan
+      // that lapsed today is no longer holding the lock back when they run.
+      const { sweepPaymentPlans } = await import("@/lib/payment-plans");
+      return sweepPaymentPlans();
+    }),
+  );
+
+  results.push(
+    await run("accountant-digest", async () => {
+      // Self-gated: idempotent per ISO week via the notification dedupeKey.
+      const { sendAccountantDigest } = await import("@/lib/accountant-digest");
+      return sendAccountantDigest();
+    }),
+  );
+
+  results.push(
     await run("payment-warnings", async () => {
       const { runPaymentWarnings } = await import("@/lib/payment-warnings");
       return runPaymentWarnings({ dryRun: false });

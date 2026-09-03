@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
+import { onTrackPlanStudentIds } from "@/lib/payment-plans";
 import { KIND, notify } from "@/lib/notify";
 
 /**
@@ -126,6 +127,10 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     },
   });
 
+  // Students on an on-track tuition payment plan — treated exactly like a
+  // future grace date: no balance-track escalation while they keep to it.
+  const onTrackPlan = await onTrackPlanStudentIds(now);
+
   const run: WarningRun = { checked: students.length, atRisk: 0, created: [], skipped: 0 };
 
   for (const student of students) {
@@ -146,7 +151,8 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
     run.atRisk++;
 
     const graceUntil = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;
-    const graceActive = !!graceUntil && now.getTime() < graceUntil.getTime();
+    const graceActive =
+      onTrackPlan.has(student.id) || (!!graceUntil && now.getTime() < graceUntil.getTime());
 
     // -------- Legacy-arrears track: gentle, no lock language, fires once --------
     if (hasLedger && ledger.legacyOutstanding > 0 && !graceActive) {

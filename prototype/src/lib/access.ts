@@ -180,6 +180,7 @@ export function deriveStudentAccess({
   classesStartedAt,
   enrolledAt,
   paymentGraceUntil,
+  paymentPlanOnTrack,
   now = new Date(),
 }: {
   totalPaid: number;
@@ -197,6 +198,12 @@ export function deriveStudentAccess({
   enrolledAt?: unknown;
   /** Admin override date; lock and balance reminders suppressed until it passes. */
   paymentGraceUntil?: unknown;
+  /**
+   * True when the student has an ACTIVE tuition payment plan they are keeping
+   * to (src/lib/payment-plans.ts). Suppresses the balance lock exactly like a
+   * grace date; a defaulted or absent plan is `false`/undefined.
+   */
+  paymentPlanOnTrack?: boolean;
   now?: Date;
 }): StudentAccess {
   const paid = Math.max(0, Math.round(Number(totalPaid) || 0));
@@ -234,7 +241,9 @@ export function deriveStudentAccess({
   // The balance lock only exists for a student who is past the deposit gate
   // but has not settled the fee.
   const graceDate = toDate(paymentGraceUntil);
-  const graceActive = graceDate ? now.getTime() < graceDate.getTime() : false;
+  // A future grace date OR an on-track payment plan holds the lock back.
+  const graceActive =
+    Boolean(paymentPlanOnTrack) || (graceDate ? now.getTime() < graceDate.getTime() : false);
 
   let lockAt: Date | null = null;
   let balanceLocked = false;

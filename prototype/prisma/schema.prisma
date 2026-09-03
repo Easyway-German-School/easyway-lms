@@ -305,6 +305,7 @@ model Tenant {
   termsAcceptances TermsAcceptance[]
   refundRequests   RefundRequest[]
   tuitionCharges   TuitionCharge[]
+  paymentPlans     PaymentPlan[]
 }
 
 /// School-wide configuration the office edits instead of asking for a deploy.
@@ -617,6 +618,7 @@ model Student {
   invoices              Invoice[]
   payments              Payment[]
   tuitionCharges        TuitionCharge[]
+  paymentPlans          PaymentPlan[]
   assignmentSubmissions AssignmentSubmission[]
   privateClasses        PrivateClass[]
   privateClassSeries    PrivateClassSeries[]
@@ -1926,6 +1928,60 @@ model TuitionCharge {
 
   @@unique([studentId, level])
   @@index([studentId])
+  @@index([tenantId])
+}
+
+/// A negotiated instalment schedule for a student's tuition balance.
+///
+/// This is the FIRST-CLASS version of what `Student.paymentGraceUntil` did by
+/// hand: while a plan is `active` and the student is keeping to it, the 30-day
+/// part-payment lock is suppressed and the balance-reminder ladder is held —
+/// exactly like a grace date, but tracked. Miss an instalment past its own
+/// short grace and the plan goes `defaulted`: the lock and the reminders come
+/// straight back and the accountant is notified.
+///
+/// `installments` is the schedule as JSON: `[{ "dueOn": ISO, "amount": naira,
+/// "paidAt"?: ISO }]`. Adherence is judged by comparing the sum due by `now`
+/// against the student's received payments since the plan started — a specific
+/// Payment row is not tied to a specific instalment, because a student paying
+/// ₦20k a week just needs the running total to keep up.
+model PaymentPlan {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /// The TuitionCharge ids this plan is meant to clear, oldest-first. Advisory
+  /// — FIFO allocation still decides what each payment actually settles.
+  chargeIds Json
+
+  /// [{ dueOn, amount, paidAt? }] — see the note above.
+  installments Json
+
+  /// active | completed | defaulted | cancelled
+  status String @default("active")
+
+  /// How many days after an instalment's dueOn before a shortfall counts as a
+  /// default. Keeps a payment that lands a day late from tripping the lock.
+  graceDays Int @default(3)
+
+  /// Naira paid toward tuition at the moment the plan was created — the
+  /// baseline adherence is measured from.
+  startingPaid Int @default(0)
+
+  createdById String?
+  note        String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  defaultedAt DateTime?
+  completedAt DateTime?
+  deletedAt   DateTime?
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, status])
   @@index([tenantId])
 }
 

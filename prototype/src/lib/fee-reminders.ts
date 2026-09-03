@@ -20,6 +20,7 @@ import { feeReminderEmailTemplate } from "@/lib/email-templates";
 import { receivedPaymentFilter } from "@/lib/payment";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
+import { onTrackPlanStudentIds } from "@/lib/payment-plans";
 
 export type FeeReminderResult = {
   sentCount: number;
@@ -44,6 +45,9 @@ export async function sendDueFeeReminders(options: {
 } = {}): Promise<FeeReminderResult> {
   const { studentId, forceSend = false } = options;
   const now = Date.now();
+
+  // Students on an on-track tuition payment plan — held like a grace date.
+  const onTrackPlan = forceSend ? new Set<string>() : await onTrackPlanStudentIds(new Date(now));
 
   const allInvoices = await prisma.invoice.findMany({
     where: {
@@ -91,6 +95,7 @@ export async function sendDueFeeReminders(options: {
       // An admin grace date in the future silences every stage.
       const graceUntil = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;
       if (!forceSend && graceUntil && now < graceUntil.getTime()) continue;
+      if (!forceSend && onTrackPlan.has(student.id)) continue;
 
       const tracking: ReminderTracking =
         student.feeRemindersScheduled && typeof student.feeRemindersScheduled === "object"

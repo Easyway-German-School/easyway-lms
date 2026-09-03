@@ -58,6 +58,7 @@ export const TENANT_OWNED_MODELS = [
   "Invoice",
   "Payment",
   "TuitionCharge",
+  "PaymentPlan",
   "Lead",
   "Notification",
   "NotificationSetting",
