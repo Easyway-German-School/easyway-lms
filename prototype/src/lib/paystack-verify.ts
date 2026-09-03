@@ -52,8 +52,13 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
   const tuitionFeeValue = Math.max(0, Math.round(Number(metadata.tuitionFee || 0)));
   const derivedTotal = Math.round(Number(metadata.totalAmount || paymentAmount));
   const totalAmount = tuitionFeeValue > 0 ? Math.max(tuitionFeeValue, derivedTotal) : derivedTotal;
+  const forNextLevel = String(metadata.forNextLevel || "") === "true";
   const paymentClassification = classifyPaymentTransaction({
-    paymentAmount,
+    // A next-level checkout's amount can exceed the new level's fee because it
+    // ALSO clears an old balance (see the breakdown in /api/paystack/initialize).
+    // Classifying off the combined figure would mislabel a 60% deposit as a
+    // full settlement, so for that path the metadata stage is authoritative.
+    paymentAmount: forNextLevel ? Math.min(paymentAmount, tuitionFeeValue || paymentAmount) : paymentAmount,
     totalAmount,
     tuitionFee: tuitionFeeValue,
     depositPercent,
@@ -129,7 +134,6 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
    * deserves its own invoice (see the note on `alreadyPaid` in the checkout
    * route about why a fresh level starts its own ledger).
    */
-  const forNextLevel = String(metadata.forNextLevel || "") === "true";
   const openInvoice = forNextLevel
     ? null
     : await prisma.invoice.findFirst({

@@ -615,10 +615,11 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
         });
       }
 
+      const feeBlocked = result.skipped.filter((s) => /owes /i.test(s.reason));
       return {
         summary: `Moved ${result.promoted.length} student${result.promoted.length === 1 ? "" : "s"} up to ${to}${
           result.skipped.length ? `, skipped ${result.skipped.length}` : ""
-        }.`,
+        }${feeBlocked.length ? ` (${feeBlocked.length} still owe on an earlier level — a super admin can override from the Promotions screen)` : ""}.`,
         details: { promoted: result.promoted.length, skipped: result.skipped },
       };
     },

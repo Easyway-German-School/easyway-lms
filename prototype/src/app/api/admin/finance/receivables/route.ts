@@ -165,6 +165,18 @@ const CSV_COLUMNS: Array<{ header: string; value: (row: StudentFinance) => strin
             : "",
   },
   { header: "Grace until", value: (row) => (row.graceUntil ? row.graceUntil.slice(0, 10) : "") },
+  // Per-level ledger columns. Blank for a student with no charges yet.
+  { header: "Go-forward outstanding (NGN)", value: (row) => (row.ledgerPopulated ? row.goForwardOutstanding : "") },
+  { header: "Legacy arrears (NGN)", value: (row) => (row.ledgerPopulated ? row.legacyOutstanding : "") },
+  { header: "Owes on an earlier level", value: (row) => (row.owesPriorLevel ? "yes" : row.ledgerPopulated ? "no" : "") },
+  {
+    header: "Open levels",
+    value: (row) =>
+      row.openCharges
+        .filter((charge) => charge.outstanding > 0)
+        .map((charge) => `${charge.level}:${charge.outstanding}${charge.legacyArrears ? "(legacy)" : ""}`)
+        .join(" | "),
+  },
 ];
 
 function csvResponse(rows: StudentFinance[]): Response {

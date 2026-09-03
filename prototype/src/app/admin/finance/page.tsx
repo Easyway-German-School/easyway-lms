@@ -43,11 +43,14 @@ type FinancePayload = {
     expected: number;
     collected: number;
     outstanding: number;
+    outstandingGoForward?: number;
+    outstandingLegacy?: number;
     depositShortfall: number;
     collectionRate: number;
     cohorts: Record<string, number>;
     lockedOut: number;
     behindOnTuition: number;
+    owesPriorLevel?: number;
   };
   cash: {
     thisMonth: number;
@@ -327,9 +330,22 @@ function FinanceWorkspace() {
               label="Outstanding"
               value={nairaShort(data.book.outstanding)}
               tone={data.book.outstanding > 0 ? "bad" : "good"}
-              sub="Priced off the fee table, not off raised invoices"
+              sub={
+                data.book.outstandingLegacy && data.book.outstandingLegacy > 0
+                  ? `incl. ${nairaShort(data.book.outstandingLegacy)} legacy arrears`
+                  : "Across every level a student has passed through"
+              }
               href="/admin/finance?tab=receivables"
             />
+            <Tile
+              label="Owes an earlier level"
+              value={String(data.book.owesPriorLevel ?? 0)}
+              tone={(data.book.owesPriorLevel ?? 0) > 0 ? "bad" : "good"}
+              sub="Moved up the ladder with a balance still open below"
+              href="/admin/finance?tab=receivables&focus=owes_prior_level"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Tile
               label="Short of deposit"
               value={nairaShort(data.book.depositShortfall)}
@@ -337,6 +353,15 @@ function FinanceWorkspace() {
               sub={`${data.book.lockedOut} students cannot reach classes`}
               href="/admin/finance?tab=receivables&focus=locked_out"
             />
+            {data.book.outstandingLegacy && data.book.outstandingLegacy > 0 ? (
+              <Tile
+                label="Legacy arrears"
+                value={nairaShort(data.book.outstandingLegacy)}
+                tone="warn"
+                sub="Pre-ledger levels — chased, never auto-locked"
+                href="/admin/finance?tab=receivables&focus=legacy_arrears"
+              />
+            ) : null}
           </div>
 
           <div className="grid gap-5 xl:grid-cols-2">

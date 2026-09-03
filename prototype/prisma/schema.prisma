@@ -305,17 +305,6 @@ model Tenant {
   termsAcceptances TermsAcceptance[]
   refundRequests   RefundRequest[]
   tuitionCharges   TuitionCharge[]
-
-  /// Back-relations for the Work Drive tables. See docs/WORK_DRIVE.md.
-  workspaces        Workspace[]
-  workspaceMembers  WorkspaceMember[]
-  driveFolders      DriveFolder[]
-  driveFiles        DriveFile[]
-  driveFileVersions DriveFileVersion[]
-  driveFileTexts    DriveFileText[]
-  fileShares        FileShare[]
-  fileActivity      FileActivity[]
-  fileComments      FileComment[]
 }
 
 /// School-wide configuration the office edits instead of asking for a deploy.

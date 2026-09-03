@@ -13,6 +13,7 @@ import {
   tuitionFeeFor,
 } from "@/lib/payment";
 import { nextLevelAfter } from "@/lib/levels";
+import { loadStudentLedger } from "@/lib/tuition-charges";
 
 /**
  * Opens a Paystack checkout.
@@ -133,15 +134,18 @@ export async function POST(request: Request) {
      * from the "Continue to X" link on an offer the server already decided was
      * eligible, but nothing stops a request being replayed after that changed.
      *
-     * `alreadyPaid` is deliberately NOT the student's cumulative payment
-     * history here. `Payment` rows carry no record of which level they were
-     * for, so summing everything ever paid would net a brand-new level's
-     * deposit against tuition paid on the level just finished — in practice,
-     * "nothing outstanding" on a level nobody has paid a naira toward yet.
-     * A fresh level starts its own ledger at zero.
+     * The bill is the TRUE total: anything still owed on a level the student
+     * has already been in (`priorOpenBalance`, from the tuition ledger — see
+     * src/lib/finance/ledger.ts) PLUS the deposit (or full fee) on the level
+     * they are moving into. FIFO allocation on the verify side then splits the
+     * one payment: the old balance clears first, the remainder lands on the new
+     * level. The response carries a `breakdown` so the checkout shows the split.
+     * Legacy arrears are never rolled in here — they are chased separately.
      */
     let billingLevel = studentRecord.level;
     let alreadyPaid = studentRecord.payments.reduce((sum, payment) => sum + payment.amount, 0);
+    let priorOpenBalance = 0;
+    let priorOwedLevel: string | null = null;
 
     if (forNextLevel) {
       if (studentRecord.levelCompletedFor !== studentRecord.level || !studentRecord.levelCompletedAt) {
@@ -157,7 +161,17 @@ export async function POST(request: Request) {
       }
 
       billingLevel = target;
-      alreadyPaid = 0;
+
+      const ledger = await loadStudentLedger(studentRecord.id);
+      const priorLines = ledger.lines.filter(
+        (line) => line.outstanding > 0 && !line.legacyArrears && line.level !== target,
+      );
+      priorOpenBalance = priorLines.reduce((sum, line) => sum + line.outstanding, 0);
+      priorOwedLevel = priorLines[0]?.level ?? null;
+      // Anything already allocated to the target level's charge (a partial
+      // next-level payment made earlier) is credited so we do not double-bill.
+      const targetLine = ledger.lines.find((line) => line.level === target);
+      alreadyPaid = targetLine ? targetLine.allocated : 0;
     }
 
     const feeLookup = { level: billingLevel, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType };
@@ -210,6 +224,25 @@ export async function POST(request: Request) {
       effectivePaymentType = "full";
       amountToCharge = Math.max(0, normalizedTuitionFee - alreadyPaid);
     }
+
+    // The portion of this payment that goes toward the level being bought.
+    const targetPortion = amountToCharge;
+    // A next-level checkout also collects whatever is still open on a level the
+    // student has already been in. FIFO on the verify side does the actual
+    // split; here we just bill the sum.
+    amountToCharge = amountToCharge + priorOpenBalance;
+
+    const breakdown =
+      forNextLevel && priorOpenBalance > 0
+        ? [
+            { level: priorOwedLevel, amount: priorOpenBalance, purpose: "outstanding balance" as const },
+            {
+              level: billingLevel,
+              amount: targetPortion,
+              purpose: (effectivePaymentType === "full" ? "balance" : "deposit") as "balance" | "deposit",
+            },
+          ]
+        : null;
 
     if (amountToCharge <= 0) {
       return NextResponse.json(
@@ -328,6 +361,9 @@ export async function POST(request: Request) {
       reference: paystackData.data.reference,
       amount: amountToCharge,
       paymentType: effectivePaymentType,
+      // Present on a next-level checkout that is also clearing an old balance,
+      // so the page can show "₦X clears A2, ₦Y goes to B1".
+      breakdown,
     });
   } catch (error) {
     console.error("Paystack initialization error:", error);

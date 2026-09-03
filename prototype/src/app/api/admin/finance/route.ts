@@ -127,11 +127,16 @@ export async function GET(request: Request) {
       expected: summary.expected,
       collected: summary.collected,
       outstanding: summary.outstanding,
+      // Split by whether the machinery acts on it. Legacy arrears (levels passed
+      // before the tuition ledger existed) are chased but never auto-locked.
+      outstandingGoForward: summary.outstandingGoForward,
+      outstandingLegacy: summary.outstandingLegacy,
       depositShortfall: summary.depositShortfall,
       collectionRate: summary.collectionRate,
       cohorts: summary.cohortCounts,
       lockedOut: summary.lockedOut,
       behindOnTuition: summary.behindOnTuition,
+      owesPriorLevel: summary.owesPriorLevel,
     },
 
     /* Cash movement: what actually arrived, and when. */

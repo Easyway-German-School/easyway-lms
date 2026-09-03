@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { tuitionFeeFor } from "@/lib/payment";
+import { receivedPaymentFilter, tuitionFeeFor } from "@/lib/payment";
+import { buildLedger, type Ledger } from "@/lib/finance/ledger";
 
 /**
  * Raising `TuitionCharge` rows — the debit side of the per-level ledger.
@@ -120,4 +121,33 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
     console.error("ensureChargeForLevel: create failed", { studentId: input.studentId, level, error });
     return null;
   }
+}
+
+/**
+ * Load one student's live ledger straight from the database — their open
+ * charges reconciled FIFO against every received payment. The shared read used
+ * by the promotion gate and the next-level checkout.
+ */
+export async function loadStudentLedger(studentId: string, now: Date = new Date()): Promise<Ledger> {
+  const [charges, payments] = await Promise.all([
+    prisma.tuitionCharge.findMany({
+      where: { studentId, deletedAt: null },
+      select: {
+        id: true,
+        level: true,
+        amount: true,
+        waivedAmount: true,
+        legacyArrears: true,
+        createdAt: true,
+        settledAt: true,
+      },
+    }),
+    prisma.payment.findMany({
+      where: { studentId, ...receivedPaymentFilter() },
+      select: { amount: true },
+    }),
+  ]);
+
+  const paid = payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+  return buildLedger(charges, paid, now);
 }

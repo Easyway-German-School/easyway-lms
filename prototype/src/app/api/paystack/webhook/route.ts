@@ -209,8 +209,13 @@ async function handlePOST(request: Request) {
     const paymentStage = String(metadata.paymentStage || metadata.paymentType || "full");
     const paymentType = paymentStage === "registration" ? "registration" : paymentStage === "full" ? "full" : "deposit";
     const depositPercent = Number(metadata.depositPercent || 100);
+    const forNextLevel = String(metadata.forNextLevel || "") === "true";
     const paymentClassification = classifyPaymentTransaction({
-      paymentAmount,
+      // A next-level checkout's amount can exceed the new level's fee because it
+      // also clears an old balance — classify off the target portion only, so a
+      // 60% deposit is not mislabelled as a full settlement. See the mirror of
+      // this in src/lib/paystack-verify.ts.
+      paymentAmount: forNextLevel ? Math.min(paymentAmount, tuitionFeeValue || paymentAmount) : paymentAmount,
       totalAmount,
       tuitionFee: tuitionFeeValue,
       depositPercent,

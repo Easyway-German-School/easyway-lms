@@ -102,17 +102,6 @@ export default function NextLevelCheckout() {
     );
   }
 
-  if (offer.currentLevelOutstanding > 0) {
-    return (
-      <div className="rounded-[32px] border border-amber-300 bg-amber-50 p-8 text-amber-900">
-        <p className="font-semibold">
-          {naira(offer.currentLevelOutstanding)} is still open on {offer.currentLevel}
-        </p>
-        <p className="mt-2 text-sm">Clear that balance first — then your place in {offer.nextLevel} opens here.</p>
-      </div>
-    );
-  }
-
   if (!offer.sellableOnline) {
     return (
       <div className="rounded-[32px] border border-[var(--border)] bg-[var(--surface)] p-8 text-[var(--foreground)]">
@@ -139,13 +128,28 @@ export default function NextLevelCheckout() {
       </div>
 
       <div className="space-y-4 p-8">
+        {offer.currentLevelOutstanding > 0 ? (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="font-semibold">
+              {naira(offer.currentLevelOutstanding)} is still open on {offer.currentLevel}.
+            </p>
+            <p className="mt-1">
+              Paying here clears that first, then your {offer.nextLevel} amount — so you would pay{" "}
+              <strong>{naira(offer.currentLevelOutstanding + offer.requiredDeposit)}</strong> for the deposit option, or{" "}
+              <strong>{naira(offer.currentLevelOutstanding + offer.tuitionFee)}</strong> to settle {offer.nextLevel} in full.
+            </p>
+          </div>
+        ) : null}
+
         <button
           type="button"
           onClick={() => startCheckout("full")}
           disabled={busy !== null}
           className="w-full rounded-2xl bg-[var(--accent)] px-6 py-4 text-lg font-bold text-white shadow-lg transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {busy === "full" ? "Opening secure checkout…" : `Pay ${naira(offer.tuitionFee)} in full`}
+          {busy === "full"
+            ? "Opening secure checkout…"
+            : `Pay ${naira(offer.currentLevelOutstanding + offer.tuitionFee)}${offer.currentLevelOutstanding > 0 ? "" : " in full"}`}
         </button>
 
         <button
@@ -156,7 +160,7 @@ export default function NextLevelCheckout() {
         >
           {busy === "deposit"
             ? "Opening…"
-            : `Pay ${naira(offer.requiredDeposit)} deposit and start class now`}
+            : `Pay ${naira(offer.currentLevelOutstanding + offer.requiredDeposit)} deposit and start class now`}
         </button>
 
         {checkoutError ? (
