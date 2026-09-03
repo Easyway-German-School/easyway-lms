@@ -275,6 +275,17 @@ export const GLOBAL_MODELS = {
   PasswordResetToken: "looked up by unguessable hash, pre-authentication; tenant comes from the User it points at",
 
   /**
+   * The public-signup gate. Same shape as PasswordResetToken: it is looked up
+   * by an unguessable one-time token (or a Paystack reference) at
+   * `/auth/signup`, which by definition runs before the visitor has any
+   * session or tenant. A tenant filter here would break the one lookup the
+   * table exists for. It records `tenantId` (resolved from the request host at
+   * mint time) as a plain audit column, and the real tenant boundary is the
+   * User/Student the token is spent on — see the model doc in schema.prisma.
+   */
+  SignupToken: "looked up by unguessable token/ref, pre-authentication; tenant is stamped on the account it creates",
+
+  /**
    * Carries its own tenantId already and is the join point for the others.
    */
   User: "tenant column already present; scoped by the extension directly",

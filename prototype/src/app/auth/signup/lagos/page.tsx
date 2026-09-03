@@ -1,5 +1,13 @@
-import SignUpForm from "@/app/auth/signup/SignUpForm";
+import SignupAccessGate from "@/app/auth/signup/SignupAccessGate";
 
-export default function LagosSignUpPage() {
-  return <SignUpForm pageTitle="Start your German journey — Lagos" initialBranchName="Lagos" />;
+type Params = Record<string, string | string[] | undefined>;
+
+export default function LagosSignUpPage({ searchParams }: { searchParams?: Promise<Params> }) {
+  return (
+    <SignupAccessGate
+      searchParams={searchParams}
+      pageTitle="Start your German journey — Lagos"
+      initialBranchName="Lagos"
+    />
+  );
 }

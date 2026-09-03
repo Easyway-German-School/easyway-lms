@@ -23,7 +23,19 @@ import { OFFERED_LEVELS } from "@/lib/levels";
 
 type BranchOption = { id: string; name: string; location?: string | null; mode?: string | null };
 
-type SignUpFormClientProps = { pageTitle?: string; initialBranchName?: string };
+type SignupPrefill = {
+  name?: string;
+  email?: string;
+  level?: string;
+  branchId?: string;
+  sessionSlot?: string;
+};
+
+type SignUpFormClientProps = {
+  pageTitle?: string;
+  initialBranchName?: string;
+  initialPrefill?: SignupPrefill;
+};
 
 const branchGuidanceMap: Record<string, string> = {
   Lagos: "Lagos branch students get access to weekday group classes and Lagos campus support.",
@@ -60,7 +72,7 @@ const BRANCH_DEFAULT_STATE: Record<string, string> = {
  */
 const SESSION_SLOTS = TIME_SLOTS.map((slot) => ({ value: slot, label: slotLabel(slot) }));
 
-export default function SignUpFormClient({ pageTitle, initialBranchName }: SignUpFormClientProps) {
+export default function SignUpFormClient({ pageTitle, initialBranchName, initialPrefill }: SignUpFormClientProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -134,6 +146,16 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
   // Once the student edits the state field by hand we stop prefilling it from
   // the branch — their choice wins from then on.
   const stateTouchedRef = useRef(false);
+
+  // The access proof this signup arrived with: a returning-student `token`, or
+  // a paid Paystack `ref` (new student who paid the registration fee on the
+  // marketing site). Read straight from the URL and echoed back to
+  // /api/auth/signup, which RE-VALIDATES it server-side — the gate on this
+  // page is UX, not the security boundary. `inviteSig` is the first-party
+  // lead-invite escape hatch (see src/lib/leads.ts).
+  const signupTokenRef = useRef("");
+  const paystackRefRef = useRef("");
+  const inviteSigRef = useRef("");
 
   // The one switch the whole form turns on. Everything below reads from it
   // rather than testing the branch name again, so an online student never sees
@@ -280,6 +302,21 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
    */
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+
+    // Capture the access proof for handleSignUp — these are never rendered.
+    signupTokenRef.current = params.get("token")?.trim() || "";
+    paystackRefRef.current =
+      params.get("ref")?.trim() || params.get("reference")?.trim() || params.get("trxref")?.trim() || "";
+    inviteSigRef.current = params.get("sig")?.trim() || "";
+
+    const applyLevel = (v: string) => {
+      const requested = v.toUpperCase();
+      if ((OFFERED_LEVELS as readonly string[]).includes(requested)) setLevel(requested);
+    };
+    const applySlot = (v: string) => {
+      const slot = v.toLowerCase();
+      if ((TIME_SLOTS as readonly string[]).includes(slot)) setSessionSlot(slot);
+    };
     const prefill = (key: string, apply: (value: string) => void) => {
       const value = params.get(key)?.trim();
       if (value) apply(value);
@@ -287,16 +324,20 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
 
     prefill("email", setEmail);
     prefill("name", setName);
-    prefill("level", (v) => {
-      const requested = v.toUpperCase();
-      if ((OFFERED_LEVELS as readonly string[]).includes(requested)) setLevel(requested);
-    });
+    prefill("level", applyLevel);
     prefill("branchId", setBranchId);
-    prefill("sessionSlot", (v) => {
-      const slot = v.toLowerCase();
-      if ((TIME_SLOTS as readonly string[]).includes(slot)) setSessionSlot(slot);
-    });
-  }, []);
+    prefill("sessionSlot", applySlot);
+
+    // Server-validated prefill (from the token row or the Paystack charge) wins
+    // over whatever the link's query string carried.
+    if (initialPrefill) {
+      if (initialPrefill.email) setEmail(initialPrefill.email);
+      if (initialPrefill.name) setName(initialPrefill.name);
+      if (initialPrefill.level) applyLevel(initialPrefill.level);
+      if (initialPrefill.branchId) setBranchId(initialPrefill.branchId);
+      if (initialPrefill.sessionSlot) applySlot(initialPrefill.sessionSlot);
+    }
+  }, [initialPrefill]);
 
   // Returns the uploaded URL so callers can use it immediately — React state
   // updates (setPhotoUrl) are async and would still be stale in the same tick.
@@ -444,6 +485,10 @@ export default function SignUpFormClient({ pageTitle, initialBranchName }: SignU
         heardFrom,
         emergencyContactName,
         emergencyContactInfo,
+        // Access proof — re-validated server-side by /api/auth/signup.
+        signupToken: signupTokenRef.current || undefined,
+        paystackRef: paystackRefRef.current || undefined,
+        inviteSig: inviteSigRef.current || undefined,
         // Only sent for an online signup. A campus student has no meaningful
         // answer to any of it, and an empty object in their admission record
         // would just be noise for whoever reads it in the admin later.

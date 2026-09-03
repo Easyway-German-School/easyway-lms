@@ -15,6 +15,9 @@ import { resolveTenantId } from "@/lib/tenant/resolve";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import { TIME_SLOTS } from "@/lib/class-times";
 import { TERMS_CONTEXT, TERMS_VERSION } from "@/lib/terms";
+import { REGISTRATION_FEE } from "@/lib/payment";
+import { validateSignupAccess, verifyInviteSig } from "@/lib/signup-access";
+import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
 
 /**
  * Whether there is a Branch table to select from.
@@ -147,6 +150,12 @@ export async function POST(request: NextRequest) {
       allowParentLogin,
       transportRoute,
       heardFrom,
+      // Signup access proof — see the gate below. One of: a returning-student
+      // token, a paid Paystack ref (new student), or a first-party invite
+      // signature.
+      signupToken,
+      paystackRef,
+      inviteSig,
       // The optional 4th step of the signup wizard: a parent/guardian account
       // to create and link alongside this student's, in the same submit. See
       // the parent-account block near the end of this handler.
@@ -286,6 +295,73 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    /**
+     * ── SIGNUP ACCESS GATE ─────────────────────────────────────────────────
+     *
+     * Public signup is only ever reached from the enrolment funnel: a
+     * returning student carries a one-time `token`, a new student a Paystack
+     * `?ref=` for a registration-fee charge they already paid on the
+     * marketing site. The `/auth/signup` page hides the form without one, but
+     * that is UX — THIS is the check that stops someone POSTing straight to
+     * this endpoint to mint an account (and skip the registration fee).
+     *
+     * Staff never come through here: `role: "lecturer"` is refused above and
+     * parent signup is its own route.
+     *
+     * A `403` here is deliberately generic — a probe should not learn whether
+     * it was a bad token, a spent token, or a dud ref.
+     */
+    const accessDenied = () =>
+      NextResponse.json(
+        {
+          error:
+            "This signup link is invalid or has already been used. Please use the enrolment form on our website.",
+        },
+        { status: 403, headers: buildCorsHeaders(request) },
+      );
+
+    const signupTokenValue = typeof signupToken === "string" ? signupToken.trim() : "";
+    const paystackRefValue = typeof paystackRef === "string" ? paystackRef.trim() : "";
+    const inviteSigValue = typeof inviteSig === "string" ? inviteSig.trim() : "";
+
+    let accessSource: "token" | "ref" | "invite-sig" = "token";
+    let accessRefAmountNaira: number | undefined;
+    let accessRefCurrency: string | undefined;
+
+    if (inviteSigValue && !signupTokenValue && !paystackRefValue) {
+      // First-party lead-invite link (src/lib/leads.ts) — a signature over the
+      // prefilled params, keyed by SIGNUP_INVITE_SIGNING_SECRET.
+      const okSig = verifyInviteSig(
+        {
+          email: normalizedEmail,
+          name: normalizedName,
+          level: typeof level === "string" ? level : undefined,
+          branchId: normalizedBranchId ?? undefined,
+          sessionSlot: typeof sessionSlot === "string" ? sessionSlot : undefined,
+        },
+        inviteSigValue,
+      );
+      if (!okSig) return accessDenied();
+      accessSource = "invite-sig";
+    } else {
+      const gate = await validateSignupAccess({ token: signupTokenValue, ref: paystackRefValue });
+      if (!gate.valid) return accessDenied();
+
+      accessSource = gate.source === "ref" ? "ref" : "token";
+      accessRefAmountNaira = gate.refAmountNaira;
+      accessRefCurrency = gate.refCurrency;
+
+      // The proof was issued FOR an email; the account being created must use
+      // it, or a leaked-but-unused link is a free account for whoever finds it.
+      if (gate.email && gate.email.toLowerCase() !== normalizedEmail) {
+        return NextResponse.json(
+          { error: "This signup link was issued for a different email address." },
+          { status: 403, headers: buildCorsHeaders(request) },
+        );
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────
 
     const hasBranchTable = await branchTableExists();
 
@@ -436,6 +512,55 @@ export async function POST(request: NextRequest) {
             });
           } catch (chargeError) {
             console.error("Tuition charge creation failed on signup:", chargeError);
+          }
+
+          /**
+           * Spend the access proof now the account exists.
+           *
+           * Best-effort, like everything else in this block: the signup has
+           * already succeeded, so a missed consumption is a line for the
+           * office to reconcile, never a registration that gets rolled back.
+           *
+           *   token       flip the invite to used (guarded on used:false so a
+           *               double-submit second request is a no-op).
+           *   ref         write the consumption marker AND credit the ₦5,000
+           *               already paid on the marketing site, so the portal
+           *               does not ask this student to pay the registration
+           *               fee a second time.
+           *   invite-sig  nothing to consume — the signature stays valid, but
+           *               the email it is bound to now has an account, so a
+           *               replay just hits "Email already registered".
+           */
+          try {
+            if (accessSource === "token" && signupTokenValue) {
+              await prisma.signupToken.updateMany({
+                where: { token: signupTokenValue, used: false },
+                data: { used: true, usedAt: new Date(), usedByUserId: user.id },
+              });
+            } else if (accessSource === "ref" && paystackRefValue) {
+              await prisma.signupToken.create({
+                data: {
+                  paystackRef: paystackRefValue,
+                  email: normalizedEmail,
+                  name: normalizedName,
+                  studentType: "new",
+                  source: "wordpress-ref",
+                  used: true,
+                  usedAt: new Date(),
+                  usedByUserId: user.id,
+                  tenantId: currentTenantId(),
+                },
+              });
+              await recordRegistrationFeeFromRef({
+                studentId: created.id,
+                reference: paystackRefValue,
+                amountNaira: accessRefAmountNaira ?? REGISTRATION_FEE,
+                currency: accessRefCurrency ?? "NGN",
+                pathwayName: normalizedPathway,
+              });
+            }
+          } catch (consumeError) {
+            console.error("Signup access proof consumption failed:", consumeError);
           }
         }
       } catch (codeError) {
