@@ -4909,6 +4909,75 @@ model ConstraintDeck {
   @@index([tenantId])
 }
 
+/**
+ * The gate on public student signup.
+ *
+ * `/auth/signup` is reached from two WordPress enrolment forms. A returning
+ * student arrives with a one-time `token` minted here (via POST
+ * /api/signup-tokens); a new student pays the registration fee on the
+ * WordPress side first and arrives with a Paystack `?ref=`. Either proof is
+ * required — both by the page (SignupAccessGate) and by the API
+ * (POST /api/auth/signup) — so nobody can type the URL, or POST the endpoint,
+ * to create an account without going through enrolment / paying the fee.
+ *
+ * ONE ROW, TWO SHAPES:
+ *   token set        a returning-student invite. Consumed (used = true) the
+ *                    moment that student's account is created.
+ *   paystackRef set  written AT signup as the consumption marker for a
+ *                    new-student Paystack reference, so the same paid ref
+ *                    cannot be replayed to mint a second account.
+ *
+ * GLOBAL, not tenant-owned — see src/lib/tenant/registry.ts. Like
+ * PasswordResetToken it is looked up by an unguessable secret BEFORE anyone is
+ * signed in (the whole point is that the visitor has no session yet), so a
+ * tenant filter here would break the one lookup that has to work. `tenantId`
+ * is still recorded (resolved from the request host at mint time) for the
+ * office's audit view and to stamp the eventual User/Student correctly; the
+ * real tenant boundary is the account this token points at once spent.
+ */
+model SignupToken {
+  id String @id @default(cuid())
+
+  /// Returning-student one-time token. base64url of 32 random bytes.
+  token String? @unique
+
+  /// New-student Paystack reference, recorded when that ref is spent on a
+  /// successful signup. Its presence means the ref is used up.
+  paystackRef String? @unique
+
+  /// Enrolment email, lower-cased. The signup that spends this token must use
+  /// the same address — see the email-consistency check in the signup route.
+  email       String
+  name        String?
+  phone       String?
+  branchId    String?
+  sessionSlot String?
+  level       String?
+
+  /// "returning" | "new"
+  studentType String @default("returning")
+
+  /// where the row came from: "wordpress" | "wordpress-ref" | "lead-invite" | "admin"
+  source String @default("wordpress")
+
+  used         Boolean   @default(false)
+  usedAt       DateTime?
+  usedByUserId String?
+
+  /// Live-checked at validation time. Null means no expiry.
+  expiresAt DateTime?
+
+  /// School this enrolment belongs to, resolved from the request host at mint
+  /// time. Not a foreign key on purpose (this model is global) — a plain
+  /// audit/stamp column.
+  tenantId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([used])
+}
+
 /// ===========================================================================
 /// WORK DRIVE  —  Phase 0 (files pillar).  See docs/WORK_DRIVE.md
 /// ===========================================================================

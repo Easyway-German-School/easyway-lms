@@ -1,5 +1,13 @@
-import SignUpForm from "@/app/auth/signup/SignUpForm";
+import SignupAccessGate from "@/app/auth/signup/SignupAccessGate";
 
-export default function PortHarcourtSignUpPage() {
-  return <SignUpForm pageTitle="Start your German journey — Port Harcourt" initialBranchName="Port Harcourt" />;
+type Params = Record<string, string | string[] | undefined>;
+
+export default function PortHarcourtSignUpPage({ searchParams }: { searchParams?: Promise<Params> }) {
+  return (
+    <SignupAccessGate
+      searchParams={searchParams}
+      pageTitle="Start your German journey — Port Harcourt"
+      initialBranchName="Port Harcourt"
+    />
+  );
 }

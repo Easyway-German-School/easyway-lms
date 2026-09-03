@@ -248,6 +248,82 @@ export async function enrollIfPathwayExists({
   }
 }
 
+/**
+ * Record a registration fee that was paid on the WordPress marketing site
+ * BEFORE the student had an LMS account.
+ *
+ * The normal Paystack path (`persistPaystackTransaction`) resolves the student
+ * from the charge metadata — but a WordPress pre-signup charge has no LMS
+ * `studentId` in it, because the student did not exist yet. The signup route
+ * calls this instead, once it has just created the account, passing the
+ * `studentId` directly.
+ *
+ * Deduped on `stripeSessionId` and best-effort: the caller has already created
+ * the account and treats a failure here as a reconciliation note, so this must
+ * not throw in a way that matters. It mirrors the `registration` branch of
+ * `persistPaystackTransaction` — one paid Invoice, one completed Payment — so
+ * `deriveStudentAccess().registrationPaid` reads true and the portal does not
+ * ask for the fee again. Tuition access still opens only at the deposit.
+ */
+export async function recordRegistrationFeeFromRef({
+  studentId,
+  reference,
+  amountNaira,
+  currency = "NGN",
+  pathwayName = "program",
+}: {
+  studentId: string;
+  reference: string;
+  amountNaira: number;
+  currency?: string;
+  pathwayName?: string;
+}): Promise<void> {
+  const amount = Math.max(0, Math.round(Number(amountNaira) || 0));
+  if (!studentId || !reference || amount <= 0) return;
+
+  const existing = await prisma.payment.findFirst({ where: { stripeSessionId: reference } });
+  if (existing) return;
+
+  // The webhook / verify path can run with no tenant in context; this runs
+  // right after the signup route created the student, so scope is already set —
+  // but pin it to the student's tenant anyway so a stray Invoice / Payment
+  // never lands with tenantId = NULL and vanishes from every scoped read.
+  const owner = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { tenantId: true },
+  });
+  if (owner?.tenantId) setTenantScope(owner.tenantId);
+
+  const invoice = await prisma.invoice.create({
+    data: {
+      studentId,
+      totalAmount: amount,
+      currency,
+      status: "paid",
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      lineItems: {
+        paymentType: "registration",
+        pathwayName,
+        source: "wordpress-signup-ref",
+      },
+    },
+  });
+
+  await prisma.payment.create({
+    data: {
+      studentId,
+      invoiceId: invoice.id,
+      amount,
+      currency,
+      status: "completed",
+      method: "paystack",
+      description: `Registration fee for ${pathwayName}`,
+      stripeSessionId: reference,
+      paymentIntentId: reference,
+    },
+  });
+}
+
 export type PaystackVerifyResult = {
   /** We reached Paystack and it answered. Says nothing about the transaction. */
   success: boolean;

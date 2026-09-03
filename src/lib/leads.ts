@@ -1,5 +1,9 @@
+import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { queueEmail } from "@/lib/email-queue";
+
+/** Days a lead-invite signup token stays usable. Shared with /api/signup-tokens. */
+const INVITE_TOKEN_TTL_DAYS = Math.max(1, Math.min(90, Number(process.env.SIGNUP_TOKEN_TTL_DAYS) || 14));
 
 /**
  * The registration funnel.
@@ -117,20 +121,19 @@ export async function captureLead(input: LeadInput): Promise<CaptureResult> {
   return { ok: true, leadId: created.id, duplicate: false };
 }
 
-/** The signup link, prefilled so the student is not retyping what we know. */
-export function enrolmentUrl(lead: {
-  email: string;
-  name: string;
-  interestedLevel: string | null;
-  branchId: string | null;
-  sessionSlot: string | null;
-}): string {
+/**
+ * The signup link.
+ *
+ * Since the `/auth/signup` gate went up (see src/lib/signup-access.ts) an
+ * unsigned `?email=&name=` link no longer opens the form — that link shape IS
+ * the fee-bypass hole the gate closes. Every lead invite now carries a
+ * one-time `SignupToken` minted in `inviteLeads` below; this just wraps it in
+ * the URL. Details are not repeated in the query string because the gate reads
+ * them off the token row and prefills the form from there.
+ */
+export function enrolmentUrl(token: string): string {
   const base = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  const params = new URLSearchParams({ email: lead.email, name: lead.name });
-  if (lead.interestedLevel) params.set("level", lead.interestedLevel);
-  if (lead.branchId) params.set("branchId", lead.branchId);
-  if (lead.sessionSlot) params.set("sessionSlot", lead.sessionSlot);
-  return `${base}/auth/signup?${params}`;
+  return `${base.replace(/\/$/, "")}/auth/signup?token=${token}`;
 }
 
 function inviteHtml(name: string, url: string): string {
@@ -175,10 +178,30 @@ export async function inviteLeads(leadIds: string[]): Promise<InviteResult> {
       continue;
     }
 
+    // One-time token that gets this lead past the /auth/signup gate. A fresh
+    // one each time the office re-invites — the previous one simply expires or
+    // sits unused.
+    const token = crypto.randomBytes(32).toString("base64url");
+    await prisma.signupToken.create({
+      data: {
+        token,
+        email: lead.email,
+        name: lead.name,
+        phone: lead.phone ?? null,
+        branchId: lead.branchId ?? null,
+        sessionSlot: lead.sessionSlot ?? null,
+        level: lead.interestedLevel ?? null,
+        studentType: "returning",
+        source: "lead-invite",
+        tenantId: lead.tenantId ?? null,
+        expiresAt: new Date(Date.now() + INVITE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000),
+      },
+    });
+
     await queueEmail({
       to: lead.email,
       subject: "Complete your enrolment at Easyway",
-      html: inviteHtml(lead.name, enrolmentUrl(lead)),
+      html: inviteHtml(lead.name, enrolmentUrl(token)),
       type: "lead_enrolment_invite",
     });
 

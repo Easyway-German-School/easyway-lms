@@ -1,9 +1,32 @@
-﻿"use client";
+"use client";
 
 import SignUpFormClient from "./SignUpFormClient";
 
-type SignUpFormProps = { pageTitle?: string; initialBranchName?: string };
+export type SignupPrefill = {
+  name?: string;
+  email?: string;
+  level?: string;
+  branchId?: string;
+  sessionSlot?: string;
+};
 
-export default function SignUpForm({ pageTitle, initialBranchName }: SignUpFormProps) {
-  return <SignUpFormClient pageTitle={pageTitle} initialBranchName={initialBranchName} />;
+type SignUpFormProps = {
+  pageTitle?: string;
+  initialBranchName?: string;
+  /**
+   * Seeded by SignupAccessGate from the validated token / Paystack ref, so a
+   * returning student is not retyping what enrolment already knows. Wins over
+   * URL params for the fields it carries.
+   */
+  initialPrefill?: SignupPrefill;
+};
+
+export default function SignUpForm({ pageTitle, initialBranchName, initialPrefill }: SignUpFormProps) {
+  return (
+    <SignUpFormClient
+      pageTitle={pageTitle}
+      initialBranchName={initialBranchName}
+      initialPrefill={initialPrefill}
+    />
+  );
 }
