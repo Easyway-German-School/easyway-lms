@@ -161,6 +161,8 @@ const CAPABILITY_LABELS: Record<Capability, string> = {
   staff: "Staff - invite tutors, set admin roles",
   integrations: "Integrations",
   security: "Security & recovery - the activity trail, restoring deleted records (super admin)",
+  work_drive: "Work Drive - staff file store, workspaces and sharing",
+  events: "Staff calendar, events and webinars",
 };
 
 /**
