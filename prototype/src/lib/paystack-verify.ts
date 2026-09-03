@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { classifyPaymentTransaction, isReceivedPayment, RECEIVED_PAYMENT_STATUSES } from "@/lib/payment";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { safeJson } from "@/lib/safe-json";
+import { setTenantScope } from "@/lib/tenant/context";
 
 function getPaymentDescription(paymentType: string, pathwayName: string) {
   if (paymentType === "registration") {
@@ -76,6 +77,18 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     console.error("Paystack persist skipped: invalid metadata", { studentId, reference, paymentAmount, metadata });
     return;
   }
+
+  // This can run with no tenant in context — the Paystack webhook is
+  // `withUnscoped`, and the verify route answers unauthenticated callers. The
+  // payment reference identifies the school, so pin the scope to it before any
+  // write: without it the Invoice / Payment rows land with `tenantId = NULL`
+  // and vanish from every tenant-scoped read. A no-op when the caller already
+  // carries this tenant's scope.
+  const owner = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { tenantId: true },
+  });
+  if (owner?.tenantId) setTenantScope(owner.tenantId);
 
   const existingPayment = await prisma.payment.findFirst({
     where: { stripeSessionId: reference },

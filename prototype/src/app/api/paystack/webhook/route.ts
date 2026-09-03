@@ -7,7 +7,7 @@ import { settleExamFee } from "@/lib/exam-payments";
 import { enrollIfPathwayExists } from "@/lib/paystack-verify";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { KIND, notifyInBackground } from "@/lib/notify";
-import { withUnscoped } from "@/lib/tenant/context";
+import { withUnscoped, setTenantScope } from "@/lib/tenant/context";
 import { emitWebhook } from "@/lib/webhooks";
 
 // Paystack signs every webhook with HMAC SHA512 of the raw body, keyed by the
@@ -151,6 +151,13 @@ async function handlePOST(request: Request) {
         return NextResponse.json({ received: true });
       }
 
+      // The handler runs `withUnscoped` because Paystack carries no tenant.
+      // Now that the payment identifies the school, scope the remaining writes
+      // to it — otherwise the isolation extension has nothing to stamp and the
+      // Payment row lands with `tenantId = NULL`, invisible to every
+      // tenant-scoped read (see scripts/backfill-tenantless-rows.ts).
+      if (upgradeStudent.tenantId) setTenantScope(upgradeStudent.tenantId);
+
       await prisma.payment.create({
         data: {
           studentId: upgradeStudent.id,
@@ -246,6 +253,13 @@ async function handlePOST(request: Request) {
       console.error("Paystack webhook could not resolve student", { rawStudentId, metadata });
       return NextResponse.json({ received: true });
     }
+
+    // The handler runs `withUnscoped` because Paystack carries no tenant. Now
+    // that the payment identifies the school, scope every write below to it —
+    // the Invoice, Payment, Notification and EmailLog rows this path creates
+    // otherwise land with `tenantId = NULL` and disappear from every
+    // tenant-scoped read (a fully-paid student then shows as "nothing paid").
+    if (student.tenantId) setTenantScope(student.tenantId);
 
     const paymentReference = String(data.reference || "");
 
