@@ -5034,6 +5034,12 @@ model DriveFile {
   createdById      String?
   lastModifiedById String?
 
+  /// A capped slice of the file's extracted text, denormalised here so search
+  /// hits one table. Null = not extracted yet, or a format with no text (an
+  /// image, a video). The fuller copy is in DriveFileText. Filled by a
+  /// background job after upload — see src/lib/work-drive/index-file.ts.
+  textContent String?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -5042,9 +5048,10 @@ model DriveFile {
   text     DriveFileText?
   comments FileComment[]
 
-  /// Full-text search vector. A Postgres generated column (see the migration):
-  /// Phase 1 indexes the filename only; Phase 2 folds in extracted text.
-  /// Unsupported so Prisma leaves it alone — it is read via $queryRaw.
+  /// Full-text search vector over the FILENAME only — a Postgres generated
+  /// column (see 20260903140000_work_drive_files). Content search is a second
+  /// GIN index over `to_tsvector(textContent)` added in the Phase 2 migration;
+  /// the search route ORs the two. Unsupported so Prisma leaves it alone.
   searchVector Unsupported("tsvector")?
 
   tenantId  String?

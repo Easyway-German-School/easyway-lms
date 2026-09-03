@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { workspaceAccess } from "@/lib/work-drive/workspaces";
+import { fileAccessFor } from "@/lib/work-drive/workspaces";
 import { logFileActivity } from "@/lib/work-drive/files";
 
 export const dynamic = "force-dynamic";
@@ -35,8 +35,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     select: FILE_SELECT,
   });
   if (!file) return NextResponse.json({ error: "No such file." }, { status: 404 });
-  if (!workspaceAccess(file.workspace, gate.admin).canEdit) {
-    return NextResponse.json({ error: "You can view this workspace but not change its files." }, { status: 403 });
+  if (!(await fileAccessFor(file, gate.admin)).canEdit) {
+    return NextResponse.json({ error: "You can view this file but not change it." }, { status: 403 });
   }
 
   const body = await request.json().catch(() => null);
@@ -106,8 +106,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   const file = await prisma.driveFile.findFirst({ where: { id }, select: FILE_SELECT });
   if (!file) return NextResponse.json({ error: "No such file." }, { status: 404 });
   if (file.deletedAt) return NextResponse.json({ ok: true });
-  if (!workspaceAccess(file.workspace, gate.admin).canEdit) {
-    return NextResponse.json({ error: "You can view this workspace but not delete its files." }, { status: 403 });
+  if (!(await fileAccessFor(file, gate.admin)).canEdit) {
+    return NextResponse.json({ error: "You can view this file but not delete it." }, { status: 403 });
   }
 
   await prisma.driveFile.delete({ where: { id: file.id } });

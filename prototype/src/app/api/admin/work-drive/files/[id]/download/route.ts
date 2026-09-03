@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import { getFile, storageConfigured } from "@/lib/storage";
-import { workspaceAccess } from "@/lib/work-drive/workspaces";
+import { fileAccessFor } from "@/lib/work-drive/workspaces";
 import { logFileActivity, WORK_DRIVE_PREFIX } from "@/lib/work-drive/files";
 
 export const dynamic = "force-dynamic";
@@ -41,8 +41,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     },
   });
   if (!file) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (!workspaceAccess(file.workspace, gate.admin).canView) {
-    return NextResponse.json({ error: "Not your workspace." }, { status: 403 });
+  if (!(await fileAccessFor(file, gate.admin)).canView) {
+    return NextResponse.json({ error: "Not your file." }, { status: 403 });
   }
 
   const key = file.storageKey.replace(/^\/+/, "");
