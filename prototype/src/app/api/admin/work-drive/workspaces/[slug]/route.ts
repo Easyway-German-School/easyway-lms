@@ -49,6 +49,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const url = new URL(request.url);
   const folderId = url.searchParams.get("folderId") || null;
+  const trash = url.searchParams.get("trash") === "1";
 
   const [folders, files, activity] = await Promise.all([
     prisma.driveFolder.findMany({
@@ -57,8 +58,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       select: { id: true, name: true, parentId: true, path: true },
     }),
     prisma.driveFile.findMany({
-      where: { workspaceId: workspace.id, folderId, deletedAt: null },
-      orderBy: { name: "asc" },
+      // `trash` shows the tombstones instead — the guard leaves an explicit
+      // deletedAt filter alone (see prisma-guard.ts).
+      where: trash
+        ? { workspaceId: workspace.id, deletedAt: { not: null } }
+        : { workspaceId: workspace.id, folderId, deletedAt: null },
+      orderBy: trash ? { updatedAt: "desc" } : { name: "asc" },
       select: {
         id: true,
         name: true,
@@ -88,6 +93,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     },
     access,
     folderId,
+    trash,
     folders,
     files: files.map((f) => ({
       ...f,

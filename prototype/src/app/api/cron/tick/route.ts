@@ -270,6 +270,17 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * Work Drive housekeeping: hard-delete files 30 days into a workspace trash,
+   * and prune surplus old file versions. Both bounded per tick.
+   */
+  results.push(
+    await run("work-drive-retention", async () => {
+      const { purgeExpiredTrash, pruneOldVersions } = await import("@/lib/work-drive/retention");
+      return { trash: await purgeExpiredTrash(), versions: await pruneOldVersions() };
+    }),
+  );
+
+  /**
    * Summarise newly uploaded materials and turn them into quests.
    *
    * Last, and capped at three per tick, because it is the only job here that

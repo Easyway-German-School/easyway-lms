@@ -92,6 +92,9 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // docs/WORK_DRIVE.md. The API routes under /api/admin/work-drive enforce the
   // same one.
   { prefix: "/admin/work-drive", capability: "work_drive" },
+  // Turning the Work Drive on and setting its storage ceiling is school setup,
+  // not a Work Drive action — longer prefix, so this wins over the line above.
+  { prefix: "/admin/work-drive/settings", capability: "staff" },
   // The staff calendar, events and webinars. `/admin/calendar` is the
   // month/week view; the webinar host console lives under it.
   { prefix: "/admin/calendar", capability: "events" },
