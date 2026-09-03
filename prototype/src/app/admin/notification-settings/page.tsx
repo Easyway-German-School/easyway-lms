@@ -28,12 +28,15 @@ type Plan = {
   configured: boolean;
 };
 
+type AutoRelease = { enabled: boolean; delayDays: number };
+
 type Payload = {
   groups: Array<{ group: string; kinds: string[] }>;
   labels: Record<string, string>;
   plans: Record<string, Plan>;
   addresses: { support: string; noreply: string };
   transport: { configured: boolean; via: "mailersend" | "smtp" | "none" };
+  autoRelease: AutoRelease;
 };
 
 export default function NotificationSettingsPage() {
@@ -80,6 +83,31 @@ export default function NotificationSettingsPage() {
       if (!res.ok) throw new Error(payload.error ?? "Could not save");
       setSaved(kind);
       window.setTimeout(() => setSaved((s) => (s === kind ? null : s)), 1800);
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save");
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveAutoRelease(patch: Partial<AutoRelease>) {
+    setBusy("autoRelease");
+    setData((current) =>
+      current ? { ...current, autoRelease: { ...current.autoRelease, ...patch } } : current,
+    );
+    try {
+      const next = { ...(data?.autoRelease ?? { enabled: true, delayDays: 2 }), ...patch };
+      const res = await fetch("/api/admin/notification-settings", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ autoRelease: next }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error ?? "Could not save");
+      setSaved("autoRelease");
+      window.setTimeout(() => setSaved((s) => (s === "autoRelease" ? null : s)), 1800);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save");
@@ -162,6 +190,63 @@ export default function NotificationSettingsPage() {
                 Receipts and confirmations. Replies still route to support rather than bouncing.
               </p>
             </div>
+          </div>
+        )}
+
+        {/* ---- Automatic result release -------------------------------- */}
+        {data && (
+          <div className="mb-5 min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
+                  <BellIcon className="h-4 w-4 shrink-0 text-[var(--accent)]" /> Automatic mock-result release
+                  {saved === "autoRelease" && (
+                    <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-600">
+                      <CheckIcon className="h-3 w-3" /> Saved
+                    </span>
+                  )}
+                </p>
+                <p className="mt-1.5 text-xs leading-5 text-[var(--muted)]">
+                  When on, a mock / pretest sitting releases its results to students and their
+                  parents on its own — once every student in the class is marked and the delay
+                  below has passed. A tutor can still release early or hold a class back from the
+                  gradebook. Real ÖSD/telc sittings are never touched by this.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={busy === "autoRelease"}
+                aria-pressed={data.autoRelease.enabled}
+                onClick={() => saveAutoRelease({ enabled: !data.autoRelease.enabled })}
+                className={`rounded-xl border px-3 py-2 text-xs font-semibold transition disabled:opacity-50 ${
+                  data.autoRelease.enabled
+                    ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                    : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--surface-alt)]"
+                }`}
+              >
+                {data.autoRelease.enabled ? "On" : "Off"}
+              </button>
+            </div>
+            <label className="mt-3 flex items-center gap-2 text-xs text-[var(--muted)]">
+              Release
+              <input
+                type="number"
+                min={0}
+                max={60}
+                disabled={busy === "autoRelease" || !data.autoRelease.enabled}
+                value={data.autoRelease.delayDays}
+                onChange={(e) =>
+                  setData((current) =>
+                    current
+                      ? { ...current, autoRelease: { ...current.autoRelease, delayDays: Number(e.target.value) } }
+                      : current,
+                  )
+                }
+                onBlur={(e) => saveAutoRelease({ delayDays: Math.max(0, Math.min(60, Number(e.target.value) || 0)) })}
+                className="w-16 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-center text-xs disabled:opacity-40"
+              />
+              day(s) after the exam date.
+            </label>
           </div>
         )}
 

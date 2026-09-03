@@ -2241,6 +2241,14 @@ model Exam {
    */
   examBody String  @default("internal")
   /**
+   * standard | mock — a mock (pretest) is a practice sitting built like the
+   * real paper. It feeds the pre-test reminder sweep (src/lib/pretest-reminders.ts)
+   * and the automatic result-release flow (src/lib/result-release.ts), and its
+   * score never touches a certificate or a level. A mock is created with
+   * resultsReleased=false so the auto-release delay is meaningful.
+   */
+  kind     String  @default("standard")
+  /**
    * CEFR level the sitting is for.
    */
   level    String?
@@ -2264,6 +2272,12 @@ model Exam {
    */
   published       Boolean @default(false)
   resultsReleased Boolean @default(true)
+  /**
+   * When results were last released to students — set by the manual toggle and
+   * by the automatic release sweep. Lets both tell "released" from "released
+   * just now", so a re-run of the cron does not re-notify a whole cohort.
+   */
+  resultsReleasedAt DateTime?
 
   /**
    * Per-skill minimum (0-100) to pass this sitting. A candidate passes only

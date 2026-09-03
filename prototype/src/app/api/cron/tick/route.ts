@@ -108,6 +108,38 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * The class-wide reminder for a mock / pretest sitting, three days out. Fires
+   * on a single calendar day so one tick a day is one reminder. See
+   * src/lib/pretest-reminders.ts.
+   */
+  results.push(
+    await run("pretest-reminders", async () => {
+      const { sendDuePretestReminders } = await import("@/lib/pretest-reminders");
+      return sendDuePretestReminders();
+    }),
+  );
+
+  /**
+   * Results releasing themselves. A mock sitting that is fully marked and past
+   * its tenant's delay publishes to students AND their parents without a tutor
+   * touching anything; one that is graded but still sitting there gets the
+   * tutor (and, if it drags, the office) a nudge. See src/lib/result-release.ts.
+   */
+  results.push(
+    await run("auto-release-results", async () => {
+      const { autoReleaseDueResults } = await import("@/lib/result-release");
+      return autoReleaseDueResults();
+    }),
+  );
+
+  results.push(
+    await run("result-release-nudge", async () => {
+      const { nudgeUnreleasedResults } = await import("@/lib/result-release");
+      return nudgeUnreleasedResults();
+    }),
+  );
+
+  /**
    * A tutor's students going quiet — low attendance, no portal activity, or
    * repeated "not yet" answers — used to be invisible until somebody in the
    * office happened to notice. This flags it to the tutor directly, at most

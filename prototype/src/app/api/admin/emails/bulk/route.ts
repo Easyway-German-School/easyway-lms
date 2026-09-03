@@ -12,6 +12,7 @@ import {
   type EmailBlock,
 } from "@/lib/email-blocks";
 import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { readAssignment } from "@/lib/lecturer-assignment";
 
 /**
  * An announcement from the office, to a selected audience.
@@ -44,6 +45,8 @@ type Audience = {
   paymentStatus?: string | null;
   /** students | tutors | both */
   group?: string | null;
+  /** One tutor, by Lecturer id. Tutors/both only; wins over branch + level. */
+  lecturerId?: string | null;
 };
 
 /**
@@ -85,21 +88,42 @@ async function resolveAudience(audience: Audience): Promise<Recipient[]> {
 
   if (group === "tutors" || group === "both") {
     /**
-     * Tutors are filtered by branch only. Level on a Lecturer is the class
-     * they are ASSIGNED to teach, not a level they are at, and payment status
-     * is meaningless for staff — applying either would silently drop tutors
-     * from a message meant for all of them.
+     * Payment status is meaningless for staff and never applies. Branch and
+     * level DO narrow now: both are matched against the tutor's ASSIGNMENT
+     * (the lists an admin set — a tutor is not "at" a level), through
+     * `readAssignment`. A named `lecturerId` skips the filters entirely.
      */
+    const picked = audience.lecturerId?.trim() || null;
+    const wantBranch = picked ? null : audience.branchId?.trim() || null;
+    const wantLevel = picked ? null : audience.level?.trim().toUpperCase() || null;
+
     const lecturers = await prisma.lecturer.findMany({
       where: {
-        ...(audience.branchId ? { branchId: audience.branchId } : {}),
         status: { not: "inactive" },
+        ...(picked ? { id: picked } : {}),
       },
-      select: { level: true, user: { select: { id: true, name: true, email: true } } },
+      select: {
+        level: true,
+        branchId: true,
+        branchIds: true,
+        levels: true,
+        assignmentGroups: true,
+        user: { select: { id: true, name: true, email: true } },
+      },
     });
 
     for (const lecturer of lecturers) {
       if (!lecturer.user?.email) continue;
+      if (!picked) {
+        const assignment = readAssignment(lecturer);
+        const branches = assignment.branchIds.length
+          ? assignment.branchIds
+          : lecturer.branchId
+            ? [lecturer.branchId]
+            : [];
+        if (wantBranch && !branches.includes(wantBranch)) continue;
+        if (wantLevel && !assignment.levels.includes(wantLevel)) continue;
+      }
       out.push({
         userId: lecturer.user.id,
         studentId: null,

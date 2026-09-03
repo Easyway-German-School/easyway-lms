@@ -163,6 +163,74 @@ export const EMAIL_TEMPLATES: EmailTemplate[] = [
   },
 
   {
+    id: "pretest-student",
+    name: "Mock exam — heads up (students)",
+    purpose: "A practice / pretest sitting is coming. Set expectations, not nerves.",
+    subject: "Your {{level}} mock exam — [Friday 00 Month]",
+    blocks: [
+      { type: "heading", text: "A mock exam is coming up, {{name}}" },
+      {
+        type: "text",
+        text: "Your {{level}} class sits a mock exam soon. It is built exactly like the real ÖSD/telc paper — same sections, same timing — so the room on the day feels familiar instead of new.",
+      },
+      { type: "callout", text: "[Friday 00 Month] at [time] WAT · [branch / room] · bring a pen and your ID." },
+      {
+        type: "text",
+        text: "What it is for:\n\nYou get a real score on every skill — reading, listening, writing, speaking — before it counts.\nYour tutor sees exactly where to spend the last few weeks.\nThe score is practice. It does not go on your certificate and it does not change your level.",
+      },
+      { type: "button", label: "See my timetable", href: "/calendar" },
+      {
+        type: "text",
+        text: "Prepare the way you would for the real thing: one past paper, a full night's sleep, arrive early. If you genuinely cannot make this date, tell your tutor now so they can plan around it.",
+      },
+    ],
+  },
+
+  {
+    id: "pretest-tutor",
+    name: "Mock exam — heads up (tutors)",
+    purpose: "Tell the tutor a mock is scheduled and what happens with the marks.",
+    subject: "Mock exam for your {{level}} class — [Friday 00 Month]",
+    blocks: [
+      { type: "heading", text: "Mock exam scheduled for {{level}}" },
+      {
+        type: "text",
+        text: "Hallo {{name}}, a mock / pretest sitting for your {{level}} class is set for [Friday 00 Month] at [time]. Please have the paper ready and run it under real conditions — timing and silence included.",
+      },
+      { type: "callout", text: "Enter every student's marks in the gradebook. Results release to students automatically once the whole class is marked — you do not need to flip anything." },
+      {
+        type: "text",
+        text: "Before the day:\n\nConfirm the room and the start time with the office.\nPrint enough papers for the full register plus two.\nTell any student who will miss it to speak to you.",
+      },
+      { type: "button", label: "Open my gradebook", href: "/lecturer/gradebook" },
+      { type: "divider" },
+      {
+        type: "text",
+        text: "If you would rather hold results back — a class that needs a conversation first — you still can, from the gradebook, before the release window passes.",
+      },
+    ],
+  },
+
+  {
+    id: "results-released",
+    name: "Results are ready",
+    purpose: "A sitting's results have been released. Neutral, points at the portal.",
+    subject: "Your {{level}} results are ready",
+    blocks: [
+      { type: "heading", text: "Your results are in, {{name}}" },
+      {
+        type: "text",
+        text: "The results for your recent {{level}} [exam / mock] have been released. You can see your score on every skill, your overall mark, and your tutor's notes in your portal now.",
+      },
+      { type: "button", label: "Open my results", href: "/results" },
+      {
+        type: "text",
+        text: "Read the per-skill breakdown, not just the total — it is the fastest way to see where the next few weeks are best spent. If anything about the marks does not look right, reply to this email and the office will check it with your tutor.",
+      },
+    ],
+  },
+
+  {
     id: "level-complete",
     name: "Level complete — move up",
     purpose: "A cohort has finished. Congratulate, then offer the next level.",

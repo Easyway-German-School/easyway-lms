@@ -110,6 +110,8 @@ const IDENTITY_BY_KIND: Partial<Record<string, MailIdentityKey>> = {
   // WhatsApp in the first place.
   [KIND.supportTicket]: "support",
   [KIND.supportReply]: "support",
+  // A tutor might reply "I'm still grading" — that should reach the office.
+  [KIND.resultReleaseNudge]: "support",
 
   // Emitted by the system. Receipts and confirmations.
   [KIND.paymentReceived]: "noreply",
@@ -117,6 +119,7 @@ const IDENTITY_BY_KIND: Partial<Record<string, MailIdentityKey>> = {
   [KIND.studentRegistered]: "noreply",
   [KIND.studentImported]: "noreply",
   [KIND.examRegistered]: "noreply",
+  [KIND.examPretest]: "noreply",
   [KIND.materialPublished]: "noreply",
   [KIND.assignmentDue]: "noreply",
   [KIND.resultPublished]: "noreply",
@@ -146,6 +149,7 @@ const EMAILS_BY_DEFAULT = new Set<string>([
   KIND.tuitionReminder,
   KIND.studentRegistered,
   KIND.examRegistered,
+  KIND.examPretest,
   KIND.resultPublished,
   KIND.levelAdvance,
   KIND.announcement,
@@ -166,6 +170,8 @@ export const KIND_LABELS: Record<string, string> = {
   [KIND.gatewayError]: "Payment gateway error",
   [KIND.tuitionReminder]: "Tuition reminder",
   [KIND.examRegistered]: "Exam registration confirmed",
+  [KIND.examPretest]: "Mock / pretest exam coming up",
+  [KIND.resultReleaseNudge]: "Results graded but not released",
   [KIND.levelAdvance]: "Level finished — next level offer",
   [KIND.materialPublished]: "New material published",
   [KIND.classNotesReady]: "Class notes ready (summary, vocabulary, transcript)",
@@ -194,7 +200,13 @@ export const KIND_GROUPS: Array<{ group: string; kinds: string[] }> = [
   },
   {
     group: "Progress",
-    kinds: [KIND.resultPublished, KIND.certificateIssued, KIND.examRegistered, KIND.levelAdvance],
+    kinds: [
+      KIND.resultPublished,
+      KIND.certificateIssued,
+      KIND.examRegistered,
+      KIND.examPretest,
+      KIND.levelAdvance,
+    ],
   },
   {
     group: "Office",
@@ -202,6 +214,7 @@ export const KIND_GROUPS: Array<{ group: string; kinds: string[] }> = [
       KIND.announcement,
       KIND.supportTicket,
       KIND.supportReply,
+      KIND.resultReleaseNudge,
       KIND.studentRegistered,
       KIND.studentImported,
       KIND.leadCaptured,
