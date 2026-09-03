@@ -12,6 +12,7 @@ import {
 } from "@/lib/mail-identity";
 import { allPlans, invalidateRoutingCache } from "@/lib/notification-routing";
 import { activeTransport, isEmailConfigured } from "@/lib/mailer";
+import { parseAutoRelease, RESULTS_AUTO_RELEASE_KEY } from "@/lib/result-settings";
 
 /**
  * Which notifications go out, on which channels, as which sender.
@@ -28,10 +29,18 @@ export async function GET() {
   const gate = await requireCapability("emails");
   if (!gate.ok) return gate.response;
 
+  const tenantId = gate.session.user.tenantId ?? null;
+  const autoReleaseRow = tenantId
+    ? await prisma.schoolSetting
+        .findUnique({ where: { tenantId_key: { tenantId, key: RESULTS_AUTO_RELEASE_KEY } }, select: { value: true } })
+        .catch(() => null)
+    : null;
+
   return NextResponse.json({
     groups: KIND_GROUPS,
     labels: KIND_LABELS,
     plans: await allPlans(ALL_KINDS),
+    autoRelease: parseAutoRelease(autoReleaseRow?.value),
     identities: {
       support: { ...MAIL_IDENTITIES.support },
       noreply: { ...MAIL_IDENTITIES.noreply },
@@ -53,6 +62,24 @@ export async function PATCH(req: NextRequest) {
   if (!gate.ok) return gate.response;
 
   const body = await req.json().catch(() => null);
+
+  // Automatic result release lives in SchoolSetting, not a per-kind row, so it
+  // is handled here before the kind lookup rather than as another `kind`.
+  if (body && body.autoRelease !== undefined) {
+    const tenantId = gate.session.user.tenantId;
+    if (!tenantId) return NextResponse.json({ error: "No school in context" }, { status: 400 });
+    const parsed = parseAutoRelease(body.autoRelease, { strict: true });
+    if (!parsed) {
+      return NextResponse.json({ error: "Invalid auto-release settings" }, { status: 400 });
+    }
+    await prisma.schoolSetting.upsert({
+      where: { tenantId_key: { tenantId, key: RESULTS_AUTO_RELEASE_KEY } },
+      update: { value: parsed },
+      create: { tenantId, key: RESULTS_AUTO_RELEASE_KEY, value: parsed },
+    });
+    return NextResponse.json({ autoRelease: parsed });
+  }
+
   const kind = typeof body?.kind === "string" ? body.kind : "";
   if (!ALL_KINDS.includes(kind)) {
     return NextResponse.json({ error: "Unknown notification kind" }, { status: 400 });

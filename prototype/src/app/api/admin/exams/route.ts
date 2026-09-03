@@ -130,18 +130,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // A mock (pretest) sitting always grades internally, and its results start
+    // hidden so the automatic release delay actually has something to delay.
+    const isMock = b.kind === "mock";
+
     const exam = await prisma.exam.create({
       data: {
         name: String(b.name).trim(),
         description: b.description?.trim() || null,
         examDate,
-        examBody: (EXAM_BODIES as readonly string[]).includes(b.examBody) ? b.examBody : "internal",
+        kind: isMock ? "mock" : "standard",
+        examBody: isMock
+          ? "internal"
+          : (EXAM_BODIES as readonly string[]).includes(b.examBody)
+            ? b.examBody
+            : "internal",
         level: b.level || null,
         branchId: b.branchId || null,
         fee: b.fee ? Number(b.fee) : null,
         capacity: b.capacity ? Number(b.capacity) : null,
         registrationDeadline: deadline,
         published: Boolean(b.published),
+        resultsReleased: isMock ? false : true,
         passThreshold: b.passThreshold ? Number(b.passThreshold) : 60,
       },
     });

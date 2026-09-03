@@ -99,6 +99,7 @@ export default function AdminExamsPage() {
   const [form, setForm] = useState({
     name: "", description: "", examDate: "", registrationDeadline: "",
     examBody: "internal", level: "B1", branchId: "", fee: "", capacity: "", passThreshold: "60", published: true,
+    kind: "standard",
   });
 
   const load = useCallback(async () => {
@@ -130,7 +131,7 @@ export default function AdminExamsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not create");
       setOpen(false);
-      setForm({ ...form, name: "", description: "", examDate: "", registrationDeadline: "", fee: "", capacity: "" });
+      setForm({ ...form, name: "", description: "", examDate: "", registrationDeadline: "", fee: "", capacity: "", kind: "standard" });
       await load();
       setError("");
     } catch (e) {
@@ -242,15 +243,20 @@ export default function AdminExamsPage() {
             </label>
             <label>
               <span className="text-xs font-medium text-[var(--muted)]">Awarding body</span>
-              <select value={form.examBody} onChange={(e) => setForm({ ...form, examBody: e.target.value })}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
+              <select value={form.kind === "mock" ? "internal" : form.examBody} disabled={form.kind === "mock"}
+                onChange={(e) => setForm({ ...form, examBody: e.target.value })}
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm disabled:opacity-50">
                 {bodies.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
-              {!isInternal(form.examBody) && !liveBodies.includes(form.examBody) && (
+              {form.kind === "mock" ? (
+                <span className="mt-1 block text-[11px] text-[var(--muted)]">
+                  A mock is always graded internally.
+                </span>
+              ) : !isInternal(form.examBody) && !liveBodies.includes(form.examBody) ? (
                 <span className="mt-1 block text-[11px] text-amber-700">
                   Hidden from student booking — this awarding body isn&apos;t live for this school yet.
                 </span>
-              )}
+              ) : null}
             </label>
             <label>
               <span className="text-xs font-medium text-[var(--muted)]">Level</span>
@@ -295,6 +301,21 @@ export default function AdminExamsPage() {
             <label className="flex items-center gap-2 pt-6">
               <input type="checkbox" checked={form.published} onChange={(e) => setForm({ ...form, published: e.target.checked })} />
               <span className="text-sm">Publish immediately</span>
+            </label>
+            <label className="flex items-start gap-2 sm:col-span-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={form.kind === "mock"}
+                onChange={(e) => setForm({ ...form, kind: e.target.checked ? "mock" : "standard" })}
+              />
+              <span className="text-sm">
+                This is a mock / pretest
+                <span className="mt-0.5 block text-[11px] text-[var(--muted)]">
+                  A practice sitting. The class gets a reminder beforehand, and results release to students automatically
+                  once every student is marked. The score never touches a certificate or a level.
+                </span>
+              </span>
             </label>
             <div className="sm:col-span-2">
               <button onClick={create} disabled={busy || !form.name.trim() || !form.examDate}

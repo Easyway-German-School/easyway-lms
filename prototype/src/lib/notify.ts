@@ -6,6 +6,7 @@ import { renderNotificationEmail } from "@/lib/notification-email";
 import { planFor } from "@/lib/notification-routing";
 import { mutedChannelsFor, type MutedChannels } from "@/lib/notification-prefs";
 import { KIND as KINDS, type Severity } from "@/lib/notification-kinds";
+import { readAssignment } from "@/lib/lecturer-assignment";
 
 /**
  * Everything that reaches somebody's bell goes through here.
@@ -74,6 +75,14 @@ export type NotifyTarget =
    * cleared for that area, so the bursar is not woken for a community report.
    */
   | { audience: "admin" | "lecturer" | "student" | "all"; capability?: string }
+  /**
+   * Tutors, narrowed. `{ audience: "lecturer" }` reaches every one of them;
+   * this reaches the ones at a branch, teaching a level, or a named few. Level
+   * is matched against the tutor's ASSIGNMENT (the `levels` list an admin set),
+   * not a level they are at — a tutor has none. `lecturerIds`, when given,
+   * wins outright: the office picked those people by name.
+   */
+  | { lecturers: { branchId?: string | null; level?: string | null; lecturerIds?: string[] } }
   /**
    * Every parent/guardian linked to any of these students, via ParentStudent.
    * A student with two linked guardians reaches both; a student nobody has
@@ -173,6 +182,47 @@ async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
       select: { userId: true },
     });
     return [...new Set(students.map((s) => s.userId))];
+  }
+
+  if ("lecturers" in to) {
+    const picked = (to.lecturers.lecturerIds ?? []).filter(Boolean);
+    const lecturers = await prisma.lecturer.findMany({
+      where: {
+        status: { not: "inactive" },
+        ...(picked.length ? { id: { in: picked } } : {}),
+      },
+      select: {
+        userId: true,
+        branchId: true,
+        level: true,
+        branchIds: true,
+        levels: true,
+        assignmentGroups: true,
+      },
+    });
+
+    // A named list is a named list — the filters do not get to trim it. When no
+    // names were given, branch and level are matched against the tutor's
+    // ASSIGNMENT (the lists an admin set), not just the primary column, so a
+    // tutor whose Lagos posting is their second campus is still reached. A
+    // tutor is not "at" a level, so level only ever means an assigned level.
+    const level = !picked.length && to.lecturers.level ? to.lecturers.level.toUpperCase() : null;
+    const branchId = !picked.length ? to.lecturers.branchId ?? null : null;
+
+    const matched = lecturers.filter((lecturer) => {
+      if (picked.length) return true;
+      const assignment = readAssignment(lecturer);
+      const branches = assignment.branchIds.length
+        ? assignment.branchIds
+        : lecturer.branchId
+          ? [lecturer.branchId]
+          : [];
+      if (branchId && !branches.includes(branchId)) return false;
+      if (level && !assignment.levels.includes(level)) return false;
+      return true;
+    });
+
+    return [...new Set(matched.map((lecturer) => lecturer.userId))];
   }
 
   const roles =
