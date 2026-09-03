@@ -321,6 +321,9 @@ model Tenant {
   eventAttendees    EventAttendee[]
   eventTasks        EventTask[]
   eventResources    EventResource[]
+  webinars             Webinar[]
+  webinarQuestions     WebinarQuestion[]
+  webinarQuestionVotes WebinarQuestionVote[]
 }
 
 /// School-wide configuration the office edits instead of asking for a deploy.
@@ -5238,6 +5241,7 @@ model WorkEvent {
   attendees EventAttendee[]
   tasks     EventTask[]
   resources EventResource[]
+  webinar   Webinar?
 
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -5323,5 +5327,119 @@ model EventResource {
 
   @@unique([eventId, fileId])
   @@index([eventId])
+  @@index([tenantId])
+}
+
+/// ===========================================================================
+/// WORK DRIVE  —  Phase 4 (webinars).  See docs/WORK_DRIVE.md
+/// ===========================================================================
+/// A webinar is a WorkEvent(kind="webinar") with a delivery side. The event
+/// owns the schedule and the attendee list (registrations are EventAttendee
+/// rows with externalEmail); this row owns the room, the landing page and the
+/// Q&A. Rides on the same LiveKit SFU and recording pipeline the live
+/// classroom uses.
+
+model Webinar {
+  id      String    @id @default(cuid())
+  /// 1:1 with the WorkEvent that carries scheduling + attendees.
+  eventId String    @unique
+  event   WorkEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  /// LiveKit room name. Unique across the platform.
+  roomName String @unique
+
+  /// webinar | meeting
+  ///   webinar  a stage: hosts/presenters publish, the audience is muted and
+  ///            raises a hand to be promoted
+  ///   meeting  everyone can talk (a big internal call)
+  mode String @default("webinar")
+
+  /// staff | students | branch | public | mixed — who the room is for. `public`
+  /// gets the landing page and external registration.
+  audience String @default("staff")
+
+  registrationRequired   Boolean   @default(true)
+  registrationOpensAt    DateTime?
+  registrationClosesAt   DateTime?
+  /// Null = no cap.
+  capacity               Int?
+
+  /// The public page lives at /w/<landingSlug>. Set only for a `public`
+  /// audience. Unique per tenant.
+  landingSlug   String?
+  /// Headline, speaker bios, agenda — free-form JSON the landing page renders.
+  landingConfig Json?
+
+  allowQuestions Boolean @default(true)
+  allowChat      Boolean @default(true)
+
+  /// Start a LiveKit egress capture when the host joins, the same as a class.
+  recordAutomatically Boolean @default(true)
+  /// The Material row for the finished recording, once there is one.
+  recordingId String?
+
+  startedAt DateTime?
+  endedAt   DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  questions WebinarQuestion[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([landingSlug])
+}
+
+/// A question in the webinar Q&A panel, with upvotes.
+model WebinarQuestion {
+  id        String  @id @default(cuid())
+  webinarId String
+  webinar   Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  /// One of these is set. A staff asker has a userId; an audience member on the
+  /// public page gives a name.
+  askedByUserId String?
+  askedByName   String?
+
+  body String
+
+  /// Denormalised count; the real votes are WebinarQuestionVote rows.
+  upvotes Int @default(0)
+
+  /// pending | answered | dismissed
+  status     String  @default("pending")
+  answeredById String?
+  answeredAt   DateTime?
+  answerText   String?
+
+  createdAt DateTime @default(now())
+
+  votes WebinarQuestionVote[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId, status])
+  @@index([tenantId])
+}
+
+/// One person's upvote on a question. Keyed by voter so a reload can't stack.
+model WebinarQuestionVote {
+  id         String          @id @default(cuid())
+  questionId String
+  question   WebinarQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  /// A user id for staff, or a stable anon key (hashed) for a public viewer.
+  voterKey   String
+  createdAt  DateTime        @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, voterKey])
+  @@index([questionId])
   @@index([tenantId])
 }
