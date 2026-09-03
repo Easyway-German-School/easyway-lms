@@ -108,6 +108,40 @@ export function workspaceAccess(
   return { canView: canView || canEdit, canEdit, memberRole };
 }
 
+type FileForAccess = {
+  id: string;
+  workspace: WorkspaceForAccess;
+};
+
+/**
+ * What this admin may do with one file — the workspace rule, OR an explicit
+ * FileShare to them when the workspace rule says no. A share can grant `view`
+ * or `edit` regardless of the workspace, which is the whole point of sharing
+ * across a boundary.
+ */
+export async function fileAccessFor(
+  file: FileForAccess,
+  admin: Pick<AdminContext, "userId" | "branchIds">,
+): Promise<{ canView: boolean; canEdit: boolean; via: "workspace" | "share" | null }> {
+  const ws = workspaceAccess(file.workspace, admin);
+  if (ws.canEdit) return { canView: true, canEdit: true, via: "workspace" };
+  if (ws.canView) return { canView: true, canEdit: false, via: "workspace" };
+
+  const now = new Date();
+  const share = await prisma.fileShare.findFirst({
+    where: {
+      targetType: "file",
+      targetId: file.id,
+      sharedWithUserId: admin.userId,
+      revokedAt: null,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+    },
+    select: { permission: true },
+  });
+  if (!share) return { canView: false, canEdit: false, via: null };
+  return { canView: true, canEdit: share.permission === "edit", via: "share" };
+}
+
 /**
  * The Prisma `where` that lists the workspaces this admin can see. Kept in
  * step with workspaceAccess() above — the list query cannot call a function per

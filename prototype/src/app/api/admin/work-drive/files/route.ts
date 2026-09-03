@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import { keyFromUrl } from "@/lib/storage";
 import { workspaceAccess } from "@/lib/work-drive/workspaces";
 import { fileKindFor, logFileActivity, MAX_FILE_BYTES, WORK_DRIVE_PREFIX } from "@/lib/work-drive/files";
+import { indexDriveFile } from "@/lib/work-drive/index-file";
 
 export const dynamic = "force-dynamic";
 
@@ -120,6 +121,9 @@ export async function POST(request: NextRequest) {
     folderId,
     meta: { name, size },
   });
+
+  // Pull the text out for search, off the critical path.
+  after(() => indexDriveFile(file.id));
 
   return NextResponse.json({ file: { id: file.id, name, kind, sizeBytes: size } }, { status: 201 });
 }
