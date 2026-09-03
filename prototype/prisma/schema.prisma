@@ -306,6 +306,17 @@ model Tenant {
   refundRequests   RefundRequest[]
   tuitionCharges   TuitionCharge[]
   paymentPlans     PaymentPlan[]
+
+  /// Back-relations for the Work Drive tables. See docs/WORK_DRIVE.md.
+  workspaces        Workspace[]
+  workspaceMembers  WorkspaceMember[]
+  driveFolders      DriveFolder[]
+  driveFiles        DriveFile[]
+  driveFileVersions DriveFileVersion[]
+  driveFileTexts    DriveFileText[]
+  fileShares        FileShare[]
+  fileActivity      FileActivity[]
+  fileComments      FileComment[]
 }
 
 /// School-wide configuration the office edits instead of asking for a deploy.
@@ -4874,5 +4885,286 @@ model ConstraintDeck {
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
+}
+
+/// ===========================================================================
+/// WORK DRIVE  —  Phase 0 (files pillar).  See docs/WORK_DRIVE.md
+/// ===========================================================================
+/// A staff-only file store + calendar + webinars area of the admin portal. The
+/// organising unit is a Workspace: a team hub that holds files, a calendar and
+/// (later) a live room. `Space` was already taken by community chat, hence the
+/// name.
+///
+/// Every table here carries `tenantId` directly — child tables included — so
+/// the Prisma guard's per-model tenant scoping (src/lib/prisma-guard.ts)
+/// covers them with no join, the same way ChannelRead and MessageReaction do.
+///
+/// "Who did this" columns (createdById, uploadedById, actorId, assigneeId) are
+/// plain user-id strings with NO relation, matching Material.uploadedBy and
+/// ClassRecording.startedByUserId: the person can be soft-deleted while the
+/// file they uploaded lives on, and the audit trail — not a foreign key — is
+/// the record of who did what.
+
+model Workspace {
+  id          String  @id @default(cuid())
+  name        String
+  /// URL-safe, unique per tenant. The workspace's address under /admin/work-drive.
+  slug        String
+  description String?
+  /// A name from the shared icon set (components/icons.tsx), never an emoji.
+  icon        String  @default("folder")
+  /// A theme token key ("sky" | "amber" | ...), resolved through the theme so
+  /// it stays legible in Tag/Nacht/Daemmerung. Never a raw hex.
+  color       String  @default("slate")
+  /// general | department | project | event — grouping plus which empty state
+  /// and defaults to show. An `event` workspace is built around one WorkEvent
+  /// and archived with it.
+  kind        String  @default("general")
+  /// private | staff | branch
+  ///   private  only WorkspaceMembers
+  ///   staff    every admin/lecturer in the tenant (read-only unless a member)
+  ///   branch   staff at `branchId`
+  /// Fail closed: an unknown value is read as `private`.
+  visibility  String  @default("private")
+  /// Set only when visibility = branch.
+  branchId    String?
+  createdById String?
+  /// Soft archive: hidden from the default list, files intact. Distinct from
+  /// deletedAt, which is the trash.
+  archivedAt  DateTime?
+  /// Denormalised sum of live DriveFile.sizeBytes here, kept in step on
+  /// upload/delete so the quota meter needs no aggregate.
+  storageUsedBytes BigInt @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  members  WorkspaceMember[]
+  folders  DriveFolder[]
+  files    DriveFile[]
+  activity FileActivity[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@index([tenantId, visibility])
+}
+
+/// Who is in a private workspace and at what level. Absent for staff/branch
+/// workspaces unless someone is pinned in with a higher role than the default.
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// Plain user id, no relation — the same convention as the actor columns
+  /// above. A membership row for a since-deleted account is harmless and is
+  /// swept by the workspace-member cleanup, not a database cascade.
+  userId      String
+  /// owner | editor | viewer
+  role        String    @default("viewer")
+  addedById   String?
+  createdAt   DateTime  @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([tenantId])
+}
+
+/// A folder in a workspace's tree.
+model DriveFolder {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parentId    String?
+  parent      DriveFolder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children    DriveFolder[] @relation("FolderTree")
+  name        String
+  /// Materialised path from the workspace root, e.g. "/Finance/2026/Q3". Kept
+  /// in step on move/rename so breadcrumbs and prefix search need no recursion.
+  path        String   @default("/")
+  createdById String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  files DriveFile[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, parentId, name])
+  @@index([workspaceId])
+  @@index([workspaceId, parentId])
+  @@index([tenantId])
+}
+
+/// One file. The bytes live in the object bucket at `storageKey`; this row is
+/// the metadata everything else reads.
+model DriveFile {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folderId    String?
+  folder      DriveFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  name        String
+  mimeType    String   @default("application/octet-stream")
+  sizeBytes   BigInt   @default(0)
+  /// R2 object key under the `work-drive/` prefix. See src/lib/storage.ts.
+  storageKey  String
+  /// sha256 of the current bytes — integrity checks and duplicate detection.
+  checksum    String?
+  /// document | spreadsheet | image | video | audio | pdf | archive | other —
+  /// derived from mimeType on upload, drives the icon and the type filter.
+  kind        String   @default("other")
+  /// FK to the current DriveFileVersion. Null until the first version row is
+  /// written (which happens on upload). @unique so a version is "current" for
+  /// exactly one file.
+  currentVersionId String? @unique
+  currentVersion   DriveFileVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+
+  createdById      String?
+  lastModifiedById String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  versions DriveFileVersion[] @relation("FileVersions")
+  text     DriveFileText?
+  comments FileComment[]
+
+  /// Full-text search vector. A Postgres generated column (see the migration):
+  /// Phase 1 indexes the filename only; Phase 2 folds in extracted text.
+  /// Unsupported so Prisma leaves it alone — it is read via $queryRaw.
+  searchVector Unsupported("tsvector")?
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, folderId])
+  @@index([tenantId])
+  @@index([checksum])
+}
+
+/// An immutable prior state of a file. The newest is also pointed at by
+/// DriveFile.currentVersionId. Never soft-deleted; a retention job prunes old
+/// ones (Phase 5).
+model DriveFileVersion {
+  id            String    @id @default(cuid())
+  fileId        String
+  file          DriveFile @relation("FileVersions", fields: [fileId], references: [id], onDelete: Cascade)
+  /// 1, 2, 3 … monotonic per file.
+  versionNumber Int
+  storageKey    String
+  sizeBytes     BigInt    @default(0)
+  checksum      String?
+  uploadedById  String?
+  /// Optional "what changed" note from whoever uploaded it.
+  note          String?
+  createdAt     DateTime  @default(now())
+
+  currentOf DriveFile? @relation("CurrentVersion")
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, versionNumber])
+  @@index([fileId])
+  @@index([tenantId])
+}
+
+/// Extracted plain text for search, kept off the hot DriveFile row because it
+/// can be large and is read only by the indexer. Populated by a background job
+/// in Phase 2.
+model DriveFileText {
+  id          String    @id @default(cuid())
+  fileId      String    @unique
+  file        DriveFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  content     String
+  extractedAt DateTime  @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+/// Grants one staff user access to one file or folder they are not otherwise a
+/// member of. No public link tokens in v1 — sharing is always to a named
+/// person inside the tenant.
+model FileShare {
+  id         String @id @default(cuid())
+  /// file | folder
+  targetType String
+  targetId   String
+  sharedById String?
+  /// The recipient's user id. Plain string, no relation — matches the actor
+  /// columns. A revoke or the account's deletion is what ends a share; an
+  /// orphaned row is filtered out at read time by the recipient lookup.
+  sharedWithUserId String
+  /// view | edit
+  permission String   @default("view")
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([targetType, targetId, sharedWithUserId])
+  @@index([sharedWithUserId, revokedAt])
+  @@index([tenantId])
+}
+
+/// The in-UI activity feed for a workspace. Deliberately separate from the
+/// security AuditLog: this is "what happened in here lately" for the people
+/// working in the workspace, not the tamper-evident record.
+model FileActivity {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fileId      String?
+  folderId    String?
+  actorId     String?
+  /// uploaded | renamed | moved | new_version | deleted | restored | shared |
+  /// downloaded | commented
+  action      String
+  /// Shape depends on the action: { from, to } for renamed/moved, { name } etc.
+  meta        Json?
+  createdAt   DateTime  @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([fileId])
+  @@index([tenantId])
+}
+
+/// A comment thread on a file.
+model FileComment {
+  id        String    @id @default(cuid())
+  fileId    String
+  file      DriveFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  authorId  String?
+  body      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([fileId, createdAt])
   @@index([tenantId])
 }
