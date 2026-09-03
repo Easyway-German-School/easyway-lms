@@ -4,17 +4,22 @@
 # A backup nobody has restored is a rumour. This is the step almost every team
 # skips, and skipping it is how organisations discover — on the worst day they
 # will have — that the dumps have been zero bytes since February, or that the
-# restic password in the password manager is the old one, or that pg_restore
-# refuses the file because of an extension nobody remembers enabling.
+# passphrase in the password manager is the old one, or that pg_restore refuses
+# the file because of an extension nobody remembers enabling.
 #
-# So once a month this takes the newest snapshot, restores it into a throwaway
-# Postgres, counts every table, and compares those counts against the live
-# database. If the restore does not work, this fails loudly while there is
-# still a working system to fix it from — which is the only useful time to
-# find out.
+# Once a month this takes the newest database backup, restores it into a
+# throwaway Postgres, counts every table, and compares those counts against the
+# live database. If the restore does not work, it fails loudly while there is
+# still a working system to fix it from — the only useful time to find out.
+#
+# It reads the SAME artifact that backup-database.yml produces: an encrypted
+# `*.dump.enc` kept as a GitHub Actions artifact (AES-256-CBC / PBKDF2 under
+# BACKUP_PASSPHRASE). If that workflow is ever upgraded to a restic repository,
+# swap the "Fetch" step for a `restic restore latest`.
 #
 # The scratch database is a service container, so the drill needs no second
-# database anywhere and cannot possibly write to production.
+# database anywhere and cannot possibly write to production. The only thing it
+# touches outside itself is a read-only COUNT against production.
 # =============================================================================
 
 name: Restore drill
@@ -24,6 +29,10 @@ on:
     # 03:00 UTC on the 3rd — a weekday-ish date, far from month-end reporting.
     - cron: "0 3 3 * *"
   workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   drill:
@@ -45,10 +54,6 @@ jobs:
           --health-retries 10
 
     env:
-      RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
-      RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
       SCRATCH_URL: postgresql://postgres:drill@localhost:5432/drill
 
     steps:
@@ -61,24 +66,69 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends postgresql-client-18 restic
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
           # /usr/bin/pg_restore stays pinned to the runner's preinstalled
           # client 16 even with 18 installed; call the versioned binary.
           echo "PG_BIN=/usr/lib/postgresql/18/bin" >> "$GITHUB_ENV"
 
-      - name: Fetch the newest snapshot
+      - name: Fetch and decrypt the newest backup artifact
         id: fetch
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p restored
-          restic restore latest --tag database --target restored
-          DUMP="$(find restored -name '*.dump' | head -1)"
-          if [ -z "$DUMP" ]; then
-            echo "No .dump file in the newest snapshot." >&2
+
+          if [ -z "${{ secrets.BACKUP_PASSPHRASE }}" ]; then
+            echo "::error::BACKUP_PASSPHRASE is not set — cannot decrypt the backup artifact."
             exit 1
           fi
+
+          # Newest unexpired artifact whose name starts with `database-backup-`.
+          # The API returns artifacts newest-first; 100 covers well over a month.
+          META="$(gh api \
+            "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+            --jq '[.artifacts[]
+                   | select(.name | startswith("database-backup-"))
+                   | select(.expired == false)]
+                  | sort_by(.created_at) | reverse | .[0]
+                  | "\(.id)\t\(.name)\t\(.created_at)"')"
+
+          if [ -z "$META" ] || [ "$META" = "null" ]; then
+            echo "::error::No unexpired database-backup-* artifact. Has 'Backup database' succeeded in the last 90 days?"
+            exit 1
+          fi
+
+          ART_ID="$(echo "$META" | cut -f1)"
+          ART_NAME="$(echo "$META" | cut -f2)"
+          ART_WHEN="$(echo "$META" | cut -f3)"
+          echo "Using artifact ${ART_NAME} (id ${ART_ID}), created ${ART_WHEN}"
+
+          # Freshness: a backup older than 48h means the nightly job is broken.
+          AGE_DAYS=$(( ( $(date -u +%s) - $(date -u -d "$ART_WHEN" +%s) ) / 86400 ))
+          if [ "$AGE_DAYS" -gt 2 ]; then
+            echo "::error::Newest backup is ${AGE_DAYS} days old — the backup job is not running."
+            exit 1
+          fi
+
+          gh api "repos/${{ github.repository }}/actions/artifacts/${ART_ID}/zip" > artifact.zip
+          unzip -o artifact.zip -d enc
+          ENC="$(find enc -name '*.dump.enc' | head -1)"
+          if [ -z "$ENC" ]; then
+            echo "::error::Artifact ${ART_NAME} contains no *.dump.enc file."
+            exit 1
+          fi
+
+          mkdir -p restored
+          DUMP="restored/$(basename "${ENC%.enc}")"
+          openssl enc -d -aes-256-cbc -pbkdf2 \
+            -in "$ENC" -out "$DUMP" \
+            -pass pass:"${{ secrets.BACKUP_PASSPHRASE }}"
+
+          # The dump must at least be a readable custom-format archive.
+          "$PG_BIN/pg_restore" --list "$DUMP" > /dev/null
+
           echo "dump=${DUMP}" >> "$GITHUB_OUTPUT"
-          echo "snapshot_id=$(restic snapshots latest --tag database --json | grep -o '"short_id":"[^"]*"' | tail -1 | cut -d'"' -f4)" >> "$GITHUB_OUTPUT"
+          echo "snapshot_id=${ART_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Restore it into the scratch database
         run: |
@@ -171,8 +221,14 @@ jobs:
 
       - name: Tell the app
         if: always()
+        continue-on-error: true
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          if [ -z "${{ secrets.APP_BASE_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "APP_BASE_URL/CRON_SECRET not set — skipping the check-in."
+            exit 0
+          fi
+
           if [ "${{ job.status }}" = "success" ]; then
             DETAIL="$(cat detail.json 2>/dev/null || echo '{}')"
             PAYLOAD=$(printf '{"kind":"drill","status":"success","snapshotId":"%s","detail":%s}' \
@@ -185,4 +241,4 @@ jobs:
           curl -fsS -X POST "${{ secrets.APP_BASE_URL }}/api/backup/report" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD"
+            -d "$PAYLOAD" || echo "::warning::Could not reach the app to record this run."
