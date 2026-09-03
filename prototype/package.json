@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/guard-not-prod.mjs",
     "dev": "next dev --webpack --hostname 0.0.0.0",
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 prisma generate && next build --webpack",
     "start": "next start --hostname 0.0.0.0",
@@ -10,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:push": "prisma db push",
+    "db:push": "node scripts/guard-not-prod.mjs && prisma db push",
+    "db:reset": "node scripts/guard-not-prod.mjs && prisma migrate reset",
     "db:migrate": "prisma migrate deploy",
     "db:port": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/port-sqlite-to-postgres.ts",
     "check:actions": "tsx --tsconfig tsconfig.json scripts/check-assistant-actions.ts",

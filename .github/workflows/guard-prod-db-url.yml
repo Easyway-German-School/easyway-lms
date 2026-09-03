@@ -1,0 +1,41 @@
+# Fails the build if a production database URL is ever committed to the repo.
+#
+# Background: the 2026-09-03 wipe happened because local .env files carried the
+# production Neon connection string. Those files are gitignored, but a fresh
+# clone, a copy-paste into a tracked file, or a bad merge could still land one
+# in git. This check makes that impossible to merge.
+#
+# It greps every tracked file for the production Neon endpoint id. Real config
+# lives in Vercel / GitHub Actions secrets, never in the tree, so a match here
+# is always a mistake.
+
+name: Guard against committed prod DB URL
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No production Neon endpoint in tracked files
+        run: |
+          set -euo pipefail
+
+          # The production branch endpoint. If prod is rotated to a new endpoint,
+          # update this list here and in prototype/scripts/guard-not-prod.mjs.
+          PATTERN='ep-green-king-as4m5c1h'
+
+          # This workflow file names the pattern on purpose — exclude it.
+          if git grep -nI "$PATTERN" -- . ':!.github/workflows/guard-prod-db-url.yml' ':!prototype/scripts/guard-not-prod.mjs'; then
+            echo "::error::A production database endpoint is committed to the repo (matches above)."
+            echo "Production credentials belong in Vercel env / GitHub secrets, never in git."
+            echo "Local dev must use the 'dev' Neon branch — see prototype/scripts/guard-not-prod.mjs."
+            exit 1
+          fi
+
+          echo "OK — no production database endpoint found in tracked files."

@@ -69,6 +69,10 @@ on:
   schedule:
     # 01:30 UTC — 02:30 in Lagos, the quietest hour for a Nigerian school.
     - cron: "30 1 * * *"
+    # 13:30 UTC — 14:30 in Lagos. A second run so the worst-case data loss in
+    # an incident is "since lunchtime", not "since last night". Added after the
+    # 2026-09-03 wipe, where the Neon 6h restore window nearly aged out.
+    - cron: "30 13 * * *"
   workflow_dispatch:
 
 concurrency:
