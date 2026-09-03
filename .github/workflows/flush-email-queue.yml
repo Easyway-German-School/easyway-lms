@@ -1,0 +1,68 @@
+# =============================================================================
+# Push the outbound email queue every ~15 minutes.
+#
+# WHY THIS EXISTS
+#
+# Queued mail is normally sent within seconds by a post-response kick
+# (src/lib/email-queue.ts), and the 06:00 Vercel cron (/api/cron/tick) is the
+# daily backstop. The gap between them: a message that hits a transient send
+# failure goes into a 1/5/30/120-minute backoff, and if nothing else queues an
+# email in the meantime, nothing re-runs the drain until 06:00. On a quiet
+# evening that is a reminder arriving the next morning.
+#
+# A more frequent Vercel cron would close the gap, but this plan allows two
+# cron jobs, daily only — a sub-daily entry in vercel.json fails the deploy.
+# So the extra heartbeat lives here instead, the same way the backups do, and
+# for the same reason: GitHub Actions schedules cost nothing on a public repo
+# and run in a different account from the app.
+#
+# It calls the SAME endpoint an admin's "Drain queue now" button calls. With a
+# Bearer CRON_SECRET the route drains every tenant; the work is idempotent and
+# each message is claimed before it is sent, so overlapping runs are harmless.
+#
+# Scheduled runs are best-effort — GitHub delays them under load — so treat the
+# cadence as "roughly every 15-25 minutes", which is all a backstop needs.
+# =============================================================================
+
+name: Flush email queue
+
+on:
+  schedule:
+    # Every 15 minutes. Effective cadence is looser; see the note above.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+# One at a time. A drain that is still running when the next tick fires should
+# finish, not be cancelled and not be doubled up.
+concurrency:
+  group: flush-email-queue
+  cancel-in-progress: false
+
+jobs:
+  flush:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: POST /api/cron/email-queue
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_BASE_URL}" ] || [ -z "${CRON_SECRET}" ]; then
+            echo "::warning::APP_BASE_URL / CRON_SECRET not set — nothing to call. Add them in repo Settings → Secrets → Actions."
+            exit 0
+          fi
+
+          # --retry rides out a transient 5xx or a cold Vercel function so a
+          # single blip does not turn the run red; a genuine outage still will.
+          body="$(
+            curl -fsS -X POST "${APP_BASE_URL%/}/api/cron/email-queue" \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
+              -H "Content-Type: application/json" \
+              --retry 3 --retry-delay 10 --retry-all-errors \
+              --max-time 60
+          )"
+
+          echo "Drain result: ${body}"
