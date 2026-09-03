@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveBatchAbsolute } from "@/lib/batch";
 import { nextLevelAfter, SESSION_MONTHS } from "@/lib/levels";
 import { derivePaymentStatus, isReceivedPayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { ensureChargeForLevel } from "@/lib/tuition-charges";
 
 /**
  * Who has finished a level but is still sitting in it.
@@ -192,6 +193,17 @@ export async function promoteStudents(studentIds: string[], now = new Date()): P
       },
     });
 
+    // Raise the tuition charge for the level they just moved into, so what they
+    // owe follows them up the ladder instead of the old level's shortfall
+    // dropping out of the maths. Idempotent — a next-level payment may have
+    // created it already. Best-effort: a missing charge is repaired by the
+    // backfill and receivables falls back to the per-level figure meanwhile.
+    try {
+      await ensureChargeForLevel({ studentId, level: next, origin: "promotion" });
+    } catch (chargeError) {
+      console.error("Tuition charge creation failed on promotion", { studentId, next, chargeError });
+    }
+
     result.promoted.push(studentId);
   }
 
@@ -221,6 +233,19 @@ export async function promoteIfNextLevelPayment(
   });
 
   if (!student) return;
+
+  // Raise the charge for the level they are paying into up front, whether or not
+  // the promotion proceeds this call — the payment that just landed has to have
+  // a charge to be allocated against (src/lib/finance/ledger.ts).
+  const target = nextLevelAfter(student.level);
+  if (target) {
+    try {
+      await ensureChargeForLevel({ studentId, level: target, origin: "next_level_payment" });
+    } catch (chargeError) {
+      console.error("Tuition charge creation failed for next-level payment", { studentId, target, chargeError });
+    }
+  }
+
   if (student.levelCompletedFor !== student.level || !student.levelCompletedAt) return;
 
   await promoteStudents([studentId]);

@@ -26,7 +26,8 @@
     "seed:spaces": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/seed-community-spaces.ts",
     "verify:community": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/verify-community.ts",
     "test:community": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/test-community-e2e.ts",
-    "backfill:thumbnails": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/backfill-recording-thumbnails.ts"
+    "backfill:thumbnails": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/backfill-recording-thumbnails.ts",
+    "backfill:charges": "tsx --tsconfig tsconfig.json --env-file=.env.local scripts/backfill-tuition-charges.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

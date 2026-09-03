@@ -7,6 +7,7 @@ import { notifyAdminsOfRegistration } from "@/lib/admin-alerts";
 import { sendRegistrationConfirmation } from "@/lib/registration-email";
 import { sendParentAccountCreatedEmail } from "@/lib/parent-account-email";
 import { linkLeadOnSignup } from "@/lib/leads";
+import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
 import { currentTenantId, setTenantScope } from "@/lib/tenant/context";
@@ -422,6 +423,20 @@ export async function POST(request: NextRequest) {
           // Close the enquiry this signup came from, so the office stops
           // chasing someone who has already enrolled.
           await linkLeadOnSignup(normalizedEmail, created.id);
+
+          // Open the tuition ledger for their starting level. Best-effort like
+          // the code assignment above — the backfill script repairs a missing
+          // charge, and receivables falls back to the per-level figure until
+          // one exists. See src/lib/tuition-charges.ts.
+          try {
+            await ensureChargeForLevel({
+              studentId: created.id,
+              level: normalizedLevel,
+              origin: "signup",
+            });
+          } catch (chargeError) {
+            console.error("Tuition charge creation failed on signup:", chargeError);
+          }
         }
       } catch (codeError) {
         console.error("Student code assignment failed:", codeError);

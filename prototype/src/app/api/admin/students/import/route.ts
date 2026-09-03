@@ -5,6 +5,7 @@ import { assignStudentCode } from "@/lib/student-code";
 import { LEVELS } from "@/lib/levels";
 import { bestMatch, matchBatch, matchLevel, matchSessionSlot } from "@/lib/fuzzy-match";
 import { generateTempPassword } from "@/lib/student-password";
+import { ensureChargeForLevel } from "@/lib/tuition-charges";
 
 import { requireCapability } from "@/lib/admin-roles";
 export const dynamic = "force-dynamic";
@@ -253,6 +254,15 @@ export async function POST(request: NextRequest) {
                 description: "Recorded on import — paid before joining the portal",
               },
             });
+          }
+
+          // Open the tuition ledger for the level they are imported into. Lower
+          // levels a mid-course import already passed are the backfill script's
+          // job (or an admin adjustment); this covers the level they're in now.
+          try {
+            await ensureChargeForLevel({ studentId: student.id, level, origin: "import" });
+          } catch (chargeError) {
+            console.error("Tuition charge creation failed on import", chargeError);
           }
         }
 

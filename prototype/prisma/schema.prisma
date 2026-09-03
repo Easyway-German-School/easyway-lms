@@ -304,6 +304,18 @@ model Tenant {
   parentStudents   ParentStudent[]
   termsAcceptances TermsAcceptance[]
   refundRequests   RefundRequest[]
+  tuitionCharges   TuitionCharge[]
+
+  /// Back-relations for the Work Drive tables. See docs/WORK_DRIVE.md.
+  workspaces        Workspace[]
+  workspaceMembers  WorkspaceMember[]
+  driveFolders      DriveFolder[]
+  driveFiles        DriveFile[]
+  driveFileVersions DriveFileVersion[]
+  driveFileTexts    DriveFileText[]
+  fileShares        FileShare[]
+  fileActivity      FileActivity[]
+  fileComments      FileComment[]
 }
 
 /// School-wide configuration the office edits instead of asking for a deploy.
@@ -615,6 +627,7 @@ model Student {
   notifications         Notification[]
   invoices              Invoice[]
   payments              Payment[]
+  tuitionCharges        TuitionCharge[]
   assignmentSubmissions AssignmentSubmission[]
   privateClasses        PrivateClass[]
   privateClassSeries    PrivateClassSeries[]
@@ -1855,6 +1868,75 @@ model Payment {
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
+}
+
+/// ONE ROW PER LEVEL A STUDENT PASSES THROUGH — the debit side of tuition.
+///
+/// Before this, "what does a student owe" was `tuitionFeeFor(currentLevel) -
+/// sum(every payment ever)` (src/lib/finance/receivables.ts). That only ever
+/// looked at the CURRENT level, so the moment `promoteStudents` bumped
+/// `Student.level` the previous level's shortfall dropped out of the maths and
+/// cumulative payments netted against the new level's fee. A student could ride
+/// A1 -> B1 on part-payments and finish owing money nobody could see.
+///
+/// Now every level entered (signup, promotion, a next-level payment, an admin
+/// adjustment, a CSV import, or the one-time backfill) leaves a `TuitionCharge`
+/// with the fee FROZEN at creation. Payments are allocated across the open
+/// charges oldest-first (FIFO) by src/lib/finance/ledger.ts — nothing is stored
+/// per allocation, it is recomputed on read like the rest of the finance layer.
+///
+/// `amount` is WHOLE NAIRA, same convention as `Payment.amount`.
+model TuitionCharge {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  /// The level this charge is for, e.g. "A1". One charge per level per student
+  /// (see the unique index) — mirrors how Certificate is keyed.
+  level  String
+  /// Fee owed for this level, frozen when the charge was created. A later price
+  /// change or branch retier must never move a charge already on the ledger.
+  amount Int
+
+  /// Snapshots of how the student attended when the charge was raised, so the
+  /// figure can be explained later without re-deriving it from current state.
+  classType  String  @default("group")
+  branchName String?
+
+  /// How the charge came to exist: signup | promotion | next_level_payment |
+  /// admin | import | backfill.
+  origin String
+
+  /// True for a lower level a student had already passed BEFORE the ledger
+  /// existed, created by the cutover backfill. Legacy arrears are fully visible
+  /// and chased, but they do NOT trip the automatic portal lock and do NOT
+  /// hard-block promotion — the student never agreed to these rules mid-course.
+  legacyArrears Boolean @default(false)
+
+  /// A scholarship or negotiated write-off. `amount - waivedAmount` is what the
+  /// student is actually expected to pay; allocation and every rollup use the
+  /// net figure.
+  waivedAmount Int     @default(0)
+  waivedReason String?
+
+  note      String?
+  createdAt DateTime  @default(now())
+  /// Set the first time FIFO allocation fully covers this charge. Advisory —
+  /// the authoritative "is it settled" answer is recomputed on read.
+  settledAt DateTime?
+
+  /**
+   * Set instead of the row being removed. See src/lib/prisma-guard.ts.
+   */
+  deletedAt DateTime?
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, level])
+  @@index([studentId])
   @@index([tenantId])
 }
 
