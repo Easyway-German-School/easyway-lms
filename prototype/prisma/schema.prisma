@@ -317,6 +317,10 @@ model Tenant {
   fileShares        FileShare[]
   fileActivity      FileActivity[]
   fileComments      FileComment[]
+  workEvents        WorkEvent[]
+  eventAttendees    EventAttendee[]
+  eventTasks        EventTask[]
+  eventResources    EventResource[]
 }
 
 /// School-wide configuration the office edits instead of asking for a deploy.
@@ -4945,6 +4949,7 @@ model Workspace {
   folders  DriveFolder[]
   files    DriveFile[]
   activity FileActivity[]
+  events   WorkEvent[]
 
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -5047,6 +5052,7 @@ model DriveFile {
   versions DriveFileVersion[] @relation("FileVersions")
   text     DriveFileText?
   comments FileComment[]
+  eventResources EventResource[]
 
   /// Full-text search vector over the FILENAME only — a Postgres generated
   /// column (see 20260903140000_work_drive_files). Content search is a second
@@ -5173,5 +5179,149 @@ model FileComment {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([fileId, createdAt])
+  @@index([tenantId])
+}
+
+/// ===========================================================================
+/// WORK DRIVE  —  Phase 3 (staff calendar & events).  See docs/WORK_DRIVE.md
+/// ===========================================================================
+/// The office's own calendar: staff meetings, deadlines, training days, events,
+/// and (Phase 4) webinars. An event can belong to a Workspace or stand alone
+/// for the whole tenant. Same conventions as the files pillar — tenantId on
+/// every row, plain user-id strings for "who", explicit IANA `timezone` on
+/// every datetime (never trust server-local time).
+
+model WorkEvent {
+  id          String     @id @default(cuid())
+  /// Null = a tenant-wide event. Set = it lives in this workspace.
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  /// Scopes a `branch`-visible event. Plain string, no relation (matches the
+  /// files pillar).
+  branchId    String?
+
+  title       String
+  description String?
+  /// meeting | deadline | holiday | training | event | webinar
+  kind        String  @default("meeting")
+  /// Free text: a room, an address, or "Online".
+  location    String?
+
+  startAt DateTime
+  /// Null for a point-in-time entry (a deadline). Otherwise the end.
+  endAt   DateTime?
+  allDay  Boolean  @default(false)
+  /// RFC 5545 recurrence string, or null for a one-off. Expanded at read time.
+  rrule    String?
+  /// IANA zone the times are anchored to, e.g. "Africa/Lagos".
+  timezone String  @default("UTC")
+
+  /// workspace | staff | branch | public
+  ///   workspace  members of `workspaceId`
+  ///   staff      every admin in the tenant
+  ///   branch     staff at `branchId`
+  ///   public     also has a landing page (webinars) — see Phase 4
+  visibility String @default("staff")
+
+  /// draft | scheduled | live | ended | cancelled
+  status String @default("scheduled")
+
+  /// R2 key for a cover image on the event / webinar landing.
+  coverImageKey String?
+
+  createdById String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  attendees EventAttendee[]
+  tasks     EventTask[]
+  resources EventResource[]
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, startAt])
+  @@index([workspaceId])
+  @@index([tenantId, status])
+}
+
+/// An invitee or registrant — internal staff (userId) or an external guest
+/// (externalName / externalEmail, used by public webinar registration).
+model EventAttendee {
+  id      String    @id @default(cuid())
+  eventId String
+  event   WorkEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  /// Set for a staff attendee. Plain string, no relation.
+  userId        String?
+  externalName  String?
+  externalEmail String?
+
+  /// invited | accepted | declined | tentative | attended | no_show
+  response String @default("invited")
+  /// host | co_host | presenter | attendee
+  role     String @default("attendee")
+
+  checkInAt      DateTime?
+  reminderSentAt DateTime?
+  /// landing_page | manual | import
+  registrationSource String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@unique([eventId, externalEmail])
+  @@index([eventId])
+  @@index([tenantId])
+}
+
+/// The "plan the event" checklist.
+model EventTask {
+  id         String    @id @default(cuid())
+  eventId    String
+  event      WorkEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  title      String
+  assigneeId String?
+  dueAt      DateTime?
+  done       Boolean   @default(false)
+  doneAt     DateTime?
+  doneById   String?
+  order      Int       @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@index([tenantId])
+}
+
+/// A Work Drive file attached to an event — an agenda deck, a handout.
+model EventResource {
+  id      String    @id @default(cuid())
+  eventId String
+  event   WorkEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  fileId  String
+  file    DriveFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  label   String?
+  /// Publish this file to registrants after the event.
+  visibleToAttendees Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, fileId])
+  @@index([eventId])
   @@index([tenantId])
 }
