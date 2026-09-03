@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
-import { classifyPaymentTransaction } from "@/lib/payment";
+import { classifyPaymentTransaction, isReceivedPayment, RECEIVED_PAYMENT_STATUSES } from "@/lib/payment";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
 import { safeJson } from "@/lib/safe-json";
+import { setTenantScope } from "@/lib/tenant/context";
 
 function getPaymentDescription(paymentType: string, pathwayName: string) {
   if (paymentType === "registration") {
@@ -52,8 +53,13 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
   const tuitionFeeValue = Math.max(0, Math.round(Number(metadata.tuitionFee || 0)));
   const derivedTotal = Math.round(Number(metadata.totalAmount || paymentAmount));
   const totalAmount = tuitionFeeValue > 0 ? Math.max(tuitionFeeValue, derivedTotal) : derivedTotal;
+  const forNextLevel = String(metadata.forNextLevel || "") === "true";
   const paymentClassification = classifyPaymentTransaction({
-    paymentAmount,
+    // A next-level checkout's amount can exceed the new level's fee because it
+    // ALSO clears an old balance (see the breakdown in /api/paystack/initialize).
+    // Classifying off the combined figure would mislabel a 60% deposit as a
+    // full settlement, so for that path the metadata stage is authoritative.
+    paymentAmount: forNextLevel ? Math.min(paymentAmount, tuitionFeeValue || paymentAmount) : paymentAmount,
     totalAmount,
     tuitionFee: tuitionFeeValue,
     depositPercent,
@@ -61,11 +67,28 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     paymentType,
   });
   const effectivePaymentType = paymentClassification.paymentType;
+  // A 60% deposit is real money that has cleared, but the account is not
+  // settled — it lands as `partial` so the ledger stays honest about the
+  // outstanding balance. `isReceivedPayment` counts `partial` everywhere a
+  // paid total is summed, so access / certificates / finance are unaffected.
+  const settledStatus = effectivePaymentType === "deposit" ? "partial" : "completed";
 
   if (!studentId || !reference || paymentAmount <= 0) {
     console.error("Paystack persist skipped: invalid metadata", { studentId, reference, paymentAmount, metadata });
     return;
   }
+
+  // This can run with no tenant in context — the Paystack webhook is
+  // `withUnscoped`, and the verify route answers unauthenticated callers. The
+  // payment reference identifies the school, so pin the scope to it before any
+  // write: without it the Invoice / Payment rows land with `tenantId = NULL`
+  // and vanish from every tenant-scoped read. A no-op when the caller already
+  // carries this tenant's scope.
+  const owner = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { tenantId: true },
+  });
+  if (owner?.tenantId) setTenantScope(owner.tenantId);
 
   const existingPayment = await prisma.payment.findFirst({
     where: { stripeSessionId: reference },
@@ -73,14 +96,15 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
   });
 
   if (existingPayment) {
-    if (existingPayment.status === "completed") {
+    // Money already recorded (full, or a deposit that landed as `partial`).
+    if (isReceivedPayment(existingPayment.status)) {
       return;
     }
 
     await prisma.payment.update({
       where: { id: existingPayment.id },
       data: {
-        status: "completed",
+        status: settledStatus,
         amount: paymentAmount,
         currency,
         method: "paystack",
@@ -112,29 +136,62 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     return;
   }
 
-  const invoice = await prisma.invoice.create({
-    data: {
-      studentId,
-      totalAmount: Math.max(totalAmount || paymentAmount, paymentAmount),
-      currency,
-      status: paymentClassification.invoiceStatus,
-      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      lineItems: {
-        pathwayId,
-        pathwayName,
-        paymentType: effectivePaymentType,
-        depositPercent,
+  /**
+   * A student may now make more than one part-payment toward the same level's
+   * tuition (a 60% deposit today, another 20% next month). Every such payment
+   * used to open its OWN invoice, leaving the student with two `partial`
+   * invoices for one balance and the fee-reminder job chasing both. So a
+   * top-up attaches to the invoice already open for this student instead.
+   *
+   * A next-level payment is explicitly excluded — that IS a new balance and
+   * deserves its own invoice (see the note on `alreadyPaid` in the checkout
+   * route about why a fresh level starts its own ledger).
+   */
+  const openInvoice = forNextLevel
+    ? null
+    : await prisma.invoice.findFirst({
+        where: { studentId, status: "partial" },
+        orderBy: { createdAt: "asc" },
+      });
+
+  let invoiceId: string;
+  if (openInvoice) {
+    const priorPaid = await prisma.payment.aggregate({
+      where: { invoiceId: openInvoice.id, status: { in: [...RECEIVED_PAYMENT_STATUSES] } },
+      _sum: { amount: true },
+    });
+    const runningPaid = (priorPaid._sum.amount ?? 0) + paymentAmount;
+    await prisma.invoice.update({
+      where: { id: openInvoice.id },
+      data: { status: runningPaid >= openInvoice.totalAmount ? "paid" : "partial" },
+    });
+    invoiceId = openInvoice.id;
+  } else {
+    const invoice = await prisma.invoice.create({
+      data: {
+        studentId,
+        totalAmount: Math.max(totalAmount || paymentAmount, paymentAmount),
+        currency,
+        status: paymentClassification.invoiceStatus,
+        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        lineItems: {
+          pathwayId,
+          pathwayName,
+          paymentType: effectivePaymentType,
+          depositPercent,
+        },
       },
-    },
-  });
+    });
+    invoiceId = invoice.id;
+  }
 
   await prisma.payment.create({
     data: {
       studentId,
-      invoiceId: invoice.id,
+      invoiceId,
       amount: paymentAmount,
       currency,
-      status: "completed",
+      status: settledStatus,
       method: "paystack",
       description: getPaymentDescription(effectivePaymentType, pathwayName),
       stripeSessionId: reference,
@@ -191,6 +248,82 @@ export async function enrollIfPathwayExists({
   }
 }
 
+/**
+ * Record a registration fee that was paid on the WordPress marketing site
+ * BEFORE the student had an LMS account.
+ *
+ * The normal Paystack path (`persistPaystackTransaction`) resolves the student
+ * from the charge metadata — but a WordPress pre-signup charge has no LMS
+ * `studentId` in it, because the student did not exist yet. The signup route
+ * calls this instead, once it has just created the account, passing the
+ * `studentId` directly.
+ *
+ * Deduped on `stripeSessionId` and best-effort: the caller has already created
+ * the account and treats a failure here as a reconciliation note, so this must
+ * not throw in a way that matters. It mirrors the `registration` branch of
+ * `persistPaystackTransaction` — one paid Invoice, one completed Payment — so
+ * `deriveStudentAccess().registrationPaid` reads true and the portal does not
+ * ask for the fee again. Tuition access still opens only at the deposit.
+ */
+export async function recordRegistrationFeeFromRef({
+  studentId,
+  reference,
+  amountNaira,
+  currency = "NGN",
+  pathwayName = "program",
+}: {
+  studentId: string;
+  reference: string;
+  amountNaira: number;
+  currency?: string;
+  pathwayName?: string;
+}): Promise<void> {
+  const amount = Math.max(0, Math.round(Number(amountNaira) || 0));
+  if (!studentId || !reference || amount <= 0) return;
+
+  const existing = await prisma.payment.findFirst({ where: { stripeSessionId: reference } });
+  if (existing) return;
+
+  // The webhook / verify path can run with no tenant in context; this runs
+  // right after the signup route created the student, so scope is already set —
+  // but pin it to the student's tenant anyway so a stray Invoice / Payment
+  // never lands with tenantId = NULL and vanishes from every scoped read.
+  const owner = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { tenantId: true },
+  });
+  if (owner?.tenantId) setTenantScope(owner.tenantId);
+
+  const invoice = await prisma.invoice.create({
+    data: {
+      studentId,
+      totalAmount: amount,
+      currency,
+      status: "paid",
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      lineItems: {
+        paymentType: "registration",
+        pathwayName,
+        source: "wordpress-signup-ref",
+      },
+    },
+  });
+
+  await prisma.payment.create({
+    data: {
+      studentId,
+      invoiceId: invoice.id,
+      amount,
+      currency,
+      status: "completed",
+      method: "paystack",
+      description: `Registration fee for ${pathwayName}`,
+      stripeSessionId: reference,
+      paymentIntentId: reference,
+    },
+  });
+}
+
 export type PaystackVerifyResult = {
   /** We reached Paystack and it answered. Says nothing about the transaction. */
   success: boolean;
@@ -219,7 +352,8 @@ export async function verifyPaystackTransaction(reference: string): Promise<Pays
 
   const secretKey = process.env.PAYSTACK_SECRET_KEY;
   if (!secretKey) {
-    return { success: false, status: 500, error: "Paystack secret not configured" };
+    console.error("Paystack verify blocked: PAYSTACK_SECRET_KEY is not set");
+    return { success: false, status: 503, error: "Payment checking is temporarily unavailable." };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
