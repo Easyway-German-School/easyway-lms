@@ -44,6 +44,16 @@ const COLORS: Record<string, string> = {
   rose: "#e11d48",
 };
 
+type SharedFile = {
+  id: string;
+  name: string;
+  kind: string;
+  sizeBytes: number;
+  permission: string;
+  workspaceName: string;
+  sharedBy: string | null;
+};
+
 function bytes(n: number): string {
   if (!n) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -72,15 +82,20 @@ export default function WorkDrivePage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [shared, setShared] = useState<SharedFile[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/work-drive/workspaces", { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Could not load the Work Drive.");
+      const [wsRes, shRes] = await Promise.all([
+        fetch("/api/admin/work-drive/workspaces", { cache: "no-store" }),
+        fetch("/api/admin/work-drive/shared", { cache: "no-store" }),
+      ]);
+      const data = await wsRes.json();
+      if (!wsRes.ok) throw new Error(data?.error || "Could not load the Work Drive.");
       setEnabled(data.enabled !== false);
       setWorkspaces(data.workspaces ?? []);
+      if (shRes.ok) setShared((await shRes.json()).files ?? []);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
@@ -134,6 +149,31 @@ export default function WorkDrivePage() {
           <div className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
             {error}
           </div>
+        )}
+
+        {shared.length > 0 && (
+          <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <h2 className="text-sm font-bold text-[var(--foreground)]">Shared with you</h2>
+            <ul className="mt-3 divide-y divide-[var(--border)]">
+              {shared.map((f) => (
+                <li key={f.id} className="flex items-center gap-3 py-2.5 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-[var(--foreground)]">{f.name}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      {bytes(f.sizeBytes)} · in {f.workspaceName}
+                      {f.sharedBy ? ` · from ${f.sharedBy}` : ""} · can {f.permission === "edit" ? "edit" : "view"}
+                    </p>
+                  </div>
+                  <a
+                    href={`/api/admin/work-drive/files/${f.id}/download`}
+                    className="rounded-lg px-2 py-1 text-xs font-semibold text-[var(--muted)] transition hover:text-[var(--accent)]"
+                  >
+                    Download
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         {loading ? (
