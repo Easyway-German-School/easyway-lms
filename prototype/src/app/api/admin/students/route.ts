@@ -66,6 +66,13 @@ export async function GET(request: Request) {
   const hasDerivedFilter = Boolean(focus || riskFocus || agingBucket || ids);
 
   const whereClause: any = {};
+  // Never surface staff in the student roster. A Student row can end up bound
+  // to an admin or lecturer account — a demo fixture, an impersonation set-up,
+  // an account that was a test student before it was promoted. If it shows
+  // here it can be removed from here, and removing a student deletes the
+  // underlying User. On 2026-09-02 a super admin cleared out test students and
+  // took their own login with them this way.
+  whereClause.user = { is: { role: "STUDENT", adminRole: null } };
   if (branchId) whereClause.branchId = branchId;
   if (level) whereClause.level = level;
   if (batch) whereClause.admission = { path: ["batch"], equals: batch };
@@ -611,7 +618,10 @@ export async function DELETE(request: Request) {
     }
 
     try {
-      const targets = await prisma.student.findMany({ where: resetWhere, select: { id: true, userId: true } });
+      const targets = await prisma.student.findMany({
+        where: resetWhere,
+        select: { id: true, userId: true, user: { select: { role: true, adminRole: true } } },
+      });
       if (targets.length === 0) {
         return NextResponse.json({ success: true, deleted: 0 });
       }
@@ -631,9 +641,16 @@ export async function DELETE(request: Request) {
       for (let i = 0; i < targets.length; i += CHUNK) {
         const slice = targets.slice(i, i + CHUNK);
         const studentIdChunk = slice.map((s) => s.id);
-        const userIdChunk = slice.map((s) => s.userId);
+        // Only take down the login when it is genuinely a student-only account.
+        // A staff member who also carries a Student row keeps their User — the
+        // roster row is removed, the ability to sign in is not.
+        const userIdChunk = slice
+          .filter((s) => s.user && s.user.role === "STUDENT" && s.user.adminRole == null)
+          .map((s) => s.userId);
         await prisma.student.deleteMany({ where: { id: { in: studentIdChunk } } });
-        await prisma.user.deleteMany({ where: { id: { in: userIdChunk } } });
+        if (userIdChunk.length > 0) {
+          await prisma.user.deleteMany({ where: { id: { in: userIdChunk } } });
+        }
         deleted += slice.length;
       }
       return NextResponse.json({ success: true, deleted });
@@ -674,7 +691,7 @@ export async function DELETE(request: Request) {
         userId: true,
         tenantId: true,
         branch: { select: { tenantId: true } },
-        user: { select: { tenantId: true } },
+        user: { select: { tenantId: true, role: true, adminRole: true } },
       },
     });
 
@@ -692,13 +709,35 @@ export async function DELETE(request: Request) {
       );
     }
 
+    const staffPreserved: string[] = [];
     for (const student of deletable) {
+      // If the row is bound to a staff account — anything that is not a plain
+      // student — remove the roster entry only. Deleting the User here is how a
+      // super admin cleaning up test students soft-deleted their own login on
+      // 2026-09-02. A missing `user` (already soft-deleted) is treated the same
+      // conservative way: drop the Student row, leave the account alone.
+      const isStudentOnly =
+        student.user != null &&
+        student.user.role === "STUDENT" &&
+        student.user.adminRole == null;
+
+      if (!isStudentOnly) {
+        await prisma.student.delete({ where: { id: student.id } });
+        staffPreserved.push(student.id);
+        continue;
+      }
+
       await prisma.session.deleteMany({ where: { userId: student.userId } });
       await prisma.student.delete({ where: { id: student.id } });
       await prisma.user.delete({ where: { id: student.userId } });
     }
 
-    return NextResponse.json({ success: true, deleted: deletable.length, skipped });
+    return NextResponse.json({
+      success: true,
+      deleted: deletable.length,
+      skipped,
+      ...(staffPreserved.length > 0 ? { staffPreserved } : {}),
+    });
   } catch (error) {
     return NextResponse.json({ error: "Unable to delete student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
   }
