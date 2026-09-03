@@ -205,6 +205,25 @@ export const TENANT_OWNED_MODELS = [
    */
   "TermsAcceptance",
   "RefundRequest",
+
+  /**
+   * The Work Drive (docs/WORK_DRIVE.md). A staff-only file store: a workspace
+   * and its folders, files, versions, extracted text, shares, activity feed
+   * and comments. Every one names one school's staff and holds one school's
+   * documents — policies, finance spreadsheets, scanned contracts. There is no
+   * reading of any of it that another tenant has any business doing, and a
+   * leak here is the same category as SupportTicket: one office's private
+   * paperwork.
+   */
+  "Workspace",
+  "WorkspaceMember",
+  "DriveFolder",
+  "DriveFile",
+  "DriveFileVersion",
+  "DriveFileText",
+  "FileShare",
+  "FileActivity",
+  "FileComment",
 ] as const;
 
 /**

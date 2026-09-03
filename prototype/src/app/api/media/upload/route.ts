@@ -17,7 +17,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { putFile, storageKey } from "@/lib/storage";
 
-const FOLDERS = new Set(["files", "materials", "photos"]);
+const FOLDERS = new Set(["files", "materials", "photos", "work-drive"]);
 
 /** Base64 through a JSON body is only ever the small-file path. */
 const MAX_BYTES = 8 * 1024 * 1024;
