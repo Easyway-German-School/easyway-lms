@@ -224,6 +224,16 @@ export const TENANT_OWNED_MODELS = [
   "FileShare",
   "FileActivity",
   "FileComment",
+  /**
+   * The staff calendar (Phase 3). An event names one school's staff and, for
+   * a public webinar, one school's registrants by email; the tasks and
+   * attached files are that school's planning. Same category of leak as the
+   * files pillar it sits beside.
+   */
+  "WorkEvent",
+  "EventAttendee",
+  "EventTask",
+  "EventResource",
 ] as const;
 
 /**

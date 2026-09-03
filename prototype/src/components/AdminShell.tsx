@@ -115,6 +115,8 @@ const navItems: NavItem[] = [
   // The office's own file store — not student-facing material. Its own
   // capability (`work_drive`), so it only appears for admins who hold it.
   { label: 'Work Drive', href: '/admin/work-drive', icon: <BriefcaseIcon />, group: 'Content' },
+  // The staff calendar that rides alongside it — gated on `events`.
+  { label: 'Staff calendar', href: '/admin/calendar', icon: <CalendarIcon />, group: 'Content' },
 
   // Finance first: for an Accountant this is the whole portal, and the
   // transaction list is what you open from it rather than the other way round.

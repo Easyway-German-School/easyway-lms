@@ -258,6 +258,18 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * Work Drive calendar: remind attendees of an event that starts soon, once
+   * per attendee per event (dedupe on EventAttendee.reminderSentAt). See
+   * src/lib/work-drive/event-reminders.ts.
+   */
+  results.push(
+    await run("work-drive-event-reminders", async () => {
+      const { sendDueEventReminders } = await import("@/lib/work-drive/event-reminders");
+      return sendDueEventReminders();
+    }),
+  );
+
+  /**
    * Summarise newly uploaded materials and turn them into quests.
    *
    * Last, and capped at three per tick, because it is the only job here that
