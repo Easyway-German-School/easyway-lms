@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail, isEmailConfigured } from "@/lib/mailer";
 import { isMailIdentityKey, type MailIdentityKey } from "@/lib/mail-identity";
+import { runUnscoped } from "@/lib/tenant/context";
 import crypto from "crypto";
 
 /**
@@ -63,7 +64,21 @@ async function kickQueue(): Promise<void> {
     const { after } = await import("next/server");
     after(async () => {
       try {
-        await drainQueue(KICK_LIMIT);
+        /**
+         * UNSCOPED, exactly like the cron dispatcher that also calls
+         * `drainQueue`. `EmailMessage` is a tenant-owned table, so a query on
+         * it throws under strict isolation unless a tenant OR an unscoped scope
+         * is in context — and an `after()` callback runs after the response,
+         * outside the request's async context, so the tenant scope the request
+         * set is already gone by the time this fires. Without this wrapper the
+         * drain threw `TenantIsolationError`, the catch below swallowed it, and
+         * the just-queued message sat until the 06:00 cron — the day-long delay
+         * this kick exists to remove, quietly back.
+         */
+        await runUnscoped(
+          "post-response email kick drains whatever is due across every tenant, like the nightly cron",
+          () => drainQueue(KICK_LIMIT),
+        );
       } catch (error) {
         console.warn("email queue: post-response drain failed", error);
       }
