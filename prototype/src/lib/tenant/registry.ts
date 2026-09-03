@@ -234,6 +234,15 @@ export const TENANT_OWNED_MODELS = [
   "EventAttendee",
   "EventTask",
   "EventResource",
+  /**
+   * Webinars (Phase 4). The room name admits people to a live session, the
+   * Q&A names one school's staff and audience, and a public webinar's
+   * registrant list is that school's marketing data. Same category of leak as
+   * a live class join code — see LiveClassSession above.
+   */
+  "Webinar",
+  "WebinarQuestion",
+  "WebinarQuestionVote",
 ] as const;
 
 /**
