@@ -114,7 +114,11 @@ export const FINANCE_STUDENT_SELECT = {
   branch: { select: { id: true, name: true } },
   user: { select: { name: true, email: true } },
   payments: {
-    where: { status: { in: RECEIVED_PAYMENT_STATUSES } },
+    // `deletedAt: null` is spelled out because this is a NESTED read: the
+    // soft-delete guard only folds that clause into top-level queries, so a
+    // reversed / refunded Payment would otherwise still be summed here while
+    // the student's own dossier (a top-level `payment.findMany`) excludes it.
+    where: { status: { in: RECEIVED_PAYMENT_STATUSES }, deletedAt: null },
     select: { amount: true, createdAt: true, method: true },
   },
   // The per-level ledger — the debit side. Present for every student once the

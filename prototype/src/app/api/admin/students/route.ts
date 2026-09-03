@@ -131,10 +131,17 @@ export async function GET(request: Request) {
     branch: true,
     tutor: { include: { user: true } },
     payments: {
+      // Nested read — the soft-delete guard only filters top-level queries, so
+      // spell out `deletedAt: null` here or a reversed payment keeps counting
+      // toward this roster's "paid in full" badge after it has been removed
+      // everywhere else. Tenant scoping has the same nested blind spot; that is
+      // handled by stamping `tenantId` at write time (see the Paystack webhook)
+      // plus scripts/backfill-tenantless-rows.ts for the rows already written.
+      where: { deletedAt: null },
       orderBy: { createdAt: "desc" as const },
     },
     invoices: {
-      include: { payments: true },
+      include: { payments: { where: { deletedAt: null } } },
     },
     // The per-level tuition ledger — so the roster's money figures and the
     // owes_prior_level / legacy_arrears focus presets see the whole ladder.
