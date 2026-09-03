@@ -16,6 +16,8 @@ import {
   SlidersIcon,
   BookOpenIcon,
   BranchIcon,
+  BriefcaseIcon,
+  BroadcastIcon,
   CalendarIcon,
   CertificateIcon,
   ChevronLeftIcon,
@@ -92,6 +94,7 @@ const navItems: NavItem[] = [
   { label: 'Live classes', href: '/admin/live', icon: <PulseIcon />, group: 'Academics' },
   { label: 'Full timetable', href: '/lecturer/timetable', icon: <CalendarIcon />, group: 'Academics' },
   { label: 'Cohort sign-off', href: '/admin/journey', icon: <MapIcon />, group: 'Academics' },
+  { label: 'Batch completions', href: '/admin/completions', icon: <ResultsIcon />, group: 'Academics' },
   { label: 'Promotions', href: '/admin/promotions', icon: <LevelUpIcon />, group: 'Academics' },
   { label: 'Certificates', href: '/admin/certificates', icon: <CertificateIcon />, group: 'Academics' },
 
@@ -110,6 +113,12 @@ const navItems: NavItem[] = [
   { label: 'Courses', href: '/admin/courses', icon: <LessonBuilderIcon />, group: 'Content' },
   { label: 'Materials', href: '/admin/materials', icon: <BookOpenIcon />, group: 'Content' },
   { label: 'Community', href: '/admin/community', icon: <CommunityIcon />, group: 'Content' },
+  // The office's own file store — not student-facing material. Its own
+  // capability (`work_drive`), so it only appears for admins who hold it.
+  { label: 'Work Drive', href: '/admin/work-drive', icon: <BriefcaseIcon />, group: 'Content' },
+  // The staff calendar that rides alongside it — gated on `events`.
+  { label: 'Staff calendar', href: '/admin/calendar', icon: <CalendarIcon />, group: 'Content' },
+  { label: 'Webinars', href: '/admin/webinars', icon: <BroadcastIcon />, group: 'Content' },
 
   // Finance first: for an Accountant this is the whole portal, and the
   // transaction list is what you open from it rather than the other way round.
@@ -283,10 +292,28 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       >
         {/* Header */}
         <div className="border-b border-[var(--border)] p-4">
-          <div className="flex items-center justify-between gap-3">
+          {/* Collapsed rail (desktop only): the brand mark stacked over a
+              full-width expand control, both centred so nothing is crammed
+              against the edge of the 80px rail. */}
+          {collapsed && (
+            <div className="hidden flex-col items-center gap-3 lg:flex">
+              <Link href="/admin" aria-label="Go to dashboard">
+                <BrandLogo variant="mark" className="h-9 w-9" />
+              </Link>
+              <button
+                onClick={() => setCollapsed(false)}
+                aria-label="Expand sidebar"
+                className="flex w-full items-center justify-center rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)]"
+              >
+                <ChevronRightIcon />
+              </button>
+            </div>
+          )}
+
+          <div className={`flex items-center justify-between gap-3 ${collapsed ? 'lg:hidden' : ''}`}>
             {/* The real logo, not an "AW" placeholder — the school has artwork
                 and every other portal was already using it. */}
-            <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
+            <div className="min-w-0">
               <Link href="/admin" aria-label="Go to dashboard">
                 <BrandLogo variant="wordmark" className="h-8" />
               </Link>
@@ -297,18 +324,13 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 <p className="text-[11px] font-medium text-[var(--accent)]">{adminRoleLabel}</p>
               )}
             </div>
-            {collapsed && (
-              <Link href="/admin" aria-label="Go to dashboard" className="hidden lg:block">
-                <BrandLogo variant="mark" className="h-10 w-10" />
-              </Link>
-            )}
 
             <button
               onClick={() => setCollapsed(!collapsed)}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label="Collapse sidebar"
               className="hidden rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:block"
             >
-              {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+              <ChevronLeftIcon />
             </button>
             <button
               onClick={() => setDrawerOpen(false)}
@@ -332,7 +354,14 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             });
             if (groupItems.length === 0) return null;
             return (
-              <div key={group} className="mb-6">
+              <div
+                key={group}
+                className={
+                  collapsed
+                    ? 'mb-3 lg:mt-3 lg:border-t lg:border-[var(--border)] lg:pt-3 lg:first:mt-0 lg:first:border-t-0 lg:first:pt-0'
+                    : 'mb-6'
+                }
+              >
                 {!collapsed && (
                   <p className="mb-3 px-3 text-xs font-bold uppercase tracking-[0.3em] text-[var(--muted)]">{group}</p>
                 )}
@@ -351,6 +380,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                         }}
                         title={collapsed ? item.label : ''}
                         className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition-all duration-200 ${
+                          collapsed ? 'lg:justify-center lg:gap-0 lg:px-0' : ''
+                        } ${
                           active
                             ? 'bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_8px_24px_rgba(255,102,0,0.12)]'
                             : 'text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]'

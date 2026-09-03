@@ -57,6 +57,8 @@ export const TENANT_OWNED_MODELS = [
   "Certificate",
   "Invoice",
   "Payment",
+  "TuitionCharge",
+  "PaymentPlan",
   "Lead",
   "Notification",
   "NotificationSetting",
@@ -203,6 +205,44 @@ export const TENANT_OWNED_MODELS = [
    */
   "TermsAcceptance",
   "RefundRequest",
+
+  /**
+   * The Work Drive (docs/WORK_DRIVE.md). A staff-only file store: a workspace
+   * and its folders, files, versions, extracted text, shares, activity feed
+   * and comments. Every one names one school's staff and holds one school's
+   * documents — policies, finance spreadsheets, scanned contracts. There is no
+   * reading of any of it that another tenant has any business doing, and a
+   * leak here is the same category as SupportTicket: one office's private
+   * paperwork.
+   */
+  "Workspace",
+  "WorkspaceMember",
+  "DriveFolder",
+  "DriveFile",
+  "DriveFileVersion",
+  "DriveFileText",
+  "FileShare",
+  "FileActivity",
+  "FileComment",
+  /**
+   * The staff calendar (Phase 3). An event names one school's staff and, for
+   * a public webinar, one school's registrants by email; the tasks and
+   * attached files are that school's planning. Same category of leak as the
+   * files pillar it sits beside.
+   */
+  "WorkEvent",
+  "EventAttendee",
+  "EventTask",
+  "EventResource",
+  /**
+   * Webinars (Phase 4). The room name admits people to a live session, the
+   * Q&A names one school's staff and audience, and a public webinar's
+   * registrant list is that school's marketing data. Same category of leak as
+   * a live class join code — see LiveClassSession above.
+   */
+  "Webinar",
+  "WebinarQuestion",
+  "WebinarQuestionVote",
 ] as const;
 
 /**

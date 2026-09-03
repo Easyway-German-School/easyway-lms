@@ -64,6 +64,23 @@ async function handleGET(request: NextRequest) {
   );
 
   results.push(
+    await run("payment-plans", async () => {
+      // Move plans to completed/defaulted BEFORE the reminder jobs, so a plan
+      // that lapsed today is no longer holding the lock back when they run.
+      const { sweepPaymentPlans } = await import("@/lib/payment-plans");
+      return sweepPaymentPlans();
+    }),
+  );
+
+  results.push(
+    await run("accountant-digest", async () => {
+      // Self-gated: idempotent per ISO week via the notification dedupeKey.
+      const { sendAccountantDigest } = await import("@/lib/accountant-digest");
+      return sendAccountantDigest();
+    }),
+  );
+
+  results.push(
     await run("payment-warnings", async () => {
       const { runPaymentWarnings } = await import("@/lib/payment-warnings");
       return runPaymentWarnings({ dryRun: false });
@@ -237,6 +254,29 @@ async function handleGET(request: NextRequest) {
     await run("satzkette-turns", async () => {
       const { openLapsedTurns, archiveStaleMatches } = await import("@/lib/satzkette-server");
       return { opened: await openLapsedTurns(), archived: await archiveStaleMatches() };
+    }),
+  );
+
+  /**
+   * Work Drive calendar: remind attendees of an event that starts soon, once
+   * per attendee per event (dedupe on EventAttendee.reminderSentAt). See
+   * src/lib/work-drive/event-reminders.ts.
+   */
+  results.push(
+    await run("work-drive-event-reminders", async () => {
+      const { sendDueEventReminders } = await import("@/lib/work-drive/event-reminders");
+      return sendDueEventReminders();
+    }),
+  );
+
+  /**
+   * Work Drive housekeeping: hard-delete files 30 days into a workspace trash,
+   * and prune surplus old file versions. Both bounded per tick.
+   */
+  results.push(
+    await run("work-drive-retention", async () => {
+      const { purgeExpiredTrash, pruneOldVersions } = await import("@/lib/work-drive/retention");
+      return { trash: await purgeExpiredTrash(), versions: await pruneOldVersions() };
     }),
   );
 
