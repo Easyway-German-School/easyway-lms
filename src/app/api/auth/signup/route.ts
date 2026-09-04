@@ -386,6 +386,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // PhotoCapture on the signup form refuses to submit without a photo, but
+    // that's a UX courtesy like the terms gate below — a request that skips
+    // the browser form entirely (a raw POST) must still be refused, not
+    // silently create an account with no photo.
+    if (normalizedRole === "STUDENT" && !normalizedAdmission.photoUrl) {
+      return NextResponse.json(
+        { error: "Please upload a profile photo." },
+        { status: 400 }
+      );
+    }
+
     // Group students pick one of the house sittings; a private student agrees
     // their own times with their tutor and never sees this question, so it is
     // not required for them.
