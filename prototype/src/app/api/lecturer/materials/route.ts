@@ -290,7 +290,7 @@ export async function POST(req: NextRequest) {
      */
     if (kind !== 'recording' && kind !== 'audio' && kind !== 'video' && !link) {
       after(() =>
-        generateForMaterial(material.id).catch((error) =>
+        generateForMaterial(material.id, { eager: true }).catch((error) =>
           console.error('material-ai kick failed', material.id, error),
         ),
       );

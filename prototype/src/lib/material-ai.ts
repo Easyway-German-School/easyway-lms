@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/ai-cache";
 import { extractText } from "@/lib/extract-text";
-import { getFile } from "@/lib/storage";
+import { getFile, keyFromUrl } from "@/lib/storage";
 import { callModel, activeModelName } from "@/lib/ai";
 import { parseModelJson } from "@/lib/safe-json";
 import { notifyInBackground, KIND } from "@/lib/notify";
@@ -190,8 +190,17 @@ export function coerceStudyNote(raw: unknown): StudyNote | undefined {
  * Returns null when there is nothing to work with — a video, an image, a
  * near-empty PDF — which is a normal outcome, not a failure. The material is
  * marked so the queue stops reconsidering it every run.
+ *
+ * `eager` is set by the fire-on-upload kick (see the upload routes). That
+ * attempt is optimistic — the file may still be settling in the bucket, a
+ * model may be briefly unreachable — so on failure it must NOT alarm the tutor
+ * and must NOT mark the row `failed` (which is terminal). It resets to `none`
+ * and lets the scheduled queue have the authoritative go.
  */
-export async function generateForMaterial(materialId: string): Promise<MaterialInsight | null> {
+export async function generateForMaterial(
+  materialId: string,
+  opts: { eager?: boolean } = {},
+): Promise<MaterialInsight | null> {
   const material = await prisma.material.findUnique({
     where: { id: materialId },
     select: {
@@ -205,21 +214,26 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
   });
   if (!material) return null;
 
-  // When notes can't be written, tell the tutor who uploaded it — not the
-  // students. Their side stays quiet and just shows "still being prepared".
+  // When notes genuinely can't be written, tell the tutor who uploaded it —
+  // not the students, whose side just shows "still being prepared". Suppressed
+  // entirely on the eager upload kick: a first-try hiccup is not news.
   const tellTutor = () => {
+    if (opts.eager) return;
     const userId = material.lecturer?.userId ?? material.uploadedBy ?? null;
     if (!userId) return;
     notifyInBackground({
       to: { userIds: [userId] },
       kind: KIND.studyNotesFailed,
       severity: "warning",
-      title: "Becca couldn't write up notes for a material",
-      message: `“${material.title}” didn't produce a study note. Open it in the lesson builder to try again.`,
-      link: `/lecturer/materials/${material.id}`,
+      title: "A material couldn't be summarised automatically",
+      message: `We couldn't build study notes for “${material.title}”. It still works as a download — you can add notes by hand from Materials.`,
+      link: "/lecturer/materials",
       dedupeKey: `study-notes-failed:${material.id}`,
     });
   };
+
+  /** Where a failed attempt leaves `aiState`: terminal for the queue, retryable for the eager kick. */
+  const failState = opts.eager ? "none" : "failed";
 
   // Recordings, videos and audio carry no readable text. Marked `none` rather
   // than `failed`: nothing went wrong, there is simply nothing to read.
@@ -236,7 +250,12 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
   await prisma.material.update({ where: { id: material.id }, data: { aiState: "pending" } });
 
   try {
-    const file = await getFile(material.filePath);
+    // `filePath` is the URL handed to the browser (`/api/files/<key>`,
+    // `/uploads/<key>`, or a full bucket URL). `getFile` wants the bare key —
+    // every other caller passes one. Resolving it here is what was making
+    // real uploads fail with "file not found in storage".
+    const key = keyFromUrl(material.filePath) ?? material.filePath.replace(/^\/+/, "");
+    const file = await getFile(key);
     if (!file) throw new Error("file not found in storage");
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -268,7 +287,7 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
     if (!insight) {
       await prisma.material.update({
         where: { id: material.id },
-        data: { aiState: "failed", aiUpdatedAt: new Date() },
+        data: { aiState: failState, aiUpdatedAt: new Date() },
       });
       tellTutor();
       return null;
@@ -313,10 +332,10 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
 
     return insight;
   } catch (error) {
-    console.error("[material-ai] failed for", material.id, error);
+    console.error("[material-ai] failed for", material.id, error, opts.eager ? "(eager, will retry on the queue)" : "");
     await prisma.material.update({
       where: { id: material.id },
-      data: { aiState: "failed", aiUpdatedAt: new Date() },
+      data: { aiState: failState, aiUpdatedAt: new Date() },
     });
     tellTutor();
     return null;
@@ -336,9 +355,16 @@ export async function processMaterialQueue(limit = 3): Promise<{
   ready: number;
   skipped: number;
 }> {
+  // A `failed` material is retried, but not on every run — a model that was
+  // briefly down or returned junk deserves another go; hammering it does not.
+  const RETRY_FAILED_AFTER_MS = 12 * 60 * 60 * 1000;
+
   const pending = await prisma.material.findMany({
     where: {
-      aiState: { in: ["none", "pending"] },
+      OR: [
+        { aiState: { in: ["none", "pending"] } },
+        { aiState: "failed", aiUpdatedAt: { lt: new Date(Date.now() - RETRY_FAILED_AFTER_MS) } },
+      ],
       kind: { notIn: ["recording", "audio", "video"] },
       // Only ones uploaded recently: back-filling the entire library on the
       // first run would be hours of generation nobody asked for.

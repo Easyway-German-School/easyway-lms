@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
      */
     if (kind !== "recording" && kind !== "audio" && kind !== "video") {
       after(() =>
-        generateForMaterial(material.id).catch((error) =>
+        generateForMaterial(material.id, { eager: true }).catch((error) =>
           console.error("material-ai kick failed", material.id, error),
         ),
       );
@@ -245,7 +245,10 @@ export async function DELETE(req: NextRequest) {
 async function announce(
   material: MaterialAudienceRow & { title: string; kind: string },
 ): Promise<void> {
-  const notifyLink = material.kind === "recording" ? "/materials?tab=watch" : "/materials";
+  // Tutors land in their own portal; students in theirs. Sending a tutor to
+  // the student `/materials` page is the kind of thing that reads as a broken
+  // link.
+  const studentLink = material.kind === "recording" ? "/materials?tab=watch" : "/materials";
 
   const tutorUserIds = await tutorUserIdsForMaterial(material);
   if (tutorUserIds.length) {
@@ -255,7 +258,7 @@ async function announce(
       severity: "info",
       title: material.lecturerId ? "New material from the office" : "New material for your class",
       message: `“${material.title}” was added for your class. Open Materials to see it.`,
-      link: notifyLink,
+      link: "/lecturer/materials",
       push: true,
       dedupeKey: `material:${material.id}:tutors`,
     }).catch((error) => console.error("Tutor material notification failed", error));
@@ -272,7 +275,7 @@ async function announce(
         material.kind === "recording"
           ? `“${material.title}” is in your video library.`
           : `“${material.title}” was added to your Materials. Open it to download.`,
-      link: notifyLink,
+      link: studentLink,
       push: true,
       dedupeKey: `material:${material.id}:students`,
     }).catch((error) => console.error("Student material notification failed", error));
