@@ -6,6 +6,7 @@ import AdminShell from "@/components/AdminShell";
 import { CheckIcon, LessonBuilderIcon, LinkIcon, TrashIcon, UploadIcon } from "@/components/icons";
 import { COURSE_LEVELS } from "@/lib/lecturer-assignment";
 import { uploadFile } from "@/lib/upload";
+import { parseDriveFolderId } from "@/lib/drive-import";
 
 /**
  * Courses — and the material that hangs off them.
@@ -200,6 +201,12 @@ export default function AdminCoursesPage() {
   /** The level the material actually lands at — the course's, or the picked one. */
   const effectiveLevel = selectedCourse?.level || upload.level;
 
+  /** Set when the pasted link is a Drive *folder* — every file inside gets imported. */
+  const driveFolderId = useMemo(
+    () => (upload.source === "link" ? parseDriveFolderId(upload.sourceUrl) : null),
+    [upload.source, upload.sourceUrl],
+  );
+
   async function submitUpload() {
     if (upload.source === "file" && upload.files.length === 0) {
       setUploadMessage("Choose files or a folder, or switch to a link.");
@@ -235,6 +242,26 @@ export default function AdminCoursesPage() {
     };
 
     try {
+      if (upload.source === "link" && driveFolderId) {
+        // A Drive *folder* link — pull in every file inside as its own material.
+        setUploadMessage("Reading the folder…");
+        const res = await fetch("/api/admin/materials/import-drive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...base, folderUrl: upload.sourceUrl.trim() }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Folder import failed");
+
+        const from = data.folderName ? ` from “${data.folderName}”` : "";
+        const extra = data.truncated ? ` (first ${data.imported} — the folder has more)` : "";
+        setSuccess(`Imported ${data.imported} file${data.imported === 1 ? "" : "s"}${from}${extra}.`);
+        setUpload((current) => ({ ...EMPTY_UPLOAD, level: current.level, audience: current.audience }));
+        setUploadMessage("");
+        await load();
+        return;
+      }
+
       if (upload.source === "link") {
         const res = await fetch("/api/admin/materials", {
           method: "POST",
@@ -524,18 +551,25 @@ export default function AdminCoursesPage() {
             ) : (
               <label className="block text-sm font-medium md:col-span-2">
                 <span className="flex items-center gap-1.5">
-                  <LinkIcon className="h-4 w-4" /> Video or audio link
+                  <LinkIcon className="h-4 w-4" /> Video / audio link — or a Google Drive folder
                 </span>
                 <input
                   type="url"
                   inputMode="url"
                   value={upload.sourceUrl}
                   onChange={(event) => setUpload((c) => ({ ...c, sourceUrl: event.target.value }))}
-                  placeholder="YouTube, Vimeo, Loom, Drive · SoundCloud, Spotify · or a .mp4 / .mp3 URL"
+                  placeholder="YouTube, Vimeo, Loom · SoundCloud, Spotify · a .mp4 / .mp3 URL · or a Drive folder link"
                   className={inputClass}
                 />
                 <p className="mt-1 text-xs text-[var(--muted)]">
-                  Nothing is copied — it plays inside the student&apos;s library from where it lives.
+                  {driveFolderId ? (
+                    <span className="font-semibold text-[var(--accent)]">
+                      Drive folder detected — every file inside becomes its own material, keeping its
+                      name. Sub-folders are included. The folder must be shared “Anyone with the link”.
+                    </span>
+                  ) : (
+                    <>Nothing is copied — it opens inside the student&apos;s library from where it lives.</>
+                  )}
                 </p>
               </label>
             )}
@@ -543,14 +577,16 @@ export default function AdminCoursesPage() {
             <label className="block text-sm font-medium">
               Title{" "}
               <span className="text-[var(--muted)]">
-                {upload.source === "file" && upload.files.length > 1 ? "(each file keeps its name)" : ""}
+                {(upload.source === "file" && upload.files.length > 1) || driveFolderId
+                  ? "(each file keeps its name)"
+                  : ""}
               </span>
               <input
                 value={upload.title}
                 onChange={(event) => setUpload((c) => ({ ...c, title: event.target.value }))}
                 placeholder="e.g. Week 3 — Perfekt worksheet"
                 className={inputClass}
-                disabled={upload.source === "file" && upload.files.length > 1}
+                disabled={(upload.source === "file" && upload.files.length > 1) || Boolean(driveFolderId)}
               />
             </label>
 
@@ -719,7 +755,13 @@ export default function AdminCoursesPage() {
             className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
             <UploadIcon className="h-4 w-4" />
-            {uploading ? "Uploading…" : "Upload"}
+            {uploading
+              ? driveFolderId
+                ? "Importing…"
+                : "Uploading…"
+              : driveFolderId
+                ? "Import folder"
+                : "Upload"}
           </button>
           {uploadMessage ? <p className="mt-3 text-sm text-[var(--muted)]">{uploadMessage}</p> : null}
         </div>

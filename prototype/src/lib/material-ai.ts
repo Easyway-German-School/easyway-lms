@@ -235,13 +235,16 @@ export async function generateForMaterial(
   /** Where a failed attempt leaves `aiState`: terminal for the queue, retryable for the eager kick. */
   const failState = opts.eager ? "none" : "failed";
 
-  // Recordings, videos and audio carry no readable text. Marked `none` rather
-  // than `failed`: nothing went wrong, there is simply nothing to read.
+  // Recordings, videos and audio carry no readable text. A `link/*` material
+  // is a pointer to a file we never held (a Drive-folder import — see
+  // drive-import.ts), so there are no bytes to extract either. Marked `none`
+  // rather than `failed`: nothing went wrong, there is simply nothing to read.
   if (
     material.kind === "recording" ||
     material.kind === "audio" ||
     (material.fileType || "").startsWith("video") ||
-    (material.fileType || "").startsWith("audio")
+    (material.fileType || "").startsWith("audio") ||
+    (material.fileType || "").startsWith("link/")
   ) {
     await prisma.material.update({ where: { id: material.id }, data: { aiState: "none" } });
     return null;

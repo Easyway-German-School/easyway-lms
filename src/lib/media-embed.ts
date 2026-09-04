@@ -21,6 +21,14 @@
 /** What `Material.fileType` carries for a linked video. */
 export const EMBED_FILE_TYPE = "video/embed";
 
+/**
+ * …and for a linked audio track. Mirrored from prototype/src/lib/media-embed.ts
+ * (PR #21, prototype-only) purely so src/lib/drive-import.ts — itself mirrored
+ * for Vercel's output-file tracer, see commit 91c544e — resolves this import.
+ * Root's own tree does not otherwise use it.
+ */
+export const AUDIO_EMBED_FILE_TYPE = "audio/embed";
+
 export function isEmbeddedVideo(fileType?: string | null): boolean {
   return String(fileType ?? "").toLowerCase() === EMBED_FILE_TYPE;
 }
