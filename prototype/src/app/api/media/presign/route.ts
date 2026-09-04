@@ -70,14 +70,55 @@ const AUTHENTICATED_CONTENT_TYPES = new Set([
   // can't render anyway, so there is nothing to gain by accepting it.
   "application/pdf",
   "audio/mpeg",
+  "audio/mp3",
   "audio/mp4",
+  "audio/aac",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/ogg",
   "audio/webm",
+  "audio/flac",
   "video/mp4",
   "video/webm",
+  "video/quicktime",
+  "video/x-matroska",
+  "video/x-msvideo",
+  "video/mpeg",
+  // Office — current (OOXML), legacy (.doc/.ppt/.xls) and OpenDocument.
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/msword",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.ms-excel",
+  "application/vnd.oasis.opendocument.text",
+  "application/vnd.oasis.opendocument.presentation",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/rtf",
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+  "application/epub+zip",
+  // Archives — a tutor's "week 3 pack" is routinely a zip of everything.
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/x-7z-compressed",
+  "application/x-rar-compressed",
+  "application/vnd.rar",
+  "application/gzip",
+  "application/x-tar",
+  // The generic type a browser sends for a format it does not recognise
+  // (.odp on some builds, .key, .pages, .apkg, …). This is what makes the
+  // uploader "any file format" in practice — lib/upload.ts falls back to
+  // exactly this. Deliberately NOT extended to anonymous callers or the
+  // `photos` folder: the file lands in the private bucket and is only ever
+  // served back through /api/files behind the session check.
+  "application/octet-stream",
 ]);
+
+// Withheld even for signed-in callers: served inline these are a
+// script-execution vector, and nothing in the app needs a user-uploaded one.
+const AUTHENTICATED_BLOCKED = new Set(["image/svg+xml", "text/html", "application/xhtml+xml"]);
 
 export async function POST(request: NextRequest) {
   // Parse the body early so callers that want to upload signup photos
@@ -121,12 +162,13 @@ export async function POST(request: NextRequest) {
   // The signature commits to this Content-Type, so the browser cannot swap it
   // afterwards — checking it here is therefore a real constraint on the bytes
   // that can land, not merely on what the caller claims.
+  const normalizedType = contentType.toLowerCase().split(";")[0].trim();
   const allowed = signedIn ? AUTHENTICATED_CONTENT_TYPES : ANONYMOUS_CONTENT_TYPES;
-  if (!allowed.has(contentType.toLowerCase().split(";")[0].trim())) {
+  if (!allowed.has(normalizedType) || (signedIn && AUTHENTICATED_BLOCKED.has(normalizedType))) {
     return NextResponse.json(
       {
         error: signedIn
-          ? "That file type is not accepted."
+          ? "That file type can't be uploaded here."
           : "Please upload a photo — JPEG, PNG or WebP.",
       },
       { status: 415 },
