@@ -10,6 +10,22 @@ import BulkStudentAdd from "@/components/BulkStudentAdd";
 import { goalFor } from "@/lib/germany-goals";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { isOnlineBranchName } from "@/lib/online-branch";
+import { CalendarIcon } from "@/components/icons";
+import { packageOptions, countries } from "@/app/auth/signup/options";
+import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload";
+
+/**
+ * Pathway choices for the manual "Add student" form only. Mirrors the signup
+ * form's list, plus "Travel Package" which the office offers to walk-in students
+ * but which isn't part of self-service signup.
+ */
+const addStudentPathwayOptions = [...packageOptions, "Travel Package"];
+
+/** Bare month names — matches the signup form and the roster's Batch filter. */
+const BATCH_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+] as const;
 
 type BranchOption = {
   id: string;
@@ -62,34 +78,48 @@ const admissionLabelMap: Record<string, string> = {
  *
  * The point is that somebody arriving from a dashboard tile can see at a glance
  * which rows the number was about, without reading a single value — so the
- * treatment is a left bar, a tinted background and bold text together rather
- * than colour alone. Colour alone excludes anyone who cannot distinguish it,
- * and this is a list people act on: ringing a student, chasing a fee.
+ * treatment is a left bar, a faint tinted background and a weight change
+ * together rather than colour alone. Colour alone excludes anyone who cannot
+ * distinguish it, and this is a list people act on: ringing a student, chasing
+ * a fee.
+ *
+ * Every value is a theme token, not a raw Tailwind palette class. The old
+ * `bg-red-50` / `text-red-700` set was built for a white page and turned into a
+ * flat pink slab with shouting text on the dark themes. `--danger-soft` and
+ * friends already carry a low alpha tuned per theme, so the tint stays a
+ * whisper on any background.
  */
-const FOCUS_TONE: Record<string, { row: string; text: string; chip: string; bar: string }> = {
+const FOCUS_TONE: Record<
+  string,
+  { row: string; text: string; bar: string; accent: string; soft: string }
+> = {
   danger: {
-    row: "bg-red-50/80",
-    text: "text-red-700",
-    chip: "bg-red-100 text-red-700 border-red-300",
-    bar: "before:bg-red-500",
+    row: "bg-[var(--danger-soft)]",
+    text: "text-[var(--danger)]",
+    bar: "before:bg-[var(--danger)]",
+    accent: "var(--danger)",
+    soft: "var(--danger-soft)",
   },
   warn: {
-    row: "bg-amber-50/80",
-    text: "text-amber-800",
-    chip: "bg-amber-100 text-amber-800 border-amber-300",
-    bar: "before:bg-amber-500",
+    row: "bg-[var(--warning-soft)]",
+    text: "text-[var(--warning)]",
+    bar: "before:bg-[var(--warning)]",
+    accent: "var(--warning)",
+    soft: "var(--warning-soft)",
   },
   good: {
-    row: "bg-emerald-50/70",
-    text: "text-emerald-700",
-    chip: "bg-emerald-100 text-emerald-700 border-emerald-300",
-    bar: "before:bg-emerald-500",
+    row: "bg-[var(--success-soft)]",
+    text: "text-[var(--success)]",
+    bar: "before:bg-[var(--success)]",
+    accent: "var(--success)",
+    soft: "var(--success-soft)",
   },
   info: {
-    row: "bg-sky-50/70",
-    text: "text-sky-700",
-    chip: "bg-sky-100 text-sky-700 border-sky-300",
-    bar: "before:bg-sky-500",
+    row: "bg-[var(--accent-soft)]",
+    text: "text-[var(--accent-ink)]",
+    bar: "before:bg-[var(--accent-strong)]",
+    accent: "var(--accent-strong)",
+    soft: "var(--accent-soft)",
   },
 };
 
@@ -157,6 +187,20 @@ function StudentsRoster() {
   const [newClassType, setNewClassType] = useState("group");
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
   const [newDeliveryMode, setNewDeliveryMode] = useState("physical");
+  const [newBatch, setNewBatch] = useState("");
+  const [newPathway, setNewPathway] = useState(packageOptions[0]);
+  const [newAmountPaid, setNewAmountPaid] = useState("");
+  // Where the student lives — collected on signup into the admission blob, but
+  // never asked for on this manual-add form, so an office-added student (and
+  // every online student added this way) had no location on record at all.
+  const [newCity, setNewCity] = useState("");
+  const [newStateRegion, setNewStateRegion] = useState("");
+  const [newCountry, setNewCountry] = useState("Nigeria");
+  // Profile photo the office can set on the student's behalf, so a record is
+  // not left faceless waiting for a student who never gets round to it.
+  const [newPhotoUrl, setNewPhotoUrl] = useState("");
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoUploadError, setPhotoUploadError] = useState("");
   const [studentError, setStudentError] = useState("");
   /** Shown once, right after a manual add, so the admin has something to copy. */
   const [savedCredentials, setSavedCredentials] = useState<{
@@ -172,6 +216,15 @@ function StudentsRoster() {
   const [selectedAdmission, setSelectedAdmission] = useState<AdmissionData>(null);
   const [selectedStudentName, setSelectedStudentName] = useState("");
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+  /** Set once the reader has ticked "select every student that matches", not just the page. */
+  const [selectAllMatching, setSelectAllMatching] = useState(false);
+  /** Which admin sub-role is signed in — "super" unlocks the Reset roster tool. */
+  const [adminRole, setAdminRole] = useState<string>("");
+  /** Short outcome line after a bulk delete: "Removed 18. 2 were already gone." */
+  const [deleteFeedback, setDeleteFeedback] = useState<string>("");
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetPhrase, setResetPhrase] = useState("");
+  const [resetting, setResetting] = useState(false);
 
   const loadBranches = useCallback(async () => {
     const [branchesRes, lecturersRes] = await Promise.all([
@@ -217,6 +270,7 @@ function StudentsRoster() {
       setFocusMeta(data.focus ?? null);
       setMatchedIds(Array.isArray(data.matchedIds) ? new Set<string>(data.matchedIds) : null);
       setCanSeeMoney(data.canSeeMoney !== false);
+      setAdminRole(typeof data.adminRole === "string" ? data.adminRole : "");
     }
     setLoading(false);
   }, [agingBucket, filterBatch, filterBranchId, filterClassType, filterLevel, filterPaymentStatus, filterSessionSlot, filterStatus, filterTutorId, focus, focusIds, page, pageSize, search]);
@@ -261,6 +315,12 @@ function StudentsRoster() {
       classType: newClassType,
       sessionSlot: newSessionSlot,
       deliveryMode: isOnlineSelection ? "online" : newDeliveryMode,
+      pathway: newPathway,
+      batch: newBatch,
+      city: newCity.trim(),
+      state: newStateRegion.trim(),
+      country: newCountry.trim(),
+      photoUrl: newPhotoUrl || undefined,
     } as Record<string, unknown>;
 
     let res: Response;
@@ -280,6 +340,10 @@ function StudentsRoster() {
       // A blank password is fine on create too — the server mints a readable
       // temporary one and hands it back, same as the CSV and paste-many tools.
       if (newPassword.trim()) payload.password = newPassword.trim();
+      // Up-front payment is a create-only concept — recorded once, when the
+      // account is made. Editing a student never re-posts it.
+      const amount = Number(newAmountPaid);
+      if (Number.isFinite(amount) && amount > 0) payload.amountPaid = Math.round(amount);
       res = await fetch("/api/admin/students", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -313,6 +377,10 @@ function StudentsRoster() {
     setNewTutorId("");
     setNewStatus("active");
     setNewDeliveryMode("physical");
+    setNewBatch("");
+    setNewPathway(packageOptions[0]);
+    setNewAmountPaid("");
+    resetExtraStudentFields();
     setShowStudentForm(false);
     await loadStudents();
   }
@@ -382,6 +450,35 @@ function StudentsRoster() {
     await loadStudents();
   }
 
+  /** Location + photo fields — cleared together everywhere the form resets. */
+  function resetExtraStudentFields() {
+    setNewCity("");
+    setNewStateRegion("");
+    setNewCountry("Nigeria");
+    setNewPhotoUrl("");
+    setPhotoUploading(false);
+    setPhotoUploadError("");
+  }
+
+  async function handlePhotoPick(file: File | null | undefined) {
+    if (!file) return;
+    const invalid = validateImageFile(file);
+    if (invalid) {
+      setPhotoUploadError(invalid);
+      return;
+    }
+    setPhotoUploadError("");
+    setPhotoUploading(true);
+    try {
+      const url = await uploadImage(file);
+      setNewPhotoUrl(url);
+    } catch (error) {
+      setPhotoUploadError(uploadErrorMessage(error, "Could not upload that photo"));
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
   function startEditingStudent(student: StudentWithUser) {
     setEditingStudentId(student.id);
     setNewName(student.user.name || "");
@@ -395,6 +492,22 @@ function StudentsRoster() {
     setNewClassType(student.classType || "group");
     setNewSessionSlot(student.sessionSlot || "morning");
     setNewDeliveryMode(student.deliveryMode === "hybrid" ? "hybrid" : "physical");
+    setNewBatch(
+      typeof (student.admission as AdmissionData)?.batch === "string"
+        ? String((student.admission as AdmissionData)?.batch)
+        : "",
+    );
+    setNewPathway(student.pathway || packageOptions[0]);
+    const admission = ((student.admission as AdmissionData) || {}) as Record<string, unknown>;
+    setNewCity(typeof admission.city === "string" ? admission.city : "");
+    setNewStateRegion(typeof admission.state === "string" ? admission.state : "");
+    setNewCountry(typeof admission.country === "string" && admission.country ? admission.country : "Nigeria");
+    setNewPhotoUrl(typeof admission.photoUrl === "string" ? admission.photoUrl : "");
+    setPhotoUploading(false);
+    setPhotoUploadError("");
+    // Not an edit concept — the initial payment was recorded when the account
+    // was created. Adjustments go through the student's own finance screen.
+    setNewAmountPaid("");
     setStudentError("");
     setSavedCredentials(null);
     setShowStudentForm(true);
@@ -413,6 +526,10 @@ function StudentsRoster() {
     setNewClassType("group");
     setNewSessionSlot("morning");
     setNewDeliveryMode("physical");
+    setNewBatch("");
+    setNewPathway(packageOptions[0]);
+    setNewAmountPaid("");
+    resetExtraStudentFields();
     setStudentError("");
     setSavedCredentials(null);
     setShowStudentForm(false);
@@ -592,22 +709,95 @@ function StudentsRoster() {
     await loadStudents();
   }
 
+  /** The filters currently narrowing the roster, in the shape the reset endpoint reads. */
+  function currentFilterPayload() {
+    return {
+      ...(filterBranchId ? { branchId: filterBranchId } : {}),
+      ...(filterLevel ? { level: filterLevel } : {}),
+      ...(filterStatus ? { status: filterStatus } : {}),
+    };
+  }
+
   async function handleDeleteSelectedStudents() {
+    setStudentError("");
+    setDeleteFeedback("");
+
+    // "Select all matching" hands the job to the server so it is not capped by
+    // one page of ids — it re-resolves the set from the same filters.
+    if (selectAllMatching) {
+      if (!confirm(`Remove all ${totalCount} students that match the current filters? They can be restored from Security → Audit trail.`)) return;
+      const res = await fetch("/api/admin/students", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "all", confirmation: "RESET STUDENTS", filters: currentFilterPayload() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStudentError(data?.error || "Unable to remove the selected students.");
+        return;
+      }
+      setDeleteFeedback(`Removed ${data.deleted ?? 0} student${(data.deleted ?? 0) === 1 ? "" : "s"}.`);
+      setSelectAllMatching(false);
+      setSelectedStudentIds(new Set());
+      setPage(1);
+      await loadStudents();
+      return;
+    }
+
     const ids = [...selectedStudentIds];
     if (!ids.length) return;
-    if (!confirm(`Are you sure you want to delete ${ids.length} students? This action is not reversible from the portal and will log them out everywhere.`)) return;
+    if (!confirm(`Delete ${ids.length} student${ids.length === 1 ? "" : "s"}? They can be restored from Security → Audit trail.`)) return;
     const res = await fetch("/api/admin/students", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ studentIds: ids, confirmation: "DELETE STUDENTS" }),
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
       setStudentError(data?.error || "Unable to delete selected students.");
       return;
     }
-    setSelectedStudentIds(new Set());
+    const deleted: number = typeof data.deleted === "number" ? data.deleted : ids.length;
+    const skipped: string[] = Array.isArray(data.skipped) ? data.skipped : [];
+    setDeleteFeedback(
+      `Removed ${deleted} student${deleted === 1 ? "" : "s"}.` +
+        (skipped.length ? ` ${skipped.length} were already gone or outside your access.` : ""),
+    );
+    // Drop only what actually went, so anything skipped stays visible/selectable.
+    setSelectedStudentIds((current) => {
+      const next = new Set(current);
+      for (const id of ids) if (!skipped.includes(id)) next.delete(id);
+      return next;
+    });
     await loadStudents();
+  }
+
+  async function handleResetRoster() {
+    if (resetPhrase !== "RESET STUDENTS") return;
+    setResetting(true);
+    setStudentError("");
+    setDeleteFeedback("");
+    try {
+      const res = await fetch("/api/admin/students", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "all", confirmation: "RESET STUDENTS" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStudentError(data?.error || "Unable to reset the roster.");
+        return;
+      }
+      setDeleteFeedback(`Roster reset — removed ${data.deleted ?? 0} student${(data.deleted ?? 0) === 1 ? "" : "s"}. Restore any of them from Security → Audit trail.`);
+      setShowResetModal(false);
+      setResetPhrase("");
+      setSelectAllMatching(false);
+      setSelectedStudentIds(new Set());
+      setPage(1);
+      await loadStudents();
+    } finally {
+      setResetting(false);
+    }
   }
 
   const tone = FOCUS_TONE[focusMeta?.tone ?? "danger"] ?? FOCUS_TONE.danger;
@@ -626,18 +816,34 @@ function StudentsRoster() {
           and offers one click out of it.
         */}
         {focusMeta && (
-          <div className={`flex flex-wrap items-center justify-between gap-4 rounded-3xl border p-5 ${tone.chip}`}>
-            <div className="min-w-0">
-              <p className="text-sm font-black uppercase tracking-[0.14em]">{focusMeta.label}</p>
-              <p className="mt-1 text-sm opacity-90">
-                {focusMeta.hint}. Showing {totalCount} {totalCount === 1 ? "student" : "students"} of the whole roster,
-                highlighted below.
-              </p>
+          <div
+            className="flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-4 pl-5 pr-4 shadow-sm"
+            style={{ borderLeft: `3px solid ${tone.accent}` }}
+          >
+            <div className="flex min-w-0 items-start gap-3">
+              <span
+                aria-hidden="true"
+                className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                style={{ background: tone.soft, color: tone.accent }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 5h16l-6.4 8v5.5L10.4 21v-8L4 5Z" />
+                </svg>
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: tone.accent }}>
+                  {focusMeta.label}
+                </p>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  {focusMeta.hint}. Showing {totalCount} {totalCount === 1 ? "student" : "students"} of the whole roster,
+                  highlighted below.
+                </p>
+              </div>
             </div>
             <button
               type="button"
               onClick={clearFocus}
-              className="shrink-0 rounded-full border border-current px-4 py-2 text-sm font-bold transition hover:bg-[var(--surface-soft)]"
+              className="shrink-0 rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-soft)]"
             >
               Clear focus
             </button>
@@ -817,9 +1023,59 @@ function StudentsRoster() {
               >
                 {showStudentForm ? "Close form" : "Add student"}
               </button>
+              {/* The switchover tool: clear the whole roster in one deliberate,
+                  restorable action. Super admin only — the server enforces it
+                  too. */}
+              {adminRole === "super" ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-red-500 px-4 py-3 text-sm font-semibold text-red-600"
+                  onClick={() => { setResetPhrase(""); setShowResetModal(true); }}
+                >
+                  Reset roster
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
+
+        {showResetModal ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md space-y-4 rounded-3xl border border-red-300 bg-[var(--surface)] p-6 shadow-xl">
+              <h2 className="text-xl font-bold text-red-600">Reset the student roster</h2>
+              <p className="text-sm text-[var(--foreground-soft)]">
+                This removes <strong>every student currently in the LMS</strong>
+                {totalCount ? <> — <strong>{totalCount}</strong> right now</> : null}. They stop being able to sign
+                in immediately. Every one of them can be restored from{" "}
+                <span className="font-semibold">Security → Audit trail</span> afterwards.
+              </p>
+              <p className="text-sm text-[var(--muted)]">Type <span className="font-mono font-bold">RESET STUDENTS</span> to confirm.</p>
+              <input
+                value={resetPhrase}
+                onChange={(event) => setResetPhrase(event.target.value)}
+                placeholder="RESET STUDENTS"
+                className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+              />
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setShowResetModal(false); setResetPhrase(""); }}
+                  className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={resetPhrase !== "RESET STUDENTS" || resetting}
+                  onClick={handleResetRoster}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {resetting ? "Removing…" : "Remove all students"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {/* Sits beside the one-at-a-time form on purpose: the moment somebody
             realises they have fourteen students to add is the moment they are
@@ -936,6 +1192,39 @@ function StudentsRoster() {
                 </select>
               </label>
               <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Batch month</span>
+                <select
+                  value={newBatch}
+                  onChange={(event) => setNewBatch(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">No batch set</option>
+                  {BATCH_MONTHS.map((month) => (
+                    <option key={month} value={month}>{month}</option>
+                  ))}
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  The month this student&apos;s level started. The timetable and the level-end date are
+                  worked out from it — without it neither exists and they never auto-promote.
+                </span>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Pathway</span>
+                <select
+                  value={newPathway}
+                  onChange={(event) => setNewPathway(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  {addStudentPathwayOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  What Germany is for. Drives the study plan and the goal shown on their journey — the
+                  same choice the signup form asks new students to make.
+                </span>
+              </label>
+              <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Branch</span>
                 <select
                   value={newBranchId}
@@ -1016,7 +1305,7 @@ function StudentsRoster() {
                 <span className="font-semibold text-[var(--muted)]">Delivery mode</span>
                 {isOnlineBranchName(branches.find((branch) => branch.id === newBranchId)?.name) ? (
                   <div className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--muted)]">
-                    Online only — set by the branch
+                    Online — set automatically by the Online branch
                   </div>
                 ) : (
                   <select
@@ -1029,9 +1318,108 @@ function StudentsRoster() {
                   </select>
                 )}
                 <span className="block text-xs font-normal text-[var(--muted)]">
-                  Decides whether &quot;Live class&quot; shows up in this student&apos;s sidebar.
+                  Decides whether &quot;Live class&quot; shows up in this student&apos;s sidebar. For a
+                  fully online student, pick the <span className="font-semibold">Online</span> branch above —
+                  that switches this to Online on its own.
                 </span>
               </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">City / town</span>
+                <input
+                  value={newCity}
+                  onChange={(event) => setNewCity(event.target.value)}
+                  placeholder="e.g. Lagos"
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">State / region</span>
+                <input
+                  value={newStateRegion}
+                  onChange={(event) => setNewStateRegion(event.target.value)}
+                  placeholder="e.g. Lagos, or Nordrhein-Westfalen"
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Where the student lives now — matters most for online students, who have no branch to
+                  place them.
+                </span>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Country</span>
+                <select
+                  value={newCountry}
+                  onChange={(event) => setNewCountry(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  {(countries.includes(newCountry) ? countries : [newCountry, ...countries]).map((country) => (
+                    <option key={country} value={country}>{country}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Profile photo</span>
+                <div className="flex items-center gap-3">
+                  {newPhotoUrl ? (
+                    <img
+                      src={newPhotoUrl}
+                      alt=""
+                      className="h-12 w-12 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-dashed border-[var(--border)] text-xs text-[var(--muted)]">
+                      —
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={photoUploading}
+                    onChange={(event) => {
+                      void handlePhotoPick(event.target.files?.[0]);
+                      event.target.value = "";
+                    }}
+                    className="text-xs"
+                  />
+                  {newPhotoUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => setNewPhotoUrl("")}
+                      className="text-xs font-semibold text-rose-500"
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+                <span
+                  className={`block text-xs font-normal ${photoUploadError ? "text-rose-500" : "text-[var(--muted)]"}`}
+                >
+                  {photoUploading
+                    ? "Uploading…"
+                    : photoUploadError
+                      ? photoUploadError
+                      : "Optional. Set it here for students who have not added one themselves — Becca reminds the rest."}
+                </span>
+              </label>
+              {!editingStudentId ? (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Amount already paid (₦)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1000}
+                    inputMode="numeric"
+                    value={newAmountPaid}
+                    onChange={(event) => setNewAmountPaid(event.target.value)}
+                    placeholder="e.g. 150000"
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  />
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    For a student who paid before joining the portal. Records a completed payment so the
+                    paywall does not lock them out of a level they have already paid for. Leave blank for none.
+                  </span>
+                </label>
+              ) : null}
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
@@ -1055,10 +1443,48 @@ function StudentsRoster() {
           </div>
         ) : null}
 
-        {selectedStudentIds.size > 0 ? (
+        {deleteFeedback ? (
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <span>{deleteFeedback}</span>
+            <button type="button" onClick={() => setDeleteFeedback("")} className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-semibold">Dismiss</button>
+          </div>
+        ) : null}
+
+        {selectedStudentIds.size > 0 || selectAllMatching ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-            <span>{selectedStudentIds.size} student{selectedStudentIds.size === 1 ? "" : "s"} selected</span>
-            <button type="button" onClick={handleDeleteSelectedStudents} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">Delete selected</button>
+            <div className="flex flex-wrap items-center gap-2">
+              <span>
+                {selectAllMatching
+                  ? `All ${totalCount} student${totalCount === 1 ? "" : "s"} matching the current filters are selected`
+                  : `${selectedStudentIds.size} student${selectedStudentIds.size === 1 ? "" : "s"} selected`}
+              </span>
+              {/* Every visible row ticked but there are more pages behind the
+                  filter — offer the whole matching set, Gmail-style. */}
+              {!selectAllMatching &&
+              students.length > 0 &&
+              students.every((student) => selectedStudentIds.has(student.id)) &&
+              totalCount > students.length ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectAllMatching(true)}
+                  className="rounded-lg border border-red-400 px-3 py-1.5 text-xs font-semibold underline-offset-2 hover:underline"
+                >
+                  Select all {totalCount} matching
+                </button>
+              ) : null}
+              {selectAllMatching ? (
+                <button
+                  type="button"
+                  onClick={() => { setSelectAllMatching(false); setSelectedStudentIds(new Set()); }}
+                  className="rounded-lg border border-red-400 px-3 py-1.5 text-xs font-semibold"
+                >
+                  Clear selection
+                </button>
+              ) : null}
+            </div>
+            <button type="button" onClick={handleDeleteSelectedStudents} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white">
+              {selectAllMatching ? `Remove all ${totalCount}` : "Delete selected"}
+            </button>
           </div>
         ) : null}
         <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] shadow-sm">
@@ -1066,7 +1492,7 @@ function StudentsRoster() {
             <table className="min-w-full divide-y divide-[var(--border)]">
             <thead className="bg-[var(--surface)] text-left text-sm uppercase tracking-[0.16em] text-[var(--muted)]">
               <tr>
-                <th className="px-6 py-4"><input type="checkbox" aria-label="Select all visible students" checked={students.length > 0 && students.every((student) => selectedStudentIds.has(student.id))} onChange={(event) => setSelectedStudentIds(event.target.checked ? new Set(students.map((student) => student.id)) : new Set())} /></th>
+                <th className="px-6 py-4"><input type="checkbox" aria-label="Select all visible students" checked={students.length > 0 && students.every((student) => selectedStudentIds.has(student.id))} onChange={(event) => { setSelectAllMatching(false); setSelectedStudentIds(event.target.checked ? new Set(students.map((student) => student.id)) : new Set()); }} /></th>
                 <th className="px-6 py-4">Name</th>
                 <th className="px-6 py-4">Email</th>
                 <th className="px-6 py-4">Branch</th>
@@ -1101,17 +1527,18 @@ function StudentsRoster() {
                 students.map((student) => {
                   const highlighted = isHighlighted(student.id);
                   const isPrivateMember = student.classType === "private";
+                  const isWeekender = student.sessionSlot === "weekend";
                   const money = (student as unknown as { _finance?: StudentFinanceRow })._finance;
                   return (
                   <tr
                     key={student.id}
                     className={
                       highlighted
-                        ? `relative ${tone.row} before:absolute before:inset-y-0 before:left-0 before:w-1 ${tone.bar}`
+                        ? `relative ${tone.row} before:absolute before:inset-y-0 before:left-0 before:w-[3px] ${tone.bar}`
                         : undefined
                     }
                   >
-                    <td className="px-6 py-4"><input type="checkbox" aria-label={`Select ${student.user.name || student.user.email}`} checked={selectedStudentIds.has(student.id)} onChange={(event) => setSelectedStudentIds((current) => { const next = new Set(current); if (event.target.checked) next.add(student.id); else next.delete(student.id); return next; })} /></td>
+                    <td className="px-6 py-4"><input type="checkbox" aria-label={`Select ${student.user.name || student.user.email}`} checked={selectAllMatching || selectedStudentIds.has(student.id)} onChange={(event) => { setSelectAllMatching(false); setSelectedStudentIds((current) => { const next = new Set(current); if (event.target.checked) next.add(student.id); else next.delete(student.id); return next; }); }} /></td>
                     {/* The name is the way into the person's file. It was plain
                         text, so the only thing a row could do was be edited —
                         the roster could tell you a student existed and nothing
@@ -1120,7 +1547,7 @@ function StudentsRoster() {
                       <Link
                         href={`/admin/students/${student.id}`}
                         className={`underline-offset-4 hover:underline ${
-                          highlighted ? `font-black ${tone.text}` : "font-semibold hover:text-[var(--accent)]"
+                          highlighted ? "font-bold" : "font-semibold hover:text-[var(--accent)]"
                         }`}
                       >
                         {student.user.name}
@@ -1134,8 +1561,17 @@ function StudentsRoster() {
                           Private membership
                         </span>
                       ) : null}
+                      {isWeekender ? (
+                        <span
+                          title="Weekend sitting — Saturdays only, 3-month level"
+                          className="ml-2 inline-flex items-center gap-1 rounded-full border border-sky-400/50 bg-sky-400/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700"
+                        >
+                          <CalendarIcon className="h-3 w-3" />
+                          Weekend
+                        </span>
+                      ) : null}
                       {highlighted && money && (
-                        <p className={`mt-0.5 text-xs font-bold ${tone.text}`}>
+                        <p className={`mt-0.5 text-xs font-semibold ${tone.text}`}>
                           {money.daysEnrolled}d enrolled
                           {canSeeMoney && money.owedOnDeposit != null && money.owedOnDeposit > 0
                             ? ` · ₦${money.owedOnDeposit.toLocaleString("en-NG")} short of deposit`

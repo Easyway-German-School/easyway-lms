@@ -10,6 +10,7 @@ import BulkStudentAdd from "@/components/BulkStudentAdd";
 import { goalFor } from "@/lib/germany-goals";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { isOnlineBranchName } from "@/lib/online-branch";
+import { CalendarIcon } from "@/components/icons";
 import { packageOptions, countries } from "@/app/auth/signup/options";
 import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload";
 
@@ -1526,6 +1527,7 @@ function StudentsRoster() {
                 students.map((student) => {
                   const highlighted = isHighlighted(student.id);
                   const isPrivateMember = student.classType === "private";
+                  const isWeekender = student.sessionSlot === "weekend";
                   const money = (student as unknown as { _finance?: StudentFinanceRow })._finance;
                   return (
                   <tr
@@ -1557,6 +1559,15 @@ function StudentsRoster() {
                         >
                           <span aria-hidden="true">★</span>
                           Private membership
+                        </span>
+                      ) : null}
+                      {isWeekender ? (
+                        <span
+                          title="Weekend sitting — Saturdays only, 3-month level"
+                          className="ml-2 inline-flex items-center gap-1 rounded-full border border-sky-400/50 bg-sky-400/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700"
+                        >
+                          <CalendarIcon className="h-3 w-3" />
+                          Weekend
                         </span>
                       ) : null}
                       {highlighted && money && (
