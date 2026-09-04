@@ -95,6 +95,11 @@ export function formatStudentCode(parts: {
  * sign up in the same instant. Rather than lock the table, we retry on the
  * unique-constraint violation — cheap, and correct at any volume this school
  * will see.
+ *
+ * `minSequence` lets a caller force the number past whatever the recount
+ * says: a retry that recounts against an unchanged DB (its own failed write
+ * left no trace) would otherwise regenerate the exact same taken code every
+ * time and never actually move forward. See `assignStudentCode`.
  */
 export async function generateStudentCode(input: {
   level: string;
@@ -102,6 +107,7 @@ export async function generateStudentCode(input: {
   branch?: BranchLike;
   classType?: string | null;
   now?: Date;
+  minSequence?: number;
 }): Promise<string> {
   const now = input.now ?? new Date();
   const year = now.getFullYear();
@@ -128,7 +134,7 @@ export async function generateStudentCode(input: {
     level: input.level,
     batchMonth,
     letter,
-    sequence: highest + 1,
+    sequence: Math.max(highest + 1, input.minSequence ?? 0),
   });
 }
 
@@ -140,12 +146,16 @@ export async function assignStudentCode(studentId: string, input: {
   classType?: string | null;
   now?: Date;
 }): Promise<string | null> {
+  let minSequence = 0;
+
   for (let attempt = 0; attempt < 5; attempt++) {
-    const code = await generateStudentCode({
-      ...input,
-      // Nudge the sequence forward on each retry by counting again.
-      now: input.now,
-    });
+    const code = await generateStudentCode({ ...input, minSequence });
+
+    // Whatever number this attempt landed on, the next retry (if any) must
+    // clear it — a P2002 here means it's taken, and recounting alone can't
+    // tell that apart from a stale read, so force the floor up regardless.
+    const sequence = parseInt(code.match(/(\d+)$/)?.[1] ?? "0", 10);
+    minSequence = sequence + 1;
 
     try {
       await prisma.student.update({
@@ -154,7 +164,7 @@ export async function assignStudentCode(studentId: string, input: {
       });
       return code;
     } catch (error: any) {
-      // P2002 = another signup took this number first; recount and retry.
+      // P2002 = another signup took this number first; bump the floor and retry.
       if (error?.code !== "P2002") throw error;
     }
   }
