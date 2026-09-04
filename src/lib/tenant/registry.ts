@@ -81,6 +81,7 @@ export const TENANT_OWNED_MODELS = [
   "Space",
   "Channel",
   "ChannelRead",
+  "TypingPing",
   "Message",
   "ClassRecording",
   "ClassTranscript",

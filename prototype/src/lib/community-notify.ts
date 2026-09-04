@@ -43,13 +43,27 @@ export type ChatAnnouncement = {
   authorName: string;
   body: string;
   hasAttachment: boolean;
+  /** MIME of the attachment, when there is one — so a voice note reads as one. */
+  attachmentType?: string | null;
 };
 
-/** A picture with no caption still has to say something in a one-line preview. */
-export function previewOf(body: string, hasAttachment: boolean): string {
+/**
+ * A message with no words still has to say something in a one-line preview.
+ *
+ * A voice note and a photo are both "an attachment with no caption", but a
+ * lock-screen line of "📷 Photo" under someone's name when they actually sent
+ * ten seconds of spoken German is a small lie that makes the notification
+ * useless — so the two are told apart by MIME.
+ */
+export function previewOf(
+  body: string,
+  hasAttachment: boolean,
+  attachmentType?: string | null,
+): string {
   const text = body.trim();
   if (text) return text.length > 140 ? `${text.slice(0, 139)}…` : text;
-  return hasAttachment ? "📷 Photo" : "";
+  if (!hasAttachment) return "";
+  return attachmentType?.startsWith("audio/") ? "🎤 Voice message" : "📷 Photo";
 }
 
 /**
@@ -119,7 +133,7 @@ export function announceChatMessage(input: ChatAnnouncement): void {
 
         await sendPushToUsers(recipients, {
           title: `${input.authorName} · ${input.channelName}`,
-          body: previewOf(input.body, input.hasAttachment),
+          body: previewOf(input.body, input.hasAttachment, input.attachmentType),
           url: `/community?channel=${input.channelId}&message=${input.messageId}`,
           // One live entry per class group, replaced rather than stacked.
           tag: `community:${input.channelId}`,
@@ -149,7 +163,7 @@ export function announceChatMessage(input: ChatAnnouncement): void {
         // The message itself, not "you have a new announcement". A notification
         // a student has to open to discover whether it mattered is one they
         // learn to ignore.
-        message: previewOf(input.body, input.hasAttachment),
+        message: previewOf(input.body, input.hasAttachment, input.attachmentType),
         link: `/community?channel=${input.channelId}&message=${input.messageId}`,
         senderId: input.authorId,
         // Once per message, however many times this runs.

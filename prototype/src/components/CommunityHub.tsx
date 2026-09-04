@@ -6,6 +6,8 @@ import { usePushNotifications } from "@/lib/use-push";
 import { uploadFile } from "@/lib/upload";
 import { ALLOWED_REACTIONS, type ReactionSummary } from "@/lib/community-reactions";
 import { STICKERS, StickerArt, stickerById } from "@/lib/community-stickers";
+import CommunityWins from "@/components/CommunityWins";
+import StoryTour from "@/components/StoryTour";
 import {
   CHAT_THEMES,
   CHAT_THEME_STORAGE_KEY,
@@ -22,8 +24,12 @@ import {
   CommunityIcon,
   GameControllerIcon,
   ImageIcon,
+  MicIcon,
   PaletteIcon,
+  PauseIcon,
+  PlayIcon,
   SendIcon,
+  TrashIcon,
 } from "@/components/icons";
 
 /**
@@ -82,7 +88,13 @@ type ChatMessage = {
   mine: boolean;
   createdAt: string;
   editedAt: string | null;
-  attachment: { url: string; type: string | null; name: string | null } | null;
+  attachment: {
+    url: string;
+    type: string | null;
+    name: string | null;
+    /** Whole seconds, on a voice note only. */
+    durationSec?: number | null;
+  } | null;
   author: { id: string; name: string; role: string };
   replyTo: { id: string; author: string; body: string; hidden: boolean } | null;
   /** Folded one-per-emoji, with whether this reader is in the count. */
@@ -126,6 +138,116 @@ function StickerGlyph({ className = "" }: { className?: string }) {
 function initials(name: string | null) {
   if (!name) return "?";
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
+}
+
+/** m:ss, for a voice-note length or playhead. */
+function clock(totalSeconds: number) {
+  const s = Math.max(0, Math.round(totalSeconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/**
+ * A voice note in a bubble.
+ *
+ * Deliberately not `<audio controls>`: the native player is a different size
+ * and colour in every browser and looks like a foreign object dropped into the
+ * chat. This is a play/pause button, a bar you can scrub, and the length —
+ * which is drawn from `durationSec` (recorded on the sender's device) so it is
+ * right before a single byte of audio has loaded. Only one plays at a time,
+ * enforced with a window event rather than a shared ref so it works across the
+ * pinned copy and the main list.
+ */
+function VoiceNote({
+  url,
+  durationSec,
+  mine,
+}: {
+  url: string;
+  durationSec: number | null | undefined;
+  mine: boolean;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [loadedDuration, setLoadedDuration] = useState<number | null>(null);
+
+  const total = loadedDuration ?? (durationSec && durationSec > 0 ? durationSec : null);
+
+  useEffect(() => {
+    const stopOthers = (event: Event) => {
+      if ((event as CustomEvent).detail !== url) {
+        audioRef.current?.pause();
+      }
+    };
+    window.addEventListener("easyway:voice-play", stopOthers);
+    return () => window.removeEventListener("easyway:voice-play", stopOthers);
+  }, [url]);
+
+  const toggle = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (el.paused) {
+      window.dispatchEvent(new CustomEvent("easyway:voice-play", { detail: url }));
+      void el.play();
+    } else {
+      el.pause();
+    }
+  }, [url]);
+
+  const scrub = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const el = audioRef.current;
+    const bar = event.currentTarget;
+    if (!el || !total) return;
+    const ratio = (event.clientX - bar.getBoundingClientRect().left) / bar.clientWidth;
+    el.currentTime = Math.max(0, Math.min(1, ratio)) * total;
+  }, [total]);
+
+  const pct = total ? Math.min(100, (elapsed / total) * 100) : 0;
+  const tint = mine ? "rgba(255,255,255,0.9)" : "var(--accent)";
+  const trackBg = mine ? "rgba(255,255,255,0.28)" : "var(--border)";
+
+  return (
+    <div className="flex items-center gap-2.5 py-0.5" style={{ minWidth: "11rem" }}>
+      <button
+        onClick={toggle}
+        aria-label={playing ? "Pause voice message" : "Play voice message"}
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-full transition active:scale-95"
+        style={{ background: mine ? "rgba(255,255,255,0.2)" : "var(--accent-soft)", color: tint }}
+      >
+        {playing ? <PauseIcon className="h-4 w-4" /> : <PlayIcon className="h-4 w-4" />}
+      </button>
+
+      <div className="min-w-0 flex-1">
+        <div
+          onClick={scrub}
+          className="h-1.5 w-full cursor-pointer overflow-hidden rounded-full"
+          style={{ background: trackBg }}
+        >
+          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: tint }} />
+        </div>
+        <p className="mt-1 text-[10px] tabular-nums" style={{ color: mine ? "rgba(255,255,255,0.75)" : "var(--muted)" }}>
+          {playing || elapsed > 0 ? clock(elapsed) : total != null ? clock(total) : "•••"}
+        </p>
+      </div>
+
+      <audio
+        ref={audioRef}
+        src={url}
+        preload="metadata"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false);
+          setElapsed(0);
+        }}
+        onTimeUpdate={(e) => setElapsed(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => {
+          const d = e.currentTarget.duration;
+          if (Number.isFinite(d) && d > 0) setLoadedDuration(d);
+        }}
+      />
+    </div>
+  );
 }
 
 /**
@@ -224,6 +346,24 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   /** This device's chat wallpaper/bubble colour. Defaults to the brand look until read from storage. */
   const [chatTheme, setChatTheme] = useState<ChatTheme>(chatThemeById(null));
   const [themePickerOpen, setThemePickerOpen] = useState(false);
+  /**
+   * Voice-note recording. `null` when idle; the elapsed millisecond count while
+   * a recording is running, so the composer can show a timer.
+   */
+  const [recordingMs, setRecordingMs] = useState<number | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const recordStartRef = useRef<number>(0);
+  const recordTimerRef = useRef<number | null>(null);
+  /** Set true by stopAndSend / false by cancel, so recorder.onstop knows which it was. */
+  const recordKeepRef = useRef(false);
+  /** Names of classmates typing in the open room right now. */
+  const [typers, setTypers] = useState<Array<{ id: string; name: string }>>([]);
+  /** Epoch ms of our last "I'm typing" POST — throttles the write. */
+  const typingPostRef = useRef(0);
+  /** The one-time "how a story works" coach: null until checked, then the flag. */
+  const [storyTourSeen, setStoryTourSeen] = useState<boolean | null>(null);
+  const [showStoryTour, setShowStoryTour] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -315,6 +455,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
     setLoadingRoom(true);
     setMessages([]);
     setReplyTo(null);
+    setTypers([]);
     cursorRef.current = null;
 
     (async () => {
@@ -373,6 +514,26 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           });
           cursorRef.current = incoming[incoming.length - 1].id;
           if (document.visibilityState === "visible") void markRead(activeId!);
+        }
+
+        // Who else is typing, on the same cadence — a held-open stream is the
+        // wrong shape here (see /api/portal/updates), so it rides the poll.
+        // Skipped while hidden: nobody is watching the dots on a background tab.
+        if (!cancelled && document.visibilityState === "visible") {
+          try {
+            const typingRes = await fetch(
+              `/api/community/typing?channelId=${activeId}`,
+              { cache: "no-store" },
+            );
+            if (typingRes.ok) {
+              const typingData = await typingRes.json();
+              if (!cancelled) setTypers(Array.isArray(typingData.typers) ? typingData.typers : []);
+            }
+          } catch {
+            // A missed typing poll just leaves the dots as they were.
+          }
+        } else if (!cancelled) {
+          setTypers([]);
         }
       } catch {
         // A failed poll is a blip. The next one is four seconds away.
@@ -469,20 +630,28 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   }, []);
 
   /**
-   * `sticker` and `gameMatch` are passed in rather than held in state, because
-   * sending either is a single tap with nothing to compose first — the tray
-   * calls this directly. Never both at once in practice, but nothing here
-   * assumes that.
+   * `sticker`, `gameMatch` and `voice` are passed in rather than held in state,
+   * because sending any of them is a single action with nothing to compose
+   * first — the tray / the recorder call this directly. Never more than one at
+   * once in practice, but nothing here assumes that.
    */
-  const send = useCallback(async (sticker?: string, gameMatch?: { id: string; title: string; status: string }) => {
+  const send = useCallback(async (
+    sticker?: string,
+    gameMatch?: { id: string; title: string; status: string },
+    voice?: { url: string; type: string | null; name: string | null; durationSec: number },
+  ) => {
     const text = draft.trim();
-    // A picture, a sticker or a game invite on its own is a message; the
-    // server agrees.
-    if ((!text && !attachment && !sticker && !gameMatch) || !activeId) return;
+    // A picture, a sticker, a game invite or a voice note on its own is a
+    // message; the server agrees.
+    if ((!text && !attachment && !sticker && !gameMatch && !voice) || !activeId) return;
 
     const tempId = `pending-${Date.now()}`;
     const quoted = replyTo;
-    const picture = attachment;
+    // A voice note and a picture never ride together — the recorder disables the
+    // rest of the composer — but the attachment field carries whichever it is.
+    const media = voice
+      ? { url: voice.url, type: voice.type, name: voice.name, durationSec: voice.durationSec }
+      : attachment;
 
     setMessages((current) => [
       ...current,
@@ -494,7 +663,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
         mine: true,
         createdAt: new Date().toISOString(),
         editedAt: null,
-        attachment: picture,
+        attachment: media,
         stickerId: sticker ?? null,
         gameMatch: gameMatch ?? null,
         author: { id: "me", name: "You", role: "student" },
@@ -517,9 +686,10 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           channelId: activeId,
           body: text,
           replyToId: quoted?.id ?? null,
-          attachmentUrl: picture?.url ?? null,
-          attachmentType: picture?.type ?? null,
-          attachmentName: picture?.name ?? null,
+          attachmentUrl: media?.url ?? null,
+          attachmentType: media?.type ?? null,
+          attachmentName: media?.name ?? null,
+          attachmentDurationSec: voice?.durationSec ?? null,
           stickerId: sticker ?? null,
           gameMatchId: gameMatch?.id ?? null,
         }),
@@ -541,6 +711,197 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
       setError(sendError instanceof Error ? sendError.message : "Message not sent");
     }
   }, [draft, activeId, replyTo, attachment]);
+
+  /* ---------------------------------------------------------- voice notes */
+
+  /**
+   * Record a voice note.
+   *
+   * `MediaRecorder` straight to a Blob, no library. The format is whatever the
+   * browser will give us — Opus-in-WebM on Chrome/Firefox/Android, MP4/AAC on
+   * iOS Safari — and all three are already on the presign allowlist. The file
+   * goes through the same `uploadFile` path a picture does, so it lands in the
+   * bucket rather than through a serverless function.
+   *
+   * The file picker is NOT opened to audio: a voice note can only be recorded
+   * here, so nobody can attach an arbitrary MP3.
+   */
+  const MAX_RECORD_MS = 120_000;
+
+  const stopRecordTimer = useCallback(() => {
+    if (recordTimerRef.current) {
+      window.clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+  }, []);
+
+  const teardownRecorder = useCallback(() => {
+    stopRecordTimer();
+    const recorder = recorderRef.current;
+    recorder?.stream.getTracks().forEach((track) => track.stop());
+    recorderRef.current = null;
+    recordChunksRef.current = [];
+    setRecordingMs(null);
+  }, [stopRecordTimer]);
+
+  const startRecording = useCallback(async () => {
+    if (recorderRef.current || uploading) return;
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setError("This browser can't record audio.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+      const mimeType = preferred.find((type) => {
+        try {
+          return MediaRecorder.isTypeSupported(type);
+        } catch {
+          return false;
+        }
+      });
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recordChunksRef.current = [];
+      recordKeepRef.current = false;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordChunksRef.current.push(event.data);
+      };
+      recorder.onstop = async () => {
+        const keep = recordKeepRef.current;
+        const elapsedMs = Date.now() - recordStartRef.current;
+        const type = recorder.mimeType || mimeType || "audio/webm";
+        const chunks = recordChunksRef.current;
+        teardownRecorder();
+        if (!keep || chunks.length === 0 || elapsedMs < 700) return;
+
+        const durationSec = Math.max(1, Math.round(elapsedMs / 1000));
+        const ext = type.includes("mp4") ? "m4a" : "webm";
+        const blob = new Blob(chunks, { type });
+        if (blob.size > 6 * 1024 * 1024) {
+          setError("That recording is too long to send.");
+          return;
+        }
+        const file = new File([blob], `voice-${durationSec}s.${ext}`, { type });
+
+        setUploading(true);
+        setError(null);
+        try {
+          const uploaded = await uploadFile(file, "files");
+          await send(undefined, undefined, {
+            url: uploaded.url,
+            type: uploaded.contentType || type,
+            name: uploaded.filename,
+            durationSec,
+          });
+        } catch (uploadError) {
+          setError(uploadError instanceof Error ? uploadError.message : "Could not send that voice message");
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      recorderRef.current = recorder;
+      recordStartRef.current = Date.now();
+      recorder.start();
+      setRecordingMs(0);
+      setStickerTrayOpen(false);
+      setGamesTrayOpen(false);
+      recordTimerRef.current = window.setInterval(() => {
+        const elapsed = Date.now() - recordStartRef.current;
+        setRecordingMs(elapsed);
+        if (elapsed >= MAX_RECORD_MS) {
+          recordKeepRef.current = true;
+          recorderRef.current?.stop();
+        }
+      }, 200);
+    } catch {
+      setError("Microphone access was blocked. Allow it in your browser to send a voice message.");
+    }
+  }, [uploading, send, teardownRecorder]);
+
+  const stopAndSendRecording = useCallback(() => {
+    if (!recorderRef.current) return;
+    recordKeepRef.current = true;
+    stopRecordTimer();
+    recorderRef.current.stop();
+  }, [stopRecordTimer]);
+
+  const cancelRecording = useCallback(() => {
+    if (!recorderRef.current) return;
+    recordKeepRef.current = false;
+    stopRecordTimer();
+    recorderRef.current.stop();
+  }, [stopRecordTimer]);
+
+  // Never leave the mic hot if the component goes away mid-recording.
+  useEffect(() => () => teardownRecorder(), [teardownRecorder]);
+
+  /* -------------------------------------------------------------- typing */
+
+  /**
+   * Tell the room we're typing. Throttled hard — one write every few seconds
+   * while there is something in the box — because the value is "somebody is
+   * composing", not a keystroke log, and the reader only refreshes every four
+   * seconds anyway.
+   */
+  const notifyTyping = useCallback(() => {
+    if (!activeId || !canPost) return;
+    const now = Date.now();
+    if (now - typingPostRef.current < 2_800) return;
+    typingPostRef.current = now;
+    void fetch("/api/community/typing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channelId: activeId }),
+    }).catch(() => {});
+  }, [activeId, canPost]);
+
+  const handleDraftChange = useCallback(
+    (value: string) => {
+      setDraft(value);
+      if (value.trim()) notifyTyping();
+    },
+    [notifyTyping],
+  );
+
+  /* ---------------------------------------------------- story-game coach */
+
+  // Whether this student has met the "how a class story works" walk-through.
+  // Staff never see it; a failed check just leaves it unshown.
+  useEffect(() => {
+    if (isStaff) {
+      setStoryTourSeen(true);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/student/story-tour", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setStoryTourSeen(Boolean(data.seen));
+      } catch {
+        // Leave it null — the coach simply never fires this visit.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isStaff]);
+
+  /** Open the games tray, and run the story coach the first time ever. */
+  const openGamesTray = useCallback(() => {
+    setGamesTrayOpen((open) => {
+      const next = !open;
+      if (next && storyTourSeen === false) {
+        setShowStoryTour(true);
+        setStoryTourSeen(true); // optimistic — the tour itself stamps the server
+      }
+      return next;
+    });
+    setStickerTrayOpen(false);
+  }, [storyTourSeen]);
 
   /**
    * THE GAMES TRAY — the iMessage-style "invite to play", scoped to the room.
@@ -905,6 +1266,11 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           </div>
         </header>
 
+        {/* A thin band of good news from this cohort — finished stories,
+            certificates, levels passed. Ambient and dismissible; hides itself
+            when there is nothing to show. */}
+        {!compact ? <CommunityWins spaceId={activeSpace?.id ?? null} /> : null}
+
         <div
           ref={scrollRef}
           className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4"
@@ -1101,12 +1467,22 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                         )}
 
                         {message.attachment ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={message.attachment.url}
-                            alt={message.attachment.name ?? "Attachment"}
-                            className="mt-2 max-h-64 rounded-xl object-cover"
-                          />
+                          message.attachment.type?.startsWith("audio/") ? (
+                            <div className="mt-1.5">
+                              <VoiceNote
+                                url={message.attachment.url}
+                                durationSec={message.attachment.durationSec}
+                                mine={message.mine && !message.hidden}
+                              />
+                            </div>
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={message.attachment.url}
+                              alt={message.attachment.name ?? "Attachment"}
+                              className="mt-2 max-h-64 rounded-xl object-cover"
+                            />
+                          )
                         ) : null}
 
                         <p
@@ -1255,6 +1631,33 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           <div ref={bottomRef} />
         </div>
 
+        {/*
+          "Anna is typing…" — folded off the same poll as the messages, so it
+          costs no extra timer. Sits on the seam between the transcript and the
+          composer, where every messaging app puts it, and reserves its own line
+          height so the composer does not hop when it appears.
+        */}
+        <div className="min-h-[1.25rem] px-4 text-[11px] text-[var(--muted)]" aria-live="polite">
+          {typers.length > 0 ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex gap-0.5">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="inline-block h-1 w-1 animate-bounce rounded-full bg-[var(--muted)]"
+                    style={{ animationDelay: `${i * 140}ms` }}
+                  />
+                ))}
+              </span>
+              {typers.length === 1
+                ? `${typers[0].name} is typing`
+                : typers.length === 2
+                  ? `${typers[0].name} and ${typers[1].name} are typing`
+                  : "Several people are typing"}
+            </span>
+          ) : null}
+        </div>
+
         {/* ------------------------------------------------------- composer */}
         {canPost ? (
           <div className="border-t border-[var(--border)] p-3">
@@ -1372,6 +1775,35 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
               </div>
             ) : null}
 
+            {recordingMs !== null ? (
+              /*
+                RECORDING. The whole row becomes the recorder — a red dot, a
+                running clock, and the only two things you can do with a
+                recording: throw it away or send it. Everything else is hidden
+                because there is nothing else to do until this is resolved.
+              */
+              <div className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5">
+                <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-rose-500" />
+                <span className="flex-1 text-sm font-semibold tabular-nums text-[var(--foreground)]">
+                  {clock(recordingMs / 1000)}
+                  <span className="ml-2 text-xs font-normal text-[var(--muted)]">Recording…</span>
+                </span>
+                <button
+                  onClick={cancelRecording}
+                  aria-label="Discard recording"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--surface)] hover:text-rose-500"
+                >
+                  <TrashIcon className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={stopAndSendRecording}
+                  aria-label="Send recording"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white transition hover:brightness-110"
+                >
+                  <SendIcon className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
             <div className="flex items-end gap-2">
               {/*
                 `capture` is deliberately absent. On a phone this offers both the
@@ -1414,10 +1846,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                 <StickerGlyph className="h-5 w-5" />
               </button>
               <button
-                onClick={() => {
-                  setGamesTrayOpen((open) => !open);
-                  setStickerTrayOpen(false);
-                }}
+                onClick={openGamesTray}
                 aria-label="Play a game"
                 aria-expanded={gamesTrayOpen}
                 title="Play a game"
@@ -1430,7 +1859,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
               <textarea
                 ref={composerRef}
                 value={draft}
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={(event) => handleDraftChange(event.target.value)}
                 onKeyDown={(event) => {
                   // Enter sends, Shift+Enter breaks the line — the convention
                   // everybody already has in their fingers. Not on a phone,
@@ -1441,22 +1870,37 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                   }
                 }}
                 rows={1}
-                placeholder={uploading ? "Uploading your picture…" : `Message #${active?.name ?? ""}`}
+                placeholder={uploading ? "Uploading…" : `Message #${active?.name ?? ""}`}
                 className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
               />
-              <button
-                onClick={() => void send()}
-                // A picture with no caption is a perfectly good message, so the
-                // button lives off either one. It stays down while the upload
-                // is in flight, because sending then would post the caption
-                // without the photograph it was written about.
-                disabled={uploading || (!draft.trim() && !attachment)}
-                aria-label="Send"
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white transition hover:brightness-110 disabled:opacity-30"
-              >
-                <SendIcon className="h-4 w-4" />
-              </button>
+              {draft.trim() || attachment ? (
+                <button
+                  onClick={() => void send()}
+                  // A picture with no caption is a perfectly good message, so the
+                  // button lives off either one. It stays down while the upload
+                  // is in flight, because sending then would post the caption
+                  // without the photograph it was written about.
+                  disabled={uploading}
+                  aria-label="Send"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white transition hover:brightness-110 disabled:opacity-30"
+                >
+                  <SendIcon className="h-4 w-4" />
+                </button>
+              ) : (
+                /* Empty box → the mic, exactly where Send sits when there is
+                   text, so the thumb never has to move. */
+                <button
+                  onClick={() => void startRecording()}
+                  disabled={uploading}
+                  aria-label="Record a voice message"
+                  title="Record a voice message"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white transition hover:brightness-110 disabled:opacity-30"
+                >
+                  <MicIcon className="h-4 w-4" />
+                </button>
+              )}
             </div>
+            )}
           </div>
         ) : (
           <p className="border-t border-[var(--border)] px-4 py-3 text-center text-xs text-[var(--muted)]">
@@ -1464,6 +1908,10 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           </p>
         )}
       </section>
+
+      {/* The one-time "how a class story works" coach — fires the first time a
+          student opens the games tray, never again. */}
+      {showStoryTour ? <StoryTour onDone={() => setShowStoryTour(false)} /> : null}
     </div>
   );
 }
