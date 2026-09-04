@@ -485,8 +485,10 @@ export async function PATCH(request: Request) {
   const newPassword = typeof body.password === "string" ? body.password : "";
   const pathway = typeof body.pathway === "string" && body.pathway.trim() ? body.pathway.trim() : undefined;
   // Only touched when the key is present at all, so an edit that isn't about
-  // the phone number (a status change, a tutor swap) never clobbers it.
+  // the phone number (a status change, a tutor swap) never clobbers it. Batch
+  // month follows the same rule — both live inside the admission JSON blob.
   const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
+  const batch = typeof body.batch === "string" ? body.batch.trim() : undefined;
 
   if (!studentId) {
     return NextResponse.json({ error: "Student ID is required" }, { status: 400 });
@@ -558,9 +560,12 @@ export async function PATCH(request: Request) {
      * Read-modify-write so editing the phone here never wipes out whatever
      * else the admission form collected (father's phone, city, and so on).
      */
-    if (phone !== undefined) {
+    if (phone !== undefined || batch !== undefined) {
       const existingAdmission = (student.admission ?? {}) as Record<string, unknown>;
-      updateStudent.admission = { ...existingAdmission, phone: phone || undefined };
+      const nextAdmission = { ...existingAdmission };
+      if (phone !== undefined) nextAdmission.phone = phone || undefined;
+      if (batch !== undefined) nextAdmission.batch = batch || undefined;
+      updateStudent.admission = nextAdmission;
     }
     if (body.branchId !== undefined) updateStudent.branchId = branchId;
     /**

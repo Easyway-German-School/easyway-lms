@@ -10,6 +10,13 @@ import BulkStudentAdd from "@/components/BulkStudentAdd";
 import { goalFor } from "@/lib/germany-goals";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { isOnlineBranchName } from "@/lib/online-branch";
+import { packageOptions } from "@/app/auth/signup/options";
+
+/** Bare month names — matches the signup form and the roster's Batch filter. */
+const BATCH_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+] as const;
 
 type BranchOption = {
   id: string;
@@ -171,6 +178,9 @@ function StudentsRoster() {
   const [newClassType, setNewClassType] = useState("group");
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
   const [newDeliveryMode, setNewDeliveryMode] = useState("physical");
+  const [newBatch, setNewBatch] = useState("");
+  const [newPathway, setNewPathway] = useState(packageOptions[0]);
+  const [newAmountPaid, setNewAmountPaid] = useState("");
   const [studentError, setStudentError] = useState("");
   /** Shown once, right after a manual add, so the admin has something to copy. */
   const [savedCredentials, setSavedCredentials] = useState<{
@@ -285,6 +295,8 @@ function StudentsRoster() {
       classType: newClassType,
       sessionSlot: newSessionSlot,
       deliveryMode: isOnlineSelection ? "online" : newDeliveryMode,
+      pathway: newPathway,
+      batch: newBatch,
     } as Record<string, unknown>;
 
     let res: Response;
@@ -304,6 +316,10 @@ function StudentsRoster() {
       // A blank password is fine on create too — the server mints a readable
       // temporary one and hands it back, same as the CSV and paste-many tools.
       if (newPassword.trim()) payload.password = newPassword.trim();
+      // Up-front payment is a create-only concept — recorded once, when the
+      // account is made. Editing a student never re-posts it.
+      const amount = Number(newAmountPaid);
+      if (Number.isFinite(amount) && amount > 0) payload.amountPaid = Math.round(amount);
       res = await fetch("/api/admin/students", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -337,6 +353,9 @@ function StudentsRoster() {
     setNewTutorId("");
     setNewStatus("active");
     setNewDeliveryMode("physical");
+    setNewBatch("");
+    setNewPathway(packageOptions[0]);
+    setNewAmountPaid("");
     setShowStudentForm(false);
     await loadStudents();
   }
@@ -419,6 +438,15 @@ function StudentsRoster() {
     setNewClassType(student.classType || "group");
     setNewSessionSlot(student.sessionSlot || "morning");
     setNewDeliveryMode(student.deliveryMode === "hybrid" ? "hybrid" : "physical");
+    setNewBatch(
+      typeof (student.admission as AdmissionData)?.batch === "string"
+        ? String((student.admission as AdmissionData)?.batch)
+        : "",
+    );
+    setNewPathway(student.pathway || packageOptions[0]);
+    // Not an edit concept — the initial payment was recorded when the account
+    // was created. Adjustments go through the student's own finance screen.
+    setNewAmountPaid("");
     setStudentError("");
     setSavedCredentials(null);
     setShowStudentForm(true);
@@ -437,6 +465,9 @@ function StudentsRoster() {
     setNewClassType("group");
     setNewSessionSlot("morning");
     setNewDeliveryMode("physical");
+    setNewBatch("");
+    setNewPathway(packageOptions[0]);
+    setNewAmountPaid("");
     setStudentError("");
     setSavedCredentials(null);
     setShowStudentForm(false);
@@ -1099,6 +1130,39 @@ function StudentsRoster() {
                 </select>
               </label>
               <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Batch month</span>
+                <select
+                  value={newBatch}
+                  onChange={(event) => setNewBatch(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">No batch set</option>
+                  {BATCH_MONTHS.map((month) => (
+                    <option key={month} value={month}>{month}</option>
+                  ))}
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  The month this student&apos;s level started. The timetable and the level-end date are
+                  worked out from it — without it neither exists and they never auto-promote.
+                </span>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Pathway</span>
+                <select
+                  value={newPathway}
+                  onChange={(event) => setNewPathway(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  {packageOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  What Germany is for. Drives the study plan and the goal shown on their journey — the
+                  same choice the signup form asks new students to make.
+                </span>
+              </label>
+              <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Branch</span>
                 <select
                   value={newBranchId}
@@ -1179,7 +1243,7 @@ function StudentsRoster() {
                 <span className="font-semibold text-[var(--muted)]">Delivery mode</span>
                 {isOnlineBranchName(branches.find((branch) => branch.id === newBranchId)?.name) ? (
                   <div className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--muted)]">
-                    Online only — set by the branch
+                    Online — set automatically by the Online branch
                   </div>
                 ) : (
                   <select
@@ -1192,9 +1256,30 @@ function StudentsRoster() {
                   </select>
                 )}
                 <span className="block text-xs font-normal text-[var(--muted)]">
-                  Decides whether &quot;Live class&quot; shows up in this student&apos;s sidebar.
+                  Decides whether &quot;Live class&quot; shows up in this student&apos;s sidebar. For a
+                  fully online student, pick the <span className="font-semibold">Online</span> branch above —
+                  that switches this to Online on its own.
                 </span>
               </label>
+              {!editingStudentId ? (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Amount already paid (₦)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1000}
+                    inputMode="numeric"
+                    value={newAmountPaid}
+                    onChange={(event) => setNewAmountPaid(event.target.value)}
+                    placeholder="e.g. 150000"
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  />
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    For a student who paid before joining the portal. Records a completed payment so the
+                    paywall does not lock them out of a level they have already paid for. Leave blank for none.
+                  </span>
+                </label>
+              ) : null}
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
