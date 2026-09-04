@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { deriveStudentAccess } from "@/lib/access";
+import { deriveStudentAccess, hasProfilePhoto } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 
@@ -40,6 +40,8 @@ export async function GET() {
       classesStartedAt: true,
       createdAt: true,
       paymentGraceUntil: true,
+      // Drives the photo lock screen — see hasProfilePhoto below.
+      admission: true,
       payments: {
         // Received tuition money only — `receivedPaymentFilter` now excludes
         // the ₦5,000 registration fee, so it cannot push the student past the
@@ -67,8 +69,8 @@ export async function GET() {
   // An on-track tuition payment plan holds the balance lock back, like grace.
   const planStatus = await planStatusForStudent(student.id);
 
-  return NextResponse.json(
-    deriveStudentAccess({
+  return NextResponse.json({
+    ...deriveStudentAccess({
       totalPaid,
       tuitionFee: tuitionFeeFor(feeLookup),
       requiredDeposit: requiredDepositFor(feeLookup),
@@ -84,5 +86,8 @@ export async function GET() {
       paymentGraceUntil: student.paymentGraceUntil,
       paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
     }),
-  );
+    // Piggybacks on this endpoint rather than a second round trip — the
+    // shell already calls this once per navigation for the payment gate.
+    hasPhoto: hasProfilePhoto(student.admission),
+  });
 }

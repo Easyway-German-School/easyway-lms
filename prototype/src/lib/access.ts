@@ -34,6 +34,37 @@ export function isTuitionGatedRoute(pathname: string): boolean {
 }
 
 /**
+ * Whether a student's `admission` blob carries a real photo.
+ *
+ * The one source of truth for "has this student got a photo" — used by the
+ * signup-gap self-heal nudge (`profile-photo-nudge.ts`), the portal's own
+ * lock screen below, and anywhere else that needs to ask the same question
+ * without redefining it slightly differently each time.
+ */
+export function hasProfilePhoto(admission: unknown): boolean {
+  if (!admission || typeof admission !== "object") return false;
+  const url = (admission as Record<string, unknown>).photoUrl;
+  return typeof url === "string" && url.trim().length > 0;
+}
+
+/**
+ * Pages a photoless student keeps while the portal is walled off — same
+ * ALLOWLIST shape as TUITION_FREE_ROUTES and for the same reason: a new page
+ * added later is locked by default rather than silently exempt.
+ *
+ * `/profile` is where the photo actually gets fixed; `/notifications` and
+ * `/payments` stay open so a student is never cut off from seeing what they
+ * are told or from paying what they owe just because of a missing photo.
+ */
+export const PHOTO_FREE_ROUTES = ["/profile", "/notifications", "/payments"] as const;
+
+export function isPhotoGatedRoute(pathname: string): boolean {
+  return !PHOTO_FREE_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
+}
+
+/**
  * How a student attends, and therefore what the portal shows them.
  *
  *   physical  campus only — no live-class tab. Putting a video classroom in

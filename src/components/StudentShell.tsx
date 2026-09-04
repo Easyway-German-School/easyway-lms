@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
@@ -21,9 +21,10 @@ import StudentUsageTracker from "@/components/StudentUsageTracker";
 import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
+import PhotoLockScreen from "@/components/PhotoLockScreen";
 import SignOutButton from "@/components/SignOutButton";
 import { MomentQueueProvider } from "@/lib/moment-queue";
-import { canAttendLive, isLiveOnlyRoute, isTuitionGatedRoute } from "@/lib/access";
+import { canAttendLive, isLiveOnlyRoute, isPhotoGatedRoute, isTuitionGatedRoute } from "@/lib/access";
 import { LiveClassProvider, useLiveClass } from "@/lib/useLiveClass";
 import { useStudentAccess } from "@/lib/useStudentAccess";
 import {
@@ -108,8 +109,24 @@ export default function StudentShell({ children }: { children: React.ReactNode }
 function StudentShellBody({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { status } = useSession();
+  const { data: session, status } = useSession();
   const { live } = useLiveClass();
+
+  /**
+   * The account was deleted (or the whole roster reset) while this person was
+   * signed in.
+   *
+   * Their JWT stays technically valid for up to 30 days, so refusing them at
+   * the sign-in form alone would leave somebody the office has removed holding
+   * a live portal until the token lapsed. The session callback downgrades a
+   * deleted user's role to a sentinel every route already refuses — see
+   * REVOKED_SESSION_ROLE in src/lib/auth.ts — and this is the matching seam on
+   * the client: turn that sentinel into an actual sign-out with an
+   * explanation, the same way LecturerShell handles a deactivated tutor.
+   */
+  const accountRevoked =
+    status === "authenticated" &&
+    (session?.user?.role ?? "").toLowerCase() === "revoked_session";
   useHideFloatingThemeToggle();
   const [collapsed, setCollapsed] = useState(false);
   // Below lg the sidebar is a drawer, not a column. It used to be a fixed 288px
@@ -154,6 +171,19 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     if (status === "unauthenticated") router.replace("/auth/signin");
   }, [router, status]);
 
+  // A deleted account (or one whose password was just reset) is signed out
+  // here, not merely blocked at the next login. The sentinel role covers both
+  // causes, so the message fits both: sign in again if you can, otherwise the
+  // office removed the account.
+  useEffect(() => {
+    if (accountRevoked) {
+      signOut({
+        callbackUrl:
+          "/auth/signin?message=You+have+been+signed+out.+Please+sign+in+again,+or+contact+the+school+office+if+you+cannot+get+back+in.",
+      });
+    }
+  }, [accountRevoked]);
+
   // The welcome tour spotlights real sidebar buttons, which on a phone live
   // inside the drawer. It asks; the shell decides — the drawer's state stays
   // owned here rather than being reached into from outside.
@@ -188,9 +218,29 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     navItems.find((item) => pathname === item.href || pathname.startsWith(item.href + "/"))?.label ??
     "This page";
 
+  // Second, independent gate: a paid-up student with no photo on file (the
+  // signup form used to let this through server-side — see the September
+  // 2026 fix to /api/auth/signup). `access` is null while the query is still
+  // in flight, so this reads false until we actually know — same reasoning
+  // as `hasAccess` defaulting to true above.
+  const photoLocked = access !== null && access.hasPhoto === false && isPhotoGatedRoute(pathname);
+
   // Hiding the sidebar entry is cosmetic — /live is still reachable by typing
   // it. The route is refused here too, and again on the server.
   const wrongDeliveryMode = access !== null && !showsLiveClass && isLiveOnlyRoute(pathname);
+
+  if (accountRevoked) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[var(--background)] px-6 text-center">
+        <div>
+          <p className="text-lg font-semibold text-[var(--foreground)]">Signing you out…</p>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Please sign in again, or contact the school office if you cannot get back in.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     // The queue lives in the shell rather than on the dashboard, so every
@@ -219,15 +269,28 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         } w-[17rem] ${collapsed ? "lg:w-20" : "lg:w-72"}`}
       >
         <div className="border-b border-[var(--border)] p-4">
-          <div className="flex items-center justify-between gap-3">
+          {/* Collapsed rail (desktop only): the brand mark stacked over a
+              full-width expand control, both centred so nothing is crammed
+              against the edge of the 80px rail. */}
+          {collapsed && (
+            <div className="hidden flex-col items-center gap-3 lg:flex">
+              <Link href="/dashboard" aria-label="Go to dashboard">
+                <BrandLogo variant="mark" className="h-9 w-9" />
+              </Link>
+              <button
+                onClick={() => setCollapsed(false)}
+                aria-label="Expand sidebar"
+                className="flex w-full items-center justify-center rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)]"
+              >
+                <ChevronRightIcon />
+              </button>
+            </div>
+          )}
+
+          <div className={`flex items-center justify-between gap-3 ${collapsed ? "lg:hidden" : ""}`}>
             {/* The wordmark already carries the school name, so it is not
                 repeated beside it — only which portal you are in. */}
-            {collapsed ? (
-              <Link href="/dashboard" aria-label="Go to dashboard" className="hidden lg:block">
-                <BrandLogo variant="mark" className="h-10 w-10" />
-              </Link>
-            ) : null}
-            <div className={`min-w-0 ${collapsed ? "lg:hidden" : ""}`}>
+            <div className="min-w-0">
               <Link href="/dashboard" aria-label="Go to dashboard">
                 <BrandLogo variant="wordmark" className="h-9" />
               </Link>
@@ -238,10 +301,10 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
 
             <button
               onClick={() => setCollapsed(!collapsed)}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label="Collapse sidebar"
               className="hidden rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:block"
             >
-              {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+              <ChevronLeftIcon />
             </button>
             <button
               onClick={() => setDrawerOpen(false)}
@@ -260,7 +323,9 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
               // Locked items stay clickable on purpose: tapping Classes and
               // meeting the padlock explains the paywall far better than a
               // dead, greyed-out button does.
-              const locked = !hasAccess && isTuitionGatedRoute(item.href);
+              const locked =
+                (!hasAccess && isTuitionGatedRoute(item.href)) ||
+                (access !== null && access.hasPhoto === false && isPhotoGatedRoute(item.href));
               // A class in progress is the one thing in this sidebar that is
               // true right now and stops being true. It gets a pulse; nothing
               // else does, which is what keeps the pulse meaning something.
@@ -275,6 +340,8 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
                   onClick={() => router.push(item.href)}
                   title={collapsed ? (locked ? `${item.label} — locked until tuition is paid` : item.label) : ""}
                   className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition-all duration-200 ${
+                    collapsed ? "lg:justify-center lg:gap-0 lg:px-0" : ""
+                  } ${
                     active
                       ? "bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_8px_24px_rgba(10,124,255,0.12)]"
                       : locked
@@ -396,6 +463,8 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           </div>
         ) : routeLocked ? (
           <PaymentLockScreen areaLabel={lockedAreaLabel} access={access} />
+        ) : photoLocked ? (
+          <PhotoLockScreen areaLabel={lockedAreaLabel} />
         ) : (
           children
         )}

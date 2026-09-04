@@ -1,3 +1,6 @@
+import { DEPOSIT_RATE } from "@/lib/payment";
+import { buildLedger, type LedgerChargeInput } from "@/lib/finance/ledger";
+
 /**
  * Who can see what before tuition is paid.
  *
@@ -28,6 +31,37 @@ export function isTuitionFreeRoute(pathname: string): boolean {
 
 export function isTuitionGatedRoute(pathname: string): boolean {
   return !isTuitionFreeRoute(pathname);
+}
+
+/**
+ * Whether a student's `admission` blob carries a real photo.
+ *
+ * The one source of truth for "has this student got a photo" — used by the
+ * signup-gap self-heal nudge (`profile-photo-nudge.ts`), the portal's own
+ * lock screen below, and anywhere else that needs to ask the same question
+ * without redefining it slightly differently each time.
+ */
+export function hasProfilePhoto(admission: unknown): boolean {
+  if (!admission || typeof admission !== "object") return false;
+  const url = (admission as Record<string, unknown>).photoUrl;
+  return typeof url === "string" && url.trim().length > 0;
+}
+
+/**
+ * Pages a photoless student keeps while the portal is walled off — same
+ * ALLOWLIST shape as TUITION_FREE_ROUTES and for the same reason: a new page
+ * added later is locked by default rather than silently exempt.
+ *
+ * `/profile` is where the photo actually gets fixed; `/notifications` and
+ * `/payments` stay open so a student is never cut off from seeing what they
+ * are told or from paying what they owe just because of a missing photo.
+ */
+export const PHOTO_FREE_ROUTES = ["/profile", "/notifications", "/payments"] as const;
+
+export function isPhotoGatedRoute(pathname: string): boolean {
+  return !PHOTO_FREE_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
 }
 
 /**
@@ -88,6 +122,24 @@ export function isLiveOnlyRoute(pathname: string): boolean {
   return LIVE_ONLY_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 }
 
+/**
+ * How long after classes start a part-payer keeps portal access while the
+ * balance is unpaid. One month into the two-month session: reminders run
+ * through it, the lock lands at the end (see runPaymentWarnings /
+ * sendDueFeeReminders for the escalation, and PaymentLockScreen for the wall).
+ */
+export const PART_PAYMENT_LOCK_DAYS = 30;
+
+const LOCK_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Why the portal is locked, when it is:
+ *   unpaid_deposit     registration-only — never cleared the 60% to start
+ *   unsettled_balance  paid the deposit, never cleared the balance, and the
+ *                      30-day grace after classes started has run out
+ */
+export type PaymentLockReason = "unpaid_deposit" | "unsettled_balance" | null;
+
 export type StudentAccess = {
   /** physical | hybrid | online — see DeliveryMode. */
   deliveryMode: DeliveryMode;
@@ -107,14 +159,46 @@ export type StudentAccess = {
   requiredDeposit: number;
   /** What is still owed before classes open. */
   outstanding: number;
+  /** Against the FULL fee — what a part-payer must clear to lift the balance lock. */
+  outstandingBalance: number;
   /** Progress towards the deposit (not the full fee) — that is the gate. */
   progressPercent: number;
+  /** Progress towards the full fee — what the settle-your-balance screen shows. */
+  feeProgressPercent: number;
+  /** Set when hasAccess is false, so the lock screen can say why. */
+  lockReason: PaymentLockReason;
+  /** ISO date the balance lock lands (or landed). Null when it does not apply. */
+  lockAt: string | null;
+  /** ISO date an admin has granted grace until. Null when none. */
+  graceUntil: string | null;
   currency: string;
 };
+
+function toDate(value: unknown): Date | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 
 /**
  * Access opens at the DEPOSIT, not the full fee, matching how the school
  * actually enrols: pay 60% and you start class while the balance runs.
+ *
+ * It then CLOSES again for a part-payer who never clears the balance: 30 days
+ * after classes start (see PART_PAYMENT_LOCK_DAYS) the portal locks until the
+ * balance is settled, unless an admin has set `paymentGraceUntil`. A
+ * fully-paid student is never touched by any of this.
+ *
+ * When `charges` is passed (the per-level tuition ledger — see
+ * src/lib/finance/ledger.ts) the deposit gate and the balance lock read the
+ * CURRENT level's charge and the GO-FORWARD outstanding, not the raw sum of
+ * every payment against the current fee. That is what stops a student who was
+ * promoted with a balance still open — whose lifetime payments happen to
+ * exceed one level's fee — from walking into the next level for free. Legacy
+ * arrears (levels passed before the ledger existed) are deliberately excluded
+ * from the lock: they are chased, never walled.
+ *
+ * With no `charges` the behaviour is exactly as before.
  */
 export function deriveStudentAccess({
   totalPaid,
@@ -122,27 +206,132 @@ export function deriveStudentAccess({
   requiredDeposit,
   deliveryMode,
   classType,
+  level,
+  charges,
+  classesStartedAt,
+  enrolledAt,
+  paymentGraceUntil,
+  paymentPlanOnTrack,
+  now = new Date(),
 }: {
   totalPaid: number;
   tuitionFee: number;
   requiredDeposit: number;
   deliveryMode?: unknown;
   classType?: unknown;
+  /** Current level — needed to pick this student's own charge out of the ledger. */
+  level?: string | null;
+  /** The student's TuitionCharge rows. When present, the ledger drives the gate. */
+  charges?: LedgerChargeInput[] | null;
+  /** Confirmed first day of classes — the clock the lock runs on. */
+  classesStartedAt?: unknown;
+  /** Enrolment date — fallback anchor when the first day was never confirmed. */
+  enrolledAt?: unknown;
+  /** Admin override date; lock and balance reminders suppressed until it passes. */
+  paymentGraceUntil?: unknown;
+  /**
+   * True when the student has an ACTIVE tuition payment plan they are keeping
+   * to (src/lib/payment-plans.ts). Suppresses the balance lock exactly like a
+   * grace date; a defaulted or absent plan is `false`/undefined.
+   */
+  paymentPlanOnTrack?: boolean;
+  now?: Date;
 }): StudentAccess {
   const paid = Math.max(0, Math.round(Number(totalPaid) || 0));
   const fee = Math.max(0, Math.round(Number(tuitionFee) || 0));
   const deposit = Math.max(0, Math.round(Number(requiredDeposit) || 0));
 
+  const ledger = charges && charges.length ? buildLedger(charges, paid, now) : null;
+  const currentLevelKey = String(level ?? "").trim().toUpperCase();
+  const currentLine = ledger && currentLevelKey
+    ? ledger.lines.find((line) => line.level.toUpperCase() === currentLevelKey) ?? null
+    : null;
+
+  // Has the student cleared the 60% deposit on the level they are IN right now?
+  //   ledger: their current-level charge has its deposit portion allocated
+  //   no ledger: the raw sum of payments reaches the current-level deposit
+  const currentLevelDeposit = currentLine
+    ? Math.round(currentLine.net * DEPOSIT_RATE)
+    : deposit;
+  const depositPaid = ledger
+    ? currentLine
+      ? currentLine.allocated >= currentLevelDeposit
+      // Ledger exists but has no row for the current level (mid-rollout gap) —
+      // fall back rather than lock everyone out.
+      : deposit > 0 ? paid >= deposit : paid >= fee
+    : deposit > 0
+      ? paid >= deposit
+      : paid >= fee;
+
+  // What must be cleared to lift the balance lock. Legacy arrears are excluded.
+  const outstandingBalance = ledger
+    ? ledger.goForwardOutstanding
+    : Math.max(0, fee - paid);
+  const fullPaid = ledger ? outstandingBalance <= 0 : fee > 0 ? paid >= fee : depositPaid;
+
+  // The balance lock only exists for a student who is past the deposit gate
+  // but has not settled the fee.
+  const graceDate = toDate(paymentGraceUntil);
+  // A future grace date OR an on-track payment plan holds the lock back.
+  const graceActive =
+    Boolean(paymentPlanOnTrack) || (graceDate ? now.getTime() < graceDate.getTime() : false);
+
+  let lockAt: Date | null = null;
+  let balanceLocked = false;
+  if (depositPaid && !fullPaid) {
+    // With a ledger, run the clock from the oldest still-open GO-FORWARD charge
+    // — a freshly promoted student gets a fresh 30-day window on the new level
+    // rather than being locked the instant they move up.
+    const anchor =
+      (ledger ? toDate(ledger.oldestOpenGoForwardChargeAt) : null) ??
+      toDate(classesStartedAt) ??
+      toDate(enrolledAt);
+    if (anchor) {
+      lockAt = new Date(anchor.getTime() + PART_PAYMENT_LOCK_DAYS * LOCK_DAY_MS);
+      balanceLocked = !graceActive && now.getTime() >= lockAt.getTime();
+    }
+  }
+
+  const hasAccess = depositPaid && !balanceLocked;
+  const lockReason: PaymentLockReason = hasAccess
+    ? null
+    : balanceLocked
+      ? "unsettled_balance"
+      : "unpaid_deposit";
+
+  // Deposit-gate figures: against the CURRENT level's charge when the ledger is
+  // driving, against the raw payment sum otherwise.
+  const towardDeposit = currentLine ? currentLine.allocated : paid;
+  const outstandingDeposit = Math.max(0, currentLevelDeposit - towardDeposit);
+  const progressPercent = currentLevelDeposit > 0
+    ? Math.min(100, Math.round((towardDeposit / currentLevelDeposit) * 100))
+    : 0;
+
+  // Settle-your-balance progress. With a ledger it is progress towards clearing
+  // everything owed across the ladder; otherwise towards the single fee.
+  const feeProgressPercent = ledger
+    ? ledger.lifetimeCharged > 0
+      ? Math.min(100, Math.round((ledger.lifetimeAllocated / ledger.lifetimeCharged) * 100))
+      : 100
+    : fee > 0
+      ? Math.min(100, Math.round((paid / fee) * 100))
+      : 0;
+
   return {
     deliveryMode: normaliseDeliveryMode(deliveryMode),
     classType: normaliseClassType(classType),
-    hasAccess: deposit > 0 ? paid >= deposit : paid >= fee,
+    hasAccess,
     registrationPaid: paid > 0,
     totalPaid: paid,
     tuitionFee: fee,
-    requiredDeposit: deposit,
-    outstanding: Math.max(0, deposit - paid),
-    progressPercent: deposit > 0 ? Math.min(100, Math.round((paid / deposit) * 100)) : 0,
+    requiredDeposit: currentLevelDeposit,
+    outstanding: outstandingDeposit,
+    outstandingBalance,
+    progressPercent,
+    feeProgressPercent,
+    lockReason,
+    lockAt: lockAt ? lockAt.toISOString() : null,
+    graceUntil: graceDate ? graceDate.toISOString() : null,
     currency: "NGN",
   };
 }

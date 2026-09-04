@@ -21,9 +21,10 @@ import StudentUsageTracker from "@/components/StudentUsageTracker";
 import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
+import PhotoLockScreen from "@/components/PhotoLockScreen";
 import SignOutButton from "@/components/SignOutButton";
 import { MomentQueueProvider } from "@/lib/moment-queue";
-import { canAttendLive, isLiveOnlyRoute, isTuitionGatedRoute } from "@/lib/access";
+import { canAttendLive, isLiveOnlyRoute, isPhotoGatedRoute, isTuitionGatedRoute } from "@/lib/access";
 import { LiveClassProvider, useLiveClass } from "@/lib/useLiveClass";
 import { useStudentAccess } from "@/lib/useStudentAccess";
 import {
@@ -217,6 +218,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     navItems.find((item) => pathname === item.href || pathname.startsWith(item.href + "/"))?.label ??
     "This page";
 
+  // Second, independent gate: a paid-up student with no photo on file (the
+  // signup form used to let this through server-side — see the September
+  // 2026 fix to /api/auth/signup). `access` is null while the query is still
+  // in flight, so this reads false until we actually know — same reasoning
+  // as `hasAccess` defaulting to true above.
+  const photoLocked = access !== null && access.hasPhoto === false && isPhotoGatedRoute(pathname);
+
   // Hiding the sidebar entry is cosmetic — /live is still reachable by typing
   // it. The route is refused here too, and again on the server.
   const wrongDeliveryMode = access !== null && !showsLiveClass && isLiveOnlyRoute(pathname);
@@ -315,7 +323,9 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
               // Locked items stay clickable on purpose: tapping Classes and
               // meeting the padlock explains the paywall far better than a
               // dead, greyed-out button does.
-              const locked = !hasAccess && isTuitionGatedRoute(item.href);
+              const locked =
+                (!hasAccess && isTuitionGatedRoute(item.href)) ||
+                (access !== null && access.hasPhoto === false && isPhotoGatedRoute(item.href));
               // A class in progress is the one thing in this sidebar that is
               // true right now and stops being true. It gets a pulse; nothing
               // else does, which is what keeps the pulse meaning something.
@@ -453,6 +463,8 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           </div>
         ) : routeLocked ? (
           <PaymentLockScreen areaLabel={lockedAreaLabel} access={access} />
+        ) : photoLocked ? (
+          <PhotoLockScreen areaLabel={lockedAreaLabel} />
         ) : (
           children
         )}

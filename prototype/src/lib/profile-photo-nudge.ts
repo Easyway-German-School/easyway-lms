@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { notify, KIND } from "@/lib/notify";
+import { hasProfilePhoto } from "@/lib/access";
 
 /**
  * "Your profile still has no photo — add one."
@@ -38,12 +39,6 @@ function isoWeekKey(now = new Date()): string {
   return `${d.getUTCFullYear()}-w${String(week).padStart(2, "0")}`;
 }
 
-function hasPhoto(admission: unknown): boolean {
-  if (!admission || typeof admission !== "object") return false;
-  const url = (admission as Record<string, unknown>).photoUrl;
-  return typeof url === "string" && url.trim().length > 0;
-}
-
 export async function nudgeStudentsWithoutPhoto() {
   const cutoff = new Date(Date.now() - MIN_ACCOUNT_AGE_DAYS * 86_400_000);
 
@@ -57,7 +52,7 @@ export async function nudgeStudentsWithoutPhoto() {
     select: { id: true, userId: true, admission: true },
   });
 
-  const targets = students.filter((s) => s.userId && !hasPhoto(s.admission));
+  const targets = students.filter((s) => s.userId && !hasProfilePhoto(s.admission));
   if (targets.length === 0) {
     return { scanned: students.length, missing: 0, created: 0 };
   }
