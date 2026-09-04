@@ -14,7 +14,7 @@ import WelcomeTour from "@/components/WelcomeTour";
 import NotificationInvite from "@/components/NotificationInvite";
 import { ArrowRightIcon, BookOpenIcon, CheckCircleIcon, CompassIcon, FlameIcon, SparklesIcon, StarIcon, TargetIcon, TrendingDownIcon, TrendingUpIcon, UserIcon, VideoIcon } from "@/components/icons";
 import { summarizeGamification } from "@/lib/gamification";
-import { isReceivedPayment, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { isReceivedPayment, isRegistrationFeePayment, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { useGamification } from "@/lib/useGamification";
 import { useLiveClass } from "@/lib/useLiveClass";
 
@@ -226,7 +226,9 @@ function DashboardContent() {
         const paymentsResponse = await fetchWithTiming("/api/student/payments", undefined, "student-payments");
         if (paymentsResponse.ok) {
           const paymentsData = await paymentsResponse.json();
-          const received = (paymentsData.payments || []).filter((payment: any) => isReceivedPayment(payment.status));
+          const received = (paymentsData.payments || []).filter(
+            (payment: any) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description),
+          );
           const totalPaid = received.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
           const feeLookup = { level: data.level, branch: data.branchName ?? null, classType: data.classType ?? null };
           const tuitionFee = tuitionFeeFor(feeLookup);

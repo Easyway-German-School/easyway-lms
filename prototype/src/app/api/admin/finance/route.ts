@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { isReceivedPayment, receivedPaymentFilter } from "@/lib/payment";
+import { allReceivedPaymentFilter, isReceivedPayment } from "@/lib/payment";
 import { requireCapability } from "@/lib/admin-roles";
 import { FINANCE_STUDENT_SELECT, computeAll, summariseReceivables } from "@/lib/finance/receivables";
 
@@ -54,7 +54,9 @@ export async function GET(request: Request) {
     prisma.invoice.aggregate({ _sum: { totalAmount: true }, _count: { id: true } }),
     prisma.invoice.count({ where: { status: { in: ["draft", "partial", "open", "unpaid"] } } }),
     prisma.payment.findMany({
-      where: receivedPaymentFilter(),
+      // A raw activity feed — every payment that arrived, registration fee
+      // included. The tuition-only view is the receivables summary above.
+      where: allReceivedPaymentFilter(),
       orderBy: { createdAt: "desc" },
       take: 12,
       select: {

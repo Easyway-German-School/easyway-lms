@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor, isReceivedPayment } from "@/lib/payment";
+import { derivePaymentStatus, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { NextResponse } from "next/server";
 import { mayAutoCreateStudent } from "@/lib/candidates";
 
@@ -99,8 +99,11 @@ export async function GET() {
     const tuitionFee = tuitionFeeFor(feeLookup);
     const registrationFee = REGISTRATION_FEE;
     const requiredDeposit = requiredDepositFor(feeLookup);
+    // Tuition money only. The ₦5,000 registration fee is recorded as its own
+    // Payment so the portal never re-charges it, but it is not tuition and must
+    // not net down the balance or count toward the 60% deposit.
     const totalPaid = student.payments
-      .filter((payment) => isReceivedPayment(payment.status))
+      .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const registrationPaid = true;
     const paymentMeta = derivePaymentStatus({ totalPaid, tuitionFee, requiredDeposit });

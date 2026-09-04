@@ -1,7 +1,7 @@
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { resolveBatchAbsolute } from "@/lib/batch";
 import { nextLevelAfter, SESSION_MONTHS } from "@/lib/levels";
-import { DEPOSIT_RATE, derivePaymentStatus, isReceivedPayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { DEPOSIT_RATE, derivePaymentStatus, isReceivedPayment, isRegistrationFeePayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
 import { writeAudit } from "@/lib/prisma-guard";
 import { naira } from "@/lib/finance/receivables";
@@ -94,7 +94,7 @@ export async function findPromotionCandidates(opts: {
     include: {
       user: { select: { name: true, email: true } },
       branch: { select: { name: true } },
-      payments: { select: { amount: true, status: true } },
+      payments: { select: { amount: true, status: true, description: true } },
     },
   });
 
@@ -116,7 +116,7 @@ export async function findPromotionCandidates(opts: {
     if (monthsElapsed < SESSION_MONTHS) continue;
 
     const totalPaid = student.payments
-      .filter((p) => isReceivedPayment(p.status))
+      .filter((p) => isReceivedPayment(p.status) && !isRegistrationFeePayment(p.description))
       .reduce((sum, p) => sum + p.amount, 0);
 
     // Abuja charges more for the same level, so the branch has to go in.

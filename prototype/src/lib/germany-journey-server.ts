@@ -14,7 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notify";
 import { LEVELS, nextLevelAfter } from "@/lib/levels";
 import { goalFor, isKnownGoal } from "@/lib/germany-goals";
-import { derivePaymentStatus, isReceivedPayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, isReceivedPayment, isRegistrationFeePayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import {
   buildCountdown,
   buildJourney,
@@ -104,7 +104,7 @@ const JOURNEY_SELECT = {
   germanyGoalSetAt: true,
   user: { select: { name: true } },
   branch: { select: { name: true } },
-  payments: { select: { amount: true, status: true } },
+  payments: { select: { amount: true, status: true, description: true } },
 } as const;
 
 function readJson(value: unknown): Record<string, any> {
@@ -141,7 +141,7 @@ export async function loadJourney(
   const branchName = student.branch?.name ?? null;
 
   const totalPaid = student.payments
-    .filter((payment) => isReceivedPayment(payment.status))
+    .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
     .reduce((sum, payment) => sum + payment.amount, 0);
 
   const feeLookup = { level: student.level, branch: branchName, classType: student.classType };
@@ -787,7 +787,7 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
       studentCode: true,
       user: { select: { name: true, email: true } },
       branch: { select: { name: true } },
-      payments: { select: { amount: true, status: true } },
+      payments: { select: { amount: true, status: true, description: true } },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -802,7 +802,7 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
 
     const branchName = student.branch?.name ?? null;
     const totalPaid = student.payments
-      .filter((payment) => isReceivedPayment(payment.status))
+      .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const feeLookup = { level: student.level, branch: branchName, classType: student.classType };
     const tuitionFee = tuitionFeeFor(feeLookup);

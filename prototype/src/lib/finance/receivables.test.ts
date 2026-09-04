@@ -57,6 +57,26 @@ describe("computeStudentFinance", () => {
     expect(row.owed).toBe(60_000);
   });
 
+  it("does not count the registration fee toward tuition", () => {
+    const row = computeStudentFinance(
+      student({
+        id: "a",
+        payments: [
+          { amount: 5_000, status: "completed", description: "Registration fee for Opportunity card" },
+          { amount: 85_000, status: "partial", description: "Deposit payment for A1" },
+        ],
+      }),
+      NOW,
+    );
+
+    // ₦85,000 of tuition is in — the ₦5,000 reg fee is separate, so she is
+    // still ₦5,000 short of the ₦90,000 deposit and ₦65,000 short of the fee.
+    expect(row.paid).toBe(85_000);
+    expect(row.owed).toBe(65_000);
+    expect(row.depositPaid).toBe(false);
+    expect(row.cohort).toBe("registered_only");
+  });
+
   it("puts a student who has paid the deposit on the right side of the paywall", () => {
     // 60% of ₦150,000 is ₦90,000.
     const row = computeStudentFinance(student({ id: "a", payments: [{ amount: 90_000 }] }), NOW);

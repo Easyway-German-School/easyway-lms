@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import {
   belongsToLecturer,
   describeAssignment,
@@ -68,7 +68,7 @@ export async function GET() {
         include: {
           user: { select: { name: true, email: true, createdAt: true } },
           branch: { select: { name: true } },
-          payments: { select: { amount: true, status: true } },
+          payments: { select: { amount: true, status: true, description: true } },
           attendances: { select: { present: true } },
           _count: { select: { assignmentSubmissions: true, certificates: true } },
         },
@@ -90,7 +90,7 @@ export async function GET() {
             : {};
 
         const totalPaid = student.payments
-          .filter((payment) => isReceivedPayment(payment.status))
+          .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
           .reduce((sum, payment) => sum + payment.amount, 0);
         const feeLookup = {
           level: student.level,

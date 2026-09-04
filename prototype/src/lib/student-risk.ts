@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notify, KIND } from "@/lib/notify";
 import { computeStudentFinance, type FinanceStudentInput } from "@/lib/finance/receivables";
-import { RECEIVED_PAYMENT_STATUSES } from "@/lib/payment";
+import { RECEIVED_PAYMENT_STATUSES, REGISTRATION_PAYMENT_DESCRIPTION_PREFIX } from "@/lib/payment";
 
 /**
  * CHURN RISK — a different question from the dashboard's existing "at risk".
@@ -167,8 +167,17 @@ const FINANCE_LOOKUP_SELECT = {
   branch: { select: { id: true, name: true } },
   user: { select: { name: true, email: true } },
   payments: {
-    where: { status: { in: RECEIVED_PAYMENT_STATUSES } },
-    select: { amount: true, createdAt: true, method: true },
+    // Tuition money only — `computeStudentFinance` treats a row with no
+    // `status` as received, so the ₦5,000 registration fee has to be dropped
+    // here or it counts toward the deposit and skews churn risk.
+    where: {
+      status: { in: RECEIVED_PAYMENT_STATUSES },
+      OR: [
+        { description: null },
+        { description: { not: { startsWith: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX } } },
+      ],
+    },
+    select: { amount: true, createdAt: true, method: true, description: true },
   },
 } as const;
 

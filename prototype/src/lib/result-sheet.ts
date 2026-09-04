@@ -8,6 +8,7 @@ import {
 import {
   derivePaymentStatus,
   isReceivedPayment,
+  isRegistrationFeePayment,
   requiredDepositFor,
   tuitionFeeFor,
 } from "@/lib/payment";
@@ -267,10 +268,10 @@ export async function buildResultSheet(
     if (includeFinance) {
       const payments = await prisma.payment.findMany({
         where: { studentId: student.id },
-        select: { amount: true, status: true },
+        select: { amount: true, status: true, description: true },
       });
       const totalPaid = payments
-        .filter((payment) => isReceivedPayment(payment.status))
+        .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
         .reduce((sum, payment) => sum + payment.amount, 0);
       const feeLookup = {
         level: student.level,

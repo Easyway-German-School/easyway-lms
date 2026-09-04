@@ -2,7 +2,7 @@ import { getServerSession, type Session } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { NextResponse } from "next/server";
 
 const DEFAULT_EXAM_CAPACITY = 30;
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
     // finding out the day of is the failure mode this closes.
     const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
     const totalPaid = student.payments
-      .filter((payment) => isReceivedPayment(payment.status))
+      .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const access = deriveStudentAccess({
       totalPaid,
