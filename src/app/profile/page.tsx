@@ -3,6 +3,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { studentAccessQueryKey } from "@/lib/useStudentAccess";
 
 import Link from "next/link";
 import StudentShell from "@/components/StudentShell";
@@ -378,6 +379,10 @@ export default function ProfilePage() {
 
       setProfile((prev) => (prev ? { ...prev, photoUrl: url } : prev));
       setMessage("Profile photo updated.");
+      // The photo lock screen promises this unlocks without a refresh — it
+      // only does if the shell's cached access read actually gets thrown
+      // away. Same shape as the gamification invalidate below.
+      queryClient.invalidateQueries({ queryKey: studentAccessQueryKey });
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Could not upload that photo");
     } finally {
