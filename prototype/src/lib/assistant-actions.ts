@@ -444,7 +444,7 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
           properties: {
             branch: FILTER_PROPERTIES.branch,
             level: FILTER_PROPERTIES.level,
-            sessionSlot: { type: "string", enum: ["morning", "afternoon", "evening"] },
+            sessionSlot: { type: "string", enum: ["morning", "afternoon", "evening", "weekend"]},
             date: { type: "string", description: "The class day as YYYY-MM-DD." },
             status: { type: "string", enum: ["present", "absent", "late", "excused"] },
           },
@@ -641,7 +641,7 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
           properties: {
             branch: FILTER_PROPERTIES.branch,
             level: FILTER_PROPERTIES.level,
-            timeSlot: { type: "string", enum: ["morning", "afternoon", "evening"] },
+            timeSlot: { type: "string", enum: ["morning", "afternoon", "evening", "weekend"]},
             date: { type: "string", description: "The day that will not hold, as YYYY-MM-DD." },
             newDate: {
               type: "string",

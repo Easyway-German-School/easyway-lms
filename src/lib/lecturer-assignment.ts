@@ -20,7 +20,7 @@
 
 export const COURSE_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
 
-export const SESSION_SLOTS = ["morning", "afternoon", "evening"] as const;
+export const SESSION_SLOTS = ["morning", "afternoon", "evening", "weekend"] as const;
 
 /**
  * How a class is delivered. Distinct from `Student.classType` (group/private),

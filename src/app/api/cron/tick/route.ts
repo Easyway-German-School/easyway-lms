@@ -108,6 +108,38 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * The class-wide reminder for a mock / pretest sitting, three days out. Fires
+   * on a single calendar day so one tick a day is one reminder. See
+   * src/lib/pretest-reminders.ts.
+   */
+  results.push(
+    await run("pretest-reminders", async () => {
+      const { sendDuePretestReminders } = await import("@/lib/pretest-reminders");
+      return sendDuePretestReminders();
+    }),
+  );
+
+  /**
+   * Results releasing themselves. A mock sitting that is fully marked and past
+   * its tenant's delay publishes to students AND their parents without a tutor
+   * touching anything; one that is graded but still sitting there gets the
+   * tutor (and, if it drags, the office) a nudge. See src/lib/result-release.ts.
+   */
+  results.push(
+    await run("auto-release-results", async () => {
+      const { autoReleaseDueResults } = await import("@/lib/result-release");
+      return autoReleaseDueResults();
+    }),
+  );
+
+  results.push(
+    await run("result-release-nudge", async () => {
+      const { nudgeUnreleasedResults } = await import("@/lib/result-release");
+      return nudgeUnreleasedResults();
+    }),
+  );
+
+  /**
    * A tutor's students going quiet — low attendance, no portal activity, or
    * repeated "not yet" answers — used to be invisible until somebody in the
    * office happened to notice. This flags it to the tutor directly, at most
@@ -138,6 +170,32 @@ async function handleGET(request: NextRequest) {
     await run("recording-expiry-nudge", async () => {
       const { sendDueExpiryNudges } = await import("@/lib/recording-expiry-nudge");
       return sendDueExpiryNudges();
+    }),
+  );
+
+  /**
+   * Students who still have no profile photo get a once-a-week nudge from
+   * Becca. Self-gated: idempotent per ISO week via the notification dedupeKey,
+   * and a student drops out of it the moment they upload one.
+   */
+  /**
+   * Student code assignment at signup / manual-add / import is deliberately
+   * best-effort (a transient failure there must never cost someone their
+   * account) — which used to mean a miss stuck as "NO STUDENT ID ISSUED"
+   * forever, until an admin noticed and ran backfill-student-codes.mjs by
+   * hand. See src/lib/student-code-backfill.ts.
+   */
+  results.push(
+    await run("student-code-backfill", async () => {
+      const { backfillMissingStudentCodes } = await import("@/lib/student-code-backfill");
+      return backfillMissingStudentCodes();
+    }),
+  );
+
+  results.push(
+    await run("profile-photo-nudge", async () => {
+      const { nudgeStudentsWithoutPhoto } = await import("@/lib/profile-photo-nudge");
+      return nudgeStudentsWithoutPhoto();
     }),
   );
 

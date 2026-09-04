@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
          * morning A1 class can now set homework for the morning A1 class,
          * rather than for three cohorts taught by three different people.
          */
-        sessionSlot: ["morning", "afternoon", "evening"].includes(String(sessionSlot))
+        sessionSlot: ["morning", "afternoon", "evening", "weekend"].includes(String(sessionSlot))
           ? String(sessionSlot)
           : null,
         type: kind,

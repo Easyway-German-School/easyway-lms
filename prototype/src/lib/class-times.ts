@@ -17,13 +17,28 @@
  * ---------------------------------------------------------------------------
  */
 
-export const TIME_SLOTS = ["morning", "afternoon", "evening"] as const;
+export const TIME_SLOTS = ["morning", "afternoon", "evening", "weekend"] as const;
 export type TimeSlot = (typeof TIME_SLOTS)[number];
+
+/**
+ * Weekday sittings meet Mon–Fri; the weekend sitting meets once, on Saturday,
+ * which is why `WEEKEND_SLOTS` exists at all — most callers that iterate
+ * "every sitting today" need to skip it on a weekday and are the only reason
+ * it isn't just folded into `TIME_SLOTS` unremarked.
+ */
+export const WEEKDAY_SLOTS = ["morning", "afternoon", "evening"] as const;
+export function isWeekendSlot(slot: unknown): boolean {
+  return String(slot ?? "").toLowerCase() === "weekend";
+}
 
 export const SLOT_DEFAULTS: Record<TimeSlot, { startTime: string; endTime: string; label: string }> = {
   morning: { startTime: "10:00", endTime: "13:00", label: "Morning" },
   afternoon: { startTime: "13:00", endTime: "15:00", label: "Afternoon" },
   evening: { startTime: "17:00", endTime: "19:00", label: "Evening" },
+  // One sitting, Saturdays only — see class-sessions.ts for how the rotation
+  // generator turns this into "which days a cohort meets" differently from
+  // the Mon–Fri slots above.
+  weekend: { startTime: "10:00", endTime: "14:00", label: "Weekend (Saturdays)" },
 };
 
 export function normalizeSlot(value: unknown): TimeSlot {

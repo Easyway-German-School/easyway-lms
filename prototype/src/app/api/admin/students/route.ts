@@ -334,7 +334,7 @@ export async function POST(request: Request) {
   const tutorId = typeof body.tutorId === "string" ? body.tutorId : null;
   const status = typeof body.status === "string" ? body.status : "active";
   const classType = body.classType === "private" ? "private" : "group";
-  const sessionSlot = ["morning", "afternoon", "evening"].includes(String(body.sessionSlot))
+  const sessionSlot = ["morning", "afternoon", "evening", "weekend"].includes(String(body.sessionSlot))
     ? String(body.sessionSlot)
     : "morning";
   const requestedDeliveryMode = body.deliveryMode === "hybrid" ? "hybrid" : "physical";
@@ -495,7 +495,7 @@ export async function PATCH(request: Request) {
   const tutorId = typeof body.tutorId === "string" ? body.tutorId : null;
   const status = typeof body.status === "string" ? body.status : undefined;
   const classType = body.classType === "private" || body.classType === "group" ? body.classType : undefined;
-  const sessionSlot = ["morning", "afternoon", "evening"].includes(String(body.sessionSlot))
+  const sessionSlot = ["morning", "afternoon", "evening", "weekend"].includes(String(body.sessionSlot))
     ? String(body.sessionSlot)
     : undefined;
   const requestedDeliveryMode = body.deliveryMode === "hybrid" || body.deliveryMode === "physical"

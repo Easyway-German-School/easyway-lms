@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { generatePersonalizedSchedule, type ScheduleMonth } from "@/lib/schedule";
-import { SLOT_DEFAULTS, normalizeSlot, type TimeSlot } from "@/lib/class-times";
+import { SLOT_DEFAULTS, normalizeSlot, isWeekendSlot, type TimeSlot } from "@/lib/class-times";
+import { sessionDurationMonths } from "@/lib/levels";
 
 /**
  * Merges the generated timetable skeleton with the ClassSession overrides a
@@ -99,7 +100,8 @@ export async function getMergedSchedule(args: {
     batch: args.batch ?? null,
     registeredAt: args.registeredAt ?? null,
     now: args.now,
-    months: args.months ?? 2,
+    months: args.months ?? sessionDurationMonths(slot),
+    sessionSlot: slot,
   });
 
   const allDates = generated.months.flatMap((m) => m.sessions.map((s) => dayKey(s.date)));

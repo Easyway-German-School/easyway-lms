@@ -54,8 +54,8 @@ function isAdminRole(role: unknown) {
   return normalizeRole(role) === "admin";
 }
 
-/** The three sittings, in the order a timetable reads. */
-export const SESSION_SLOTS = ["morning", "afternoon", "evening"] as const;
+/** The sittings, in the order a timetable reads. */
+export const SESSION_SLOTS = ["morning", "afternoon", "evening", "weekend"] as const;
 export type SessionSlot = (typeof SESSION_SLOTS)[number];
 
 export function normalizeSlot(value: unknown): SessionSlot {

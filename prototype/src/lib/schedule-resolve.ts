@@ -2,7 +2,7 @@ import type { Student } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getMergedSchedule } from "@/lib/class-sessions";
 import { getPrivateSchedule } from "@/lib/private-classes";
-import { nextLevelAfter } from "@/lib/levels";
+import { nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
 
 /**
  * Builds the same timetable payload /api/schedule has always returned for a
@@ -50,7 +50,7 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
     registeredAt: student.createdAt,
     sessionSlot: student.sessionSlot,
     now: new Date(),
-    months: 2,
+    months: sessionDurationMonths(student.sessionSlot),
   });
 
   try {

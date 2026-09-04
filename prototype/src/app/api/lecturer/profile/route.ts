@@ -14,7 +14,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const SLOTS = ["morning", "afternoon", "evening"] as const;
+const SLOTS = ["morning", "afternoon", "evening", "weekend"] as const;
 
 type LecturerProfile = {
   id: string;

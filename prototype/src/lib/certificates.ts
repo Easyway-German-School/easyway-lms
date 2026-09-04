@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 
 import { prisma } from "@/lib/prisma";
 import { awardFor, hasPassed, weightedCourseworkAverage, type Award } from "@/lib/grading";
-import { SESSION_MONTHS } from "@/lib/levels";
+import { SESSION_MONTHS, sessionDurationMonths } from "@/lib/levels";
 import { receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { resolveBatchWindow } from "@/lib/batch";
@@ -69,8 +69,9 @@ export function courseWindow(
   batch: string | null,
   now = new Date(),
   registeredAt: Date | null = null,
+  sessionSlot: string | null = null,
 ): { start: Date | null; end: Date | null } {
-  const window = resolveBatchWindow(batch, { registeredAt, now });
+  const window = resolveBatchWindow(batch, { registeredAt, now, months: sessionDurationMonths(sessionSlot) });
   if (!window) return { start: null, end: null };
   return { start: window.startsOn, end: window.endsOn };
 }
@@ -79,10 +80,12 @@ export function sessionIsComplete(
   batch: string | null,
   now = new Date(),
   registeredAt: Date | null = null,
+  sessionSlot: string | null = null,
 ): boolean {
-  const window = resolveBatchWindow(batch, { registeredAt, now });
+  const months = sessionDurationMonths(sessionSlot);
+  const window = resolveBatchWindow(batch, { registeredAt, now, months });
   if (!window) return false;
-  return window.monthsElapsed >= SESSION_MONTHS;
+  return window.monthsElapsed >= months;
 }
 
 export type Eligibility =
@@ -104,11 +107,12 @@ export function certificateEligibility(input: {
   now?: Date;
   /** When the student registered — decides which occurrence of the batch month. */
   registeredAt?: Date | null;
+  sessionSlot?: string | null;
 }): Eligibility {
-  if (!sessionIsComplete(input.batch, input.now, input.registeredAt ?? null)) {
+  if (!sessionIsComplete(input.batch, input.now, input.registeredAt ?? null, input.sessionSlot ?? null)) {
     return {
       eligible: false,
-      reason: `Your ${SESSION_MONTHS}-month session is still running. Certificates are issued at the end of it.`,
+      reason: `Your ${sessionDurationMonths(input.sessionSlot)}-month session is still running. Certificates are issued at the end of it.`,
     };
   }
   if (input.totalPaid < input.requiredDeposit) {
@@ -174,6 +178,7 @@ export async function issueCertificateForStudent(
       id: true,
       level: true,
       classType: true,
+      sessionSlot: true,
       studentCode: true,
       admission: true,
       // Anchors which occurrence of the batch month this student's course ran
@@ -214,6 +219,7 @@ export async function issueCertificateForStudent(
     requiredDeposit: requiredDepositFor(feeLookup),
     now,
     registeredAt: student.createdAt,
+    sessionSlot: student.sessionSlot,
   });
   if (!eligibility.eligible) return { issued: false, reason: eligibility.reason };
 
@@ -257,8 +263,8 @@ export async function issueCertificateForStudent(
       // Snapshotted like every other field here: a student who repeats the
       // level or moves batch must not change the dates on a document already
       // printed and in somebody's hand.
-      courseStart: courseWindow(batch, now, student.createdAt).start,
-      courseEnd: courseWindow(batch, now, student.createdAt).end,
+      courseStart: courseWindow(batch, now, student.createdAt, student.sessionSlot).start,
+      courseEnd: courseWindow(batch, now, student.createdAt, student.sessionSlot).end,
       issuedAt: now,
     },
     select: { id: true },

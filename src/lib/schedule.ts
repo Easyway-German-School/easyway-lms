@@ -62,6 +62,9 @@ const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // The two weekday patterns (JS getDay(): 0=Sun … 6=Sat).
 const PATTERN_MFS = [1, 5, 6]; // Mon, Fri, Sat
 const PATTERN_TWT = [2, 3, 4]; // Tue, Wed, Thu
+// The weekend sitting meets once a week, not three times — there is no
+// alternation to pick between, so this bypasses `patternForBatch` entirely.
+const PATTERN_WEEKEND = [6]; // Sat only
 
 /**
  * The pattern a batch teaches on, for every month of its course.
@@ -119,6 +122,19 @@ function sessionFor(level: string, weekday: string): { slot: string; focus: stri
   return table[weekday] ?? { slot: "Live Class", focus: "Guided practice" };
 }
 
+/**
+ * The weekend sitting meets once a week, not five times, so it cannot follow
+ * one weekday's slot every time without teaching nothing but "Exam Workshop"
+ * for three months straight — that is what every weekday cohort's own Saturday
+ * already is (see `sessionFor`'s "Sat" row), and it works there because it is
+ * one sitting in five. Here it is the only one, so it cycles through the same
+ * five labs a weekday cohort gets across its whole week, one per Saturday.
+ */
+function sessionForWeekend(level: string, weekIndex: number): { slot: string; focus: string } {
+  const rotation: readonly string[] = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  return sessionFor(level, rotation[weekIndex % rotation.length]);
+}
+
 export type GenerateScheduleArgs = {
   level?: string | null;
   batch?: string | null; // month name e.g. "August" — the FIRST teaching month
@@ -133,6 +149,8 @@ export type GenerateScheduleArgs = {
   now?: Date;
   /** How many months of timetable to generate. */
   months?: number;
+  /** "weekend" meets Saturdays only and skips the Mon/Fri/Sat vs Tue/Wed/Thu alternation. */
+  sessionSlot?: string | null;
 };
 
 export function generatePersonalizedSchedule({
@@ -141,6 +159,7 @@ export function generatePersonalizedSchedule({
   registeredAt = null,
   now = new Date(),
   months = 2,
+  sessionSlot = null,
 }: GenerateScheduleArgs): { level: string; batchMonth: string; batchYear: number; months: ScheduleMonth[] } {
   const normalizedLevel = (typeof level === "string" && level.trim() ? level : "A1").toUpperCase();
 
@@ -166,9 +185,14 @@ export function generatePersonalizedSchedule({
 
   // Fixed for the whole course. Read once, outside the loop, so it is not even
   // possible for a later edit to make it depend on the month being generated.
-  const patternDays = patternForBatch(batchMonthIndex);
+  const isWeekend = String(sessionSlot ?? "").toLowerCase() === "weekend";
+  const patternDays = isWeekend ? PATTERN_WEEKEND : patternForBatch(batchMonthIndex);
 
   const out: ScheduleMonth[] = [];
+  // Counts Saturdays across the whole course (not reset per month), so a
+  // weekend cohort's curriculum rotation carries on from where the previous
+  // month left off instead of always starting the course back on "Mon".
+  let weekendWeekIndex = 0;
 
   for (let i = 0; i < months; i += 1) {
     const offset = startOffset + i;
@@ -185,7 +209,9 @@ export function generatePersonalizedSchedule({
       if (!patternDays.includes(jsWeekday)) continue;
 
       const weekday = WEEKDAY_SHORT[jsWeekday];
-      const { slot, focus } = sessionFor(normalizedLevel, weekday);
+      const { slot, focus } = isWeekend
+        ? sessionForWeekend(normalizedLevel, weekendWeekIndex++)
+        : sessionFor(normalizedLevel, weekday);
       sessions.push({
         date: date.toISOString(),
         weekday,

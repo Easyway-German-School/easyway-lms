@@ -23,7 +23,7 @@ export const CLASS_SESSIONS_KEY = "class.sessions";
 export { OFFERED_LEVELS as LEVELS } from "@/lib/levels";
 import { OFFERED_LEVELS as LEVELS } from "@/lib/levels";
 
-export const SESSION_SLOTS = ["morning", "afternoon", "evening"] as const;
+export const SESSION_SLOTS = ["morning", "afternoon", "evening", "weekend"] as const;
 
 export type Level = (typeof LEVELS)[number];
 export type SessionSlot = (typeof SESSION_SLOTS)[number];
@@ -33,6 +33,7 @@ export type SessionConfig = {
   morning: boolean;
   afternoon: boolean;
   evening: boolean;
+  weekend: boolean;
 };
 
 export type SessionSettings = {
@@ -47,6 +48,7 @@ export function defaultSessionSettings(): SessionSettings {
       morning: true,
       afternoon: true,
       evening: true,
+      weekend: true,
     })),
   };
 }
@@ -89,6 +91,7 @@ export function parseSessionSettings(
       morning: Boolean((row as SessionConfig).morning),
       afternoon: Boolean((row as SessionConfig).afternoon),
       evening: Boolean((row as SessionConfig).evening),
+      weekend: Boolean((row as SessionConfig).weekend),
     });
   }
 
@@ -100,7 +103,7 @@ export function parseSessionSettings(
    */
   return {
     sessions: LEVELS.map(
-      (level) => byLevel.get(level) ?? { level, morning: true, afternoon: true, evening: true },
+      (level) => byLevel.get(level) ?? { level, morning: true, afternoon: true, evening: true, weekend: true },
     ),
   };
 }

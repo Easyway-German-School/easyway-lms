@@ -12,7 +12,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notify";
-import { LEVELS, nextLevelAfter } from "@/lib/levels";
+import { LEVELS, nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
 import { goalFor, isKnownGoal } from "@/lib/germany-goals";
 import { derivePaymentStatus, isReceivedPayment, isRegistrationFeePayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import {
@@ -84,6 +84,7 @@ const JOURNEY_SELECT = {
   level: true,
   branchId: true,
   classType: true,
+  sessionSlot: true,
   outcome: true,
   pathway: true,
   admission: true,
@@ -228,6 +229,7 @@ export async function loadJourney(
     goalId: student.germanyGoal,
     goalNote: student.germanyGoalNote,
     privateFocus,
+    sessionSlot: student.sessionSlot,
     now,
   });
 
@@ -811,7 +813,10 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
     let daysElapsed: number | null = null;
     let percent: number | null = null;
     if (student.classesStartedAt) {
-      const countdown = buildCountdown(student.level, student.classesStartedAt, { now });
+      const countdown = buildCountdown(student.level, student.classesStartedAt, {
+        now,
+        months: sessionDurationMonths(student.sessionSlot),
+      });
       daysElapsed = countdown.daysElapsed;
       percent = countdown.percent;
     }

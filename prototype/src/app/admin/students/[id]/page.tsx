@@ -402,6 +402,8 @@ export default function StudentDossierPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [photoBroken, setPhotoBroken] = useState(false);
+  const [issuingCode, setIssuingCode] = useState(false);
+  const [issueCodeError, setIssueCodeError] = useState<string | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
@@ -444,6 +446,22 @@ export default function StudentDossierPage() {
       .then((payload) => setBranches(payload?.branches || []))
       .catch(() => {});
   }, []);
+
+  async function issueCode() {
+    if (issuingCode) return;
+    setIssuingCode(true);
+    setIssueCodeError(null);
+    try {
+      const response = await fetch(`/api/admin/students/${id}/issue-code`, { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Could not issue a student ID");
+      await load(false);
+    } catch (issueError) {
+      setIssueCodeError(issueError instanceof Error ? issueError.message : "Could not issue a student ID");
+    } finally {
+      setIssuingCode(false);
+    }
+  }
 
   function openEdit() {
     if (!data) return;
@@ -772,9 +790,22 @@ export default function StudentDossierPage() {
             </div>
 
             <div className="min-w-0 flex-1">
-              <p className="font-mono text-xs tracking-[0.2em] text-white/50">
+              <p className="flex flex-wrap items-center gap-2 font-mono text-xs tracking-[0.2em] text-white/50">
                 {identity.studentCode ?? "NO STUDENT ID ISSUED"}
+                {!identity.studentCode && (
+                  <button
+                    type="button"
+                    onClick={() => void issueCode()}
+                    disabled={issuingCode}
+                    className="rounded-full bg-amber-500 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white transition hover:brightness-110 disabled:opacity-50"
+                  >
+                    {issuingCode ? "Issuing…" : "Issue ID now"}
+                  </button>
+                )}
               </p>
+              {issueCodeError && !identity.studentCode && (
+                <p className="mt-1 text-xs font-semibold text-red-400">{issueCodeError}</p>
+              )}
               <h1 className="mt-1 text-3xl font-black tracking-tight">{identity.name}</h1>
               <p className="mt-1 text-sm text-white/70">
                 {identity.email}

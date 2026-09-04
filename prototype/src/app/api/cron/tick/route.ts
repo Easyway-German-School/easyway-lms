@@ -178,6 +178,20 @@ async function handleGET(request: NextRequest) {
    * Becca. Self-gated: idempotent per ISO week via the notification dedupeKey,
    * and a student drops out of it the moment they upload one.
    */
+  /**
+   * Student code assignment at signup / manual-add / import is deliberately
+   * best-effort (a transient failure there must never cost someone their
+   * account) — which used to mean a miss stuck as "NO STUDENT ID ISSUED"
+   * forever, until an admin noticed and ran backfill-student-codes.mjs by
+   * hand. See src/lib/student-code-backfill.ts.
+   */
+  results.push(
+    await run("student-code-backfill", async () => {
+      const { backfillMissingStudentCodes } = await import("@/lib/student-code-backfill");
+      return backfillMissingStudentCodes();
+    }),
+  );
+
   results.push(
     await run("profile-photo-nudge", async () => {
       const { nudgeStudentsWithoutPhoto } = await import("@/lib/profile-photo-nudge");

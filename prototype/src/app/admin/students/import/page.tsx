@@ -24,13 +24,15 @@ type ImportResult = {
   password?: string;
   studentCode?: string | null;
   emailed?: boolean;
+  /** True when this row had no email and one was minted to create the account. */
+  placeholderEmail?: boolean;
 };
 
-const TEMPLATE_HEADERS = ["name", "email", "phone", "branch", "level", "batch", "session", "amount_paid"];
+const TEMPLATE_HEADERS = ["name", "email", "phone", "branch", "level", "batch", "session", "type_of_class", "amount_paid"];
 
-const SAMPLE = `name,email,phone,branch,level,batch,session,amount_paid
-Chidi Okafor,chidi@example.com,08031234567,Lagos,B1,May,morning,150000
-Aisha Bello,aisha@example.com,08039876543,Abuja,A2,June,evening,108000`;
+const SAMPLE = `name,email,phone,branch,level,batch,session,type_of_class,amount_paid
+Chidi Okafor,chidi@example.com,08031234567,Lagos,B1,May,morning,physical,150000
+Aisha Bello,,08039876543,,A2,June,weekend,online,108000`;
 
 /**
  * Bringing existing students onto the LMS.
@@ -122,8 +124,12 @@ export default function ImportStudentsPage() {
 
   const rows = useMemo(() => parseCsv(csv), [csv]);
 
-  const importHeaderWarning = csv.trim() && rows.length > 0 && rows.every((row) => !row.name || !row.email)
-    ? "We could not confidently identify both a student-name and email column. Rename the headers to Name and Email, or use the supported aliases below."
+  // Email is no longer required to identify a row — a school's own sheet
+  // often carries a phone number and nothing else, and the importer mints a
+  // placeholder account for those (see the importer's placeholderEmail note).
+  // Only a missing NAME column is worth stopping the office over.
+  const importHeaderWarning = csv.trim() && rows.length > 0 && rows.every((row) => !row.name)
+    ? "We could not confidently identify a student-name column. Rename the header to Name, or use the supported aliases below."
     : "";
 
   async function run(dryRun: boolean) {
@@ -151,9 +157,15 @@ export default function ImportStudentsPage() {
     }
   }
 
-  /** The CSV importer's version of the "send it now?" prompt. */
+  /**
+   * The CSV importer's version of the "send it now?" prompt.
+   *
+   * Skips a placeholder-email row — sending its login to
+   * `noemail.xxxx@students.placeholder…` reaches nobody, and Brevo has no
+   * reason to know that address is expected to bounce.
+   */
   async function sendLogins() {
-    const toSend = results.filter((r) => r.status === "created" && r.password);
+    const toSend = results.filter((r) => r.status === "created" && r.password && !r.placeholderEmail);
     if (toSend.length === 0) return;
     setSendState("sending");
     try {
@@ -201,7 +213,9 @@ export default function ImportStudentsPage() {
           <p className="mt-2 max-w-3xl text-[var(--muted)]">
             For students who started classes before the portal existed. Include their <strong>branch</strong>, their{" "}
             <strong>batch month</strong> and anything they have <strong>already paid</strong> — without those the
-            timetable, the level-end date and the paywall all get it wrong.
+            timetable, the level-end date and the paywall all get it wrong. <strong>Email is optional</strong> — a row
+            with only a phone number still creates the account, with a placeholder email you can replace later from
+            the student&apos;s own profile page.
           </p>
         </div>
 
@@ -264,9 +278,12 @@ export default function ImportStudentsPage() {
 
           <p className="mt-2 text-xs text-[var(--muted)]">
             Columns: <code>{TEMPLATE_HEADERS.join(", ")}</code>. The importer also understands common headers such as
-            <code> Name of Students</code>, <code>Student Name</code>, <code>Full Name</code>, and <code>Email Address</code>.
-            Only name and email are required; everything else improves what the account can do. An .xlsx file is read
-            from its first sheet and shown below as text, so you can check it before anything is written.
+            <code> Name of Students</code>, <code>Student Name</code>, <code>Full Name</code>, <code>Type of Class</code> (
+            physical / online / hybrid), and <code>Session</code> (morning / afternoon / evening / weekend). Only name is
+            required; everything else improves what the account can do, and spelling does not have to be exact — the
+            importer reads "portharcourt" as Port Harcourt and "150K" as ₦150,000 and shows you every correction it made.
+            An .xlsx file is read from its first sheet and shown below as text, so you can check it before anything is
+            written.
           </p>
 
           <textarea
@@ -376,7 +393,15 @@ export default function ImportStudentsPage() {
                       <td className="px-3 py-2 text-[var(--muted)]">{result.row}</td>
                       <td className="px-3 py-2">
                         <p className="font-medium text-[var(--foreground)]">{result.name || "—"}</p>
-                        <p className="text-xs text-[var(--muted)]">{result.email}</p>
+                        <p className="text-xs text-[var(--muted)]">
+                          {result.placeholderEmail ? (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-800">
+                              No email — placeholder account
+                            </span>
+                          ) : (
+                            result.email
+                          )}
+                        </p>
                       </td>
                       <td className="px-3 py-2 text-[var(--muted)]">{result.branch || "—"}</td>
                       <td className="px-3 py-2 text-[var(--muted)]">{result.level}</td>

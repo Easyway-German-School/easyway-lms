@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
 }
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
-const SESSION_SLOTS = ["morning", "afternoon", "evening"];
+const SESSION_SLOTS = ["morning", "afternoon", "evening", "weekend"];
 const CLASS_TYPES = ["group", "private"];
 const DELIVERY_MODES = ["physical", "hybrid", "online"];
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;

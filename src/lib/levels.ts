@@ -64,8 +64,34 @@ export function journeyLevelFor(level: string | null | undefined): string {
  */
 export const SESSION_MONTHS = 2;
 
+/**
+ * The weekend sitting meets once a week instead of three times, so the same
+ * curriculum takes three months, not two — see schedule.ts's PATTERN_WEEKEND.
+ */
+export const WEEKEND_SESSION_MONTHS = 3;
+
+/**
+ * How long THIS student's level runs, given their sitting.
+ *
+ * Every duration-gated computation in the app — promotion eligibility,
+ * certificate timing, the Germany-journey countdown, the batch/rotation
+ * generator — used to read the flat `SESSION_MONTHS` constant directly, which
+ * was correct until "weekend" existed as a sitting with a different course
+ * length. Read through this instead of the constant so a weekend student's
+ * level is not marked overdue, promotion-eligible or certificate-ready a full
+ * month early.
+ */
+export function sessionDurationMonths(sessionSlot?: string | null): number {
+  return String(sessionSlot ?? "").toLowerCase() === "weekend" ? WEEKEND_SESSION_MONTHS : SESSION_MONTHS;
+}
+
 /** Weeks of teaching in one level, used to express tuition per week. */
 export const WEEKS_OF_TEACHING = SESSION_MONTHS * 4;
+
+/** Same idea as `WEEKS_OF_TEACHING`, sized to this student's own sitting. */
+export function weeksOfTeachingFor(sessionSlot?: string | null): number {
+  return sessionDurationMonths(sessionSlot) * 4;
+}
 
 /** The level a student moves up to after this one. C2 is the end of the ladder. */
 export function nextLevelAfter(level: string): string | null {

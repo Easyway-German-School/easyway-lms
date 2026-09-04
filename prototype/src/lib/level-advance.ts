@@ -82,8 +82,8 @@ export type LevelAdvanceOffer = {
   perks: AdvancePerk[];
 };
 
-export function perWeekCost(tuitionFee: number): number {
-  return Math.round((Number(tuitionFee) || 0) / WEEKS_OF_TEACHING);
+export function perWeekCost(tuitionFee: number, weeks: number = WEEKS_OF_TEACHING): number {
+  return Math.round((Number(tuitionFee) || 0) / (weeks || WEEKS_OF_TEACHING));
 }
 
 export { SESSION_MONTHS, WEEKS_OF_TEACHING };

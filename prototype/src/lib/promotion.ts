@@ -1,6 +1,6 @@
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { resolveBatchAbsolute } from "@/lib/batch";
-import { nextLevelAfter, SESSION_MONTHS } from "@/lib/levels";
+import { nextLevelAfter, SESSION_MONTHS, sessionDurationMonths } from "@/lib/levels";
 import { DEPOSIT_RATE, derivePaymentStatus, isReceivedPayment, isRegistrationFeePayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
 import { writeAudit } from "@/lib/prisma-guard";
@@ -113,7 +113,8 @@ export async function findPromotionCandidates(opts: {
     if (startAbsolute === null) continue;
 
     const monthsElapsed = currentAbsolute - startAbsolute;
-    if (monthsElapsed < SESSION_MONTHS) continue;
+    const monthsAllowed = sessionDurationMonths(student.sessionSlot);
+    if (monthsElapsed < monthsAllowed) continue;
 
     const totalPaid = student.payments
       .filter((p) => isReceivedPayment(p.status) && !isRegistrationFeePayment(p.description))
@@ -139,7 +140,7 @@ export async function findPromotionCandidates(opts: {
       branchName: student.branch?.name ?? null,
       batch,
       monthsElapsed,
-      monthsOverdue: monthsElapsed - SESSION_MONTHS,
+      monthsOverdue: monthsElapsed - monthsAllowed,
       paymentStatus: status,
       totalPaid,
       tuitionFee,

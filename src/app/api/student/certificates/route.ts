@@ -8,7 +8,8 @@ import {
   issueCertificateForStudent,
   toCertificateView,
 } from "@/lib/certificates";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { parseCertificateTemplate } from "@/lib/certificate-template";
 
 /**
@@ -35,6 +36,7 @@ export async function GET() {
       id: true,
       level: true,
       classType: true,
+      sessionSlot: true,
       admission: true,
       studentCode: true,
       createdAt: true,
@@ -45,7 +47,11 @@ export async function GET() {
       // placeholder name would defeat the entire point of showing it.
       user: { select: { name: true } },
       tutor: { select: { user: { select: { name: true } } } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+      },
     },
   });
 
@@ -56,8 +62,13 @@ export async function GET() {
   const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
   // The live balance, which decides the provisional stamp on every certificate
-  // the student holds — not just the one for their current level.
-  const outstanding = Math.max(0, tuitionFeeFor(feeLookup) - totalPaid);
+  // the student holds — not just the one for their current level. Across the
+  // whole ledger: a student who finished B1 still owing on A1 holds a
+  // provisional B1 certificate until the A1 balance is cleared.
+  const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid);
+  const outstanding = ledgerIsPopulated(ledger)
+    ? ledger.lifetimeOutstanding
+    : Math.max(0, tuitionFeeFor(feeLookup) - totalPaid);
 
   const admission =
     typeof student.admission === "object" && student.admission !== null
@@ -70,6 +81,7 @@ export async function GET() {
     totalPaid,
     requiredDeposit: requiredDepositFor(feeLookup),
     registeredAt: student.createdAt,
+    sessionSlot: student.sessionSlot,
   });
 
   if (eligibility.eligible) {

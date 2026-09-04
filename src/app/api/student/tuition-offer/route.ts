@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { isLevelSellable, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { isLevelSellable, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 import {
   deriveFullPaymentOffer,
   isSocialProofPublishable,
@@ -34,11 +34,12 @@ export async function GET() {
       id: true,
       level: true,
       classType: true,
+      sessionSlot: true,
       branchId: true,
       createdAt: true,
       branch: { select: { name: true } },
       payments: {
-        where: { status: "completed" },
+        where: receivedPaymentFilter(),
         orderBy: { createdAt: "asc" },
         select: { amount: true, createdAt: true },
       },
@@ -71,6 +72,7 @@ export async function GET() {
     tuitionFee,
     totalPaid,
     fullPaidAt,
+    sessionSlot: student.sessionSlot,
   });
 
   return NextResponse.json({
@@ -100,7 +102,7 @@ async function branchFullPaymentRate(branchId: string | null): Promise<BranchFul
     select: {
       level: true,
       branch: { select: { name: true } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
 

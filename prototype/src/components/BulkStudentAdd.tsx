@@ -22,7 +22,7 @@ import { AlertIcon, CheckCircleIcon, UserPlusIcon, UsersIcon } from "@/component
  */
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
-const SLOTS = ["morning", "afternoon", "evening"] as const;
+const SLOTS = ["morning", "afternoon", "evening", "weekend"] as const;
 
 type ParsedRow = { line: number; name: string; email: string; raw: string; problem: string | null };
 

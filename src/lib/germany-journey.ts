@@ -40,6 +40,7 @@ import {
   JOURNEY_TOP_LEVEL,
   LEVELS,
   SESSION_MONTHS,
+  sessionDurationMonths,
   journeyLevelFor,
   nextLevelAfter,
 } from "@/lib/levels";
@@ -474,8 +475,13 @@ export function estimateArrival(input: {
   // The level they are sitting counts as a whole one unless a countdown tells
   // us how far through it they are.
   const levelsAfterCurrent = to - from;
+  // `countdown.monthsTotal` already reflects THIS student's own sitting (a
+  // weekend student's level runs three months, not two) — reading it off the
+  // countdown rather than the flat constant keeps this estimate from
+  // under-counting a weekend student's remaining teaching time.
+  const currentLevelSessionMonths = input.countdown?.monthsTotal ?? SESSION_MONTHS;
   const currentLevelMonthsLeft = input.countdown
-    ? Math.max(0, SESSION_MONTHS * (1 - input.countdown.percent / 100))
+    ? Math.max(0, currentLevelSessionMonths * (1 - input.countdown.percent / 100))
     : SESSION_MONTHS;
 
   const monthsOfTeaching = currentLevelMonthsLeft + levelsAfterCurrent * SESSION_MONTHS;
@@ -538,6 +544,9 @@ export type JourneyInput = {
    * teaser; it never replaces the crafted copy in LEVEL_VOICE.
    */
   privateFocus?: { topic: string | null; nextSessionAt: string | null } | null;
+
+  /** morning/afternoon/evening/weekend — decides the countdown length (see SESSION_MONTHS). */
+  sessionSlot?: string | null;
 
   now?: Date;
 };
@@ -656,9 +665,10 @@ export function buildJourney(input: JourneyInput): Journey {
   let currentIndex = raw.findIndex((stage) => !stage.clearedAt);
   if (currentIndex === -1) currentIndex = raw.length - 1;
 
+  const levelMonths = sessionDurationMonths(input.sessionSlot);
   const countdown =
     startedIso && !completed.has(currentLevel)
-      ? buildCountdown(currentLevel, startedIso, { now })
+      ? buildCountdown(currentLevel, startedIso, { now, months: levelMonths })
       : null;
 
   const stages: JourneyStage[] = raw.map((stage, index) => {

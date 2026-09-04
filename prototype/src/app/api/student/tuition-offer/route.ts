@@ -34,6 +34,7 @@ export async function GET() {
       id: true,
       level: true,
       classType: true,
+      sessionSlot: true,
       branchId: true,
       createdAt: true,
       branch: { select: { name: true } },
@@ -71,6 +72,7 @@ export async function GET() {
     tuitionFee,
     totalPaid,
     fullPaidAt,
+    sessionSlot: student.sessionSlot,
   });
 
   return NextResponse.json({

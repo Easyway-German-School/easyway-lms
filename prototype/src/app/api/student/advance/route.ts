@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { monthsSinceBatchStart } from "@/lib/promotion";
-import { nextLevelAfter, SESSION_MONTHS, WEEKS_OF_TEACHING } from "@/lib/levels";
+import { nextLevelAfter, SESSION_MONTHS, WEEKS_OF_TEACHING, sessionDurationMonths, weeksOfTeachingFor } from "@/lib/levels";
 import { isLevelSellable, requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { ADVANCE_PERKS, perWeekCost, type LevelAdvanceOffer } from "@/lib/level-advance";
 import { buildCountdown } from "@/lib/germany-journey";
@@ -96,11 +96,11 @@ export async function GET() {
               (student.levelCompletedAt.getFullYear() * 12 + student.levelCompletedAt.getMonth()),
           )
         : 0,
-      sessionMonths: SESSION_MONTHS,
-      weeksOfTeaching: WEEKS_OF_TEACHING,
+      sessionMonths: sessionDurationMonths(student.sessionSlot),
+      weeksOfTeaching: weeksOfTeachingFor(student.sessionSlot),
       tuitionFee: nextFee,
       requiredDeposit: nextLevel ? requiredDepositFor({ level: nextLevel, branch: branchName }) : 0,
-      perWeek: perWeekCost(nextFee),
+      perWeek: perWeekCost(nextFee, weeksOfTeachingFor(student.sessionSlot)),
       sellableOnline: nextLevel ? isLevelSellable(nextLevel) : false,
       currentLevelOutstanding,
       perks: ADVANCE_PERKS,
@@ -130,8 +130,8 @@ export async function GET() {
             message: offer.atTopOfLadder
               ? `Congratulations. You have finished ${currentLevel}, the highest level we teach. Speak to your branch about registering for your final exam and collecting your certificate.`
               : currentLevelOutstanding > 0
-                ? `Congratulations on finishing ${currentLevel}. There is ₦${currentLevelOutstanding.toLocaleString()} still open on it — clear that and your place in ${nextLevel} is confirmed. ${nextLevel} runs for ${SESSION_MONTHS} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"}.`
-                : `Congratulations on finishing ${currentLevel}. ${nextLevel} runs for ${SESSION_MONTHS} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"}. Continue now to keep your tutor, your class and your streak.`,
+                ? `Congratulations on finishing ${currentLevel}. There is ₦${currentLevelOutstanding.toLocaleString()} still open on it — clear that and your place in ${nextLevel} is confirmed. ${nextLevel} runs for ${sessionDurationMonths(student.sessionSlot)} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"}.`
+                : `Congratulations on finishing ${currentLevel}. ${nextLevel} runs for ${sessionDurationMonths(student.sessionSlot)} months and costs ₦${nextFee.toLocaleString()} at ${branchName || "your branch"}. Continue now to keep your tutor, your class and your streak.`,
             channel: "in-app",
             studentId: student.id,
             branchId: student.branchId,
@@ -153,7 +153,10 @@ export async function GET() {
       // exactly that kind of interruption if it pops up over whatever the
       // student opened the dashboard to do.
       try {
-        const { daysLeft } = buildCountdown(currentLevel, student.classesStartedAt, { now: new Date() });
+        const { daysLeft } = buildCountdown(currentLevel, student.classesStartedAt, {
+          now: new Date(),
+          months: sessionDurationMonths(student.sessionSlot),
+        });
 
         // Three tiers, one dedupeKey shape each — notify()'s own dedupeKey is
         // the idempotency mechanism (see lib/notify.ts), so no new Student

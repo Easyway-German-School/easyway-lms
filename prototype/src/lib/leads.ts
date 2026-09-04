@@ -33,7 +33,7 @@ export type LeadInput = {
   notes?: string | null;
 };
 
-const SLOTS = ["morning", "afternoon", "evening"];
+const SLOTS = ["morning", "afternoon", "evening", "weekend"];
 
 function normalize(input: LeadInput) {
   const slot = String(input.sessionSlot ?? "").toLowerCase();

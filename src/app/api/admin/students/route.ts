@@ -14,6 +14,12 @@ import { setStudentTutor } from "@/lib/tutor-pairing";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
+import { ensureChargeForLevel } from "@/lib/tuition-charges";
+
+// The "Reset roster" path soft-deletes every student in the tenant in chunks;
+// on Neon that is a few hundred round trips and comfortably outruns the default
+// serverless budget.
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
   const gate = await requireCapability("students");
@@ -61,6 +67,13 @@ export async function GET(request: Request) {
   const hasDerivedFilter = Boolean(focus || riskFocus || agingBucket || ids);
 
   const whereClause: any = {};
+  // Never surface staff in the student roster. A Student row can end up bound
+  // to an admin or lecturer account — a demo fixture, an impersonation set-up,
+  // an account that was a test student before it was promoted. If it shows
+  // here it can be removed from here, and removing a student deletes the
+  // underlying User. On 2026-09-02 a super admin cleared out test students and
+  // took their own login with them this way.
+  whereClause.user = { is: { role: "STUDENT", adminRole: null } };
   if (branchId) whereClause.branchId = branchId;
   if (level) whereClause.level = level;
   if (batch) whereClause.admission = { path: ["batch"], equals: batch };
@@ -119,10 +132,23 @@ export async function GET(request: Request) {
     branch: true,
     tutor: { include: { user: true } },
     payments: {
+      // Nested read — the soft-delete guard only filters top-level queries, so
+      // spell out `deletedAt: null` here or a reversed payment keeps counting
+      // toward this roster's "paid in full" badge after it has been removed
+      // everywhere else. Tenant scoping has the same nested blind spot; that is
+      // handled by stamping `tenantId` at write time (see the Paystack webhook)
+      // plus scripts/backfill-tenantless-rows.ts for the rows already written.
+      where: { deletedAt: null },
       orderBy: { createdAt: "desc" as const },
     },
     invoices: {
-      include: { payments: true },
+      include: { payments: { where: { deletedAt: null } } },
+    },
+    // The per-level tuition ledger — so the roster's money figures and the
+    // owes_prior_level / legacy_arrears focus presets see the whole ladder.
+    tuitionCharges: {
+      where: { deletedAt: null },
+      select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
     },
     // Churn-risk inputs — see lib/student-risk.ts. Kept lightweight: a bounded
     // window for attendance, and only the single most recent row for the two
@@ -169,6 +195,7 @@ export async function GET(request: Request) {
         branch: student.branch ? { id: student.branch.id, name: student.branch.name } : null,
         user: student.user,
         payments: student.payments,
+        tuitionCharges: student.tuitionCharges,
       },
       now,
     );
@@ -199,6 +226,7 @@ export async function GET(request: Request) {
         branch: entry.raw.branch ? { id: entry.raw.branch.id, name: entry.raw.branch.name } : null,
         user: entry.raw.user,
         payments: entry.raw.payments,
+        tuitionCharges: entry.raw.tuitionCharges,
       }),
     );
   }
@@ -253,6 +281,9 @@ export async function GET(request: Request) {
     students: enriched,
     totalCount,
     canSeeMoney,
+    // The roster uses this to decide whether to offer "Reset roster" — the
+    // bulk wipe is super-admin only, and the server enforces that too.
+    adminRole: gate.admin.adminRole,
     // Echoed so the page can title and explain itself without keeping its own
     // copy of the wording — one edit to the preset changes both ends. Finance
     // and churn-risk presets share this one slot since a request only ever
@@ -303,10 +334,36 @@ export async function POST(request: Request) {
   const tutorId = typeof body.tutorId === "string" ? body.tutorId : null;
   const status = typeof body.status === "string" ? body.status : "active";
   const classType = body.classType === "private" ? "private" : "group";
-  const sessionSlot = ["morning", "afternoon", "evening"].includes(String(body.sessionSlot))
+  const sessionSlot = ["morning", "afternoon", "evening", "weekend"].includes(String(body.sessionSlot))
     ? String(body.sessionSlot)
     : "morning";
   const requestedDeliveryMode = body.deliveryMode === "hybrid" ? "hybrid" : "physical";
+  // The pathway ("what Germany is for") is chosen on signup; before now the
+  // manual-add form had no field for it and every admin-added student was
+  // silently filed as "Language training".
+  const pathway =
+    typeof body.pathway === "string" && body.pathway.trim() ? body.pathway.trim() : "Language training";
+  // Batch month — the timetable generator and the promotion engine both read
+  // this off the admission blob, so a student added without it has no
+  // level-end date and never auto-promotes. Stored as a bare month name
+  // ("September") to match signup and the roster's Batch filter.
+  const batch = typeof body.batch === "string" ? body.batch.trim() : "";
+  // Where the student lives — the signup form collects this into the admission
+  // blob; the manual-add form now offers it too, chiefly for online students
+  // who have no branch to place them.
+  const city = typeof body.city === "string" ? body.city.trim() : "";
+  const stateRegion = typeof body.state === "string" ? body.state.trim() : "";
+  const country = typeof body.country === "string" ? body.country.trim() : "";
+  // A profile photo the office set on the student's behalf. Only accept a URL
+  // this app could have produced — the office is trusted, but a stray payload
+  // should not be able to point an avatar at an arbitrary host.
+  const photoUrlRaw = typeof body.photoUrl === "string" ? body.photoUrl.trim() : "";
+  const photoUrl =
+    photoUrlRaw && /^(\/uploads\/|\/api\/files\/|https:\/\/)/.test(photoUrlRaw) ? photoUrlRaw : "";
+  // Money already collected before the student was put on the portal — same
+  // idea as the CSV importer's "amount paid" column, so the paywall does not
+  // lock someone out of a level they have already paid for.
+  const amountPaid = Math.max(0, Math.round(Number(body.amountPaid) || 0));
 
   if (!name || !email) {
     return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
@@ -356,11 +413,21 @@ export async function POST(request: Request) {
             branchId,
             status,
             tutorId,
-            pathway: "Language training",
+            pathway,
             classType,
             sessionSlot,
             deliveryMode,
-            admission: phone ? { phone } : undefined,
+            admission:
+              phone || batch || city || stateRegion || country || photoUrl
+                ? {
+                    ...(phone ? { phone } : {}),
+                    ...(batch ? { batch } : {}),
+                    ...(city ? { city } : {}),
+                    ...(stateRegion ? { state: stateRegion } : {}),
+                    ...(country ? { country } : {}),
+                    ...(photoUrl ? { photoUrl } : {}),
+                  }
+                : undefined,
           },
         },
       },
@@ -368,8 +435,35 @@ export async function POST(request: Request) {
 
     const student = await prisma.student.findUnique({ where: { userId: user.id }, select: { id: true } });
     const studentCode = student
-      ? await assignStudentCode(student.id, { level, branch: branchRow, classType })
+      ? await assignStudentCode(student.id, { level, batch, branch: branchRow, classType })
       : null;
+
+    if (student) {
+      // Record the up-front payment, if any was entered — mirrors the importer
+      // so a mid-course student is not paywalled out of what they have paid for.
+      if (amountPaid > 0) {
+        await prisma.payment.create({
+          data: {
+            studentId: student.id,
+            amount: amountPaid,
+            currency: "NGN",
+            status: "completed",
+            method: "manual",
+            description: "Recorded on manual add — paid before joining the portal",
+            ...(gate.session.user.tenantId ? { tenantId: gate.session.user.tenantId } : {}),
+          },
+        });
+      }
+
+      // Open the tuition ledger for the level they start in, the same as signup
+      // and the CSV import do. Non-fatal: a student can still be created if this
+      // trips, and an admin adjustment can add the charge later.
+      try {
+        await ensureChargeForLevel({ studentId: student.id, level, origin: "signup" });
+      } catch (chargeError) {
+        console.error("Tuition charge creation failed on manual add", chargeError);
+      }
+    }
 
     return NextResponse.json(
       {
@@ -401,7 +495,7 @@ export async function PATCH(request: Request) {
   const tutorId = typeof body.tutorId === "string" ? body.tutorId : null;
   const status = typeof body.status === "string" ? body.status : undefined;
   const classType = body.classType === "private" || body.classType === "group" ? body.classType : undefined;
-  const sessionSlot = ["morning", "afternoon", "evening"].includes(String(body.sessionSlot))
+  const sessionSlot = ["morning", "afternoon", "evening", "weekend"].includes(String(body.sessionSlot))
     ? String(body.sessionSlot)
     : undefined;
   const requestedDeliveryMode = body.deliveryMode === "hybrid" || body.deliveryMode === "physical"
@@ -410,8 +504,22 @@ export async function PATCH(request: Request) {
   const newPassword = typeof body.password === "string" ? body.password : "";
   const pathway = typeof body.pathway === "string" && body.pathway.trim() ? body.pathway.trim() : undefined;
   // Only touched when the key is present at all, so an edit that isn't about
-  // the phone number (a status change, a tutor swap) never clobbers it.
+  // the phone number (a status change, a tutor swap) never clobbers it. Batch
+  // month follows the same rule — both live inside the admission JSON blob.
   const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
+  const batch = typeof body.batch === "string" ? body.batch.trim() : undefined;
+  // Location + photo live in the same admission blob — only touched when their
+  // key is present, so an unrelated edit never wipes what signup collected.
+  const city = typeof body.city === "string" ? body.city.trim() : undefined;
+  const stateRegion = typeof body.state === "string" ? body.state.trim() : undefined;
+  const country = typeof body.country === "string" ? body.country.trim() : undefined;
+  const photoUrlRaw = typeof body.photoUrl === "string" ? body.photoUrl.trim() : undefined;
+  const photoUrl =
+    photoUrlRaw === undefined
+      ? undefined
+      : photoUrlRaw && /^(\/uploads\/|\/api\/files\/|https:\/\/)/.test(photoUrlRaw)
+        ? photoUrlRaw
+        : "";
 
   if (!studentId) {
     return NextResponse.json({ error: "Student ID is required" }, { status: 400 });
@@ -429,7 +537,9 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    if (gate.session.user.tenantId && student.branch?.tenantId !== gate.session.user.tenantId) {
+    // Same ownership rule as GET/DELETE — a no-branch student is still ours if
+    // their user account or their own row carries the tenant.
+    if (!ownedByTenant(student, gate.session.user.tenantId ?? null)) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
@@ -481,9 +591,23 @@ export async function PATCH(request: Request) {
      * Read-modify-write so editing the phone here never wipes out whatever
      * else the admission form collected (father's phone, city, and so on).
      */
-    if (phone !== undefined) {
+    if (
+      phone !== undefined ||
+      batch !== undefined ||
+      city !== undefined ||
+      stateRegion !== undefined ||
+      country !== undefined ||
+      photoUrl !== undefined
+    ) {
       const existingAdmission = (student.admission ?? {}) as Record<string, unknown>;
-      updateStudent.admission = { ...existingAdmission, phone: phone || undefined };
+      const nextAdmission = { ...existingAdmission };
+      if (phone !== undefined) nextAdmission.phone = phone || undefined;
+      if (batch !== undefined) nextAdmission.batch = batch || undefined;
+      if (city !== undefined) nextAdmission.city = city || undefined;
+      if (stateRegion !== undefined) nextAdmission.state = stateRegion || undefined;
+      if (country !== undefined) nextAdmission.country = country || undefined;
+      if (photoUrl !== undefined) nextAdmission.photoUrl = photoUrl || undefined;
+      updateStudent.admission = nextAdmission;
     }
     if (body.branchId !== undefined) updateStudent.branchId = branchId;
     /**
@@ -530,11 +654,124 @@ export async function PATCH(request: Request) {
   }
 }
 
+/**
+ * Does this student belong to the acting admin's tenant?
+ *
+ * A student is owned by the tenant when ANY of their tenant anchors match — the
+ * student row's own `tenantId`, their branch's, or their user account's. The
+ * three can disagree: imported and SQLite-era students have no branch at all
+ * (`branch` is null), so a branch-only check — which this handler used to do —
+ * treated every one of them as foreign and 404'd. The GET query already reads
+ * them via the `user.tenantId` arm of its OR; delete has to see the same set.
+ */
+function ownedByTenant(
+  student: { tenantId?: string | null; branch?: { tenantId: string | null } | null; user?: { tenantId: string | null } | null },
+  tenantId: string | null | undefined,
+): boolean {
+  if (!tenantId) return true;
+  return (
+    student.tenantId === tenantId ||
+    student.branch?.tenantId === tenantId ||
+    student.user?.tenantId === tenantId
+  );
+}
+
 export async function DELETE(request: Request) {
   const gate = await requireCapability("students");
   if (!gate.ok) return gate.response;
 
-  const body = await request.json().catch(() => ({}));
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const tenantId = gate.session.user.tenantId ?? null;
+
+  // ---------------------------------------------------------------------------
+  // "Reset roster" — soft-delete every student that matches the current view.
+  //
+  // This is the switchover tool: pilot data out, real students in. It stays
+  // super-admin only and needs its own confirmation phrase so it can never be
+  // reached by the ordinary row/multi-row delete below. Everything it removes
+  // is restorable from the audit trail (see src/lib/prisma-guard.ts).
+  // ---------------------------------------------------------------------------
+  if (body.scope === "all") {
+    if (gate.admin.adminRole !== "super") {
+      return NextResponse.json({ error: "Only a super admin can reset the roster" }, { status: 403 });
+    }
+    if (body.confirmation !== "RESET STUDENTS") {
+      return NextResponse.json({ error: "Confirmation phrase RESET STUDENTS is required" }, { status: 400 });
+    }
+
+    const filters = (body.filters ?? {}) as Record<string, unknown>;
+    const resetWhere: any = {};
+    if (typeof filters.branchId === "string" && filters.branchId) resetWhere.branchId = filters.branchId;
+    if (typeof filters.level === "string" && filters.level) resetWhere.level = filters.level;
+    if (typeof filters.status === "string" && filters.status) resetWhere.status = filters.status;
+
+    // Same tenant fence as GET: match on branch OR user OR the student's own
+    // tenant column, so no-branch students are in scope.
+    if (tenantId) {
+      resetWhere.OR = [
+        { tenantId },
+        { branch: { tenantId } },
+        { user: { tenantId } },
+      ];
+    }
+
+    // A branch-scoped admin can only clear their own branches, whatever filter
+    // they pass — mirrors the GET route.
+    const allowedBranchIds = scopedBranchIds(gate.admin);
+    if (allowedBranchIds) {
+      resetWhere.branchId = resetWhere.branchId
+        ? (allowedBranchIds.includes(resetWhere.branchId) ? resetWhere.branchId : "__no-branch-access__")
+        : { in: allowedBranchIds };
+    }
+
+    try {
+      const targets = await prisma.student.findMany({
+        where: resetWhere,
+        select: { id: true, userId: true, user: { select: { role: true, adminRole: true } } },
+      });
+      if (targets.length === 0) {
+        return NextResponse.json({ success: true, deleted: 0 });
+      }
+
+      // Chunks of 150 keep each statement under the guard's 200-row
+      // blast-radius cap (src/lib/prisma-guard.ts), so no unscoped-write
+      // escape hatch is needed and every chunk still lands a restorable audit
+      // row attributed to the real admin.
+      //
+      // Session rows are deliberately left alone here: once the User is
+      // soft-deleted the auth lookup returns null (the guard hides deleted
+      // rows), so any live session is already inert — and a `session.deleteMany`
+      // over 150 users is the one statement whose row count we cannot bound
+      // ahead of the blast-radius check.
+      const CHUNK = 150;
+      let deleted = 0;
+      for (let i = 0; i < targets.length; i += CHUNK) {
+        const slice = targets.slice(i, i + CHUNK);
+        const studentIdChunk = slice.map((s) => s.id);
+        // Only take down the login when it is genuinely a student-only account.
+        // A staff member who also carries a Student row keeps their User — the
+        // roster row is removed, the ability to sign in is not.
+        const userIdChunk = slice
+          .filter((s) => s.user && s.user.role === "STUDENT" && s.user.adminRole == null)
+          .map((s) => s.userId);
+        await prisma.student.deleteMany({ where: { id: { in: studentIdChunk } } });
+        if (userIdChunk.length > 0) {
+          await prisma.user.deleteMany({ where: { id: { in: userIdChunk } } });
+        }
+        deleted += slice.length;
+      }
+      return NextResponse.json({ success: true, deleted });
+    } catch (error) {
+      return NextResponse.json(
+        { error: "Unable to reset the roster", detail: error instanceof Error ? error.message : "Unknown" },
+        { status: 500 },
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Explicit one-or-many delete by id.
+  // ---------------------------------------------------------------------------
   const studentIds: string[] = [];
   if (Array.isArray(body.studentIds)) {
     for (const id of body.studentIds as unknown[]) {
@@ -554,24 +791,60 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const students = await prisma.student.findMany({
+    const found = await prisma.student.findMany({
       where: { id: { in: studentIds } },
-      select: { id: true, userId: true, branch: { select: { tenantId: true } } },
+      select: {
+        id: true,
+        userId: true,
+        tenantId: true,
+        branch: { select: { tenantId: true } },
+        user: { select: { tenantId: true, role: true, adminRole: true } },
+      },
     });
-    if (students.length !== studentIds.length) {
-      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+
+    // A row that is missing (already deleted) or outside the tenant is skipped,
+    // not fatal — one stale id in a 20-row selection used to 404 the whole
+    // batch and nothing got removed.
+    const deletable = found.filter((student) => ownedByTenant(student, tenantId));
+    const deletableIds = new Set(deletable.map((s) => s.id));
+    const skipped = studentIds.filter((id) => !deletableIds.has(id));
+
+    if (deletable.length === 0) {
+      return NextResponse.json(
+        { error: found.length === 0 ? "Student not found" : "None of those students are in your tenant" },
+        { status: 404 },
+      );
     }
 
-    if (gate.session.user.tenantId && students.some((student) => student.branch?.tenantId !== gate.session.user.tenantId)) {
-      return NextResponse.json({ error: "Student not found" }, { status: 404 });
-    }
+    const staffPreserved: string[] = [];
+    for (const student of deletable) {
+      // If the row is bound to a staff account — anything that is not a plain
+      // student — remove the roster entry only. Deleting the User here is how a
+      // super admin cleaning up test students soft-deleted their own login on
+      // 2026-09-02. A missing `user` (already soft-deleted) is treated the same
+      // conservative way: drop the Student row, leave the account alone.
+      const isStudentOnly =
+        student.user != null &&
+        student.user.role === "STUDENT" &&
+        student.user.adminRole == null;
 
-    for (const student of students) {
+      if (!isStudentOnly) {
+        await prisma.student.delete({ where: { id: student.id } });
+        staffPreserved.push(student.id);
+        continue;
+      }
+
       await prisma.session.deleteMany({ where: { userId: student.userId } });
       await prisma.student.delete({ where: { id: student.id } });
       await prisma.user.delete({ where: { id: student.userId } });
     }
-    return NextResponse.json({ success: true, deleted: students.length });
+
+    return NextResponse.json({
+      success: true,
+      deleted: deletable.length,
+      skipped,
+      ...(staffPreserved.length > 0 ? { staffPreserved } : {}),
+    });
   } catch (error) {
     return NextResponse.json({ error: "Unable to delete student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
   }

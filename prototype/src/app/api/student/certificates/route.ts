@@ -36,6 +36,7 @@ export async function GET() {
       id: true,
       level: true,
       classType: true,
+      sessionSlot: true,
       admission: true,
       studentCode: true,
       createdAt: true,
@@ -80,6 +81,7 @@ export async function GET() {
     totalPaid,
     requiredDeposit: requiredDepositFor(feeLookup),
     registeredAt: student.createdAt,
+    sessionSlot: student.sessionSlot,
   });
 
   if (eligibility.eligible) {

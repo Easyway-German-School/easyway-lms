@@ -90,6 +90,7 @@ export const SLOT_LABEL: Record<string, string> = {
   morning: "Morning",
   afternoon: "Afternoon",
   evening: "Evening",
+  weekend: "Weekend",
 };
 
 export const MONTH_NAMES = [

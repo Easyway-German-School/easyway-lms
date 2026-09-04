@@ -227,6 +227,19 @@ export function matchSessionSlot(input: string): Match<string> | null {
     { value: "morning", label: "morning", aliases: ["am", "9am", "morning class", "morn"] },
     { value: "afternoon", label: "afternoon", aliases: ["pm", "noon", "afternoon class", "aft"] },
     { value: "evening", label: "evening", aliases: ["eve", "night", "evening class", "6pm"] },
+    { value: "weekend", label: "weekend", aliases: ["sat", "saturday", "saturdays", "weekend class", "weekends"] },
+  ]);
+}
+
+/**
+ * physical / online / hybrid, from whatever the office writes in the column:
+ * "Physical", "ONLINE", "Virtual", "Zoom".
+ */
+export function matchDeliveryMode(input: string): Match<string> | null {
+  return bestMatch(input, [
+    { value: "physical", label: "physical", aliases: ["in person", "in-person", "campus", "onsite", "on-site"] },
+    { value: "online", label: "online", aliases: ["virtual", "remote", "zoom", "video"] },
+    { value: "hybrid", label: "hybrid", aliases: ["mixed", "both"] },
   ]);
 }
 

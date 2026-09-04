@@ -1,4 +1,4 @@
-import { WEEKS_OF_TEACHING } from "@/lib/levels";
+import { WEEKS_OF_TEACHING, weeksOfTeachingFor } from "@/lib/levels";
 import { DEPOSIT_RATE, MIN_PART_PAYMENT, REGISTRATION_FEE } from "@/lib/payment";
 
 /**
@@ -142,13 +142,16 @@ export function deriveFullPaymentOffer({
   totalPaid,
   fullPaidAt,
   now = new Date(),
+  sessionSlot = null,
 }: {
   enrolledAt: Date | string;
   tuitionFee: number;
   totalPaid: number;
   fullPaidAt?: Date | string | null;
   now?: Date;
+  sessionSlot?: string | null;
 }): FullPaymentOffer {
+  const weeksOfTeaching = weeksOfTeachingFor(sessionSlot);
   const fee = Math.max(0, Math.round(Number(tuitionFee) || 0));
   const paid = Math.max(0, Math.round(Number(totalPaid) || 0));
   const deposit = Math.round(fee * DEPOSIT_RATE);
@@ -186,10 +189,10 @@ export function deriveFullPaymentOffer({
     bonusForfeited: !fullPaid && !windowOpen,
 
     // The office expects the balance by the end of the teaching period.
-    balanceDueAt: new Date(enrolMs + WEEKS_OF_TEACHING * 7 * DAY_MS).toISOString(),
+    balanceDueAt: new Date(enrolMs + weeksOfTeaching * 7 * DAY_MS).toISOString(),
 
-    perWeek: WEEKS_OF_TEACHING > 0 ? Math.round(fee / WEEKS_OF_TEACHING) : fee,
-    weeksOfTeaching: WEEKS_OF_TEACHING,
+    perWeek: weeksOfTeaching > 0 ? Math.round(fee / weeksOfTeaching) : fee,
+    weeksOfTeaching,
 
     perks: PAY_IN_FULL_PERKS,
   };

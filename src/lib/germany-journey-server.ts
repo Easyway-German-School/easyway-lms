@@ -12,9 +12,9 @@
 
 import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notify";
-import { LEVELS, nextLevelAfter } from "@/lib/levels";
+import { LEVELS, nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
 import { goalFor, isKnownGoal } from "@/lib/germany-goals";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, isReceivedPayment, isRegistrationFeePayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import {
   buildCountdown,
   buildJourney,
@@ -84,6 +84,7 @@ const JOURNEY_SELECT = {
   level: true,
   branchId: true,
   classType: true,
+  sessionSlot: true,
   outcome: true,
   pathway: true,
   admission: true,
@@ -104,7 +105,7 @@ const JOURNEY_SELECT = {
   germanyGoalSetAt: true,
   user: { select: { name: true } },
   branch: { select: { name: true } },
-  payments: { select: { amount: true, status: true } },
+  payments: { select: { amount: true, status: true, description: true } },
 } as const;
 
 function readJson(value: unknown): Record<string, any> {
@@ -141,7 +142,7 @@ export async function loadJourney(
   const branchName = student.branch?.name ?? null;
 
   const totalPaid = student.payments
-    .filter((payment) => payment.status === "completed")
+    .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
     .reduce((sum, payment) => sum + payment.amount, 0);
 
   const feeLookup = { level: student.level, branch: branchName, classType: student.classType };
@@ -228,6 +229,7 @@ export async function loadJourney(
     goalId: student.germanyGoal,
     goalNote: student.germanyGoalNote,
     privateFocus,
+    sessionSlot: student.sessionSlot,
     now,
   });
 
@@ -787,7 +789,7 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
       studentCode: true,
       user: { select: { name: true, email: true } },
       branch: { select: { name: true } },
-      payments: { select: { amount: true, status: true } },
+      payments: { select: { amount: true, status: true, description: true } },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -802,7 +804,7 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
 
     const branchName = student.branch?.name ?? null;
     const totalPaid = student.payments
-      .filter((payment) => payment.status === "completed")
+      .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const feeLookup = { level: student.level, branch: branchName, classType: student.classType };
     const tuitionFee = tuitionFeeFor(feeLookup);
@@ -811,7 +813,10 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
     let daysElapsed: number | null = null;
     let percent: number | null = null;
     if (student.classesStartedAt) {
-      const countdown = buildCountdown(student.level, student.classesStartedAt, { now });
+      const countdown = buildCountdown(student.level, student.classesStartedAt, {
+        now,
+        months: sessionDurationMonths(student.sessionSlot),
+      });
       daysElapsed = countdown.daysElapsed;
       percent = countdown.percent;
     }

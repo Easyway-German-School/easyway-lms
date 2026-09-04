@@ -1,7 +1,10 @@
-import { prisma } from "@/lib/prisma";
+import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { resolveBatchAbsolute } from "@/lib/batch";
-import { nextLevelAfter, SESSION_MONTHS } from "@/lib/levels";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { nextLevelAfter, SESSION_MONTHS, sessionDurationMonths } from "@/lib/levels";
+import { DEPOSIT_RATE, derivePaymentStatus, isReceivedPayment, isRegistrationFeePayment, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
+import { writeAudit } from "@/lib/prisma-guard";
+import { naira } from "@/lib/finance/receivables";
 
 /**
  * Who has finished a level but is still sitting in it.
@@ -91,7 +94,7 @@ export async function findPromotionCandidates(opts: {
     include: {
       user: { select: { name: true, email: true } },
       branch: { select: { name: true } },
-      payments: { select: { amount: true, status: true } },
+      payments: { select: { amount: true, status: true, description: true } },
     },
   });
 
@@ -110,10 +113,11 @@ export async function findPromotionCandidates(opts: {
     if (startAbsolute === null) continue;
 
     const monthsElapsed = currentAbsolute - startAbsolute;
-    if (monthsElapsed < SESSION_MONTHS) continue;
+    const monthsAllowed = sessionDurationMonths(student.sessionSlot);
+    if (monthsElapsed < monthsAllowed) continue;
 
     const totalPaid = student.payments
-      .filter((p) => p.status === "completed")
+      .filter((p) => isReceivedPayment(p.status) && !isRegistrationFeePayment(p.description))
       .reduce((sum, p) => sum + p.amount, 0);
 
     // Abuja charges more for the same level, so the branch has to go in.
@@ -136,7 +140,7 @@ export async function findPromotionCandidates(opts: {
       branchName: student.branch?.name ?? null,
       batch,
       monthsElapsed,
-      monthsOverdue: monthsElapsed - SESSION_MONTHS,
+      monthsOverdue: monthsElapsed - monthsAllowed,
       paymentStatus: status,
       totalPaid,
       tuitionFee,
@@ -151,14 +155,42 @@ export async function findPromotionCandidates(opts: {
 export type PromotionResult = {
   promoted: string[];
   skipped: Array<{ studentId: string; reason: string }>;
+  /** Students promoted only because a super-admin overrode an open fee balance. */
+  overridden?: string[];
+};
+
+export type PromotionOptions = {
+  now?: Date;
+  /**
+   * Supplied only when a super-admin has chosen to move a student up DESPITE an
+   * unsettled go-forward tuition balance. Without it, such a student is skipped.
+   * Every override is written to the audit trail. Legacy arrears never block a
+   * promotion and never need an override.
+   */
+  override?: { by: string; reason: string };
 };
 
 /**
  * Move students up a level. The new batch month is set to the current month so
  * their calendar regenerates from now rather than replaying the old session.
+ *
+ * A student who still owes on a GO-FORWARD charge (their current level or an
+ * earlier one they were signed off from) is skipped unless `override` is given
+ * — see PromotionOptions. This is the gate that stops the A1 -> B1 ride: you
+ * cannot climb the ladder while a level below you is unpaid, and an office that
+ * decides to make an exception leaves a logged reason.
  */
-export async function promoteStudents(studentIds: string[], now = new Date()): Promise<PromotionResult> {
-  const result: PromotionResult = { promoted: [], skipped: [] };
+export async function promoteStudents(
+  studentIds: string[],
+  optionsOrNow: Date | PromotionOptions = {},
+): Promise<PromotionResult> {
+  // Back-compat: this used to take `now` as the second arg positionally.
+  const options: PromotionOptions =
+    optionsOrNow instanceof Date ? { now: optionsOrNow } : optionsOrNow;
+  const now = options.now ?? new Date();
+  const override = options.override;
+
+  const result: PromotionResult = { promoted: [], skipped: [], overridden: [] };
 
   const monthName = now.toLocaleString("en-US", { month: "long" });
 
@@ -179,6 +211,45 @@ export async function promoteStudents(studentIds: string[], now = new Date()): P
       continue;
     }
 
+    // The fee gate. Blocks on money owed for a level the student has ALREADY
+    // been in — not on the normal post-deposit balance of the level they are
+    // moving into (its charge, if the next-level checkout created it early, is
+    // the balance the 30-day lock covers, not a promotion blocker). Legacy
+    // arrears never block.
+    const ledger = await loadStudentLedger(studentId, now);
+    const priorOwedLines = ledger.lines.filter(
+      (line) => line.outstanding > 0 && !line.legacyArrears && line.level !== next,
+    );
+    const priorOwed = priorOwedLines.reduce((sum, line) => sum + line.outstanding, 0);
+    if (priorOwed > 0) {
+      if (!override) {
+        const owedOn = priorOwedLines[0]?.level ?? student.level;
+        result.skipped.push({
+          studentId,
+          reason: `Owes ${naira(priorOwed)} on ${owedOn} — settle the balance or promote with an override`,
+        });
+        continue;
+      }
+      await writeAudit(unguardedPrisma, {
+        action: "promotion.fee_override",
+        model: "Student",
+        recordId: studentId,
+        severity: "warning",
+        summary: `Promoted ${student.level} → ${next} with ${naira(priorOwed)} still owed on ${priorOwedLines[0]?.level ?? student.level}. Override by ${override.by}: ${override.reason}`,
+        after: {
+          fromLevel: student.level,
+          toLevel: next,
+          priorOwed,
+          owedOnLevels: priorOwedLines.map((line) => ({ level: line.level, outstanding: line.outstanding })),
+          overriddenBy: override.by,
+          reason: override.reason,
+        },
+      }).catch((auditError) => {
+        console.error("promotion.fee_override audit write failed", { studentId, auditError });
+      });
+      result.overridden!.push(studentId);
+    }
+
     const admission =
       typeof student.admission === "object" && student.admission !== null
         ? (student.admission as Record<string, unknown>)
@@ -191,6 +262,17 @@ export async function promoteStudents(studentIds: string[], now = new Date()): P
         admission: { ...admission, batch: monthName } as any,
       },
     });
+
+    // Raise the tuition charge for the level they just moved into, so what they
+    // owe follows them up the ladder instead of the old level's shortfall
+    // dropping out of the maths. Idempotent — a next-level payment may have
+    // created it already. Best-effort: a missing charge is repaired by the
+    // backfill and receivables falls back to the per-level figure meanwhile.
+    try {
+      await ensureChargeForLevel({ studentId, level: next, origin: "promotion" });
+    } catch (chargeError) {
+      console.error("Tuition charge creation failed on promotion", { studentId, next, chargeError });
+    }
 
     result.promoted.push(studentId);
   }
@@ -221,7 +303,45 @@ export async function promoteIfNextLevelPayment(
   });
 
   if (!student) return;
+
+  // Raise the charge for the level they are paying into up front, whether or not
+  // the promotion proceeds this call — the payment that just landed has to have
+  // a charge to be allocated against (src/lib/finance/ledger.ts).
+  const target = nextLevelAfter(student.level);
+  if (target) {
+    try {
+      await ensureChargeForLevel({ studentId, level: target, origin: "next_level_payment" });
+    } catch (chargeError) {
+      console.error("Tuition charge creation failed for next-level payment", { studentId, target, chargeError });
+    }
+  }
+
   if (student.levelCompletedFor !== student.level || !student.levelCompletedAt) return;
+
+  // No human in the loop here, so no override path. Auto-promotion proceeds
+  // only when the payment that just landed has (a) cleared everything owed on
+  // levels the student was already in, and (b) covered at least the 60% deposit
+  // on the level they are moving into. The checkout bills exactly that total
+  // (prior open balance + new-level deposit — see /api/paystack/initialize). If
+  // it is short, the payment is still recorded and FIFO-allocated; the student
+  // stays put until it is covered or the office promotes them by hand.
+  const ledger = await loadStudentLedger(studentId);
+  const targetLine = target ? ledger.lines.find((line) => line.level === target) : null;
+  const priorOwed = ledger.lines
+    .filter((line) => !line.legacyArrears && line.level !== target)
+    .reduce((sum, line) => sum + line.outstanding, 0);
+  const targetDepositMet = targetLine
+    ? targetLine.allocated >= Math.round(targetLine.net * DEPOSIT_RATE)
+    : false;
+
+  if (priorOwed > 0 || !targetDepositMet) {
+    console.info("promoteIfNextLevelPayment: holding promotion, balance still open", {
+      studentId,
+      priorOwed,
+      targetDepositMet,
+    });
+    return;
+  }
 
   await promoteStudents([studentId]);
 }

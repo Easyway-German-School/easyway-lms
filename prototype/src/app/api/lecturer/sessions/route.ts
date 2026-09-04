@@ -1,6 +1,7 @@
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getMergedSchedule, dayKey, normalizeSlot, TIME_SLOTS } from "@/lib/class-sessions";
+import { sessionDurationMonths } from "@/lib/levels";
 import { NextRequest, NextResponse } from "next/server";
 import { KIND, notify } from "@/lib/notify";
 import {
@@ -164,7 +165,7 @@ export async function GET(req: NextRequest) {
       batch,
       sessionSlot: slot,
       now: new Date(),
-      months: 2,
+      months: sessionDurationMonths(slot),
     });
 
     return NextResponse.json({

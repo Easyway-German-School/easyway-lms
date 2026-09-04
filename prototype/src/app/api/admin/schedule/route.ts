@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import { getMergedSchedule } from "@/lib/class-sessions";
+import { sessionDurationMonths } from "@/lib/levels";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -153,7 +154,7 @@ export async function GET() {
       registeredAt: student.createdAt,
       sessionSlot: student.sessionSlot,
       now: new Date(),
-      months: 2,
+      months: sessionDurationMonths(student.sessionSlot),
     });
     return schedule.months.flatMap((month) => month.sessions.map((session) => ({
       ...session,

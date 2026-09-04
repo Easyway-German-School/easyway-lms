@@ -200,12 +200,12 @@ export default function LecturerTimetablePage() {
       ? [...new Set(groupsForBranch.map((group) => group.level))]
       : (assignment?.levels ?? []);
   const selectableSlots = canChooseCohort
-    ? ["morning", "afternoon", "evening"]
+    ? ["morning", "afternoon", "evening", "weekend"]
     : assignment?.groups?.length
       ? [...new Set(groupsForBranch.filter((group) => group.level === level).map((group) => group.sessionSlot))]
       : assignment?.sessionSlots.length
         ? assignment.sessionSlots
-        : ["morning", "afternoon", "evening"];
+        : ["morning", "afternoon", "evening", "weekend"];
 
   return (
     <PortalShell>

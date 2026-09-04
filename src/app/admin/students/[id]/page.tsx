@@ -86,10 +86,16 @@ type Dossier = {
   money: {
     paywall: "unpaid" | "registeredOnly" | "depositPaid" | "fullPaid";
     lockedOut: boolean;
+    partPayer: boolean;
+    balanceLockAt: string | null;
+    balanceLockActive: boolean;
+    graceUntil: string | null;
     fee?: number;
     deposit?: number;
     paid?: number;
     owed?: number;
+    feeProgressPercent?: number;
+    reminderStages?: Record<string, boolean>;
     payments?: Array<{
       id: string;
       amount: number;
@@ -146,7 +152,7 @@ type Dossier = {
   };
   engagement: {
     videos: Array<{ id: string; title: string; completed: boolean; positionSeconds: number; updatedAt: string }>;
-    notifications: Array<{ id: string; title: string; message: string; createdAt: string }>;
+    notifications: Array<{ id: string; title: string; message: string; createdAt: string; dedupeKey: string | null }>;
   };
   email: {
     queued: number;
@@ -396,6 +402,8 @@ export default function StudentDossierPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [photoBroken, setPhotoBroken] = useState(false);
+  const [issuingCode, setIssuingCode] = useState(false);
+  const [issueCodeError, setIssueCodeError] = useState<string | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
@@ -403,6 +411,11 @@ export default function StudentDossierPage() {
 
   const [holdBusy, setHoldBusy] = useState(false);
   const [holdError, setHoldError] = useState<string | null>(null);
+
+  // Tuition balance & reminders panel — grace date + "send reminder now".
+  const [graceInput, setGraceInput] = useState("");
+  const [balanceBusy, setBalanceBusy] = useState<"grace" | "reminder" | null>(null);
+  const [balanceMsg, setBalanceMsg] = useState<string | null>(null);
 
   /**
    * Editing is deliberately behind its own modal rather than inline fields —
@@ -433,6 +446,22 @@ export default function StudentDossierPage() {
       .then((payload) => setBranches(payload?.branches || []))
       .catch(() => {});
   }, []);
+
+  async function issueCode() {
+    if (issuingCode) return;
+    setIssuingCode(true);
+    setIssueCodeError(null);
+    try {
+      const response = await fetch(`/api/admin/students/${id}/issue-code`, { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Could not issue a student ID");
+      await load(false);
+    } catch (issueError) {
+      setIssueCodeError(issueError instanceof Error ? issueError.message : "Could not issue a student ID");
+    } finally {
+      setIssuingCode(false);
+    }
+  }
 
   function openEdit() {
     if (!data) return;
@@ -492,6 +521,56 @@ export default function StudentDossierPage() {
       setEditBusy(false);
     }
   }, [id, editForm, load]);
+
+  const saveGrace = useCallback(
+    async (clear = false) => {
+      if (!id) return;
+      setBalanceBusy("grace");
+      setBalanceMsg(null);
+      try {
+        const response = await fetch(`/api/admin/students/${id}/balance`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ graceUntil: clear ? null : graceInput || null }),
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(json?.error || "Could not save the grace date");
+        setBalanceMsg(clear ? "Grace cleared — the normal lock applies again." : "Grace date saved.");
+        setGraceInput("");
+        void load(false);
+      } catch (graceErr) {
+        setBalanceMsg(graceErr instanceof Error ? graceErr.message : "Could not save the grace date");
+      } finally {
+        setBalanceBusy(null);
+      }
+    },
+    [id, graceInput, load],
+  );
+
+  const sendReminderNow = useCallback(async () => {
+    if (!id) return;
+    setBalanceBusy("reminder");
+    setBalanceMsg(null);
+    try {
+      const response = await fetch(`/api/admin/students/${id}/balance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sendReminder" }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Could not send the reminder");
+      setBalanceMsg(
+        json.sentCount > 0
+          ? `Reminder sent (${json.sentCount} email${json.sentCount === 1 ? "" : "s"}).`
+          : "Nothing to send — no email on file, or the balance is already clear.",
+      );
+      void load(false);
+    } catch (remindErr) {
+      setBalanceMsg(remindErr instanceof Error ? remindErr.message : "Could not send the reminder");
+    } finally {
+      setBalanceBusy(null);
+    }
+  }, [id, load]);
 
   const resetPassword = useCallback(async () => {
     if (!id) return;
@@ -659,6 +738,12 @@ export default function StudentDossierPage() {
               <EyeIcon className="h-3.5 w-3.5" />
               Remote view
             </Link>
+            <Link
+              href={`/admin/students/${id}/sheet`}
+              className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold transition hover:bg-[var(--surface)]"
+            >
+              Result sheet
+            </Link>
             <button
               type="button"
               onClick={openEdit}
@@ -705,9 +790,22 @@ export default function StudentDossierPage() {
             </div>
 
             <div className="min-w-0 flex-1">
-              <p className="font-mono text-xs tracking-[0.2em] text-white/50">
+              <p className="flex flex-wrap items-center gap-2 font-mono text-xs tracking-[0.2em] text-white/50">
                 {identity.studentCode ?? "NO STUDENT ID ISSUED"}
+                {!identity.studentCode && (
+                  <button
+                    type="button"
+                    onClick={() => void issueCode()}
+                    disabled={issuingCode}
+                    className="rounded-full bg-amber-500 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white transition hover:brightness-110 disabled:opacity-50"
+                  >
+                    {issuingCode ? "Issuing…" : "Issue ID now"}
+                  </button>
+                )}
               </p>
+              {issueCodeError && !identity.studentCode && (
+                <p className="mt-1 text-xs font-semibold text-red-400">{issueCodeError}</p>
+              )}
               <h1 className="mt-1 text-3xl font-black tracking-tight">{identity.name}</h1>
               <p className="mt-1 text-sm text-white/70">
                 {identity.email}
@@ -915,12 +1013,14 @@ export default function StudentDossierPage() {
                         className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
                           payment.status === "completed"
                             ? "bg-emerald-100 text-emerald-700"
-                            : payment.status === "pending"
-                              ? "bg-amber-100 text-amber-700"
-                              : "bg-red-100 text-red-700"
+                            : payment.status === "partial"
+                              ? "bg-amber-100 text-amber-800"
+                              : payment.status === "pending"
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-red-100 text-red-700"
                         }`}
                       >
-                        {payment.status}
+                        {payment.status === "partial" ? "part-payment" : payment.status}
                       </span>
                     </div>
                   ))}
@@ -928,6 +1028,128 @@ export default function StudentDossierPage() {
               </>
             )}
           </Card>
+
+          {/* ---- Tuition balance & reminders (part-payers) --------------- */}
+          {data.viewer.canSeeMoney && money.partPayer ? (
+            <Card title="Tuition balance & reminders" hint="Part-payment — balance owed">
+              <div className="grid grid-cols-3 gap-4">
+                <Field label="Outstanding" value={<span className="text-red-600">{naira(money.owed ?? 0)}</span>} />
+                <Field label="Paid" value={`${money.feeProgressPercent ?? 0}% of ${naira(money.fee ?? 0)}`} />
+                <Field
+                  label="Access"
+                  value={
+                    money.balanceLockActive ? (
+                      <span className="text-red-600">On hold</span>
+                    ) : money.graceUntil && new Date(money.graceUntil) > new Date() ? (
+                      <span className="text-amber-600">Grace</span>
+                    ) : (
+                      <span className="text-emerald-600">Open</span>
+                    )
+                  }
+                />
+              </div>
+
+              <p className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)]/40 p-3 text-sm">
+                {money.balanceLockActive
+                  ? `Portal access has been on hold since ${when(money.balanceLockAt!)} — settling the balance (or granting grace below) restores it.`
+                  : money.graceUntil && new Date(money.graceUntil) > new Date()
+                    ? `Lock suppressed by grace until ${when(money.graceUntil)}. The normal lock date is ${money.balanceLockAt ? when(money.balanceLockAt) : "—"}.`
+                    : money.balanceLockAt
+                      ? `Access locks on ${when(money.balanceLockAt)} (30 days after classes started) unless the balance is cleared.`
+                      : "No lock date — classes have not started yet."}
+              </p>
+
+              {/* Reminder history — emails and in-app notices. */}
+              <div className="mt-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">Reminders sent</p>
+                {(() => {
+                  const balanceKeys = new Set([
+                    "balance-notice",
+                    "balance-warning",
+                    "balance-final",
+                    "payment-notice",
+                    "payment-warning",
+                    "payment-final",
+                  ]);
+                  const rows = [
+                    ...email.log
+                      .filter((entry) => entry.type.startsWith("fee_reminder"))
+                      .map((entry) => ({
+                        id: `e-${entry.id}`,
+                        at: entry.createdAt,
+                        label: `Email · ${entry.type.replace("fee_reminder_", "").replace("d", "-day")}`,
+                        failed: entry.status !== "sent",
+                      })),
+                    ...engagement.notifications
+                      .filter((n) => n.dedupeKey && balanceKeys.has(n.dedupeKey))
+                      .map((n) => ({
+                        id: `n-${n.id}`,
+                        at: n.createdAt,
+                        label: `In-app · ${n.title}`,
+                        failed: false,
+                      })),
+                  ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
+
+                  if (rows.length === 0) {
+                    return <p className="mt-1 text-sm text-[var(--muted)]">None sent yet.</p>;
+                  }
+                  return (
+                    <ul className="mt-1 space-y-1.5">
+                      {rows.map((row) => (
+                        <li key={row.id} className="flex items-center justify-between gap-3 text-sm">
+                          <span className={row.failed ? "text-red-600" : ""}>
+                            {row.label}
+                            {row.failed ? " (failed)" : ""}
+                          </span>
+                          <span className="shrink-0 text-xs text-[var(--muted)]">{when(row.at)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  );
+                })()}
+              </div>
+
+              {/* Controls */}
+              <div className="mt-5 flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-4">
+                <label className="text-sm">
+                  <span className="block text-xs font-semibold text-[var(--muted)]">Grant grace until</span>
+                  <input
+                    type="date"
+                    value={graceInput}
+                    onChange={(event) => setGraceInput(event.target.value)}
+                    className="mt-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => saveGrace(false)}
+                  disabled={balanceBusy !== null || !graceInput}
+                  className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {balanceBusy === "grace" ? "Saving…" : "Save grace"}
+                </button>
+                {money.graceUntil ? (
+                  <button
+                    type="button"
+                    onClick={() => saveGrace(true)}
+                    disabled={balanceBusy !== null}
+                    className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                  >
+                    Clear grace
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={sendReminderNow}
+                  disabled={balanceBusy !== null}
+                  className="rounded-lg border border-amber-500 px-4 py-2 text-sm font-semibold text-amber-600 disabled:opacity-50"
+                >
+                  {balanceBusy === "reminder" ? "Sending…" : "Send reminder now"}
+                </button>
+              </div>
+              {balanceMsg ? <p className="mt-3 text-sm text-[var(--muted)]">{balanceMsg}</p> : null}
+            </Card>
+          ) : null}
 
           {/* ---- Attendance ---------------------------------------------- */}
           <Card title="Attendance" hint={`Last ${attendance.recent.length} sessions`}>

@@ -444,7 +444,7 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
           properties: {
             branch: FILTER_PROPERTIES.branch,
             level: FILTER_PROPERTIES.level,
-            sessionSlot: { type: "string", enum: ["morning", "afternoon", "evening"] },
+            sessionSlot: { type: "string", enum: ["morning", "afternoon", "evening", "weekend"]},
             date: { type: "string", description: "The class day as YYYY-MM-DD." },
             status: { type: "string", enum: ["present", "absent", "late", "excused"] },
           },
@@ -615,10 +615,11 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
         });
       }
 
+      const feeBlocked = result.skipped.filter((s) => /owes /i.test(s.reason));
       return {
         summary: `Moved ${result.promoted.length} student${result.promoted.length === 1 ? "" : "s"} up to ${to}${
           result.skipped.length ? `, skipped ${result.skipped.length}` : ""
-        }.`,
+        }${feeBlocked.length ? ` (${feeBlocked.length} still owe on an earlier level — a super admin can override from the Promotions screen)` : ""}.`,
         details: { promoted: result.promoted.length, skipped: result.skipped },
       };
     },
@@ -640,7 +641,7 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
           properties: {
             branch: FILTER_PROPERTIES.branch,
             level: FILTER_PROPERTIES.level,
-            timeSlot: { type: "string", enum: ["morning", "afternoon", "evening"] },
+            timeSlot: { type: "string", enum: ["morning", "afternoon", "evening", "weekend"]},
             date: { type: "string", description: "The day that will not hold, as YYYY-MM-DD." },
             newDate: {
               type: "string",
@@ -862,6 +863,143 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
           result.skipped.length ? `, skipped ${result.skipped.length}` : ""
         }.`,
         details: { invited: result.invited.length, skipped: result.skipped },
+      };
+    },
+  },
+
+  /* ------------------------------------------------------------ mock reminder */
+  {
+    name: "remind_pretest",
+    capability: "emails",
+    reversible: false,
+    spec: {
+      type: "function",
+      function: {
+        name: "remind_pretest",
+        description:
+          "Propose reminding a class about an upcoming mock / pretest exam. Write the message yourself — say when it is, that it is practice not the real certificate, and to sit it properly. Nothing is sent until the admin confirms.",
+        parameters: {
+          type: "object",
+          properties: {
+            ...COHORT_FILTERS,
+            title: { type: "string", description: "Subject line, under 120 characters." },
+            message: {
+              type: "string",
+              description:
+                "The reminder itself, as the school would say it. No placeholders — sent exactly as written.",
+            },
+          },
+          required: ["title", "message"],
+        },
+      },
+    },
+    async plan(args, admin) {
+      const title = requireStr(args, "title", "A subject line");
+      const message = requireStr(args, "message", "A message");
+      if (title.length > 120) throw new PlanError("That subject line is over 120 characters. Shorten it.");
+      if (message.length > 2000) throw new PlanError("That message is over 2000 characters. Shorten it.");
+
+      const { rows, label } = await cohortFor({ ...args, status: "active" }, admin);
+      guardCohort(rows, label);
+
+      const warnings = breadthWarnings(rows, args);
+      if (/\[[A-Za-z_ ]+\]|\{\{.+?\}\}/.test(message)) {
+        warnings.push("The message still contains a placeholder — it will be sent literally.");
+      }
+
+      return {
+        payload: { studentIds: rows.map((row) => row.id), title, message, label },
+        preview: {
+          summary: `Remind ${rows.length} student${rows.length === 1 ? "" : "s"} about a mock exam — ${label}`,
+          affected: rows.length,
+          lines: [
+            `Subject: ${title}`,
+            message,
+            "Goes to the bell in their portal and buzzes their phone if they allowed notifications.",
+          ],
+          warnings,
+          sample: sampleOf(rows, (row) => `${row.level}${row.branch ? ` · ${row.branch}` : ""}`),
+          reversible: false,
+        },
+      };
+    },
+    async execute(payload) {
+      const studentIds = requireIdList(payload, "studentIds");
+      const real = await prisma.student.findMany({
+        where: { id: { in: studentIds } },
+        select: { id: true },
+      });
+
+      const result = await notify({
+        to: { studentIds: real.map((student) => student.id) },
+        title: String(payload.title),
+        message: String(payload.message),
+        kind: KIND.examPretest,
+        severity: "info",
+        link: "/calendar",
+        push: true,
+      });
+
+      return {
+        summary: `Reminded ${result.created} student${result.created === 1 ? "" : "s"} about the mock exam.`,
+        details: { delivered: result.created, pushed: result.pushed },
+      };
+    },
+  },
+
+  /* --------------------------------------------------- chase unreleased results */
+  {
+    name: "chase_unreleased_results",
+    capability: "exams",
+    reversible: true,
+    spec: {
+      type: "function",
+      function: {
+        name: "chase_unreleased_results",
+        description:
+          "Propose nudging the tutors who have marks in the gradebook for a mock sitting but have not released the results. Takes no arguments — it finds them. Nothing is sent until the admin confirms.",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+    async plan() {
+      const { findUnreleasedSittings } = await import("@/lib/result-release");
+      const sittings = await findUnreleasedSittings();
+      const withTutor = sittings.filter((sitting) => sitting.tutorUserId);
+
+      if (withTutor.length === 0) {
+        throw new PlanError(
+          "Every mock sitting with marks in it has already been released, or has no tutor to nudge. Say so.",
+        );
+      }
+
+      return {
+        payload: { examIds: withTutor.map((sitting) => sitting.id) },
+        preview: {
+          summary: `Nudge ${withTutor.length} tutor${withTutor.length === 1 ? "" : "s"} sitting on unreleased results`,
+          affected: withTutor.length,
+          lines: [
+            "Each tutor gets a bell notification and a push about the sitting they have not released.",
+            "Anything graded and unreleased for more than five days also flags the office.",
+            "Deduped to once a day — running this twice does not double-poke anybody.",
+          ],
+          warnings: [],
+          sample: withTutor.slice(0, 4).map((sitting) => ({
+            name: sitting.name,
+            detail: sitting.fullyGraded
+              ? `all ${sitting.expected} marked · ${sitting.daysSinceExam}d ago`
+              : `${sitting.graded}/${sitting.expected} marked · ${sitting.daysSinceExam}d ago`,
+          })),
+          reversible: true,
+        },
+      };
+    },
+    async execute(payload) {
+      const examIds = requireIdList(payload, "examIds");
+      const { nudgeUnreleasedResults } = await import("@/lib/result-release");
+      const result = await nudgeUnreleasedResults(examIds);
+      return {
+        summary: `Nudged ${result.nudged} tutor${result.nudged === 1 ? "" : "s"} about results still to release.`,
+        details: { nudged: result.nudged },
       };
     },
   },

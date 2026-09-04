@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
 import bcryptjs from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { assignStudentCode } from "@/lib/student-code";
 import { LEVELS } from "@/lib/levels";
-import { bestMatch, matchBatch, matchLevel, matchSessionSlot } from "@/lib/fuzzy-match";
+import { bestMatch, matchBatch, matchDeliveryMode, matchLevel, matchSessionSlot } from "@/lib/fuzzy-match";
 import { generateTempPassword } from "@/lib/student-password";
+import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { isOnlineBranch } from "@/lib/online-branch";
 
 import { requireCapability } from "@/lib/admin-roles";
 export const dynamic = "force-dynamic";
@@ -24,7 +27,7 @@ export const dynamic = "force-dynamic";
  * the generated passwords so the office can give people their logins.
  */
 
-const SLOTS = ["morning", "afternoon", "evening"];
+const SLOTS = ["morning", "afternoon", "evening", "weekend"];
 
 type ImportRow = Record<string, unknown>;
 
@@ -52,9 +55,28 @@ function rowValue(row: ImportRow, aliases: string[]): string {
 }
 
 function money(value: string): number {
-  // Offices type "150,000", "₦150000" and "150000.00". All mean the same thing.
-  const digits = value.replace(/[^0-9.]/g, "");
+  // Offices type "150,000", "₦150000", "150000.00" and — this school's own
+  // habit — "150K" for 150,000. All mean the same thing.
+  const trimmed = value.trim();
+  const shorthand = /^[₦$]?\s*([\d.,]+)\s*([km])\s*$/i.exec(trimmed);
+  if (shorthand) {
+    const n = Number(shorthand[1].replace(/,/g, ""));
+    const multiplier = shorthand[2].toLowerCase() === "k" ? 1_000 : 1_000_000;
+    return Math.max(0, Math.round((Number.isFinite(n) ? n : 0) * multiplier));
+  }
+  const digits = trimmed.replace(/[^0-9.]/g, "");
   return Math.max(0, Math.round(Number(digits) || 0));
+}
+
+/**
+ * A stand-in for a student the office has no email address for yet — this
+ * spreadsheet's own "phone but no email" shape, not a hypothetical. `noemail.`
+ * makes the account findable later (grep the roster for the prefix), and the
+ * `.placeholder.` subdomain means nothing here is ever a real mailbox this
+ * school's domain has to answer for — no bounce, no deliverability hit.
+ */
+function placeholderEmail(): string {
+  return `noemail.${randomBytes(5).toString("hex")}@students.placeholder.easywayschoollms.com.ng`;
 }
 
 export async function POST(request: NextRequest) {
@@ -89,6 +111,17 @@ export async function POST(request: NextRequest) {
       aliases: /port\s*harcourt/i.test(branch.name) ? ["ph", "phc"] : [],
     }));
 
+    // Resolved lazily — most imports have branches for every row and never
+    // need this looked up.
+    let onlineBranch: { id: string; name: string } | null | undefined;
+    async function resolveOnlineBranch() {
+      if (onlineBranch === undefined) {
+        const candidates = await prisma.branch.findMany({ select: { id: true, name: true, mode: true } });
+        onlineBranch = candidates.find((b) => isOnlineBranch(b)) ?? null;
+      }
+      return onlineBranch;
+    }
+
     const results: Array<{
       row: number;
       name: string;
@@ -97,6 +130,7 @@ export async function POST(request: NextRequest) {
       branch: string | null;
       batch: string | null;
       sessionSlot: string;
+      deliveryMode: string;
       amountPaid: number;
       status: "ready" | "created" | "skipped" | "error";
       note: string;
@@ -104,6 +138,8 @@ export async function POST(request: NextRequest) {
       corrections?: string[];
       password?: string;
       studentCode?: string | null;
+      /** True when this row had no email and one was minted to create the account. */
+      placeholderEmail?: boolean;
     }> = [];
 
     for (let index = 0; index < rows.length; index++) {
@@ -112,9 +148,15 @@ export async function POST(request: NextRequest) {
         "name", "names", "student", "student name", "student names", "student full name",
         "full name", "fullname", "name of student", "name of students", "learner name",
       ]);
-      const email = rowValue(row, [
+      const emailInput = rowValue(row, [
         "email", "email address", "email id", "email address of student", "mail", "e-mail",
       ]).toLowerCase();
+      // No email on file at all — mint a placeholder rather than reject the
+      // whole row, since this school's own walk-in sheets carry a phone number
+      // and nothing else. Never invented for a row that gave an email that
+      // merely looks wrong — that is still an error below, not a guess.
+      const placeholderEmailUsed = !emailInput;
+      const email = emailInput || placeholderEmail();
       /**
        * SPELLING IS NOT DATA ENTRY'S JOB.
        *
@@ -135,7 +177,8 @@ export async function POST(request: NextRequest) {
         return match;
       };
 
-      const levelMatch = note(matchLevel(str(row, "level", "class", "current_level"), LEVELS));
+      const levelInput = str(row, "level", "class", "current_level");
+      const levelMatch = note(matchLevel(levelInput, LEVELS));
       const level = levelMatch?.value ?? "A1";
 
       const branchInput = str(row, "branch", "campus", "location");
@@ -148,6 +191,14 @@ export async function POST(request: NextRequest) {
 
       const slotMatch = note(matchSessionSlot(str(row, "session", "session_slot", "slot", "time")));
       const sessionSlot = slotMatch?.value ?? "morning";
+
+      // "Type of class" in this school's own sheets means how the student
+      // attends (online/physical/hybrid) — a different question from group vs
+      // private, which has no column here and stays the create-call's default.
+      const deliveryModeInput = str(row, "type_of_class", "class_type", "delivery_mode", "attendance", "attending");
+      const deliveryModeMatch = deliveryModeInput ? note(matchDeliveryMode(deliveryModeInput)) : null;
+      const deliveryMode = deliveryModeMatch?.value ?? "physical";
+
       const phone = str(row, "phone", "phone_number", "mobile");
       const amountPaid = money(str(row, "amount_paid", "paid", "amountpaid", "payment"));
 
@@ -159,20 +210,33 @@ export async function POST(request: NextRequest) {
         branch: branchName || null,
         batch: batch || null,
         sessionSlot,
+        deliveryMode,
         amountPaid,
         corrections: corrections.length ? corrections : undefined,
+        placeholderEmail: placeholderEmailUsed || undefined,
       };
 
-      if (!name || !email) {
-        results.push({ ...base, status: "error", note: "Name and email are both required" });
+      if (!name) {
+        results.push({ ...base, status: "error", note: "A name is required" });
         continue;
       }
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      if (!placeholderEmailUsed && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
         results.push({ ...base, status: "error", note: "That email does not look valid" });
         continue;
       }
+      // A level was typed but did not resolve to any offered level — silently
+      // filing this student as A1 would be a guess dressed up as a read, and
+      // the fuzzy-match module's whole point is refusing to do that.
+      if (levelInput && !levelMatch) {
+        results.push({
+          ...base,
+          status: "error",
+          note: `No level close to "${levelInput}". Use one of: ${LEVELS.join(", ")}`,
+        });
+        continue;
+      }
 
-      const branch = branchMatch?.value;
+      let branch = branchMatch?.value as { id: string; name: string } | null | undefined;
       if (branchInput && !branch) {
         results.push({
           ...base,
@@ -180,6 +244,13 @@ export async function POST(request: NextRequest) {
           note: `No branch close to "${branchInput}". Use one of: ${branches.map((b) => b.name).join(", ")}`,
         });
         continue;
+      }
+      // Online, but the sheet gave no branch to place them at (this school's
+      // own sheets leave BRANCH blank for every online row) — the online
+      // branch itself is the answer, the same way a physical row's branch
+      // decides its fee table, its roster and its community space.
+      if (!branch && deliveryMode === "online") {
+        branch = (await resolveOnlineBranch()) ?? undefined;
       }
 
       const existing = await prisma.user.findUnique({ where: { email }, select: { id: true, tenantId: true } });
@@ -195,12 +266,15 @@ export async function POST(request: NextRequest) {
       }
 
       if (dryRun) {
+        const timetableNote = batch
+          ? "Will be created and placed on the timetable from their batch month"
+          : "Will be created. Without a batch month their level-end date cannot be worked out";
         results.push({
           ...base,
           status: "ready",
-          note: batch
-            ? "Will be created and placed on the timetable from their batch month"
-            : "Will be created. Without a batch month their level-end date cannot be worked out",
+          note: placeholderEmailUsed
+            ? `${timetableNote}. No email on file — a placeholder account is created; add their real email from the student's profile before sending login details.`
+            : timetableNote,
         });
         continue;
       }
@@ -219,6 +293,7 @@ export async function POST(request: NextRequest) {
               create: {
                 level,
                 sessionSlot,
+                deliveryMode,
                 branchId: branch?.id ?? null,
                 pathway: str(row, "pathway", "program") || "Language training",
                 // The batch month is what the timetable generator and the
@@ -254,9 +329,26 @@ export async function POST(request: NextRequest) {
               },
             });
           }
+
+          // Open the tuition ledger for the level they are imported into. Lower
+          // levels a mid-course import already passed are the backfill script's
+          // job (or an admin adjustment); this covers the level they're in now.
+          try {
+            await ensureChargeForLevel({ studentId: student.id, level, origin: "import" });
+          } catch (chargeError) {
+            console.error("Tuition charge creation failed on import", chargeError);
+          }
         }
 
-        results.push({ ...base, status: "created", note: "Account created", password, studentCode });
+        results.push({
+          ...base,
+          status: "created",
+          note: placeholderEmailUsed
+            ? "Account created with a placeholder email — add their real email from the student's profile before sending login details"
+            : "Account created",
+          password,
+          studentCode,
+        });
       } catch (rowError) {
         console.error("Student import row failed", rowError);
         results.push({ ...base, status: "error", note: "Could not create this account" });
