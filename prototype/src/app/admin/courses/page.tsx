@@ -67,6 +67,23 @@ type ValidationPreview = {
   errorCount: number;
 };
 
+/**
+ * OS bookkeeping that rides along when you pick a whole folder — Finder's
+ * `.DS_Store`, Windows' `Thumbs.db`/`desktop.ini`, editor dotfiles, and the
+ * empty placeholder files some sync clients leave behind. None of it is
+ * teaching material, so it never reaches the upload loop.
+ */
+function isRealMaterialFile(file: File): boolean {
+  const name = file.name;
+  if (!name || name.startsWith(".")) return false;
+  if (/^(thumbs\.db|desktop\.ini|\.ds_store)$/i.test(name)) return false;
+  if (file.size === 0) return false;
+  return true;
+}
+
+/** How many files upload at once — enough to be quick, not enough to stampede a slow line. */
+const UPLOAD_CONCURRENCY = 4;
+
 const EMPTY_UPLOAD = {
   source: "file" as "file" | "link",
   files: [] as File[],
@@ -96,6 +113,7 @@ export default function AdminCoursesPage() {
   const [creating, setCreating] = useState(false);
 
   const [upload, setUpload] = useState(EMPTY_UPLOAD);
+  const [fileMode, setFileMode] = useState<"files" | "folder">("files");
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
 
@@ -184,7 +202,7 @@ export default function AdminCoursesPage() {
 
   async function submitUpload() {
     if (upload.source === "file" && upload.files.length === 0) {
-      setUploadMessage("Choose at least one file, or switch to a link.");
+      setUploadMessage("Choose files or a folder, or switch to a link.");
       return;
     }
     if (upload.source === "link" && !upload.sourceUrl.trim()) {
@@ -230,30 +248,66 @@ export default function AdminCoursesPage() {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Upload failed");
       } else {
+        /**
+         * A folder pick is routinely 50+ files. Three things make that bearable:
+         *  - upload several at once (UPLOAD_CONCURRENCY), so it is not a serial
+         *    wait of fifty round-trips;
+         *  - never let one bad file abort the batch — collect the failures and
+         *    report them at the end;
+         *  - leave the failed files in the picker so pressing Upload again
+         *    retries only those.
+         */
+        const queue = [...upload.files];
+        const total = queue.length;
+        const singleTitle = total === 1 && upload.title.trim() ? upload.title.trim() : null;
+        const failed: File[] = [];
         let done = 0;
-        for (const file of upload.files) {
-          const uploaded = await uploadFile(file, "materials");
-          const res = await fetch("/api/admin/materials", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...base,
-              // With one file the typed title wins; with many, each file keeps
-              // its own name so they do not all land as "Week 3".
-              title:
-                upload.files.length === 1 && upload.title.trim()
-                  ? upload.title.trim()
-                  : file.name.replace(/\.[^.]+$/, ""),
-              fileUrl: uploaded.url,
-              fileName: uploaded.filename,
-              fileType: uploaded.contentType,
-              fileSize: uploaded.size,
-            }),
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error || `Upload failed for ${file.name}`);
-          done += 1;
-          setUploadMessage(`Uploaded ${done} of ${upload.files.length}…`);
+
+        const worker = async () => {
+          for (let file = queue.shift(); file; file = queue.shift()) {
+            try {
+              const uploaded = await uploadFile(file, "materials");
+              const res = await fetch("/api/admin/materials", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  ...base,
+                  // With one file the typed title wins; with many, each file
+                  // keeps its own name so they do not all land as "Week 3".
+                  title: singleTitle ?? file.name.replace(/\.[^.]+$/, ""),
+                  fileUrl: uploaded.url,
+                  fileName: uploaded.filename,
+                  fileType: uploaded.contentType,
+                  fileSize: uploaded.size,
+                }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) throw new Error(data.error || `Upload failed for ${file.name}`);
+            } catch {
+              failed.push(file);
+            } finally {
+              done += 1;
+              setUploadMessage(
+                `Uploading… ${done} of ${total}${failed.length ? ` · ${failed.length} failed` : ""}`,
+              );
+            }
+          }
+        };
+
+        await Promise.all(
+          Array.from({ length: Math.min(UPLOAD_CONCURRENCY, total) }, worker),
+        );
+
+        if (failed.length) {
+          setUpload((current) => ({ ...current, files: failed }));
+          setUploadMessage(
+            `${total - failed.length} uploaded, ${failed.length} failed: ` +
+              `${failed.slice(0, 5).map((f) => f.name).join(", ")}` +
+              `${failed.length > 5 ? ` and ${failed.length - 5} more` : ""}. ` +
+              `Press Upload to retry just these.`,
+          );
+          await load();
+          return;
         }
       }
 
@@ -387,8 +441,9 @@ export default function AdminCoursesPage() {
             Upload material
           </h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Any file type, or paste a video or audio link. Choose who it is for — a whole cohort, or one
-            tutor — and it reaches every assigned tutor for that class, across branches and batches.
+            Any file type — one at a time or a whole folder in a single go — or paste a video or audio
+            link. Choose who it is for — a whole cohort, or one tutor — and it reaches every assigned
+            tutor for that class, across branches and batches.
           </p>
 
           <div className="mt-5 flex flex-wrap gap-2">
@@ -410,21 +465,62 @@ export default function AdminCoursesPage() {
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             {upload.source === "file" ? (
-              <label className="block text-sm font-medium md:col-span-2">
-                Files <span className="text-[var(--muted)]">(PDF, DOCX, PPTX, XLSX, MP4, MP3, ZIP, images…)</span>
+              <div className="block text-sm font-medium md:col-span-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>Upload</span>
+                  {(["files", "folder"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        setFileMode(mode);
+                        setUpload((c) => ({ ...c, files: [] }));
+                        setUploadMessage("");
+                      }}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                        fileMode === mode
+                          ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--foreground)]"
+                          : "border-[var(--border)] text-[var(--muted)]"
+                      }`}
+                    >
+                      {mode === "files" ? "Pick files" : "Whole folder"}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs font-normal text-[var(--muted)]">
+                  {fileMode === "folder"
+                    ? "Every file in the folder becomes its own material, keeping its filename. Sub-folders are included; system files are skipped."
+                    : "PDF, DOCX, PPTX, XLSX, MP4, MP3, ZIP, images… select as many as you like."}
+                </p>
                 <input
+                  key={fileMode}
                   type="file"
                   multiple
-                  onChange={(event) => setUpload((c) => ({ ...c, files: Array.from(event.target.files || []) }))}
+                  ref={(el) => {
+                    // React has no typed prop for a directory picker; the
+                    // attribute has to go on the element by hand. `key` above
+                    // remounts the input when the mode flips so it never keeps
+                    // a stale `webkitdirectory`.
+                    if (el && fileMode === "folder") {
+                      el.setAttribute("webkitdirectory", "");
+                      el.setAttribute("directory", "");
+                    }
+                  }}
+                  onChange={(event) => {
+                    const picked = Array.from(event.target.files || []).filter(isRealMaterialFile);
+                    setUpload((c) => ({ ...c, files: picked }));
+                    setUploadMessage("");
+                  }}
                   className={inputClass}
                 />
                 {upload.files.length > 0 ? (
-                  <p className="mt-1 text-xs text-[var(--muted)]">
+                  <p className="mt-1 text-xs font-normal text-[var(--muted)]">
                     {upload.files.length} file{upload.files.length === 1 ? "" : "s"} —{" "}
                     {(upload.files.reduce((sum, file) => sum + file.size, 0) / 1024 / 1024).toFixed(1)} MB total
+                    {upload.files.length > 8 ? " · uploads run 4 at a time" : ""}
                   </p>
                 ) : null}
-              </label>
+              </div>
             ) : (
               <label className="block text-sm font-medium md:col-span-2">
                 <span className="flex items-center gap-1.5">
