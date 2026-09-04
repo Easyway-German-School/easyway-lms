@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
@@ -6,6 +6,7 @@ import { KIND, notify } from '@/lib/notify';
 import { belongsToLecturer, isAssigned, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
 import { EMBED_FILE_TYPE, parseEmbed } from '@/lib/media-embed';
+import { generateForMaterial } from '@/lib/material-ai';
 
 function serialise(material: {
   id: string;
@@ -272,6 +273,21 @@ export async function POST(req: NextRequest) {
           dedupeKey: `material:${material.id}`,
         }).catch((error) => console.error("Material notification failed", error));
       }
+    }
+
+    /**
+     * Start the AI read now rather than waiting for the 6am cron — a handout
+     * uploaded at 8am for a 10am class should have its quests and notes drafted
+     * in time. `after()` runs it once the response is out; a timeout mid-run
+     * leaves `aiState:"pending"` for the cron queue to finish. Recordings and
+     * pasted links carry no readable text.
+     */
+    if (kind !== 'recording' && !embed) {
+      after(() =>
+        generateForMaterial(material.id).catch((error) =>
+          console.error('material-ai kick failed', material.id, error),
+        ),
+      );
     }
 
     return NextResponse.json(serialise(material));

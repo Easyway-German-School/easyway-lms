@@ -24,18 +24,28 @@ export async function GET() {
 
   const student = await prisma.student.findUnique({
     where: { userId: session.user.id },
-    select: { id: true, level: true },
+    select: { id: true, level: true, branchId: true, sessionSlot: true },
   });
   if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
 
-  // Every document material this student can see — the same scoping the video
-  // library uses (level / course level / a private class booked for them).
+  // Every document material this student can see — level / course level / a
+  // private class booked for them — then narrowed by the office targeting the
+  // Materials list already honours: a branch- or sitting-specific office
+  // upload, and staff-only ones, stay out. (Batch is not filtered here; it is
+  // rare on a study-note handout and would break the `preparing` count below.)
   const scope = {
     kind: { notIn: ["recording", "video"] },
-    OR: [
-      { level: student.level },
-      { course: { level: student.level } },
-      { privateClasses: { some: { studentId: student.id } } },
+    visibleToStudents: true,
+    AND: [
+      {
+        OR: [
+          { level: student.level },
+          { course: { level: student.level } },
+          { privateClasses: { some: { studentId: student.id } } },
+        ],
+      },
+      { OR: [{ branchId: null }, { branchId: student.branchId }] },
+      { OR: [{ sessionSlot: null }, { sessionSlot: student.sessionSlot }] },
     ],
   };
 

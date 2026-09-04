@@ -41,6 +41,17 @@ export const KIND = {
   resultReleaseNudge: "result.release_nudge",
   levelAdvance: "level.advance",
   materialPublished: "material.published",
+  /**
+   * To the tutor: the AI has finished reading an uploaded material and its
+   * quests / study notes are waiting for a sign-off before students see them.
+   * See src/lib/material-ai.ts.
+   */
+  questsToReview: "quests.to_review",
+  /**
+   * To the student: their tutor signed off the quests + written-up notes for a
+   * material, so both are now live. See the quests review PATCH.
+   */
+  studyNotesReady: "study_notes.ready",
   assignmentDue: "assignment.due",
   /** A student handed in work. The tutor who set it is waiting to mark it. */
   assignmentSubmitted: "assignment.submitted",
