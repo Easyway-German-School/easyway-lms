@@ -34,7 +34,7 @@ export async function GET() {
   // upload, and staff-only ones, stay out. (Batch is not filtered here; it is
   // rare on a study-note handout and would break the `preparing` count below.)
   const scope = {
-    kind: { notIn: ["recording", "video"] },
+    kind: { notIn: ["recording", "video", "audio"] },
     visibleToStudents: true,
     AND: [
       {

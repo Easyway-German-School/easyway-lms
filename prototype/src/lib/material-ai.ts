@@ -221,9 +221,14 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
     });
   };
 
-  // Recordings and videos carry no readable text. Marked `none` rather than
-  // `failed`: nothing went wrong, there is simply nothing to read.
-  if (material.kind === "recording" || (material.fileType || "").startsWith("video")) {
+  // Recordings, videos and audio carry no readable text. Marked `none` rather
+  // than `failed`: nothing went wrong, there is simply nothing to read.
+  if (
+    material.kind === "recording" ||
+    material.kind === "audio" ||
+    (material.fileType || "").startsWith("video") ||
+    (material.fileType || "").startsWith("audio")
+  ) {
     await prisma.material.update({ where: { id: material.id }, data: { aiState: "none" } });
     return null;
   }
@@ -334,7 +339,7 @@ export async function processMaterialQueue(limit = 3): Promise<{
   const pending = await prisma.material.findMany({
     where: {
       aiState: { in: ["none", "pending"] },
-      kind: { not: "recording" },
+      kind: { notIn: ["recording", "audio", "video"] },
       // Only ones uploaded recently: back-filling the entire library on the
       // first run would be hours of generation nobody asked for.
       createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },

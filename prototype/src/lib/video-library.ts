@@ -69,8 +69,11 @@ export function isPlayableVideo(fileType?: string | null): boolean {
  * A recording is only ever set explicitly — we cannot tell a taught lesson
  * from a captured class by its MIME type.
  */
-export function deriveMaterialKind(fileType?: string | null): "video" | "document" {
-  return isPlayableVideo(fileType) ? "video" : "document";
+export function deriveMaterialKind(fileType?: string | null): "video" | "audio" | "document" {
+  const type = String(fileType ?? "").toLowerCase();
+  if (isPlayableVideo(type)) return "video";
+  if (type.startsWith("audio/") || type === "audio") return "audio";
+  return "document";
 }
 
 /**

@@ -7,7 +7,7 @@ import LecturerShell from '@/components/LecturerShell';
 import BrandLoader from "@/components/BrandLoader";
 import { BookOpenIcon, CalendarIcon, DocumentIcon, EmptyIcon, LecturerIcon, LinkIcon, PackageIcon, VideoIcon } from '@/components/icons';
 import { uploadFile } from '@/lib/upload';
-import { parseEmbed } from '@/lib/media-embed';
+import { parseAudioLink, parseEmbed } from '@/lib/media-embed';
 import LecturerQuestReview from '@/components/materials/LecturerQuestReview';
 
 interface Course {
@@ -72,11 +72,15 @@ export default function LecturerMaterials() {
 
   // Parsed here as well as on the server so the tutor sees "YouTube" the moment
   // they paste, rather than discovering the link was unusable after submitting.
-  const parsedLink = source === 'link' ? parseEmbed(formData.sourceUrl) : null;
+  const parsedVideo = source === 'link' ? parseEmbed(formData.sourceUrl) : null;
+  const parsedAudio = source === 'link' && !parsedVideo ? parseAudioLink(formData.sourceUrl) : null;
+  const parsedLink = parsedVideo ?? parsedAudio;
   const linkTyped = source === 'link' && formData.sourceUrl.trim().length > 0;
 
-  // A pasted link is always a video, so the shelf fields below apply to it too.
-  const isVideoFile = source === 'link' ? Boolean(parsedLink) : Boolean(formData.file?.type?.startsWith('video/'));
+  // The video-shelf fields (series, episode, "is this a class recording") only
+  // apply to video — a pasted audio track skips straight past them, like a
+  // document.
+  const isVideoFile = source === 'link' ? Boolean(parsedVideo) : Boolean(formData.file?.type?.startsWith('video/'));
 
   /**
    * Read the runtime out of the chosen file before uploading.
@@ -159,7 +163,7 @@ export default function LecturerMaterials() {
       return;
     }
     if (source === 'link' && !parsedLink) {
-      setError('Paste a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.');
+      setError('Paste a video link (YouTube, Vimeo, Loom, Drive) or an audio link (SoundCloud, Spotify, or a direct .mp4 / .mp3 URL).');
       return;
     }
     // A recording is filed by level rather than course, so the two have
@@ -336,7 +340,7 @@ export default function LecturerMaterials() {
                   <div className="mb-3 flex flex-wrap gap-2">
                     {([
                       { value: 'file' as const, icon: <PackageIcon className="h-4 w-4" />, label: 'Upload a file', hint: 'PDF, slides, or a video you have' },
-                      { value: 'link' as const, icon: <LinkIcon className="h-4 w-4" />, label: 'Paste a link', hint: 'YouTube, Vimeo, Loom, Drive' },
+                      { value: 'link' as const, icon: <LinkIcon className="h-4 w-4" />, label: 'Paste a link', hint: 'YouTube, Vimeo, Loom, Drive · SoundCloud, Spotify' },
                     ]).map((option) => (
                       <button
                         key={option.value}
@@ -378,7 +382,7 @@ export default function LecturerMaterials() {
                       <input
                         type="url"
                         inputMode="url"
-                        placeholder="https://www.youtube.com/watch?v=…"
+                        placeholder="YouTube, Vimeo, Loom, Drive · SoundCloud, Spotify · or a .mp4 / .mp3 URL"
                         value={formData.sourceUrl}
                         onChange={(e) => setFormData({ ...formData, sourceUrl: e.target.value })}
                         className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder-[var(--muted)]"
@@ -388,23 +392,26 @@ export default function LecturerMaterials() {
                           submitting a form and being told the link was wrong. */}
                       {linkTyped && parsedLink ? (
                         <div className="mt-2 flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5">
-                          {parsedLink.thumbnailUrl ? (
+                          {parsedVideo?.thumbnailUrl ? (
                             /* eslint-disable-next-line @next/next/no-img-element */
-                            <img src={parsedLink.thumbnailUrl} alt="" className="h-12 w-20 shrink-0 rounded object-cover" />
+                            <img src={parsedVideo.thumbnailUrl} alt="" className="h-12 w-20 shrink-0 rounded object-cover" />
                           ) : null}
                           <p className="text-xs text-emerald-700 dark:text-emerald-400">
-                            <span className="font-semibold">{parsedLink.label} video recognised.</span>
+                            <span className="font-semibold">
+                              {parsedLink.label} {parsedAudio ? 'audio' : 'video'} recognised.
+                            </span>
                             <br />
                             Students will play it inside the library — they never leave the portal.
                           </p>
                         </div>
                       ) : linkTyped ? (
                         <p className="mt-2 text-xs text-red-600">
-                          Not a video link we recognise. Try a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.
+                          Not a link we recognise. Try a YouTube, Vimeo, Loom or Drive video; a SoundCloud or
+                          Spotify link; or a direct .mp4 / .mp3 URL.
                         </p>
                       ) : (
                         <p className="text-xs text-[var(--muted)] mt-1">
-                          Nothing is copied — the video stays where it is and plays inside your students&apos; library.
+                          Nothing is copied — it stays where it is and plays inside your students&apos; library.
                         </p>
                       )}
                     </>
