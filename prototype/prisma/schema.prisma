@@ -129,6 +129,7 @@ model User {
   communityMute      CommunityMute?           @relation("MutedMember")
   mutesIssued        CommunityMute[]          @relation("MuteAuthor")
   channelReads       ChannelRead[]
+  typingPings        TypingPing[]
   pushSubs           PushSubscription[]
   examRegistrations  ExamRegistration[]
   notifications      Notification[]           @relation("NotificationRecipient")
@@ -260,6 +261,7 @@ model Tenant {
   spaces                  Space[]
   channels                Channel[]
   channelReads            ChannelRead[]
+  typingPings             TypingPing[]
   pushSubscriptions       PushSubscription[]
   messages                Message[]
   classSessions           ClassSession[]
@@ -496,6 +498,14 @@ model Student {
    * through the introduction a second time.
    */
   welcomeTourSeenAt DateTime?
+
+  /**
+   * When this student finished (or skipped) the "how a class story works"
+   * coach-mark — the separate Becca walk-through that fires the first time they
+   * go to start or join a Satzkette story from the community. Same reasoning as
+   * welcomeTourSeenAt: it is a property of the person, not the device.
+   */
+  storyTourSeenAt DateTime?
 
   // ---------------------------------------------------------------------
   // The journey to Germany. See src/lib/germany-journey.ts.
@@ -2371,6 +2381,7 @@ model Channel {
 
   messages Message[]
   reads    ChannelRead[]
+  typingPings TypingPing[]
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
@@ -2469,6 +2480,14 @@ model Message {
   attachmentUrl  String?
   attachmentType String?
   attachmentName String?
+
+  /**
+   * Length in whole seconds of a voice-note attachment, captured on the device
+   * that recorded it. Null for pictures and for messages with no attachment.
+   * Stored so a bubble can show "0:14" before the audio element has loaded a
+   * byte — the same reason a thumbnail carries its own dimensions.
+   */
+  attachmentDurationSec Int?
 
   /**
    * Moderation, kept as a soft hide. A hidden message stops rendering for
@@ -2610,6 +2629,36 @@ model MessageReaction {
 
   @@unique([messageId, userId, emoji])
   @@index([messageId])
+  @@index([tenantId])
+}
+
+/// "Someone is typing in this room, right now."
+///
+/// Deliberately disposable. One row per (channel, member); the client re-stamps
+/// it at most once every few seconds while a draft is non-empty, and a reader
+/// treats it as live only for a few seconds past `updatedAt`. Nothing here is
+/// worth keeping — a stale row is swept the next time anyone in the channel
+/// stamps one, so there is no cron.
+///
+/// A separate table rather than a column on ChannelRead: the read marker is a
+/// fact that matters (it drives the unread badge), a typing ping is noise with
+/// a short shelf life, and mixing the two would make "clear the typing state"
+/// risk touching the read cursor.
+model TypingPing {
+  id        String   @id @default(cuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([channelId, updatedAt])
+  @@index([userId])
   @@index([tenantId])
 }
 
