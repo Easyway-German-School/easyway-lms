@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import StudentShell from "@/components/StudentShell";
 import AICoachPanel from "@/components/AICoachPanel";
+import StoryTour from "@/components/StoryTour";
 import { AlertIcon, ChainIcon, ClockIcon, PlusIcon, SparklesIcon } from "@/components/icons";
 
 type Waiting = {
@@ -57,6 +58,36 @@ export default function GamesPage() {
   const [newPrompt, setNewPrompt] = useState("");
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
+
+  /** The one-time "how a class story works" coach: null until checked. */
+  const [storyTourSeen, setStoryTourSeen] = useState<boolean | null>(null);
+  const [showStoryTour, setShowStoryTour] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/student/story-tour", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setStoryTourSeen(Boolean(data.seen));
+      } catch {
+        // Leave it null — the coach just never fires this visit.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Reveal the start form, and run the coach the first time ever. */
+  const openStartForm = useCallback(() => {
+    setShowStartForm(true);
+    if (storyTourSeen === false) {
+      setShowStoryTour(true);
+      setStoryTourSeen(true); // optimistic — the tour stamps the server itself
+    }
+  }, [storyTourSeen]);
 
   const load = useCallback(async () => {
     try {
@@ -195,7 +226,7 @@ export default function GamesPage() {
                 {canStart && !showStartForm ? (
                   <button
                     type="button"
-                    onClick={() => setShowStartForm(true)}
+                    onClick={openStartForm}
                     className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)] hover:border-[var(--border-strong)]"
                   >
                     <PlusIcon className="h-3.5 w-3.5" /> Start a story
@@ -294,6 +325,8 @@ export default function GamesPage() {
         </>
         )}
       </div>
+
+      {showStoryTour ? <StoryTour onDone={() => setShowStoryTour(false)} /> : null}
     </StudentShell>
   );
 }

@@ -120,7 +120,7 @@ export async function GET(request: Request) {
         id: `chat:${message.id}`,
         source: "chat" as const,
         title: `${message.author.name ?? "Someone"} · ${channelName.get(message.channelId) ?? "Community"}`,
-        body: previewOf(message.body, Boolean(message.attachmentUrl)),
+        body: previewOf(message.body, Boolean(message.attachmentUrl), message.attachmentType),
         link: `/community?channel=${message.channelId}&message=${message.id}`,
         at: message.createdAt.toISOString(),
         severity: "info",

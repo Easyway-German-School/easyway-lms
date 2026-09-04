@@ -78,7 +78,7 @@ export async function POST(request: Request) {
           kind: KIND.announcement,
           severity: "info",
           title: `${pinnedByName} pinned a message in ${message.channel.name}`,
-          message: previewOf(message.body, Boolean(message.attachmentUrl)),
+          message: previewOf(message.body, Boolean(message.attachmentUrl), message.attachmentType),
           link: `/community?channel=${message.channelId}&message=${messageId}`,
           senderId: viewer.userId,
         });

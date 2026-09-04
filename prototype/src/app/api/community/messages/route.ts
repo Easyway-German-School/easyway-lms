@@ -38,6 +38,7 @@ function serialise(
     attachmentUrl: string | null;
     attachmentType: string | null;
     attachmentName: string | null;
+    attachmentDurationSec: number | null;
     replyToId: string | null;
     author: { id: string; name: string | null; role: string };
     replyTo?: {
@@ -71,7 +72,14 @@ function serialise(
       hidden && !staff
         ? null
         : message.attachmentUrl
-          ? { url: message.attachmentUrl, type: message.attachmentType, name: message.attachmentName }
+          ? {
+              url: message.attachmentUrl,
+              type: message.attachmentType,
+              name: message.attachmentName,
+              // Whole seconds for a voice note; null for a picture. Lets the
+              // bubble show "0:14" before the audio element loads.
+              durationSec: message.attachmentDurationSec ?? null,
+            }
           : null,
     author: {
       id: message.author.id,
@@ -242,6 +250,15 @@ export async function POST(request: Request) {
     const text = String(body.body ?? "").trim().slice(0, MAX_BODY);
     const attachmentUrl = body.attachmentUrl ? String(body.attachmentUrl) : null;
     /**
+     * Length of a voice note, in whole seconds, as measured on the device that
+     * recorded it. Clamped to a sane range so a bad clock or a hand-crafted
+     * request cannot store a bubble that claims to be three hours long.
+     */
+    const attachmentDurationSec =
+      attachmentUrl && Number.isFinite(Number(body.attachmentDurationSec))
+        ? Math.max(0, Math.min(600, Math.round(Number(body.attachmentDurationSec))))
+        : null;
+    /**
      * Validated against the set, not trusted. This id is rendered to a whole
      * cohort, and an unrecognised one would put an empty tile in everybody's
      * transcript permanently.
@@ -328,6 +345,7 @@ export async function POST(request: Request) {
         attachmentUrl,
         attachmentType: body.attachmentType ? String(body.attachmentType) : null,
         attachmentName: body.attachmentName ? String(body.attachmentName) : null,
+        attachmentDurationSec,
         stickerId,
         kind: gameMatch ? "game_invite" : "text",
         gameMatchId: gameMatch?.id ?? null,
@@ -355,6 +373,7 @@ export async function POST(request: Request) {
       // the message.
       body: text || (stickerId ? stickerById(stickerId)?.caption ?? "" : "") || (gameMatch ? `Started a game: ${gameMatch.title}` : ""),
       hasAttachment: Boolean(attachmentUrl),
+      attachmentType: created.attachmentType,
     });
 
     /**
