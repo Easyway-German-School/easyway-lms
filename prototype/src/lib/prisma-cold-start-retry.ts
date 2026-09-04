@@ -39,10 +39,20 @@ const isColdStart = (error: unknown): boolean => {
   return false;
 };
 
-/** Two retries, both short — a real cold start wakes in a few seconds, and a
- * genuinely dead database should still fail fast rather than hang the
- * request for a long time. */
-const DELAYS_MS = [500, 1500];
+/**
+ * Three retries, still short in total — a real cold start wakes in a few
+ * seconds, and a genuinely dead database should still fail fast rather than
+ * hang the request for a long time.
+ *
+ * Was [500, 1500] (2s of headroom). A tutor's photo save on the admin screen
+ * was lost outright — the update reached the server, hit a slower-than-usual
+ * wake-up, exhausted both retries, and came back as a 500 with nothing
+ * written. The bucket had the freshly uploaded file the whole time; only the
+ * database row never moved. Extending the window rather than adding a third
+ * short delay, since the failure mode was "not quite enough time", not "the
+ * retries fire too rarely".
+ */
+const DELAYS_MS = [500, 1500, 3000];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
