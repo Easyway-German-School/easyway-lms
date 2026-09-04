@@ -1,17 +1,16 @@
 import { prisma } from "@/lib/prisma";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { KIND, notify } from "@/lib/notify";
 import { deriveMaterialKind } from "@/lib/video-library";
 import { EMBED_FILE_TYPE, parseEmbed } from "@/lib/media-embed";
+import { BATCHES, COURSE_LEVELS, SESSION_SLOTS } from "@/lib/lecturer-assignment";
+import { generateForMaterial } from "@/lib/material-ai";
 import {
-  BATCHES,
-  COURSE_LEVELS,
-  SESSION_SLOTS,
-  matchesBatch,
-  readAssignment,
-  isAssigned,
-} from "@/lib/lecturer-assignment";
+  studentIdsForMaterial,
+  tutorUserIdsForMaterial,
+  type MaterialAudienceRow,
+} from "@/lib/material-audience";
 
 async function requireMaterialsAdmin() {
   return requireCapability("materials");
@@ -175,16 +174,25 @@ export async function POST(req: NextRequest) {
       include: { course: { select: { title: true, level: true } } },
     });
 
-    await announce(material, {
-      level: resolvedLevel,
-      branchId,
-      sessionSlot,
-      batch,
-      lecturerId,
-      visibleToStudents,
-      kind,
-      title,
-    }).catch((error) => console.error("Material announcement failed", error));
+    await announce(material).catch((error) => console.error("Material announcement failed", error));
+
+    /**
+     * Start the AI read now, not on the 6am cron.
+     *
+     * `generateForMaterial` produces the summary, key points, quests and
+     * study-notes; it then nudges the assigned tutor(s) to sign them off (see
+     * material-ai.ts). Running it in `after()` keeps the upload response fast;
+     * if it times out mid-generation the row is left at `aiState:"pending"`,
+     * which the cron queue picks up and finishes. A recording carries no text,
+     * so there is nothing to read.
+     */
+    if (kind !== "recording") {
+      after(() =>
+        generateForMaterial(material.id).catch((error) =>
+          console.error("material-ai kick failed", material.id, error),
+        ),
+      );
+    }
 
     return NextResponse.json(material);
   } catch (error) {
@@ -222,112 +230,44 @@ export async function DELETE(req: NextRequest) {
 
 /* -------------------------------------------------------------------------- */
 
-type Target = {
-  level: string | null;
-  branchId: string | null;
-  sessionSlot: string | null;
-  batch: string | null;
-  lecturerId: string | null;
-  visibleToStudents: boolean;
-  kind: string;
-  title: string;
-};
-
 /**
- * Tell the people an office upload is for that it exists.
+ * Tell the people a new material is for that it exists.
  *
- * Tutors: the one named tutor if the upload was aimed at a person, otherwise
- * every assigned tutor whose class the target cohort falls inside — same
- * "empty list = teaches all" reading the roster uses. Students: the cohort
- * itself, but only when the office left it visible to them.
+ * Audience is resolved through `@/lib/material-audience` — the one place that
+ * knows a tutor upload goes to that tutor's roster while an office cohort
+ * upload goes to every assigned tutor for the class (and its students, unless
+ * it is staff-only).
  */
-async function announce(material: { id: string }, target: Target): Promise<void> {
-  const notifyLink = target.kind === "recording" ? "/materials?tab=watch" : "/materials";
+async function announce(
+  material: MaterialAudienceRow & { title: string; kind: string },
+): Promise<void> {
+  const notifyLink = material.kind === "recording" ? "/materials?tab=watch" : "/materials";
 
-  // ---- Tutors -------------------------------------------------------------
-  const tutorUserIds = new Set<string>();
-
-  if (target.lecturerId) {
-    const lecturer = await prisma.lecturer.findUnique({
-      where: { id: target.lecturerId },
-      select: { userId: true },
-    });
-    if (lecturer?.userId) tutorUserIds.add(lecturer.userId);
-  } else {
-    const lecturers = await prisma.lecturer.findMany({
-      where: { status: { not: "inactive" } },
-      select: { id: true, userId: true, branchId: true, level: true, sessionSlot: true, branchIds: true, levels: true, sessionSlots: true, assignmentGroups: true, classTypes: true, batches: true },
-    });
-    for (const lecturer of lecturers) {
-      if (!lecturer.userId) continue;
-      const assignment = readAssignment(lecturer);
-      if (!isAssigned(assignment)) continue;
-      if (target.level && assignment.levels.length && !assignment.levels.includes(target.level)) continue;
-      if (
-        target.branchId &&
-        assignment.branchIds.length &&
-        !assignment.branchIds.includes(target.branchId)
-      )
-        continue;
-      if (
-        target.sessionSlot &&
-        assignment.sessionSlots.length &&
-        !assignment.sessionSlots.map((s) => s.toLowerCase()).includes(target.sessionSlot.toLowerCase())
-      )
-        continue;
-      if (
-        target.batch &&
-        assignment.batches.length &&
-        !assignment.batches.map((b) => b.toLowerCase()).includes(target.batch.toLowerCase())
-      )
-        continue;
-      tutorUserIds.add(lecturer.userId);
-    }
-  }
-
-  if (tutorUserIds.size) {
+  const tutorUserIds = await tutorUserIdsForMaterial(material);
+  if (tutorUserIds.length) {
     await notify({
-      to: { userIds: [...tutorUserIds] },
+      to: { userIds: tutorUserIds },
       kind: KIND.materialPublished,
       severity: "info",
-      title: "New material from the office",
-      message: `“${target.title}” was added for your class. Open Materials to see it.`,
+      title: material.lecturerId ? "New material from the office" : "New material for your class",
+      message: `“${material.title}” was added for your class. Open Materials to see it.`,
       link: notifyLink,
       push: true,
       dedupeKey: `material:${material.id}:tutors`,
     }).catch((error) => console.error("Tutor material notification failed", error));
   }
 
-  // ---- Students --------------------------------------------------------
-  if (!target.visibleToStudents || !target.level) return;
-
-  const studentWhere: Record<string, unknown> = { level: target.level, deletedAt: null };
-  if (target.branchId) studentWhere.branchId = target.branchId;
-  if (target.sessionSlot) studentWhere.sessionSlot = target.sessionSlot;
-
-  const students = await prisma.student.findMany({
-    where: studentWhere as never,
-    select: { id: true, admission: true },
-  });
-
-  const studentIds = students
-    .filter((student) =>
-      target.batch
-        ? matchesBatch({ batches: [target.batch] } as never, student.admission)
-        : true,
-    )
-    .map((student) => student.id);
-
+  const studentIds = await studentIdsForMaterial(material);
   if (studentIds.length) {
     await notify({
       to: { studentIds },
       kind: KIND.materialPublished,
       severity: "info",
-      title: target.kind === "recording" ? "A class recording is up" : "New course material",
+      title: material.kind === "recording" ? "A class recording is up" : "New course material",
       message:
-        target.kind === "recording"
-          ? `“${target.title}” is in your video library.`
-          : `“${target.title}” was added to your Materials. Open it to download.`,
+        material.kind === "recording"
+          ? `“${material.title}” is in your video library.`
+          : `“${material.title}” was added to your Materials. Open it to download.`,
       link: notifyLink,
       push: true,
       dedupeKey: `material:${material.id}:students`,

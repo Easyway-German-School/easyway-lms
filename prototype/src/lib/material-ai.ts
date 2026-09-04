@@ -5,6 +5,7 @@ import { getFile } from "@/lib/storage";
 import { callModel, activeModelName } from "@/lib/ai";
 import { parseModelJson } from "@/lib/safe-json";
 import { notifyInBackground, KIND } from "@/lib/notify";
+import { tutorUserIdsForMaterial } from "@/lib/material-audience";
 
 /**
  * Turning what a tutor uploaded into something a student will actually open.
@@ -196,6 +197,8 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
     select: {
       id: true, title: true, filePath: true, fileName: true,
       fileType: true, level: true, kind: true, uploadedBy: true,
+      branchId: true, sessionSlot: true, batch: true,
+      visibleToStudents: true, lecturerId: true,
       course: { select: { level: true } },
       lecturer: { select: { userId: true } },
     },
@@ -277,6 +280,31 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
         aiUpdatedAt: new Date(),
       },
     });
+
+    /**
+     * Nudge the tutor(s) that there is something to sign off.
+     *
+     * Nothing the model wrote reaches a student until a tutor approves the
+     * quests (`questsReviewedAt`, which also gates the notes). Without this the
+     * tutor had to happen to open the material and notice the panel — and for
+     * an office cohort upload there is no single owner watching for it at all,
+     * so the generated quests would simply never go live. Goes to the assigned
+     * tutor(s) for the cohort, resolved the same way the roster is.
+     */
+    if (insight.quests.length > 0 || insight.notes) {
+      const tutorIds = await tutorUserIdsForMaterial(material);
+      if (tutorIds.length) {
+        notifyInBackground({
+          to: { userIds: tutorIds },
+          kind: KIND.questsToReview,
+          severity: "info",
+          title: "Quests ready to review",
+          message: `Becca drafted quests and study notes for “${material.title}”. Open Materials to check them — students see them once you sign off.`,
+          link: "/lecturer/materials",
+          dedupeKey: `quests-review:${material.id}`,
+        });
+      }
+    }
 
     return insight;
   } catch (error) {
