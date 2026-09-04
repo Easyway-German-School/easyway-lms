@@ -5,7 +5,7 @@ import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
 import { belongsToLecturer, isAssigned, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
-import { EMBED_FILE_TYPE, parseEmbed } from '@/lib/media-embed';
+import { AUDIO_EMBED_FILE_TYPE, EMBED_FILE_TYPE, parseAudioLink, parseEmbed } from '@/lib/media-embed';
 import { generateForMaterial } from '@/lib/material-ai';
 
 function serialise(material: {
@@ -149,19 +149,25 @@ export async function POST(req: NextRequest) {
      */
     const sourceUrl = String(body.sourceUrl ?? '').trim();
     const embed = sourceUrl ? parseEmbed(sourceUrl) : null;
-    if (sourceUrl && !embed) {
+    const audioEmbed = sourceUrl && !embed ? parseAudioLink(sourceUrl) : null;
+    if (sourceUrl && !embed && !audioEmbed) {
       return NextResponse.json(
-        { error: 'That link is not a video we recognise. Paste a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.' },
+        { error: 'That link is not a video or audio we recognise. Paste a YouTube, Vimeo, Loom or Drive video; a SoundCloud or Spotify link; or a direct .mp4 / .mp3 URL.' },
         { status: 400 },
       );
     }
+    const link = embed ?? audioEmbed;
 
-    const fileUrl = embed ? embed.sourceUrl : String(body.fileUrl ?? '').trim();
-    const fileName = embed ? embed.label : String(body.fileName ?? '').trim();
-    const fileType = embed ? EMBED_FILE_TYPE : String(body.fileType ?? '').trim() || 'application/octet-stream';
+    const fileUrl = link ? link.sourceUrl : String(body.fileUrl ?? '').trim();
+    const fileName = link ? link.label : String(body.fileName ?? '').trim();
+    const fileType = embed
+      ? EMBED_FILE_TYPE
+      : audioEmbed
+        ? AUDIO_EMBED_FILE_TYPE
+        : String(body.fileType ?? '').trim() || 'application/octet-stream';
     // A link occupies no storage. Recording it as 0 keeps the tutor's "MB used"
     // honest rather than inventing a size for something we do not host.
-    const fileSize = embed ? 0 : Number(body.fileSize) || 0;
+    const fileSize = link ? 0 : Number(body.fileSize) || 0;
 
     // Video-library metadata. All optional — a plain document upload sends none
     // of it and behaves exactly as it did before.
@@ -279,10 +285,10 @@ export async function POST(req: NextRequest) {
      * Start the AI read now rather than waiting for the 6am cron — a handout
      * uploaded at 8am for a 10am class should have its quests and notes drafted
      * in time. `after()` runs it once the response is out; a timeout mid-run
-     * leaves `aiState:"pending"` for the cron queue to finish. Recordings and
-     * pasted links carry no readable text.
+     * leaves `aiState:"pending"` for the cron queue to finish. Recordings,
+     * videos, audio and pasted links carry no readable text.
      */
-    if (kind !== 'recording' && !embed) {
+    if (kind !== 'recording' && kind !== 'audio' && kind !== 'video' && !link) {
       after(() =>
         generateForMaterial(material.id).catch((error) =>
           console.error('material-ai kick failed', material.id, error),

@@ -21,8 +21,15 @@
 /** What `Material.fileType` carries for a linked video. */
 export const EMBED_FILE_TYPE = "video/embed";
 
+/** …and for a linked audio track (a podcast episode, a SoundCloud clip, an mp3). */
+export const AUDIO_EMBED_FILE_TYPE = "audio/embed";
+
 export function isEmbeddedVideo(fileType?: string | null): boolean {
   return String(fileType ?? "").toLowerCase() === EMBED_FILE_TYPE;
+}
+
+export function isEmbeddedAudio(fileType?: string | null): boolean {
+  return String(fileType ?? "").toLowerCase() === AUDIO_EMBED_FILE_TYPE;
 }
 
 export type EmbedProvider = "youtube" | "vimeo" | "drive" | "loom" | "direct";
@@ -182,4 +189,77 @@ export function parseEmbed(rawUrl: string): ParsedEmbed | null {
  */
 export function needsIframe(provider: EmbedProvider): boolean {
   return provider !== "direct";
+}
+
+/* ------------------------------------------------------------------ audio */
+
+/**
+ * The same idea for sound.
+ *
+ * A tutor's listening material is a Deutsche-Welle podcast episode, a
+ * SoundCloud clip, a Spotify episode, or a plain .mp3 sitting on a school
+ * Drive. Pasting the link stores an ordinary Material row with
+ * `fileType = "audio/embed"` and `kind = "audio"`; the student library shows it
+ * in the documents list with a play/open link, and `material-ai` leaves it
+ * alone (there is no readable text to summarise).
+ */
+
+export type AudioProvider = "soundcloud" | "spotify" | "direct";
+
+export type ParsedAudio = {
+  provider: AudioProvider;
+  /** iframe `src` for SoundCloud / Spotify; the file URL itself for `direct`. */
+  embedUrl: string;
+  /** The link as pasted, so "open on SoundCloud" still goes to the real page. */
+  sourceUrl: string;
+  /** For the upload form: what we recognised it as, in words. */
+  label: string;
+};
+
+export function parseAudioLink(rawUrl: string): ParsedAudio | null {
+  const trimmed = String(rawUrl ?? "").trim();
+  if (!trimmed) return null;
+
+  let url: URL;
+  try {
+    url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+  } catch {
+    return null;
+  }
+  if (url.protocol === "http:") url.protocol = "https:";
+
+  const sourceUrl = url.toString();
+  const host = url.hostname.replace(/^www\./, "");
+
+  // SoundCloud — the widget takes the track page URL as a query param.
+  if (host === "soundcloud.com" || host.endsWith(".soundcloud.com")) {
+    return {
+      provider: "soundcloud",
+      embedUrl: `https://w.soundcloud.com/player/?url=${encodeURIComponent(
+        sourceUrl,
+      )}&color=%23ff5500&auto_play=false&show_comments=false&show_teaser=false`,
+      sourceUrl,
+      label: "SoundCloud",
+    };
+  }
+
+  // Spotify — open.spotify.com/{track,episode,show,playlist}/{id}
+  if (host === "open.spotify.com") {
+    const match = url.pathname.match(/^\/(track|episode|show|playlist)\/([A-Za-z0-9]+)/);
+    if (match) {
+      return {
+        provider: "spotify",
+        embedUrl: `https://open.spotify.com/embed/${match[1]}/${match[2]}`,
+        sourceUrl,
+        label: "Spotify",
+      };
+    }
+  }
+
+  // A bare audio file on someone else's server — plays in a real <audio>.
+  if (/\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|weba)(\?|$)/i.test(url.pathname)) {
+    return { provider: "direct", embedUrl: sourceUrl, sourceUrl, label: "Direct audio file" };
+  }
+
+  return null;
 }

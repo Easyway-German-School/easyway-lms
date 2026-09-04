@@ -188,7 +188,7 @@ export default function AdminCoursesPage() {
       return;
     }
     if (upload.source === "link" && !upload.sourceUrl.trim()) {
-      setUploadMessage("Paste a YouTube, Vimeo, Loom or Google Drive link.");
+      setUploadMessage("Paste a video link (YouTube, Vimeo, Loom, Drive) or an audio link (SoundCloud, Spotify, .mp3).");
       return;
     }
     if (!upload.courseId && !upload.level) {
@@ -223,7 +223,7 @@ export default function AdminCoursesPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             ...base,
-            title: upload.title.trim() || "Shared video",
+            title: upload.title.trim() || "Shared link",
             sourceUrl: upload.sourceUrl.trim(),
           }),
         });
@@ -387,8 +387,8 @@ export default function AdminCoursesPage() {
             Upload material
           </h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Any file type, or paste a video link. Choose who it is for — a whole cohort, or one tutor — and
-            it reaches every assigned tutor for that class, across branches and batches.
+            Any file type, or paste a video or audio link. Choose who it is for — a whole cohort, or one
+            tutor — and it reaches every assigned tutor for that class, across branches and batches.
           </p>
 
           <div className="mt-5 flex flex-wrap gap-2">
@@ -428,16 +428,19 @@ export default function AdminCoursesPage() {
             ) : (
               <label className="block text-sm font-medium md:col-span-2">
                 <span className="flex items-center gap-1.5">
-                  <LinkIcon className="h-4 w-4" /> Video link
+                  <LinkIcon className="h-4 w-4" /> Video or audio link
                 </span>
                 <input
                   type="url"
                   inputMode="url"
                   value={upload.sourceUrl}
                   onChange={(event) => setUpload((c) => ({ ...c, sourceUrl: event.target.value }))}
-                  placeholder="https://www.youtube.com/watch?v=…"
+                  placeholder="YouTube, Vimeo, Loom, Drive · SoundCloud, Spotify · or a .mp4 / .mp3 URL"
                   className={inputClass}
                 />
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  Nothing is copied — it plays inside the student&apos;s library from where it lives.
+                </p>
               </label>
             )}
 

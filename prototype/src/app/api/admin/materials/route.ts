@@ -3,7 +3,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { KIND, notify } from "@/lib/notify";
 import { deriveMaterialKind } from "@/lib/video-library";
-import { EMBED_FILE_TYPE, parseEmbed } from "@/lib/media-embed";
+import { AUDIO_EMBED_FILE_TYPE, EMBED_FILE_TYPE, parseAudioLink, parseEmbed } from "@/lib/media-embed";
 import { BATCHES, COURSE_LEVELS, SESSION_SLOTS } from "@/lib/lecturer-assignment";
 import { generateForMaterial } from "@/lib/material-ai";
 import {
@@ -70,22 +70,26 @@ export async function POST(req: NextRequest) {
 
     const sourceUrl = String(body.sourceUrl ?? "").trim();
     const embed = sourceUrl ? parseEmbed(sourceUrl) : null;
-    if (sourceUrl && !embed) {
+    const audioEmbed = sourceUrl && !embed ? parseAudioLink(sourceUrl) : null;
+    if (sourceUrl && !embed && !audioEmbed) {
       return NextResponse.json(
         {
           error:
-            "That link is not a video we recognise. Paste a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.",
+            "That link is not a video or audio we recognise. Paste a YouTube, Vimeo, Loom or Drive video; a SoundCloud or Spotify link; or a direct .mp4 / .mp3 URL.",
         },
         { status: 400 },
       );
     }
+    const link = embed ?? audioEmbed;
 
-    const fileUrl = embed ? embed.sourceUrl : String(body.fileUrl ?? "").trim();
-    const fileName = embed ? embed.label : String(body.fileName ?? "").trim();
+    const fileUrl = link ? link.sourceUrl : String(body.fileUrl ?? "").trim();
+    const fileName = link ? link.label : String(body.fileName ?? "").trim();
     const fileType = embed
       ? EMBED_FILE_TYPE
-      : String(body.fileType ?? "").trim() || fileName.split(".").pop() || "application/octet-stream";
-    const fileSize = embed ? 0 : Number(body.fileSize) || 0;
+      : audioEmbed
+        ? AUDIO_EMBED_FILE_TYPE
+        : String(body.fileType ?? "").trim() || fileName.split(".").pop() || "application/octet-stream";
+    const fileSize = link ? 0 : Number(body.fileSize) || 0;
 
     if (!title || !fileUrl || !fileName) {
       return NextResponse.json(
@@ -183,10 +187,10 @@ export async function POST(req: NextRequest) {
      * study-notes; it then nudges the assigned tutor(s) to sign them off (see
      * material-ai.ts). Running it in `after()` keeps the upload response fast;
      * if it times out mid-generation the row is left at `aiState:"pending"`,
-     * which the cron queue picks up and finishes. A recording carries no text,
-     * so there is nothing to read.
+     * which the cron queue picks up and finishes. A recording, a video or an
+     * audio track carries no readable text, so there is nothing to read.
      */
-    if (kind !== "recording") {
+    if (kind !== "recording" && kind !== "audio" && kind !== "video") {
       after(() =>
         generateForMaterial(material.id).catch((error) =>
           console.error("material-ai kick failed", material.id, error),
