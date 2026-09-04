@@ -67,6 +67,23 @@ jobs:
           curl -fsSL https://rclone.org/install.sh | sudo bash
           rclone version
 
+      - name: Clear a stray "archive" object blocking the backup-dir folder
+        run: |
+          set -euo pipefail
+          # --backup-dir needs "archive/" to act as a folder prefix. If some
+          # earlier manual run ever wrote a real object literally named
+          # "archive" (no trailing slash) to the bucket root, rclone can't
+          # treat that path as a directory and the whole sync dies with
+          # "is a file not a directory" — every run, forever, until that one
+          # object is moved. Self-heal it here instead of relying on someone
+          # noticing the dashboard and clicking around in Backblaze by hand.
+          if rclone lsf "DST:${{ secrets.BACKUP_OBJECTS_BUCKET }}" --files-only | grep -qx "archive"; then
+            echo "::warning::Found a stray file named 'archive' at the bucket root — moving it aside so --backup-dir can use that path as a folder."
+            rclone moveto \
+              "DST:${{ secrets.BACKUP_OBJECTS_BUCKET }}/archive" \
+              "DST:${{ secrets.BACKUP_OBJECTS_BUCKET }}/archive.orphan-${{ github.run_id }}"
+          fi
+
       - name: Mirror, preserving anything removed
         id: mirror
         run: |
