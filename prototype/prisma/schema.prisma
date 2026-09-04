@@ -1133,6 +1133,33 @@ model Material {
   uploadedBy  String? // admin user id who uploaded
 
   /**
+   * ADMIN TARGETING — who an office upload is aimed at.
+   *
+   * A tutor uploading through their own portal owns the material via
+   * `lecturerId` and it reaches their roster. An admin has no single roster, so
+   * an office upload instead describes the cohort it is for: a level (`level`
+   * below), and optionally one branch, one sitting and one intake batch. Any
+   * left null means "no restriction on that axis" — `branchId` null is every
+   * branch at the level, exactly as a plain level upload behaved before this.
+   *
+   * The tutor portal reads these the same way it reads a tutor's own
+   * assignment, so an office upload for "Lagos · A1 · morning" surfaces for
+   * every tutor whose assignment covers it, across branches and batches, and
+   * for nobody else. Stored as loose ids (no FK) on purpose: targeting is
+   * advisory and must not block a branch rename or a delete.
+   */
+  branchId          String?
+  sessionSlot       String?
+  batch             String?
+  /**
+   * Whether the students in the target cohort see this too, or only their
+   * tutor(s). Default true so every material that existed before this column —
+   * and every ordinary tutor upload — stays visible to students untouched; an
+   * office sets it false to hand a resource to staff only.
+   */
+  visibleToStudents Boolean @default(true)
+
+  /**
    * document | video | recording.
    * `fileType` already says "video/mp4", but it cannot tell a taught lesson
    * apart from an auto-captured class recording, and the library shelves the
@@ -1231,6 +1258,8 @@ model Material {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([kind, level])
+  // Office uploads are looked up by their target cohort from the tutor portal.
+  @@index([branchId])
   // Exists in the database but had fallen out of this file, so any `db push`
   // would silently drop it. The AI backfill sweeps for aiState = "pending",
   // which is the one query that scans this column.

@@ -1,10 +1,27 @@
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
-import { deleteFile, keyFromUrl } from "@/lib/storage";
+import { KIND, notify } from "@/lib/notify";
+import { deriveMaterialKind } from "@/lib/video-library";
+import { EMBED_FILE_TYPE, parseEmbed } from "@/lib/media-embed";
+import {
+  BATCHES,
+  COURSE_LEVELS,
+  SESSION_SLOTS,
+  matchesBatch,
+  readAssignment,
+  isAssigned,
+} from "@/lib/lecturer-assignment";
 
 async function requireMaterialsAdmin() {
   return requireCapability("materials");
+}
+
+function pickOne(value: unknown, allowed: readonly string[]): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const hit = allowed.find((option) => option.toLowerCase() === raw.toLowerCase());
+  return hit ?? null;
 }
 
 export async function GET(req: NextRequest) {
@@ -21,8 +38,8 @@ export async function GET(req: NextRequest) {
       where,
       include: {
         course: {
-          select: { title: true }
-        }
+          select: { title: true, level: true },
+        },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -30,10 +47,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(materials);
   } catch (error) {
     console.error("Error fetching materials:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch materials" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to fetch materials" }, { status: 500 });
   }
 }
 
@@ -45,62 +59,137 @@ export async function POST(req: NextRequest) {
     /**
      * The browser has already put the file in the bucket (see lib/upload.ts)
      * and sends only the metadata, because a request body through Vercel is
-     * capped at 4.5 MB and course material routinely is not.
+     * capped at 4.5 MB and course material routinely is not. A pasted link is
+     * the alternative to a file — nothing was uploaded, the fields are
+     * synthesised from the parsed link. Mirrors /api/lecturer/materials.
      */
     const body = await req.json().catch(() => ({}));
-    const courseId = String(body.courseId ?? "").trim();
+
     const title = String(body.title ?? "").trim();
     const description = String(body.description ?? "").trim();
-    const fileUrl = String(body.fileUrl ?? "").trim();
-    const fileName = String(body.fileName ?? "").trim();
-    const fileType = String(body.fileType ?? "").trim();
-    const fileSize = Number(body.fileSize) || 0;
+    const courseId = String(body.courseId ?? "").trim();
 
-    if (!fileUrl || !fileName || !courseId || !title) {
+    const sourceUrl = String(body.sourceUrl ?? "").trim();
+    const embed = sourceUrl ? parseEmbed(sourceUrl) : null;
+    if (sourceUrl && !embed) {
       return NextResponse.json(
-        { error: "file, courseId, and title are required" },
-        { status: 400 }
+        {
+          error:
+            "That link is not a video we recognise. Paste a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.",
+        },
+        { status: 400 },
       );
     }
 
-    // Check if course exists
-    const course = await prisma.course.findUnique({
-      where: { id: courseId },
-    });
+    const fileUrl = embed ? embed.sourceUrl : String(body.fileUrl ?? "").trim();
+    const fileName = embed ? embed.label : String(body.fileName ?? "").trim();
+    const fileType = embed
+      ? EMBED_FILE_TYPE
+      : String(body.fileType ?? "").trim() || fileName.split(".").pop() || "application/octet-stream";
+    const fileSize = embed ? 0 : Number(body.fileSize) || 0;
 
-    if (!course) {
+    if (!title || !fileUrl || !fileName) {
       return NextResponse.json(
-        { error: "Course not found" },
-        { status: 404 }
+        { error: "A title and either a file or a video link are required" },
+        { status: 400 },
       );
     }
 
-    // Create database record
+    // ---- Targeting -------------------------------------------------------
+    const targetLevel = pickOne(body.level, COURSE_LEVELS);
+    const branchId = String(body.branchId ?? "").trim() || null;
+    const sessionSlot = pickOne(body.sessionSlot, SESSION_SLOTS);
+    const batch = pickOne(body.batch, BATCHES);
+    const lecturerId = String(body.lecturerId ?? "").trim() || null;
+    // Default true — the office ticks this off to keep a resource staff-only.
+    const visibleToStudents = body.visibleToStudents === undefined ? true : body.visibleToStudents !== false;
+
+    const isRecording = String(body.isRecording ?? "") === "true";
+    const series = String(body.series ?? "").trim() || null;
+    const episodeRaw = String(body.episodeNumber ?? "").trim();
+    const recordedAtRaw = String(body.recordedAt ?? "").trim();
+    const durationRaw = String(body.durationSeconds ?? "").trim();
+
+    const kind = isRecording ? "recording" : deriveMaterialKind(fileType);
+
+    // A material has to land somewhere findable: either it belongs to a course
+    // (students of that course's level get it) or it names the level directly.
+    if (!courseId && !targetLevel) {
+      return NextResponse.json(
+        { error: "Choose a course, or the level this material is for" },
+        { status: 400 },
+      );
+    }
+
+    let resolvedLevel = targetLevel;
+    if (courseId) {
+      const course = await prisma.course.findUnique({
+        where: { id: courseId },
+        select: { id: true, level: true },
+      });
+      if (!course) return NextResponse.json({ error: "Course not found" }, { status: 404 });
+      // The level is always stamped on the row — see the note in
+      // /api/lecturer/materials: student visibility must not rest on a join to
+      // course.level staying correct forever.
+      resolvedLevel = resolvedLevel || (course.level ? course.level.toUpperCase() : null);
+    }
+
+    if (lecturerId) {
+      const lecturer = await prisma.lecturer.findUnique({
+        where: { id: lecturerId },
+        select: { id: true },
+      });
+      if (!lecturer) return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
+    }
+
     const material = await prisma.material.create({
       data: {
-        courseId,
+        courseId: courseId || null,
+        // When the office aims an upload at one named tutor, it is owned by
+        // that tutor exactly as if they had uploaded it themselves — it shows
+        // in their portal through the ordinary `lecturerId` path.
+        lecturerId: lecturerId || null,
         title,
         description: description || null,
         filePath: fileUrl,
         fileName,
-        fileType: fileType || fileName.split(".").pop() || "bin",
+        fileType,
         fileSize,
         uploadedBy: gate.session.user.id,
+        kind,
+        level: resolvedLevel,
+        branchId,
+        sessionSlot,
+        batch,
+        visibleToStudents,
+        series,
+        episodeNumber: episodeRaw ? Number(episodeRaw) || null : null,
+        durationSeconds: durationRaw ? Number(durationRaw) || null : null,
+        recordedAt: recordedAtRaw
+          ? new Date(recordedAtRaw)
+          : kind === "recording"
+            ? new Date()
+            : null,
+        thumbnailPath: embed?.thumbnailUrl ?? null,
       },
-      include: {
-        course: {
-          select: { title: true }
-        }
-      }
+      include: { course: { select: { title: true, level: true } } },
     });
+
+    await announce(material, {
+      level: resolvedLevel,
+      branchId,
+      sessionSlot,
+      batch,
+      lecturerId,
+      visibleToStudents,
+      kind,
+      title,
+    }).catch((error) => console.error("Material announcement failed", error));
 
     return NextResponse.json(material);
   } catch (error) {
     console.error("Error uploading material:", error);
-    return NextResponse.json(
-      { error: "Failed to upload material" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to upload material" }, { status: 500 });
   }
 }
 
@@ -109,43 +198,139 @@ export async function DELETE(req: NextRequest) {
     const gate = await requireMaterialsAdmin();
     if (!gate.ok) return gate.response;
 
-    const { id } = await req.json();
+    const { id } = await req.json().catch(() => ({}));
+    if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
-    if (!id) {
-      return NextResponse.json(
-        { error: "id is required" },
-        { status: 400 }
-      );
-    }
+    const material = await prisma.material.findUnique({ where: { id }, select: { id: true } });
+    if (!material) return NextResponse.json({ error: "Material not found" }, { status: 404 });
 
-    const material = await prisma.material.findUnique({
-      where: { id },
-    });
-
-    if (!material) {
-      return NextResponse.json(
-        { error: "Material not found" },
-        { status: 404 }
-      );
-    }
-
-    // Reclaim the stored file. A failure here is logged and ignored: an
-    // orphaned object costs pennies, a row that will not delete blocks the
-    // admin who asked.
-    const key = keyFromUrl(material.filePath);
-    if (key) await deleteFile(key);
-
-    // Delete database record
-    await prisma.material.delete({
-      where: { id },
-    });
+    /**
+     * Soft delete only — the row leaves every list but is restorable from the
+     * audit trail (prisma-guard rewrites this `delete` into `deletedAt = now`).
+     * The stored file is deliberately left in the bucket: reclaiming it here
+     * would make "restore" hand back a row pointing at nothing. A retention
+     * job sweeps orphaned objects separately.
+     */
+    await prisma.material.delete({ where: { id } });
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error deleting material:", error);
-    return NextResponse.json(
-      { error: "Failed to delete material" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to delete material" }, { status: 500 });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+
+type Target = {
+  level: string | null;
+  branchId: string | null;
+  sessionSlot: string | null;
+  batch: string | null;
+  lecturerId: string | null;
+  visibleToStudents: boolean;
+  kind: string;
+  title: string;
+};
+
+/**
+ * Tell the people an office upload is for that it exists.
+ *
+ * Tutors: the one named tutor if the upload was aimed at a person, otherwise
+ * every assigned tutor whose class the target cohort falls inside — same
+ * "empty list = teaches all" reading the roster uses. Students: the cohort
+ * itself, but only when the office left it visible to them.
+ */
+async function announce(material: { id: string }, target: Target): Promise<void> {
+  const notifyLink = target.kind === "recording" ? "/materials?tab=watch" : "/materials";
+
+  // ---- Tutors -------------------------------------------------------------
+  const tutorUserIds = new Set<string>();
+
+  if (target.lecturerId) {
+    const lecturer = await prisma.lecturer.findUnique({
+      where: { id: target.lecturerId },
+      select: { userId: true },
+    });
+    if (lecturer?.userId) tutorUserIds.add(lecturer.userId);
+  } else {
+    const lecturers = await prisma.lecturer.findMany({
+      where: { status: { not: "inactive" } },
+      select: { id: true, userId: true, branchId: true, level: true, sessionSlot: true, branchIds: true, levels: true, sessionSlots: true, assignmentGroups: true, classTypes: true, batches: true },
+    });
+    for (const lecturer of lecturers) {
+      if (!lecturer.userId) continue;
+      const assignment = readAssignment(lecturer);
+      if (!isAssigned(assignment)) continue;
+      if (target.level && assignment.levels.length && !assignment.levels.includes(target.level)) continue;
+      if (
+        target.branchId &&
+        assignment.branchIds.length &&
+        !assignment.branchIds.includes(target.branchId)
+      )
+        continue;
+      if (
+        target.sessionSlot &&
+        assignment.sessionSlots.length &&
+        !assignment.sessionSlots.map((s) => s.toLowerCase()).includes(target.sessionSlot.toLowerCase())
+      )
+        continue;
+      if (
+        target.batch &&
+        assignment.batches.length &&
+        !assignment.batches.map((b) => b.toLowerCase()).includes(target.batch.toLowerCase())
+      )
+        continue;
+      tutorUserIds.add(lecturer.userId);
+    }
+  }
+
+  if (tutorUserIds.size) {
+    await notify({
+      to: { userIds: [...tutorUserIds] },
+      kind: KIND.materialPublished,
+      severity: "info",
+      title: "New material from the office",
+      message: `“${target.title}” was added for your class. Open Materials to see it.`,
+      link: notifyLink,
+      push: true,
+      dedupeKey: `material:${material.id}:tutors`,
+    }).catch((error) => console.error("Tutor material notification failed", error));
+  }
+
+  // ---- Students --------------------------------------------------------
+  if (!target.visibleToStudents || !target.level) return;
+
+  const studentWhere: Record<string, unknown> = { level: target.level, deletedAt: null };
+  if (target.branchId) studentWhere.branchId = target.branchId;
+  if (target.sessionSlot) studentWhere.sessionSlot = target.sessionSlot;
+
+  const students = await prisma.student.findMany({
+    where: studentWhere as never,
+    select: { id: true, admission: true },
+  });
+
+  const studentIds = students
+    .filter((student) =>
+      target.batch
+        ? matchesBatch({ batches: [target.batch] } as never, student.admission)
+        : true,
+    )
+    .map((student) => student.id);
+
+  if (studentIds.length) {
+    await notify({
+      to: { studentIds },
+      kind: KIND.materialPublished,
+      severity: "info",
+      title: target.kind === "recording" ? "A class recording is up" : "New course material",
+      message:
+        target.kind === "recording"
+          ? `“${target.title}” is in your video library.`
+          : `“${target.title}” was added to your Materials. Open it to download.`,
+      link: notifyLink,
+      push: true,
+      dedupeKey: `material:${material.id}:students`,
+    }).catch((error) => console.error("Student material notification failed", error));
   }
 }
