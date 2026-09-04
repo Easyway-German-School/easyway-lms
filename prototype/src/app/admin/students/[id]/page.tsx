@@ -404,6 +404,7 @@ export default function StudentDossierPage() {
   const [photoBroken, setPhotoBroken] = useState(false);
   const [issuingCode, setIssuingCode] = useState(false);
   const [issueCodeError, setIssueCodeError] = useState<string | null>(null);
+  const [unissuingCode, setUnissuingCode] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
@@ -460,6 +461,25 @@ export default function StudentDossierPage() {
       setIssueCodeError(issueError instanceof Error ? issueError.message : "Could not issue a student ID");
     } finally {
       setIssuingCode(false);
+    }
+  }
+
+  async function unissueCode() {
+    if (unissuingCode) return;
+    if (!window.confirm("Clear this student's ID? It goes back to \"NO STUDENT ID ISSUED\" until reissued — anything already printed with the old code (certificates, exam entries) keeps it.")) {
+      return;
+    }
+    setUnissuingCode(true);
+    setIssueCodeError(null);
+    try {
+      const response = await fetch(`/api/admin/students/${id}/unissue-code`, { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Could not clear the student ID");
+      await load(false);
+    } catch (unissueError) {
+      setIssueCodeError(unissueError instanceof Error ? unissueError.message : "Could not clear the student ID");
+    } finally {
+      setUnissuingCode(false);
     }
   }
 
@@ -792,7 +812,7 @@ export default function StudentDossierPage() {
             <div className="min-w-0 flex-1">
               <p className="flex flex-wrap items-center gap-2 font-mono text-xs tracking-[0.2em] text-white/50">
                 {identity.studentCode ?? "NO STUDENT ID ISSUED"}
-                {!identity.studentCode && (
+                {!identity.studentCode ? (
                   <button
                     type="button"
                     onClick={() => void issueCode()}
@@ -801,9 +821,18 @@ export default function StudentDossierPage() {
                   >
                     {issuingCode ? "Issuing…" : "Issue ID now"}
                   </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void unissueCode()}
+                    disabled={unissuingCode}
+                    className="rounded-full border border-white/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white/70 transition hover:border-red-400 hover:text-red-300 disabled:opacity-50"
+                  >
+                    {unissuingCode ? "Clearing…" : "Unissue ID"}
+                  </button>
                 )}
               </p>
-              {issueCodeError && !identity.studentCode && (
+              {issueCodeError && (
                 <p className="mt-1 text-xs font-semibold text-red-400">{issueCodeError}</p>
               )}
               <h1 className="mt-1 text-3xl font-black tracking-tight">{identity.name}</h1>
