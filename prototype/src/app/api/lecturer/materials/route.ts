@@ -3,7 +3,7 @@ import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
-import { belongsToLecturer, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
+import { belongsToLecturer, isAssigned, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
 import { EMBED_FILE_TYPE, parseEmbed } from '@/lib/media-embed';
 
@@ -60,10 +60,50 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
     }
 
-    const materials = await prisma.material.findMany({
-      where: { lecturerId },
+    /**
+     * Two ways a material reaches this tutor:
+     *   1. They uploaded it (`lecturerId` is theirs), or the office aimed it at
+     *      them by name (same column).
+     *   2. The office aimed it at a cohort — a level, and optionally one
+     *      branch / sitting — that this tutor's assignment covers. Read the
+     *      same way the roster is: an empty list on the assignment side means
+     *      "no restriction", so a tutor with no sitting chosen still sees an
+     *      office upload for any sitting at their level and branch.
+     * Batch lives outside SQL (see matchesBatch) and is applied after.
+     */
+    const lecturer = await prisma.lecturer.findUnique({ where: { id: lecturerId } });
+    const assignment = readAssignment(lecturer);
+
+    const where: Record<string, unknown> = { lecturerId };
+    if (isAssigned(assignment)) {
+      const officeClause: Record<string, unknown> = {
+        uploadedBy: { not: null },
+        lecturerId: null,
+        level: { in: assignment.levels },
+        OR: [{ branchId: null }, { branchId: { in: assignment.branchIds } }],
+      };
+      if (assignment.sessionSlots.length) {
+        officeClause.AND = [
+          { OR: [{ sessionSlot: null }, { sessionSlot: { in: assignment.sessionSlots } }] },
+        ];
+      }
+      where.OR = [{ lecturerId }, officeClause];
+      delete where.lecturerId;
+    }
+
+    const rows = await prisma.material.findMany({
+      where: where as never,
       include: { course: { select: { title: true } } },
       orderBy: { createdAt: 'desc' },
+    });
+
+    const allowedBatches = assignment.batches.map((b) => b.toLowerCase());
+    const materials = rows.filter((material) => {
+      // Only office cohort uploads carry a batch to check; a tutor's own
+      // uploads and by-name uploads always pass.
+      if (!material.batch || (material.lecturerId && material.lecturerId === lecturerId)) return true;
+      if (!allowedBatches.length) return true;
+      return allowedBatches.includes(material.batch.toLowerCase());
     });
 
     return NextResponse.json(materials.map(serialise));

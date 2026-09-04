@@ -66,9 +66,24 @@ export async function GET() {
      * bug so confusing to look at: the same upload showed on the Watch shelf
      * and not in Materials. The two queries now agree.
      */
+    /**
+     * OFFICE TARGETING NARROWS, IT NEVER WIDENS.
+     *
+     * The level match above is unchanged. On top of it, an office upload may
+     * name one branch and/or one sitting (null = "every one"), and may be
+     * hidden from students entirely (`visibleToStudents = false`, staff-only).
+     * A tutor's own upload sets none of these, so it still reaches the whole
+     * level exactly as before. Batch lives in the admission JSON and is applied
+     * in memory below.
+     */
     const records = await prisma.material.findMany({
       where: {
-        OR: [{ level: student.level }, { course: { level: student.level } }],
+        AND: [
+          { OR: [{ level: student.level }, { course: { level: student.level } }] },
+          { OR: [{ branchId: null }, { branchId: student.branchId }] },
+          { OR: [{ sessionSlot: null }, { sessionSlot: student.sessionSlot }] },
+          { visibleToStudents: true },
+        ],
       },
       include: {
         course: {
@@ -77,6 +92,14 @@ export async function GET() {
       },
       orderBy: { createdAt: "desc" },
     });
+
+    const studentBatch =
+      student.admission && typeof student.admission === "object"
+        ? String((student.admission as Record<string, unknown>).batch ?? "").toLowerCase()
+        : "";
+    const visible = records.filter(
+      (material) => !material.batch || material.batch.toLowerCase() === studentBatch,
+    );
 
     /**
      * The client reads `fileUrl`; the column is `filePath`. Expose both so the
@@ -87,7 +110,7 @@ export async function GET() {
      * as absolute URLs, and prefixing those with a slash produced
      * `/https://…`, a link that can only 404.
      */
-    const materials = records.map((material) => ({
+    const materials = visible.map((material) => ({
       ...material,
       fileUrl: toPlayableUrl(material.filePath),
     }));
