@@ -255,6 +255,48 @@ function PortalAccessFields({
   );
 }
 
+/**
+ * A tutor's photo, or their initial if there is none — or if there was one
+ * but it no longer loads.
+ *
+ * A stale `photoUrl` (a file that was moved, or that predates the current
+ * storage setup) used to render as the browser's bare broken-image glyph,
+ * sitting in the corner of the circle instead of filling it. `onError` here
+ * catches exactly that and drops back to the same initial-letter circle a
+ * tutor with no photo at all gets, so a dead link never reads as a bug.
+ */
+function TutorAvatar({
+  photoUrl,
+  label,
+  size = "h-12 w-12",
+  textSize = "text-lg",
+}: {
+  photoUrl: string | null | undefined;
+  label: string;
+  size?: string;
+  textSize?: string;
+}) {
+  const [broken, setBroken] = useState(false);
+
+  if (photoUrl && !broken) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={photoUrl}
+        alt=""
+        className={`${size} shrink-0 rounded-full object-cover`}
+        onError={() => setBroken(true)}
+      />
+    );
+  }
+
+  return (
+    <div className={`grid ${size} shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] ${textSize} font-bold text-[var(--accent)]`}>
+      {label.slice(0, 1).toUpperCase()}
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: LecturerStatus }) {
   const meta = LECTURER_STATUS_META[status];
   return (
@@ -936,14 +978,7 @@ export default function AdminTutorsPage() {
                 <div key={tutor.id} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
                   <div className="flex flex-wrap items-start gap-4">
                     <input type="checkbox" aria-label={`Select ${tutor.user.name || tutor.user.email}`} checked={selectedTutorIds.has(tutor.id)} onChange={(event) => setSelectedTutorIds((current) => { const next = new Set(current); if (event.target.checked) next.add(tutor.id); else next.delete(tutor.id); return next; })} className="mt-2 h-4 w-4" />
-                    {tutor.photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={tutor.photoUrl} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
-                    ) : (
-                      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-lg font-bold text-[var(--accent)]">
-                        {(tutor.user.name || tutor.user.email).slice(0, 1).toUpperCase()}
-                      </div>
-                    )}
+                    <TutorAvatar photoUrl={tutor.photoUrl} label={tutor.user.name || tutor.user.email} />
 
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1032,10 +1067,12 @@ export default function AdminTutorsPage() {
                         </div>
                         {editingTutor?.photoUrl && !editPhotoFile ? (
                           <div className="mt-3 inline-flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--muted)]">
-                            <span className="h-8 w-8 overflow-hidden rounded-full border border-[var(--border)]">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={editingTutor.photoUrl} alt="Current tutor photo" className="h-full w-full object-cover" />
-                            </span>
+                            <TutorAvatar
+                              photoUrl={editingTutor.photoUrl}
+                              label={editingTutor.user.name || editingTutor.user.email}
+                              size="h-8 w-8"
+                              textSize="text-xs"
+                            />
                             Current photo on this tutor profile.
                           </div>
                         ) : null}
