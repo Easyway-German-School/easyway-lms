@@ -3,7 +3,6 @@ import {
   isReceivedPayment,
   isRegistrationFeePayment,
   RECEIVED_PAYMENT_STATUSES,
-  REGISTRATION_PAYMENT_DESCRIPTION_PREFIX,
   requiredDepositFor,
   tuitionFeeFor,
 } from "@/lib/payment";
@@ -120,18 +119,11 @@ export const FINANCE_STUDENT_SELECT = {
     // soft-delete guard only folds that clause into top-level queries, so a
     // reversed / refunded Payment would otherwise still be summed here while
     // the student's own dossier (a top-level `payment.findMany`) excludes it.
-    // The `OR` on description drops the ₦5,000 registration fee — it is not
-    // tuition and must not net down the balance (see `isTuitionPayment`). The
-    // `description: null` arm keeps NULL-description rows (front-desk cash
-    // entries) counting, which a bare `not: { startsWith }` would exclude.
-    where: {
-      status: { in: RECEIVED_PAYMENT_STATUSES },
-      deletedAt: null,
-      OR: [
-        { description: null },
-        { description: { not: { startsWith: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX } } },
-      ],
-    },
+    // The ₦5,000 registration fee is NOT excluded here — this select is
+    // `as const`, which makes a NULL-safe `OR` array unassignable to Prisma's
+    // where type. `description` is loaded so `computeStudentFinance` drops it
+    // in memory instead (see the `received` filter below).
+    where: { status: { in: RECEIVED_PAYMENT_STATUSES }, deletedAt: null },
     select: { amount: true, createdAt: true, method: true, description: true },
   },
   // The per-level ledger — the debit side. Present for every student once the
