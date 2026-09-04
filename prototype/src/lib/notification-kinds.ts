@@ -85,6 +85,8 @@ export const KIND = {
   recordingExpiring: "recording.expiring",
   /** Becca couldn't write up notes for a tutor's uploaded material — the tutor can retry. See src/lib/material-ai.ts. */
   studyNotesFailed: "study_notes.failed",
+  /** A student still has no profile photo — Becca nudges them, at most once a week. See src/lib/profile-photo-nudge.ts. */
+  profilePhotoMissing: "profile.photo_missing",
   general: "general",
 } as const;
 

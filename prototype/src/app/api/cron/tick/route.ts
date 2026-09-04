@@ -174,6 +174,18 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * Students who still have no profile photo get a once-a-week nudge from
+   * Becca. Self-gated: idempotent per ISO week via the notification dedupeKey,
+   * and a student drops out of it the moment they upload one.
+   */
+  results.push(
+    await run("profile-photo-nudge", async () => {
+      const { nudgeStudentsWithoutPhoto } = await import("@/lib/profile-photo-nudge");
+      return nudgeStudentsWithoutPhoto();
+    }),
+  );
+
+  /**
    * Ask, once a day, whether the backups are still happening.
    *
    * Deliberately runs here rather than as its own schedule. This tick is the

@@ -10,7 +10,8 @@ import BulkStudentAdd from "@/components/BulkStudentAdd";
 import { goalFor } from "@/lib/germany-goals";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { isOnlineBranchName } from "@/lib/online-branch";
-import { packageOptions } from "@/app/auth/signup/options";
+import { packageOptions, countries } from "@/app/auth/signup/options";
+import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload";
 
 /**
  * Pathway choices for the manual "Add student" form only. Mirrors the signup
@@ -188,6 +189,17 @@ function StudentsRoster() {
   const [newBatch, setNewBatch] = useState("");
   const [newPathway, setNewPathway] = useState(packageOptions[0]);
   const [newAmountPaid, setNewAmountPaid] = useState("");
+  // Where the student lives — collected on signup into the admission blob, but
+  // never asked for on this manual-add form, so an office-added student (and
+  // every online student added this way) had no location on record at all.
+  const [newCity, setNewCity] = useState("");
+  const [newStateRegion, setNewStateRegion] = useState("");
+  const [newCountry, setNewCountry] = useState("Nigeria");
+  // Profile photo the office can set on the student's behalf, so a record is
+  // not left faceless waiting for a student who never gets round to it.
+  const [newPhotoUrl, setNewPhotoUrl] = useState("");
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoUploadError, setPhotoUploadError] = useState("");
   const [studentError, setStudentError] = useState("");
   /** Shown once, right after a manual add, so the admin has something to copy. */
   const [savedCredentials, setSavedCredentials] = useState<{
@@ -304,6 +316,10 @@ function StudentsRoster() {
       deliveryMode: isOnlineSelection ? "online" : newDeliveryMode,
       pathway: newPathway,
       batch: newBatch,
+      city: newCity.trim(),
+      state: newStateRegion.trim(),
+      country: newCountry.trim(),
+      photoUrl: newPhotoUrl || undefined,
     } as Record<string, unknown>;
 
     let res: Response;
@@ -363,6 +379,7 @@ function StudentsRoster() {
     setNewBatch("");
     setNewPathway(packageOptions[0]);
     setNewAmountPaid("");
+    resetExtraStudentFields();
     setShowStudentForm(false);
     await loadStudents();
   }
@@ -432,6 +449,35 @@ function StudentsRoster() {
     await loadStudents();
   }
 
+  /** Location + photo fields — cleared together everywhere the form resets. */
+  function resetExtraStudentFields() {
+    setNewCity("");
+    setNewStateRegion("");
+    setNewCountry("Nigeria");
+    setNewPhotoUrl("");
+    setPhotoUploading(false);
+    setPhotoUploadError("");
+  }
+
+  async function handlePhotoPick(file: File | null | undefined) {
+    if (!file) return;
+    const invalid = validateImageFile(file);
+    if (invalid) {
+      setPhotoUploadError(invalid);
+      return;
+    }
+    setPhotoUploadError("");
+    setPhotoUploading(true);
+    try {
+      const url = await uploadImage(file);
+      setNewPhotoUrl(url);
+    } catch (error) {
+      setPhotoUploadError(uploadErrorMessage(error, "Could not upload that photo"));
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
   function startEditingStudent(student: StudentWithUser) {
     setEditingStudentId(student.id);
     setNewName(student.user.name || "");
@@ -451,6 +497,13 @@ function StudentsRoster() {
         : "",
     );
     setNewPathway(student.pathway || packageOptions[0]);
+    const admission = ((student.admission as AdmissionData) || {}) as Record<string, unknown>;
+    setNewCity(typeof admission.city === "string" ? admission.city : "");
+    setNewStateRegion(typeof admission.state === "string" ? admission.state : "");
+    setNewCountry(typeof admission.country === "string" && admission.country ? admission.country : "Nigeria");
+    setNewPhotoUrl(typeof admission.photoUrl === "string" ? admission.photoUrl : "");
+    setPhotoUploading(false);
+    setPhotoUploadError("");
     // Not an edit concept — the initial payment was recorded when the account
     // was created. Adjustments go through the student's own finance screen.
     setNewAmountPaid("");
@@ -475,6 +528,7 @@ function StudentsRoster() {
     setNewBatch("");
     setNewPathway(packageOptions[0]);
     setNewAmountPaid("");
+    resetExtraStudentFields();
     setStudentError("");
     setSavedCredentials(null);
     setShowStudentForm(false);
@@ -1266,6 +1320,84 @@ function StudentsRoster() {
                   Decides whether &quot;Live class&quot; shows up in this student&apos;s sidebar. For a
                   fully online student, pick the <span className="font-semibold">Online</span> branch above —
                   that switches this to Online on its own.
+                </span>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">City / town</span>
+                <input
+                  value={newCity}
+                  onChange={(event) => setNewCity(event.target.value)}
+                  placeholder="e.g. Lagos"
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">State / region</span>
+                <input
+                  value={newStateRegion}
+                  onChange={(event) => setNewStateRegion(event.target.value)}
+                  placeholder="e.g. Lagos, or Nordrhein-Westfalen"
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  Where the student lives now — matters most for online students, who have no branch to
+                  place them.
+                </span>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Country</span>
+                <select
+                  value={newCountry}
+                  onChange={(event) => setNewCountry(event.target.value)}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  {(countries.includes(newCountry) ? countries : [newCountry, ...countries]).map((country) => (
+                    <option key={country} value={country}>{country}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Profile photo</span>
+                <div className="flex items-center gap-3">
+                  {newPhotoUrl ? (
+                    <img
+                      src={newPhotoUrl}
+                      alt=""
+                      className="h-12 w-12 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-dashed border-[var(--border)] text-xs text-[var(--muted)]">
+                      —
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={photoUploading}
+                    onChange={(event) => {
+                      void handlePhotoPick(event.target.files?.[0]);
+                      event.target.value = "";
+                    }}
+                    className="text-xs"
+                  />
+                  {newPhotoUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => setNewPhotoUrl("")}
+                      className="text-xs font-semibold text-rose-500"
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+                <span
+                  className={`block text-xs font-normal ${photoUploadError ? "text-rose-500" : "text-[var(--muted)]"}`}
+                >
+                  {photoUploading
+                    ? "Uploading…"
+                    : photoUploadError
+                      ? photoUploadError
+                      : "Optional. Set it here for students who have not added one themselves — Becca reminds the rest."}
                 </span>
               </label>
               {!editingStudentId ? (

@@ -348,6 +348,18 @@ export async function POST(request: Request) {
   // level-end date and never auto-promotes. Stored as a bare month name
   // ("September") to match signup and the roster's Batch filter.
   const batch = typeof body.batch === "string" ? body.batch.trim() : "";
+  // Where the student lives — the signup form collects this into the admission
+  // blob; the manual-add form now offers it too, chiefly for online students
+  // who have no branch to place them.
+  const city = typeof body.city === "string" ? body.city.trim() : "";
+  const stateRegion = typeof body.state === "string" ? body.state.trim() : "";
+  const country = typeof body.country === "string" ? body.country.trim() : "";
+  // A profile photo the office set on the student's behalf. Only accept a URL
+  // this app could have produced — the office is trusted, but a stray payload
+  // should not be able to point an avatar at an arbitrary host.
+  const photoUrlRaw = typeof body.photoUrl === "string" ? body.photoUrl.trim() : "";
+  const photoUrl =
+    photoUrlRaw && /^(\/uploads\/|\/api\/files\/|https:\/\/)/.test(photoUrlRaw) ? photoUrlRaw : "";
   // Money already collected before the student was put on the portal — same
   // idea as the CSV importer's "amount paid" column, so the paywall does not
   // lock someone out of a level they have already paid for.
@@ -406,8 +418,15 @@ export async function POST(request: Request) {
             sessionSlot,
             deliveryMode,
             admission:
-              phone || batch
-                ? { ...(phone ? { phone } : {}), ...(batch ? { batch } : {}) }
+              phone || batch || city || stateRegion || country || photoUrl
+                ? {
+                    ...(phone ? { phone } : {}),
+                    ...(batch ? { batch } : {}),
+                    ...(city ? { city } : {}),
+                    ...(stateRegion ? { state: stateRegion } : {}),
+                    ...(country ? { country } : {}),
+                    ...(photoUrl ? { photoUrl } : {}),
+                  }
                 : undefined,
           },
         },
@@ -489,6 +508,18 @@ export async function PATCH(request: Request) {
   // month follows the same rule — both live inside the admission JSON blob.
   const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
   const batch = typeof body.batch === "string" ? body.batch.trim() : undefined;
+  // Location + photo live in the same admission blob — only touched when their
+  // key is present, so an unrelated edit never wipes what signup collected.
+  const city = typeof body.city === "string" ? body.city.trim() : undefined;
+  const stateRegion = typeof body.state === "string" ? body.state.trim() : undefined;
+  const country = typeof body.country === "string" ? body.country.trim() : undefined;
+  const photoUrlRaw = typeof body.photoUrl === "string" ? body.photoUrl.trim() : undefined;
+  const photoUrl =
+    photoUrlRaw === undefined
+      ? undefined
+      : photoUrlRaw && /^(\/uploads\/|\/api\/files\/|https:\/\/)/.test(photoUrlRaw)
+        ? photoUrlRaw
+        : "";
 
   if (!studentId) {
     return NextResponse.json({ error: "Student ID is required" }, { status: 400 });
@@ -560,11 +591,22 @@ export async function PATCH(request: Request) {
      * Read-modify-write so editing the phone here never wipes out whatever
      * else the admission form collected (father's phone, city, and so on).
      */
-    if (phone !== undefined || batch !== undefined) {
+    if (
+      phone !== undefined ||
+      batch !== undefined ||
+      city !== undefined ||
+      stateRegion !== undefined ||
+      country !== undefined ||
+      photoUrl !== undefined
+    ) {
       const existingAdmission = (student.admission ?? {}) as Record<string, unknown>;
       const nextAdmission = { ...existingAdmission };
       if (phone !== undefined) nextAdmission.phone = phone || undefined;
       if (batch !== undefined) nextAdmission.batch = batch || undefined;
+      if (city !== undefined) nextAdmission.city = city || undefined;
+      if (stateRegion !== undefined) nextAdmission.state = stateRegion || undefined;
+      if (country !== undefined) nextAdmission.country = country || undefined;
+      if (photoUrl !== undefined) nextAdmission.photoUrl = photoUrl || undefined;
       updateStudent.admission = nextAdmission;
     }
     if (body.branchId !== undefined) updateStudent.branchId = branchId;

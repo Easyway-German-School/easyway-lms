@@ -185,6 +185,7 @@ export const KIND_LABELS: Record<string, string> = {
   [KIND.supportReply]: "The office answered your question",
   [KIND.announcement]: "Announcement from the office",
   [KIND.studentAtRisk]: "A tutor's student may be going quiet",
+  [KIND.profilePhotoMissing]: "Reminder to add a profile photo",
   [KIND.general]: "General",
 };
 
@@ -219,6 +220,7 @@ export const KIND_GROUPS: Array<{ group: string; kinds: string[] }> = [
       KIND.studentImported,
       KIND.leadCaptured,
       KIND.studentAtRisk,
+      KIND.profilePhotoMissing,
       KIND.general,
     ],
   },
