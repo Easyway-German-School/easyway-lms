@@ -8,6 +8,7 @@ import { bestMatch, matchBatch, matchDeliveryMode, matchLevel, matchSessionSlot 
 import { generateTempPassword } from "@/lib/student-password";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { isOnlineBranch } from "@/lib/online-branch";
+import { normalizeProfileInput } from "@/lib/student-profile";
 
 import { requireCapability } from "@/lib/admin-roles";
 export const dynamic = "force-dynamic";
@@ -202,6 +203,22 @@ export async function POST(request: NextRequest) {
       const phone = str(row, "phone", "phone_number", "mobile");
       const amountPaid = money(str(row, "amount_paid", "paid", "amountpaid", "payment"));
 
+      // The rest of the structured profile (see lib/student-profile.ts) — not
+      // required for the account to work like phone/batch are, but a school's
+      // own walk-in sheet often has these columns already and there is no
+      // reason to throw them away on the way in.
+      const profileRow = {
+        phone,
+        city: rowValue(row, ["city", "town"]),
+        state: rowValue(row, ["state", "state_region", "region", "province"]),
+        country: rowValue(row, ["country"]),
+        dob: rowValue(row, ["dob", "date_of_birth", "birthdate", "birth_date"]),
+        gender: rowValue(row, ["gender", "sex"]),
+        emergencyContactName: rowValue(row, ["emergency_contact_name", "emergency_name", "next_of_kin"]),
+        emergencyContactInfo: rowValue(row, ["emergency_contact_info", "emergency_phone", "emergency_contact_phone"]),
+        occupation: rowValue(row, ["occupation", "profession"]),
+      };
+
       const base = {
         row: index + 1,
         name,
@@ -300,6 +317,9 @@ export async function POST(request: NextRequest) {
                 // promotion engine both read, so a mid-course student is
                 // useless without it.
                 admission: { batch: batch || undefined, phone: phone || undefined, importedAt: new Date().toISOString() },
+                // The typed twin of the admission blob above — see
+                // lib/student-profile.ts.
+                profile: { create: normalizeProfileInput(profileRow) },
               },
             },
           },

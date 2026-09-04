@@ -24,6 +24,7 @@ import {
   UnlockIcon,
   WalletIcon,
 } from "@/components/icons";
+import { SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
 
 /**
  * One student's file.
@@ -166,6 +167,35 @@ type Dossier = {
     }>;
   };
   admissionEntries: Array<{ key: string; value: string }>;
+  // The structured record — see lib/student-profile.ts. Null only for a
+  // pre-migration account before the backfill script has run.
+  profile: {
+    phone: string | null;
+    altPhone: string | null;
+    whatsapp: string | null;
+    addressLine: string | null;
+    city: string | null;
+    stateRegion: string | null;
+    country: string | null;
+    postalCode: string | null;
+    dateOfBirth: string | null;
+    gender: string | null;
+    nationality: string | null;
+    govIdType: string | null;
+    govIdNumber: string | null;
+    emergencyName: string | null;
+    emergencyPhone: string | null;
+    emergencyRelation: string | null;
+    guardianName: string | null;
+    guardianPhone: string | null;
+    occupation: string | null;
+    employer: string | null;
+    priorEducation: string | null;
+    heardFrom: string | null;
+    visaStatus: string | null;
+  } | null;
+  tags: string[];
+  segments: string[];
 };
 
 const PAYWALL_LABEL: Record<Dossier["money"]["paywall"], string> = {
@@ -396,6 +426,8 @@ export default function StudentDossierPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params?.id;
+  const [tagDraft, setTagDraft] = useState("");
+  const [tagBusy, setTagBusy] = useState(false);
 
   const [data, setData] = useState<Dossier | null>(null);
   const [loading, setLoading] = useState(true);
@@ -439,6 +471,21 @@ export default function StudentDossierPage() {
     branchId: "",
     status: "active",
     pathway: "",
+    // The structured profile — see lib/student-profile.ts. Sent as one nested
+    // object so the server's PATCH handler can merge it against the existing
+    // StudentProfile row without colliding with the top-level fields above.
+    profile: {
+      city: "",
+      stateRegion: "",
+      country: "",
+      dateOfBirth: "",
+      gender: "",
+      nationality: "",
+      guardianName: "",
+      guardianPhone: "",
+      emergencyName: "",
+      emergencyPhone: "",
+    },
   });
 
   useEffect(() => {
@@ -496,6 +543,18 @@ export default function StudentDossierPage() {
       branchId: data.identity.branch?.id || "",
       status: data.identity.status || "active",
       pathway: data.identity.pathway || "",
+      profile: {
+        city: data.profile?.city || "",
+        stateRegion: data.profile?.stateRegion || "",
+        country: data.profile?.country || "",
+        dateOfBirth: data.profile?.dateOfBirth ? data.profile.dateOfBirth.slice(0, 10) : "",
+        gender: data.profile?.gender || "",
+        nationality: data.profile?.nationality || "",
+        guardianName: data.profile?.guardianName || "",
+        guardianPhone: data.profile?.guardianPhone || "",
+        emergencyName: data.profile?.emergencyName || "",
+        emergencyPhone: data.profile?.emergencyPhone || "",
+      },
     });
     setEditError(null);
     setEditOpen(true);
@@ -541,6 +600,25 @@ export default function StudentDossierPage() {
       setEditBusy(false);
     }
   }, [id, editForm, load]);
+
+  /** Admin-authored classification chips — see lib/student-segments.ts. */
+  const updateTags = useCallback(
+    async (nextTags: string[]) => {
+      if (!id) return;
+      setTagBusy(true);
+      try {
+        const response = await fetch("/api/admin/students", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ studentId: id, tags: nextTags }),
+        });
+        if (response.ok) await load(false);
+      } finally {
+        setTagBusy(false);
+      }
+    },
+    [id, load],
+  );
 
   const saveGrace = useCallback(
     async (clear = false) => {
@@ -1444,6 +1522,80 @@ export default function StudentDossierPage() {
             )}
           </Card>
 
+          {/* ---- Profile — see lib/student-profile.ts --------------------- */}
+          <Card title="Profile" hint="Edit from the Edit button above">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
+              <Field label="Phone" value={data.profile?.phone} />
+              <Field label="WhatsApp" value={data.profile?.whatsapp} />
+              <Field
+                label="Location"
+                value={[data.profile?.city, data.profile?.stateRegion, data.profile?.country].filter(Boolean).join(", ")}
+              />
+              <Field label="Date of birth" value={data.profile?.dateOfBirth ? when(data.profile.dateOfBirth) : null} />
+              <Field label="Gender" value={data.profile?.gender} />
+              <Field label="Nationality" value={data.profile?.nationality} />
+              <Field
+                label="Guardian"
+                value={[data.profile?.guardianName, data.profile?.guardianPhone].filter(Boolean).join(" — ")}
+              />
+              <Field
+                label="Emergency contact"
+                value={[data.profile?.emergencyName, data.profile?.emergencyPhone].filter(Boolean).join(" — ")}
+              />
+              <Field label="Heard about us via" value={data.profile?.heardFrom} />
+            </div>
+
+            <div className="mt-5 border-t border-[var(--border)] pt-4">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Classification</p>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {data.segments
+                  .filter((seg) => seg !== "new" && seg !== "group" && seg !== "campus")
+                  .map((seg) => (
+                    <span
+                      key={seg}
+                      className="inline-flex items-center rounded-full bg-[var(--surface-soft)] px-2.5 py-1 text-xs font-medium text-[var(--muted)]"
+                    >
+                      {SEGMENT_LABELS[seg] ?? seg}
+                    </span>
+                  ))}
+                {data.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--accent-ink)]"
+                  >
+                    {tag}
+                    <button
+                      type="button"
+                      aria-label={`Remove tag ${tag}`}
+                      disabled={tagBusy}
+                      onClick={() => void updateTags(data.tags.filter((t) => t !== tag))}
+                      className="opacity-60 hover:opacity-100"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <form
+                  className="inline-flex items-center gap-1.5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const value = tagDraft.trim().toLowerCase();
+                    if (value && !data.tags.includes(value)) void updateTags([...data.tags, value]);
+                    setTagDraft("");
+                  }}
+                >
+                  <input
+                    value={tagDraft}
+                    onChange={(event) => setTagDraft(event.target.value)}
+                    placeholder="Add a tag…"
+                    disabled={tagBusy}
+                    className="w-28 rounded-full border border-[var(--border)] bg-[var(--background)] px-2.5 py-1 text-xs"
+                  />
+                </form>
+              </div>
+            </div>
+          </Card>
+
           {/* ---- Admission form ------------------------------------------- */}
           <Card title="Admission form" hint={`${data.admissionEntries.length} fields`}>
             {data.admissionEntries.length === 0 ? (
@@ -1668,9 +1820,9 @@ export default function StudentDossierPage() {
                   onChange={(event) => setEditForm((form) => ({ ...form, status: event.target.value }))}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="active">Active</option>
-                  <option value="paused">Paused</option>
-                  <option value="graduated">Graduated</option>
+                  {STUDENT_STATUSES.map((status) => (
+                    <option key={status.value} value={status.value}>{status.label}</option>
+                  ))}
                 </select>
               </label>
               <label className="space-y-2 text-sm">
@@ -1679,6 +1831,55 @@ export default function StudentDossierPage() {
                   value={editForm.pathway}
                   onChange={(event) => setEditForm((form) => ({ ...form, pathway: event.target.value }))}
                   placeholder="e.g. Language training"
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+
+            {/* ---- Profile — see lib/student-profile.ts ------------------ */}
+            <p className="mt-6 text-sm font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Profile</p>
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {(
+                [
+                  ["city", "City"],
+                  ["stateRegion", "State / region"],
+                  ["country", "Country"],
+                  ["nationality", "Nationality"],
+                  ["guardianName", "Guardian name"],
+                  ["guardianPhone", "Guardian phone"],
+                  ["emergencyName", "Emergency contact"],
+                  ["emergencyPhone", "Emergency phone"],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">{label}</span>
+                  <input
+                    value={editForm.profile[key]}
+                    onChange={(event) =>
+                      setEditForm((form) => ({ ...form, profile: { ...form.profile, [key]: event.target.value } }))
+                    }
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  />
+                </label>
+              ))}
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Date of birth</span>
+                <input
+                  type="date"
+                  value={editForm.profile.dateOfBirth}
+                  onChange={(event) =>
+                    setEditForm((form) => ({ ...form, profile: { ...form.profile, dateOfBirth: event.target.value } }))
+                  }
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[var(--muted)]">Gender</span>
+                <input
+                  value={editForm.profile.gender}
+                  onChange={(event) =>
+                    setEditForm((form) => ({ ...form, profile: { ...form.profile, gender: event.target.value } }))
+                  }
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 />
               </label>

@@ -13,6 +13,7 @@ import { isOnlineBranchName } from "@/lib/online-branch";
 import { CalendarIcon } from "@/components/icons";
 import { packageOptions, countries } from "@/app/auth/signup/options";
 import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload";
+import { DERIVED_SEGMENT_IDS, SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
 
 /**
  * Pathway choices for the manual "Add student" form only. Mirrors the signup
@@ -159,7 +160,13 @@ function StudentsRoster() {
   const [filterSessionSlot, setFilterSessionSlot] = useState<string>(params.get("sessionSlot") ?? "");
   const [filterStatus, setFilterStatus] = useState<string>(params.get("status") ?? "");
   const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>(params.get("paymentStatus") ?? "");
+  // A stored tag (admin-authored) or a derived segment id — see
+  // lib/student-segments.ts. The roster and the export treat both the same.
+  const [filterTag, setFilterTag] = useState<string>(params.get("tag") ?? "");
   const [search, setSearch] = useState<string>(params.get("search") ?? "");
+  const [savingTagsFor, setSavingTagsFor] = useState<string>("");
+  const [tagDraftFor, setTagDraftFor] = useState<string>("");
+  const [tagDraftText, setTagDraftText] = useState<string>("");
 
   /** The derived rule this view is pinned to, and the exact set it selected. */
   const [focus, setFocus] = useState<string>(params.get("focus") ?? "");
@@ -254,6 +261,7 @@ function StudentsRoster() {
     if (filterSessionSlot) url.searchParams.set("sessionSlot", filterSessionSlot);
     if (filterStatus) url.searchParams.set("status", filterStatus);
     if (filterPaymentStatus) url.searchParams.set("paymentStatus", filterPaymentStatus);
+    if (filterTag) url.searchParams.set("tag", filterTag);
     if (search) url.searchParams.set("search", search);
     if (focus) url.searchParams.set("focus", focus);
     if (agingBucket) url.searchParams.set("agingBucket", agingBucket);
@@ -273,7 +281,38 @@ function StudentsRoster() {
       setAdminRole(typeof data.adminRole === "string" ? data.adminRole : "");
     }
     setLoading(false);
-  }, [agingBucket, filterBatch, filterBranchId, filterClassType, filterLevel, filterPaymentStatus, filterSessionSlot, filterStatus, filterTutorId, focus, focusIds, page, pageSize, search]);
+  }, [agingBucket, filterBatch, filterBranchId, filterClassType, filterLevel, filterPaymentStatus, filterSessionSlot, filterStatus, filterTag, filterTutorId, focus, focusIds, page, pageSize, search]);
+
+  /**
+   * Same query the roster just fetched, minus paging — the export route
+   * shares the roster's exact filter builder (student-roster-query.ts), so
+   * whatever this view is filtered to is exactly what downloads.
+   */
+  /**
+   * A relative URL, deliberately — this is called directly during render (the
+   * toolbar's `href`), which also runs on the server. `new URL(path,
+   * window.location.origin)` crashed SSR with "window is not defined" the way
+   * `loadStudents` above never does, because that one only ever runs inside a
+   * `useEffect`/callback, after the component has mounted in the browser.
+   */
+  function exportUrl(): string {
+    const params = new URLSearchParams();
+    if (filterBranchId) params.set("branchId", filterBranchId);
+    if (filterTutorId) params.set("tutorId", filterTutorId);
+    if (filterLevel) params.set("level", filterLevel);
+    if (filterBatch) params.set("batch", filterBatch);
+    if (filterClassType) params.set("classType", filterClassType);
+    if (filterSessionSlot) params.set("sessionSlot", filterSessionSlot);
+    if (filterStatus) params.set("status", filterStatus);
+    if (filterPaymentStatus) params.set("paymentStatus", filterPaymentStatus);
+    if (filterTag) params.set("tag", filterTag);
+    if (search) params.set("search", search);
+    if (focus) params.set("focus", focus);
+    if (agingBucket) params.set("agingBucket", agingBucket);
+    if (focusIds) params.set("ids", focusIds);
+    const query = params.toString();
+    return query ? `/api/admin/students/export?${query}` : "/api/admin/students/export";
+  }
 
   function clearFocus() {
     setFocus("");
@@ -448,6 +487,31 @@ function StudentsRoster() {
     }
 
     await loadStudents();
+  }
+
+  /**
+   * Admin-authored classification chips — see lib/student-segments.ts. Sends
+   * the whole next list rather than a single add/remove, same as the tutor
+   * pairing above: one PATCH, one reload, no separate tags endpoint needed.
+   */
+  async function updateStudentTags(studentId: string, nextTags: string[]) {
+    setStudentError("");
+    setSavingTagsFor(studentId);
+    try {
+      const res = await fetch("/api/admin/students", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId, tags: nextTags }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setStudentError(data?.error || "Unable to update tags.");
+        return;
+      }
+      await loadStudents();
+    } finally {
+      setSavingTagsFor("");
+    }
   }
 
   /** Location + photo fields — cleared together everywhere the form resets. */
@@ -984,9 +1048,26 @@ function StudentsRoster() {
                   className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
                   <option value="">All statuses</option>
-                  <option value="active">Active</option>
-                  <option value="paused">Paused</option>
-                  <option value="graduated">Graduated</option>
+                  {STUDENT_STATUSES.map((status) => (
+                    <option key={status.value} value={status.value}>{status.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                <label htmlFor="tagFilter" className="block text-sm font-semibold text-[var(--muted)]">Segment / tag</label>
+                <select
+                  id="tagFilter"
+                  value={filterTag}
+                  onChange={(event) => {
+                    setFilterTag(event.target.value);
+                    setPage(1);
+                  }}
+                  className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">All students</option>
+                  {DERIVED_SEGMENT_IDS.map((id) => (
+                    <option key={id} value={id}>{SEGMENT_LABELS[id]}</option>
+                  ))}
                 </select>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
@@ -1016,6 +1097,14 @@ function StudentsRoster() {
               >
                 Import many
               </Link>
+              {/* Downloads exactly this filtered view — same query the roster
+                  just ran, shared through lib/student-roster-query.ts. */}
+              <a
+                href={exportUrl()}
+                className="rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--foreground)]"
+              >
+                Export CSV
+              </a>
               <button
                 type="button"
                 className="rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white"
@@ -1267,9 +1356,9 @@ function StudentsRoster() {
                   onChange={(event) => setNewStatus(event.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="active">Active</option>
-                  <option value="paused">Paused</option>
-                  <option value="graduated">Graduated</option>
+                  {STUDENT_STATUSES.map((status) => (
+                    <option key={status.value} value={status.value}>{status.label}</option>
+                  ))}
                 </select>
               </label>
               <label className="space-y-2 text-sm">
@@ -1577,6 +1666,74 @@ function StudentsRoster() {
                             ? ` · ₦${money.owedOnDeposit.toLocaleString("en-NG")} short of deposit`
                             : ""}
                         </p>
+                      )}
+                      {/* Machine-derived classification (see
+                          lib/student-segments.ts) plus whatever the office has
+                          tagged by hand. Read-only badges here — the file page
+                          is where a tag gets added or removed one at a time. */}
+                      {(student._segments?.length || student.tags?.length) ? (
+                        <p className="mt-1 flex flex-wrap gap-1">
+                          {(student._segments ?? [])
+                            .filter((id) => id !== "new" && id !== "group" && id !== "campus")
+                            .map((id) => (
+                              <span
+                                key={id}
+                                className="inline-flex items-center rounded-full bg-[var(--surface-soft)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)]"
+                              >
+                                {SEGMENT_LABELS[id] ?? id}
+                              </span>
+                            ))}
+                          {(student.tags ?? []).map((tag) => (
+                            <span
+                              key={tag}
+                              className="group inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[var(--accent-ink)]"
+                            >
+                              {tag}
+                              <button
+                                type="button"
+                                aria-label={`Remove tag ${tag}`}
+                                className="opacity-60 hover:opacity-100"
+                                onClick={() =>
+                                  updateStudentTags(student.id, (student.tags ?? []).filter((t) => t !== tag))
+                                }
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </p>
+                      ) : null}
+                      {tagDraftFor === student.id ? (
+                        <form
+                          className="mt-1 flex items-center gap-1"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            const value = tagDraftText.trim().toLowerCase();
+                            if (value && !(student.tags ?? []).includes(value)) {
+                              updateStudentTags(student.id, [...(student.tags ?? []), value]);
+                            }
+                            setTagDraftFor("");
+                            setTagDraftText("");
+                          }}
+                        >
+                          <input
+                            autoFocus
+                            value={tagDraftText}
+                            onChange={(event) => setTagDraftText(event.target.value)}
+                            onBlur={() => { setTagDraftFor(""); setTagDraftText(""); }}
+                            placeholder="tag name"
+                            className="w-24 rounded-md border border-[var(--border)] bg-[var(--background)] px-1.5 py-0.5 text-[10px]"
+                          />
+                        </form>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={savingTagsFor === student.id}
+                          onClick={() => { setTagDraftFor(student.id); setTagDraftText(""); }}
+                          className="mt-1 text-[10px] font-medium text-[var(--muted)] hover:text-[var(--accent)]"
+                        >
+                          + tag
+                        </button>
                       )}
                     </td>
                     <td className="px-6 py-4">{student.user.email}</td>

@@ -18,6 +18,7 @@ import { TERMS_CONTEXT, TERMS_VERSION } from "@/lib/terms";
 import { REGISTRATION_FEE } from "@/lib/payment";
 import { validateSignupAccess, verifyInviteSig } from "@/lib/signup-access";
 import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
+import { normalizeProfileInput } from "@/lib/student-profile";
 
 /**
  * Whether there is a Branch table to select from.
@@ -471,6 +472,10 @@ export async function POST(request: NextRequest) {
               branchId: hasBranchTable ? normalizedBranchId : null,
               // store admission payload as JSON
               admission: normalizedAdmission,
+              // The typed twin of the admission blob — see lib/student-profile.ts.
+              // `normalizedAdmission` already carries every field under the same
+              // key names the parser's aliases expect, so this is a straight reread.
+              profile: { create: normalizeProfileInput(normalizedAdmission) },
             } as any),
           },
         },

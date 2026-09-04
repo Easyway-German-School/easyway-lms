@@ -3,18 +3,21 @@ import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
-import {
-  AGING_BUCKETS,
-  computeStudentFinance,
-  focusPreset,
-  type StudentFinance,
-} from "@/lib/finance/receivables";
-import { computeChurnRisk, churnRiskPreset, RECENT_WINDOW_DAYS } from "@/lib/student-risk";
+import { AGING_BUCKETS, focusPreset, type StudentFinance } from "@/lib/finance/receivables";
+import { churnRiskPreset } from "@/lib/student-risk";
 import { setStudentTutor } from "@/lib/tutor-pairing";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { normalizeProfileInput, mergeProfile, type StudentProfileInput } from "@/lib/student-profile";
+import {
+  buildRosterWhereClause,
+  hasDerivedFilter as computeHasDerivedFilter,
+  parseRosterFilters,
+  ROSTER_INCLUDE,
+  scoreAndFilterRoster,
+} from "@/lib/student-roster-query";
 
 // The "Reset roster" path soft-deletes every student in the tenant in chunks;
 // on Neon that is a few hundred round trips and comfortably outruns the default
@@ -26,69 +29,9 @@ export async function GET(request: Request) {
   if (!gate.ok) return gate.response;
 
   const url = new URL(request.url);
-  const branchId = url.searchParams.get("branchId");
-  const level = url.searchParams.get("level");
-  const batch = url.searchParams.get("batch");
-  const classType = url.searchParams.get("classType");
-  const sessionSlot = url.searchParams.get("sessionSlot");
-  const status = url.searchParams.get("status");
-  const paymentStatus = url.searchParams.get("paymentStatus");
-  const tutorId = url.searchParams.get("tutorId");
-  const search = url.searchParams.get("search") || undefined;
+  const filters = parseRosterFilters(url);
   const page = parseInt(url.searchParams.get("page") || "1", 10) || 1;
   const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get("pageSize") || "20", 10)));
-
-  /**
-   * DERIVED FILTERS — the other half of a clickable dashboard.
-   *
-   * "7 students behind on tuition" is not a column in the database. It is a
-   * fee table, a deposit rate and a clock, resolved per student, and it used to
-   * be resolved only inside the overview route. So the dashboard could state
-   * the number and had nowhere to send anybody: the tile linked to an
-   * unfiltered payments screen and the reader was left to work out which seven.
-   *
-   * `focus` names a rule in src/lib/finance/receivables.ts — the same module
-   * the overview route counts with — so the count and this list cannot disagree
-   * without someone editing the one shared definition. `ids` is the exact-set
-   * escape hatch for a tile that already knows precisely who it meant.
-   */
-  const focus = focusPreset(url.searchParams.get("focus"));
-  /**
-   * A second, independent preset namespace — churn risk isn't a financial
-   * rule, so it doesn't live in FOCUS_PRESETS. The two ids never collide, so
-   * this only ever fires when `focus` (finance) came back empty.
-   */
-  const riskFocus = focus ? null : churnRiskPreset(url.searchParams.get("focus"));
-  const agingBucket = url.searchParams.get("agingBucket");
-  const idsParam = url.searchParams.get("ids");
-  const ids = idsParam
-    ? new Set(idsParam.split(",").map((id) => id.trim()).filter(Boolean))
-    : null;
-  const hasDerivedFilter = Boolean(focus || riskFocus || agingBucket || ids);
-
-  const whereClause: any = {};
-  // Never surface staff in the student roster. A Student row can end up bound
-  // to an admin or lecturer account — a demo fixture, an impersonation set-up,
-  // an account that was a test student before it was promoted. If it shows
-  // here it can be removed from here, and removing a student deletes the
-  // underlying User. On 2026-09-02 a super admin cleared out test students and
-  // took their own login with them this way.
-  whereClause.user = { is: { role: "STUDENT", adminRole: null } };
-  if (branchId) whereClause.branchId = branchId;
-  if (level) whereClause.level = level;
-  if (batch) whereClause.admission = { path: ["batch"], equals: batch };
-  if (classType) whereClause.classType = classType;
-  if (sessionSlot) whereClause.sessionSlot = sessionSlot;
-  if (status) whereClause.status = status;
-
-  if (gate.session.user.tenantId) {
-    // Imported students may not have a branch yet. Their user tenant is still
-    // authoritative, so they must remain available for billing and activation.
-    whereClause.OR = [
-      { branch: { tenantId: gate.session.user.tenantId } },
-      { user: { tenantId: gate.session.user.tenantId } },
-    ];
-  }
 
   /**
    * BRANCH SCOPING — an admin restricted to specific branches (see
@@ -99,152 +42,33 @@ export async function GET(request: Request) {
    * be used to probe which branches exist.
    */
   const allowedBranchIds = scopedBranchIds(gate.admin);
-  if (allowedBranchIds) {
-    if (branchId) {
-      if (!allowedBranchIds.includes(branchId)) whereClause.branchId = "__no-branch-access__";
-    } else {
-      whereClause.branchId = { in: allowedBranchIds };
-    }
-  }
+  const whereClause = buildRosterWhereClause(filters, {
+    tenantId: gate.session.user.tenantId,
+    allowedBranchIds,
+  });
 
-  if (search) {
-    whereClause.AND = whereClause.AND || [];
-    whereClause.AND.push({
-      OR: [
-        { user: { name: { contains: search, mode: "insensitive" } } },
-        { user: { email: { contains: search, mode: "insensitive" } } },
-      ],
-    });
-  }
-
-  if (paymentStatus) {
-    whereClause.payments = { some: { status: paymentStatus } };
-  }
-  if (tutorId) {
-    whereClause.tutorId = tutorId;
-  }
-
-  const now = new Date();
-  const riskWindowStart = new Date(now.getTime() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-
-  const include = {
-    user: true,
-    branch: true,
-    tutor: { include: { user: true } },
-    payments: {
-      // Nested read — the soft-delete guard only filters top-level queries, so
-      // spell out `deletedAt: null` here or a reversed payment keeps counting
-      // toward this roster's "paid in full" badge after it has been removed
-      // everywhere else. Tenant scoping has the same nested blind spot; that is
-      // handled by stamping `tenantId` at write time (see the Paystack webhook)
-      // plus scripts/backfill-tenantless-rows.ts for the rows already written.
-      where: { deletedAt: null },
-      orderBy: { createdAt: "desc" as const },
-    },
-    invoices: {
-      include: { payments: { where: { deletedAt: null } } },
-    },
-    // The per-level tuition ledger — so the roster's money figures and the
-    // owes_prior_level / legacy_arrears focus presets see the whole ladder.
-    tuitionCharges: {
-      where: { deletedAt: null },
-      select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
-    },
-    // Churn-risk inputs — see lib/student-risk.ts. Kept lightweight: a bounded
-    // window for attendance, and only the single most recent row for the two
-    // recency signals.
-    attendances: {
-      where: { date: { gte: riskWindowStart } },
-      select: { present: true, status: true },
-    },
-    videoProgress: {
-      orderBy: { updatedAt: "desc" as const },
-      take: 1,
-      select: { updatedAt: true },
-    },
-    journeyEvents: {
-      orderBy: { occurredAt: "desc" as const },
-      take: 1,
-      select: { occurredAt: true },
-    },
-  };
+  const derivedFilter = computeHasDerivedFilter(filters);
 
   /**
-   * A derived filter cannot be pushed into SQL, so the page has to be cut after
-   * the rule has run rather than before. Paginating in the database first would
-   * ask for "page 1 of everyone" and then filter it down to whoever on that
-   * page happens to be behind — which is not the first page of the behind list,
-   * and would report a total that counts students the list does not contain.
+   * A derived filter (focus preset, risk preset, aging bucket, an id set, or a
+   * tag/segment) cannot be pushed into SQL, so the page has to be cut after the
+   * rule has run rather than before — see student-roster-query.ts.
    */
   const rawStudents = await prisma.student.findMany({
     where: whereClause,
-    include,
+    include: ROSTER_INCLUDE,
     orderBy: { createdAt: "desc" },
-    ...(hasDerivedFilter ? {} : { skip: (page - 1) * pageSize, take: pageSize }),
+    ...(derivedFilter ? {} : { skip: (page - 1) * pageSize, take: pageSize }),
   });
 
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const withFinance = rawStudents.map((student) => {
-    const finance = computeStudentFinance(
-      {
-        id: student.id,
-        level: student.level,
-        status: student.status,
-        classType: student.classType,
-        createdAt: student.createdAt,
-        branch: student.branch ? { id: student.branch.id, name: student.branch.name } : null,
-        user: student.user,
-        payments: student.payments,
-        tuitionCharges: student.tuitionCharges,
-      },
-      now,
-    );
-    const risk = computeChurnRisk(
-      {
-        id: student.id,
-        createdAt: student.createdAt,
-        notStartedCount: student.notStartedCount,
-        recentAttendance: student.attendances,
-        lastVideoActivityAt: student.videoProgress[0]?.updatedAt ?? null,
-        lastJourneyEventAt: student.journeyEvents[0]?.occurredAt ?? null,
-        behindOnTuition: finance.behindOnTuition,
-      },
-      now,
-    );
-    return { student, finance, risk, raw: student };
-  });
+  const now = new Date();
+  const matched = scoreAndFilterRoster(rawStudents, filters, now);
 
-  let matched = withFinance;
-  if (focus) {
-    matched = matched.filter((entry) =>
-      focus.matches(entry.finance, { now, startOfMonth }, {
-        id: entry.raw.id,
-        level: entry.raw.level,
-        status: entry.raw.status,
-        classType: entry.raw.classType,
-        createdAt: entry.raw.createdAt,
-        branch: entry.raw.branch ? { id: entry.raw.branch.id, name: entry.raw.branch.name } : null,
-        user: entry.raw.user,
-        payments: entry.raw.payments,
-        tuitionCharges: entry.raw.tuitionCharges,
-      }),
-    );
-  }
-  if (riskFocus) {
-    matched = matched.filter((entry) => riskFocus.matches(entry.risk));
-  }
-  if (agingBucket) {
-    matched = matched.filter((entry) => entry.finance.owed > 0 && entry.finance.agingBucket === agingBucket);
-  }
-  if (ids) {
-    matched = matched.filter((entry) => ids.has(entry.student.id));
-  }
-
-  const totalCount = hasDerivedFilter
+  const totalCount = derivedFilter
     ? matched.length
     : await prisma.student.count({ where: whereClause });
 
-  const pageRows = hasDerivedFilter
+  const pageRows = derivedFilter
     ? matched.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize)
     : matched;
 
@@ -259,11 +83,14 @@ export async function GET(request: Request) {
    */
   const canSeeMoney = gate.admin.can("payments");
 
-  const enriched = pageRows.map(({ student, finance, risk }) => ({
+  const enriched = pageRows.map(({ student, finance, risk, segments }) => ({
     ...student,
     _finance: canSeeMoney ? finance : stripMoney(finance),
     // Not financial data, so it isn't gated behind the `payments` capability.
     _risk: risk,
+    // Machine-derived classification — see lib/student-segments.ts. Combine
+    // with the stored `tags` column client-side for one filterable list.
+    _segments: segments,
     // Kept under its old name so nothing that reads it breaks. It now comes off
     // the tuition fee rather than the sum of raised invoices: most students who
     // owe the school money have no Invoice row at all, so the old figure read
@@ -276,6 +103,9 @@ export async function GET(request: Request) {
         }
       : null,
   }));
+
+  const focus = focusPreset(filters.focus);
+  const riskFocus = focus ? null : churnRiskPreset(filters.focus);
 
   return NextResponse.json({
     students: enriched,
@@ -293,12 +123,12 @@ export async function GET(request: Request) {
       : riskFocus
         ? { id: riskFocus.id, label: riskFocus.label, hint: riskFocus.hint, tone: riskFocus.tone }
         : null,
-    agingBucket: agingBucket
-      ? AGING_BUCKETS.find((bucket) => bucket.id === agingBucket) ?? null
+    agingBucket: filters.agingBucket
+      ? AGING_BUCKETS.find((bucket) => bucket.id === filters.agingBucket) ?? null
       : null,
     // Every id the filter matched, not just this page — so the page can
     // highlight consistently as the reader pages through.
-    matchedIds: hasDerivedFilter ? matched.map((entry) => entry.student.id) : null,
+    matchedIds: derivedFilter ? matched.map((entry) => entry.student.id) : null,
   });
 }
 
@@ -428,6 +258,11 @@ export async function POST(request: Request) {
                     ...(photoUrl ? { photoUrl } : {}),
                   }
                 : undefined,
+            // The typed twin of the admission blob above — see
+            // lib/student-profile.ts. Reads the same request body (with the
+            // already-sanitized `photoUrl`, not the raw one), so anything this
+            // form collects lands in both places at once.
+            profile: { create: normalizeProfileInput({ ...body, photoUrl }) },
           },
         },
       },
@@ -531,6 +366,7 @@ export async function PATCH(request: Request) {
       include: {
         user: true,
         branch: { select: { tenantId: true } },
+        profile: true,
       },
     });
     if (!student) {
@@ -580,9 +416,18 @@ export async function PATCH(request: Request) {
       sessionSlot?: string;
       deliveryMode?: string;
       pathway?: string;
+      tags?: string[];
       // JSON blob field — typed loosely on purpose, same as whereClause above.
       admission?: any;
     };
+    // Admin-authored classification chips (see lib/student-segments.ts). Only
+    // touched when the key is present — same read-if-present rule as the
+    // admission fields — so an edit that isn't about tags never clears them.
+    if (Array.isArray(body.tags)) {
+      updateStudent.tags = body.tags
+        .filter((tag: unknown): tag is string => typeof tag === "string" && tag.trim().length > 0)
+        .map((tag: string) => tag.trim());
+    }
     if (level) updateStudent.level = level;
     if (pathway) updateStudent.pathway = pathway;
     /**
@@ -633,6 +478,32 @@ export async function PATCH(request: Request) {
 
     await prisma.user.update({ where: { id: student.userId }, data: updateUser });
     await prisma.student.update({ where: { id: studentId }, data: updateStudent });
+
+    /**
+     * The structured profile — see lib/student-profile.ts. Reads BOTH the
+     * legacy top-level fields (phone/city/state/country/photoUrl, which the
+     * manual-add form has always sent) and an optional `body.profile` object
+     * (the Student 360 dossier's edit panel sends the full field set there).
+     * Merged against the existing row rather than replaced, so editing one
+     * field on the dossier can never blank out the rest.
+     */
+    const profileIncoming = normalizeProfileInput({
+      ...body,
+      ...(body.profile && typeof body.profile === "object" ? (body.profile as Record<string, unknown>) : {}),
+      ...(phone !== undefined ? { phone } : {}),
+      ...(city !== undefined ? { city } : {}),
+      ...(stateRegion !== undefined ? { stateRegion } : {}),
+      ...(country !== undefined ? { country } : {}),
+      ...(photoUrl !== undefined ? { photoUrl } : {}),
+    });
+    if (Object.keys(profileIncoming).length > 0) {
+      const merged = mergeProfile(student.profile ?? {}, profileIncoming);
+      await prisma.studentProfile.upsert({
+        where: { studentId },
+        create: { studentId, tenantId: gate.session.user.tenantId, ...merged },
+        update: merged,
+      });
+    }
 
     /**
      * The tutor moves through the shared pairing helper rather than being one

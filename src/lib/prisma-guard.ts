@@ -43,6 +43,8 @@ export const SOFT_DELETE_MODELS = new Set<string>([
   "ClassRecording",
   "Invoice",
   "Payment",
+  "TuitionCharge",
+  "PaymentPlan",
   "Certificate",
   "RefundRequest",
 ]);
@@ -61,10 +63,13 @@ export const SOFT_DELETE_MODELS = new Set<string>([
 export const FULLY_AUDITED_MODELS = new Set<string>([
   "User",
   "Student",
+  "StudentProfile",
   "Lecturer",
   "Branch",
   "Invoice",
   "Payment",
+  "TuitionCharge",
+  "PaymentPlan",
   "Certificate",
   "ExamRegistration",
   "Grade",
