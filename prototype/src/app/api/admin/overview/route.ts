@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { receivedPaymentFilter } from "@/lib/payment";
+import { allReceivedPaymentFilter, receivedPaymentFilter } from "@/lib/payment";
 import { requireAdmin } from "@/lib/admin-roles";
 import { activeTransport } from "@/lib/mailer";
 import {
@@ -101,7 +101,7 @@ export async function GET() {
       select: { id: true, name: true, enabled: true, status: true, lastSyncAt: true, lastError: true, itemsSynced: true },
     }).catch(() => []),
     prisma.payment.findMany({
-      where: { ...receivedPaymentFilter(), createdAt: { gte: sixMonthsAgo } },
+      where: { ...allReceivedPaymentFilter(), createdAt: { gte: sixMonthsAgo } },
       select: {
         amount: true,
         createdAt: true,

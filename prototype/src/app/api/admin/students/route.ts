@@ -14,6 +14,7 @@ import { setStudentTutor } from "@/lib/tutor-pairing";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
+import { ensureChargeForLevel } from "@/lib/tuition-charges";
 
 // The "Reset roster" path soft-deletes every student in the tenant in chunks;
 // on Neon that is a few hundred round trips and comfortably outruns the default
@@ -337,6 +338,20 @@ export async function POST(request: Request) {
     ? String(body.sessionSlot)
     : "morning";
   const requestedDeliveryMode = body.deliveryMode === "hybrid" ? "hybrid" : "physical";
+  // The pathway ("what Germany is for") is chosen on signup; before now the
+  // manual-add form had no field for it and every admin-added student was
+  // silently filed as "Language training".
+  const pathway =
+    typeof body.pathway === "string" && body.pathway.trim() ? body.pathway.trim() : "Language training";
+  // Batch month — the timetable generator and the promotion engine both read
+  // this off the admission blob, so a student added without it has no
+  // level-end date and never auto-promotes. Stored as a bare month name
+  // ("September") to match signup and the roster's Batch filter.
+  const batch = typeof body.batch === "string" ? body.batch.trim() : "";
+  // Money already collected before the student was put on the portal — same
+  // idea as the CSV importer's "amount paid" column, so the paywall does not
+  // lock someone out of a level they have already paid for.
+  const amountPaid = Math.max(0, Math.round(Number(body.amountPaid) || 0));
 
   if (!name || !email) {
     return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
@@ -386,11 +401,14 @@ export async function POST(request: Request) {
             branchId,
             status,
             tutorId,
-            pathway: "Language training",
+            pathway,
             classType,
             sessionSlot,
             deliveryMode,
-            admission: phone ? { phone } : undefined,
+            admission:
+              phone || batch
+                ? { ...(phone ? { phone } : {}), ...(batch ? { batch } : {}) }
+                : undefined,
           },
         },
       },
@@ -398,8 +416,35 @@ export async function POST(request: Request) {
 
     const student = await prisma.student.findUnique({ where: { userId: user.id }, select: { id: true } });
     const studentCode = student
-      ? await assignStudentCode(student.id, { level, branch: branchRow, classType })
+      ? await assignStudentCode(student.id, { level, batch, branch: branchRow, classType })
       : null;
+
+    if (student) {
+      // Record the up-front payment, if any was entered — mirrors the importer
+      // so a mid-course student is not paywalled out of what they have paid for.
+      if (amountPaid > 0) {
+        await prisma.payment.create({
+          data: {
+            studentId: student.id,
+            amount: amountPaid,
+            currency: "NGN",
+            status: "completed",
+            method: "manual",
+            description: "Recorded on manual add — paid before joining the portal",
+            ...(gate.session.user.tenantId ? { tenantId: gate.session.user.tenantId } : {}),
+          },
+        });
+      }
+
+      // Open the tuition ledger for the level they start in, the same as signup
+      // and the CSV import do. Non-fatal: a student can still be created if this
+      // trips, and an admin adjustment can add the charge later.
+      try {
+        await ensureChargeForLevel({ studentId: student.id, level, origin: "signup" });
+      } catch (chargeError) {
+        console.error("Tuition charge creation failed on manual add", chargeError);
+      }
+    }
 
     return NextResponse.json(
       {

@@ -41,6 +41,9 @@ export async function GET() {
       createdAt: true,
       paymentGraceUntil: true,
       payments: {
+        // Received tuition money only — `receivedPaymentFilter` now excludes
+        // the ₦5,000 registration fee, so it cannot push the student past the
+        // deposit gate or the balance lock.
         where: receivedPaymentFilter(),
         select: { amount: true },
       },

@@ -1,6 +1,7 @@
 import {
   DEPOSIT_RATE,
   isReceivedPayment,
+  isRegistrationFeePayment,
   RECEIVED_PAYMENT_STATUSES,
   requiredDepositFor,
   tuitionFeeFor,
@@ -118,8 +119,12 @@ export const FINANCE_STUDENT_SELECT = {
     // soft-delete guard only folds that clause into top-level queries, so a
     // reversed / refunded Payment would otherwise still be summed here while
     // the student's own dossier (a top-level `payment.findMany`) excludes it.
+    // The ₦5,000 registration fee is NOT excluded here — this select is
+    // `as const`, which makes a NULL-safe `OR` array unassignable to Prisma's
+    // where type. `description` is loaded so `computeStudentFinance` drops it
+    // in memory instead (see the `received` filter below).
     where: { status: { in: RECEIVED_PAYMENT_STATUSES }, deletedAt: null },
-    select: { amount: true, createdAt: true, method: true },
+    select: { amount: true, createdAt: true, method: true, description: true },
   },
   // The per-level ledger — the debit side. Present for every student once the
   // cutover backfill has run; a student with none yet falls back to the
@@ -148,7 +153,13 @@ export type FinanceStudentInput = {
   paymentGraceUntil?: Date | null;
   branch?: { id: string; name: string } | null;
   user?: { name?: string | null; email?: string | null } | null;
-  payments: Array<{ amount: number; status?: string | null; createdAt?: Date; method?: string | null }>;
+  payments: Array<{
+    amount: number;
+    status?: string | null;
+    createdAt?: Date;
+    method?: string | null;
+    description?: string | null;
+  }>;
   tuitionCharges?: Array<{
     id: string;
     level: string;
@@ -248,14 +259,17 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
   const requiredDeposit = requiredDepositFor(feeLookup);
 
   /**
-   * Defensive filter on `status`. `FINANCE_STUDENT_SELECT` already narrows to
-   * received payments (completed + partial deposits), but a caller passing its
-   * own shape must not be able to count a pending or failed transaction as
-   * money in the bank — that is the difference between an accurate collection
-   * rate and an optimistic one.
+   * Defensive filter. `FINANCE_STUDENT_SELECT` already narrows to received,
+   * non-registration payments, but a caller passing its own shape (the admin
+   * roster loads full Payment rows) must not be able to count a pending/failed
+   * transaction — or the ₦5,000 registration fee — as tuition in the bank.
+   * That is the difference between an accurate collection rate and an
+   * optimistic one, and between "hasn't paid a deposit" and "₦5k down".
    */
   const received = student.payments.filter(
-    (payment) => payment.status == null || isReceivedPayment(payment.status),
+    (payment) =>
+      (payment.status == null || isReceivedPayment(payment.status)) &&
+      !isRegistrationFeePayment(payment.description),
   );
   const paid = received.reduce((sum, payment) => sum + (payment.amount || 0), 0);
 

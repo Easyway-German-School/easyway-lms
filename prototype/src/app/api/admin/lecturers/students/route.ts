@@ -8,7 +8,7 @@ import {
   readAssignment,
   studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { setStudentTutor } from "@/lib/tutor-pairing";
 
 /**
@@ -62,7 +62,7 @@ const STUDENT_SHAPE = {
   tutorId: true,
   user: { select: { name: true, email: true } },
   branch: { select: { name: true } },
-  payments: { select: { amount: true, status: true } },
+  payments: { select: { amount: true, status: true, description: true } },
   tutor: { select: { id: true, user: { select: { name: true, email: true } } } },
 } as const;
 
@@ -76,13 +76,13 @@ type RawStudent = {
   tutorId: string | null;
   user: { name: string | null; email: string };
   branch: { name: string } | null;
-  payments: Array<{ amount: number; status: string }>;
+  payments: Array<{ amount: number; status: string; description?: string | null }>;
   tutor: { id: string; user: { name: string | null; email: string } } | null;
 };
 
 function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
   const totalPaid = student.payments
-    .filter((payment) => isReceivedPayment(payment.status))
+    .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
     .reduce((sum, payment) => sum + payment.amount, 0);
 
   const feeLookup = {

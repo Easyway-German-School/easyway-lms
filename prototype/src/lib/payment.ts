@@ -25,22 +25,100 @@ export type TransactionStatus = (typeof PAYMENT_STATUSES)[number];
 export const RECEIVED_PAYMENT_STATUSES: string[] = ["completed", "partial"];
 
 /**
- * Prisma `where` fragment: payments that count towards a student's paid total.
+ * Prisma `where` fragment: payments that count towards a student's paid total
+ * **for tuition** — received status AND not the ₦5,000 registration fee.
+ *
+ * The registration fee is recorded as its own `completed` Payment (see
+ * `REGISTRATION_PAYMENT_DESCRIPTION_PREFIX` below) so the portal never
+ * re-charges it, but it is not tuition: counting it netted ₦5,000 off every
+ * ref-signup student's balance and pushed them ₦5,000 toward the deposit gate
+ * the instant they signed up. Every deposit / balance / "paid in full" / lock
+ * calculation reads through this, so excluding it here fixes all of them.
+ *
+ * For "how much cash actually arrived" (the accountant's revenue trend) use
+ * `allReceivedPaymentFilter()` instead — that one keeps the registration fee.
+ *
  * A getter, so every call site receives a fresh plain object — a shared
  * `as const` literal is a readonly tuple that Prisma's `in` type rejects, and a
  * shared mutable singleton risks being spread into and mutated.
  */
 export function receivedPaymentFilter() {
+  return {
+    status: { in: [...RECEIVED_PAYMENT_STATUSES] },
+    // NULL-safe exclusion: `{ not: { startsWith } }` alone drops rows with a
+    // NULL description (front-desk cash entries often have none), which would
+    // wrongly un-count real tuition. The explicit `null` arm keeps them.
+    OR: [
+      { description: null },
+      { description: { not: { startsWith: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX } } },
+    ],
+  };
+}
+
+/**
+ * Received payments of EVERY kind, registration fee included — for cash-in
+ * reporting where the question is "what money came in", not "what has this
+ * student paid toward tuition".
+ */
+export function allReceivedPaymentFilter() {
   return { status: { in: [...RECEIVED_PAYMENT_STATUSES] } };
 }
 
-/** In-memory equivalent of `receivedPaymentFilter`, for arrays already loaded. */
+/**
+ * In-memory status check — is this a received (completed / partial) payment?
+ * Status ONLY: unlike `receivedPaymentFilter` it says nothing about whether the
+ * row is a registration fee, so a caller summing tuition must also test
+ * `!isRegistrationFeePayment(description)` (or use `isTuitionPayment`).
+ */
 export function isReceivedPayment(status?: string | null): boolean {
   return RECEIVED_PAYMENT_STATUSES.includes(String(status ?? ""));
 }
 
 export function isValidPaymentStatus(status: unknown): status is TransactionStatus {
   return typeof status === "string" && (PAYMENT_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * REGISTRATION FEE IS NOT TUITION.
+ *
+ * The ₦5,000 registration fee is paid on the marketing site before the student
+ * has an LMS account, then mirrored into the LMS as a `completed` Payment so the
+ * portal never asks for it again (`recordRegistrationFeeFromRef`, and the
+ * `registration` branch of `persistPaystackTransaction` — both in
+ * src/lib/paystack-verify.ts). Every one of those writers sets `description` to
+ * exactly `Registration fee for <pathway>`.
+ *
+ * That row must never net down a tuition balance, move the "paid in full" line,
+ * or count toward the 60% deposit gate. Before this guard existed, a
+ * ref-signup student showed ₦145,000 outstanding on a ₦150,000 fee and ₦5,000
+ * "toward the deposit" the moment they signed up. So every sum of what a
+ * student has paid TOWARD TUITION excludes these rows, via the `where` fragment
+ * or the in-memory predicate below.
+ */
+export const REGISTRATION_PAYMENT_DESCRIPTION_PREFIX = "Registration fee";
+
+export function isRegistrationFeePayment(description?: string | null): boolean {
+  return String(description ?? "").startsWith(REGISTRATION_PAYMENT_DESCRIPTION_PREFIX);
+}
+
+/**
+ * Prisma `where` fragment: drop registration-fee rows from a tuition sum,
+ * NULL-safe (see the note in `receivedPaymentFilter`). A getter, for the same
+ * reason `receivedPaymentFilter` is one. Spread it into a `where` alongside a
+ * status filter; do not combine with a sibling `OR`.
+ */
+export function excludeRegistrationFeeWhere() {
+  return {
+    OR: [
+      { description: null },
+      { description: { not: { startsWith: REGISTRATION_PAYMENT_DESCRIPTION_PREFIX } } },
+    ],
+  };
+}
+
+/** In-memory: does this payment count toward a student's TUITION total? */
+export function isTuitionPayment(payment: { status?: string | null; description?: string | null }): boolean {
+  return isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description);
 }
 
 /**
