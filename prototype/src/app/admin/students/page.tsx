@@ -12,6 +12,13 @@ import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { isOnlineBranchName } from "@/lib/online-branch";
 import { packageOptions } from "@/app/auth/signup/options";
 
+/**
+ * Pathway choices for the manual "Add student" form only. Mirrors the signup
+ * form's list, plus "Travel Package" which the office offers to walk-in students
+ * but which isn't part of self-service signup.
+ */
+const addStudentPathwayOptions = [...packageOptions, "Travel Package"];
+
 /** Bare month names — matches the signup form and the roster's Batch filter. */
 const BATCH_MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -1153,7 +1160,7 @@ function StudentsRoster() {
                   onChange={(event) => setNewPathway(event.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  {packageOptions.map((option) => (
+                  {addStudentPathwayOptions.map((option) => (
                     <option key={option} value={option}>{option}</option>
                   ))}
                 </select>
