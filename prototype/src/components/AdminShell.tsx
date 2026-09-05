@@ -40,6 +40,7 @@ import {
   PaletteIcon,
   PaymentIcon,
   PencilIcon,
+  PlaneIcon,
   PulseIcon,
   ResultsIcon,
   RobotIcon,
@@ -80,6 +81,9 @@ const navItems: NavItem[] = [
 
   { label: 'Students', href: '/admin/students', icon: <UsersIcon />, group: 'Academics' },
   { label: 'Import students', href: '/admin/students/import', icon: <UserPlusIcon />, group: 'Academics' },
+  // The relocation track — its own console because ₦980,000 walk-in
+  // students need watching differently from the self-service roster.
+  { label: 'Travel Package', href: '/admin/travel-package', icon: <PlaneIcon />, group: 'Academics' },
   { label: 'Parents', href: '/admin/parents', icon: <FamilyIcon />, group: 'Academics' },
   // Two different things that both used to be called "Enquiries". A ticket is
   // a student who is already here and stuck; a lead is a stranger the school is

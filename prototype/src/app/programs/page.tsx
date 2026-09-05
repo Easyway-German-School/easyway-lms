@@ -8,6 +8,7 @@ import { useSession } from "next-auth/react";
 import TuitionCheckout from "@/components/TuitionCheckout";
 import NextLevelCheckout from "@/components/NextLevelCheckout";
 import PremiumPrivateClasses from "@/components/PremiumPrivateClasses";
+import TravelPackageShowcase from "@/components/TravelPackageShowcase";
 import { ArrowLeftIcon } from "@/components/icons";
 
 /**
@@ -60,6 +61,7 @@ type StudentInfo = {
   classType: string;
   level?: string;
   branchName?: string;
+  pathway?: string | null;
   /** Just enough of the payment picture to know if this is still a new, unpaid registrant. */
   hasUnlockedClasses?: boolean;
 };
@@ -142,6 +144,7 @@ function ProgramsPageInner() {
           classType,
           level: data.level ?? undefined,
           branchName: data.branchName ?? undefined,
+          pathway: data.pathway ?? null,
           hasUnlockedClasses,
         });
 
@@ -248,7 +251,10 @@ function ProgramsPageInner() {
             that are still true an hour later — an upsell isn't one of them.
             It belongs with the other "study more, differently" choices, here
             and on the payment lock screen for students who haven't paid yet. */}
-        <div id="private-upgrade">{student ? <PremiumPrivateClasses student={student} /> : null}</div>
+        <div id="private-upgrade" className="space-y-6">
+          {student ? <PremiumPrivateClasses student={student} /> : null}
+          {student ? <TravelPackageShowcase student={student} /> : null}
+        </div>
       </div>
 
       {showUpsellPopup && <PrivateUpsellPopup onExplore={exploreUpsellPopup} onDismiss={dismissUpsellPopup} />}

@@ -199,7 +199,11 @@ function StudentsRoster() {
   const [totalCount, setTotalCount] = useState(0);
   const [lecturers, setLecturers] = useState<Array<{ id: string; user: { name?: string | null; email: string } }>>([]);
 
-  const [showStudentForm, setShowStudentForm] = useState(false);
+  // Seeded from the URL like the filters above — lets a link from elsewhere
+  // (the Travel Package roster's "Add a student" button) land here with the
+  // manual-add form already open and the right pathway picked, instead of
+  // making the office re-select it every time.
+  const [showStudentForm, setShowStudentForm] = useState(params.get("addStudent") === "1");
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -213,7 +217,9 @@ function StudentsRoster() {
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
   const [newDeliveryMode, setNewDeliveryMode] = useState("physical");
   const [newBatch, setNewBatch] = useState("");
-  const [newPathway, setNewPathway] = useState(packageOptions[0]);
+  const [newPathway, setNewPathway] = useState(
+    addStudentPathwayOptions.includes(params.get("pathway") ?? "") ? (params.get("pathway") as string) : packageOptions[0],
+  );
   const [newAmountPaid, setNewAmountPaid] = useState("");
   // Where the student lives — collected on signup into the admission blob, but
   // never asked for on this manual-add form, so an office-added student (and
