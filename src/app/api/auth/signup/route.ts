@@ -19,6 +19,7 @@ import { REGISTRATION_FEE } from "@/lib/payment";
 import { validateSignupAccess, verifyInviteSig } from "@/lib/signup-access";
 import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
 import { normalizeProfileInput } from "@/lib/student-profile";
+import { openEnrolment } from "@/lib/student-enrolment";
 
 /**
  * Whether there is a Branch table to select from.
@@ -520,14 +521,37 @@ export async function POST(request: NextRequest) {
           // the code assignment above — the backfill script repairs a missing
           // charge, and receivables falls back to the per-level figure until
           // one exists. See src/lib/tuition-charges.ts.
+          let signupCharge: { chargeId: string; amount: number } | null = null;
           try {
-            await ensureChargeForLevel({
+            signupCharge = await ensureChargeForLevel({
               studentId: created.id,
               level: normalizedLevel,
               origin: "signup",
             });
           } catch (chargeError) {
             console.error("Tuition charge creation failed on signup:", chargeError);
+          }
+
+          // Enrolment #1 — see lib/student-enrolment.ts. Best-effort like the
+          // code assignment and tuition charge above: a missed row is repaired
+          // by scripts/backfill-student-enrolments.mjs, never a reason to fail
+          // a signup that has already succeeded.
+          try {
+            await openEnrolment({
+              studentId: created.id,
+              level: normalizedLevel,
+              branchId: normalizedBranchId,
+              sessionSlot: normalizedSessionSlot,
+              classType: normalizedClassType,
+              deliveryMode: normalizedDeliveryMode,
+              batch: (normalizedAdmission as any)?.batch,
+              registeredAt: user.createdAt,
+              tenantId: currentTenantId(),
+              tuitionChargeId: signupCharge?.chargeId ?? null,
+              feeSnapshot: signupCharge?.amount ?? null,
+            });
+          } catch (enrolmentError) {
+            console.error("Enrolment history creation failed on signup:", enrolmentError);
           }
 
           /**

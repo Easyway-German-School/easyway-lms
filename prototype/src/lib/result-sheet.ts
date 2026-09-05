@@ -157,6 +157,7 @@ export async function buildResultSheet(
       user: { select: { name: true, email: true } },
       branch: { select: { name: true } },
       profile: true,
+      _count: { select: { enrolments: true } },
     },
   });
   if (!student) return null;
@@ -365,6 +366,7 @@ export async function buildResultSheet(
               heldBackAt: student.heldBackAt,
               classesStartedAt: student.classesStartedAt,
               createdAt: student.createdAt,
+              enrolmentCount: student._count.enrolments,
             }),
           }
         : null,

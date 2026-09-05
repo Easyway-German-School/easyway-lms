@@ -100,6 +100,10 @@ export async function GET(request: Request) {
       "Enrolled on": isoDate(student.createdAt),
       "Classes started": isoDate(student.classesStartedAt),
       "Held back": student.heldBackAt ? "yes" : "no",
+      // Per-level stints on record — see lib/student-enrolment.ts. 0 means a
+      // pre-enrolment-history account not yet touched by the backfill script,
+      // not a student with no history.
+      Enrolments: String(student._count.enrolments),
       Tags: student.tags.join("; "),
       Segments: segments.join("; "),
     };

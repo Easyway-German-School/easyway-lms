@@ -9,6 +9,7 @@ import { generateTempPassword } from "@/lib/student-password";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { normalizeProfileInput } from "@/lib/student-profile";
+import { openEnrolment } from "@/lib/student-enrolment";
 
 import { requireCapability } from "@/lib/admin-roles";
 export const dynamic = "force-dynamic";
@@ -353,10 +354,32 @@ export async function POST(request: NextRequest) {
           // Open the tuition ledger for the level they are imported into. Lower
           // levels a mid-course import already passed are the backfill script's
           // job (or an admin adjustment); this covers the level they're in now.
+          let importCharge: { chargeId: string; amount: number } | null = null;
           try {
-            await ensureChargeForLevel({ studentId: student.id, level, origin: "import" });
+            importCharge = await ensureChargeForLevel({ studentId: student.id, level, origin: "import" });
           } catch (chargeError) {
             console.error("Tuition charge creation failed on import", chargeError);
+          }
+
+          // Enrolment #1 (as far as this import can tell) — see
+          // lib/student-enrolment.ts. A mid-course student's EARLIER levels
+          // are not fabricated here; only the level this import places them
+          // at, same scope as the tuition charge above.
+          try {
+            await openEnrolment({
+              studentId: student.id,
+              level,
+              branchId: branch?.id ?? null,
+              sessionSlot,
+              classType: str(row, "classType") === "private" ? "private" : "group",
+              deliveryMode,
+              batch,
+              tenantId: gate.session.user.tenantId ?? null,
+              tuitionChargeId: importCharge?.chargeId ?? null,
+              feeSnapshot: importCharge?.amount ?? null,
+            });
+          } catch (enrolmentError) {
+            console.error("Enrolment history creation failed on import", enrolmentError);
           }
         }
 

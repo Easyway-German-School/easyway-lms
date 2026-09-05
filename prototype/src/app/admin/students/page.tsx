@@ -28,6 +28,21 @@ const BATCH_MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ] as const;
 
+/**
+ * Years the "Enrolled in year" filter offers — the current year back through
+ * when this school's earliest known batches sit, per lib/student-enrolment.ts.
+ * A plain range rather than a fetched list: nobody needs a year with zero
+ * students to be missing from the dropdown, and a live query for "which years
+ * actually have a row" would be one more request for what is, at most, a
+ * handful of options.
+ */
+function enrolmentYearOptions(): number[] {
+  const currentYear = new Date().getFullYear();
+  const years: number[] = [];
+  for (let year = currentYear; year >= currentYear - 6; year -= 1) years.push(year);
+  return years;
+}
+
 type BranchOption = {
   id: string;
   name: string;
@@ -163,6 +178,9 @@ function StudentsRoster() {
   // A stored tag (admin-authored) or a derived segment id — see
   // lib/student-segments.ts. The roster and the export treat both the same.
   const [filterTag, setFilterTag] = useState<string>(params.get("tag") ?? "");
+  // Which year a student was ever enrolled in — see lib/student-enrolment.ts.
+  // "Who studied with us in 2024", the thing Student.level alone could never answer.
+  const [filterYear, setFilterYear] = useState<string>(params.get("year") ?? "");
   const [search, setSearch] = useState<string>(params.get("search") ?? "");
   const [savingTagsFor, setSavingTagsFor] = useState<string>("");
   const [tagDraftFor, setTagDraftFor] = useState<string>("");
@@ -262,6 +280,7 @@ function StudentsRoster() {
     if (filterStatus) url.searchParams.set("status", filterStatus);
     if (filterPaymentStatus) url.searchParams.set("paymentStatus", filterPaymentStatus);
     if (filterTag) url.searchParams.set("tag", filterTag);
+    if (filterYear) url.searchParams.set("year", filterYear);
     if (search) url.searchParams.set("search", search);
     if (focus) url.searchParams.set("focus", focus);
     if (agingBucket) url.searchParams.set("agingBucket", agingBucket);
@@ -281,7 +300,7 @@ function StudentsRoster() {
       setAdminRole(typeof data.adminRole === "string" ? data.adminRole : "");
     }
     setLoading(false);
-  }, [agingBucket, filterBatch, filterBranchId, filterClassType, filterLevel, filterPaymentStatus, filterSessionSlot, filterStatus, filterTag, filterTutorId, focus, focusIds, page, pageSize, search]);
+  }, [agingBucket, filterBatch, filterBranchId, filterClassType, filterLevel, filterPaymentStatus, filterSessionSlot, filterStatus, filterTag, filterYear, filterTutorId, focus, focusIds, page, pageSize, search]);
 
   /**
    * Same query the roster just fetched, minus paging — the export route
@@ -306,6 +325,7 @@ function StudentsRoster() {
     if (filterStatus) params.set("status", filterStatus);
     if (filterPaymentStatus) params.set("paymentStatus", filterPaymentStatus);
     if (filterTag) params.set("tag", filterTag);
+    if (filterYear) params.set("year", filterYear);
     if (search) params.set("search", search);
     if (focus) params.set("focus", focus);
     if (agingBucket) params.set("agingBucket", agingBucket);
@@ -1067,6 +1087,25 @@ function StudentsRoster() {
                   <option value="">All students</option>
                   {DERIVED_SEGMENT_IDS.map((id) => (
                     <option key={id} value={id}>{SEGMENT_LABELS[id]}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                <label htmlFor="yearFilter" className="block text-sm font-semibold text-[var(--muted)]">
+                  Enrolled in year
+                </label>
+                <select
+                  id="yearFilter"
+                  value={filterYear}
+                  onChange={(event) => {
+                    setFilterYear(event.target.value);
+                    setPage(1);
+                  }}
+                  className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                >
+                  <option value="">Any year</option>
+                  {enrolmentYearOptions().map((year) => (
+                    <option key={year} value={year}>{year}</option>
                   ))}
                 </select>
               </div>

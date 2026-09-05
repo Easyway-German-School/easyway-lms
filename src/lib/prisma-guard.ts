@@ -64,6 +64,7 @@ export const FULLY_AUDITED_MODELS = new Set<string>([
   "User",
   "Student",
   "StudentProfile",
+  "StudentEnrolment",
   "Lecturer",
   "Branch",
   "Invoice",

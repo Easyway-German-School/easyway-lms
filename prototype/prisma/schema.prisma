@@ -232,6 +232,7 @@ model Tenant {
   /// scripts/add-tenant-columns.mjs; Prisma requires both sides.
   students                Student[]
   studentProfiles         StudentProfile[]
+  studentEnrolments       StudentEnrolment[]
   journeyEvents           JourneyEvent[]
   examRegistrations       ExamRegistration[]
   pathways                Pathway[]
@@ -654,6 +655,18 @@ model Student {
    */
   profile StudentProfile?
 
+  /**
+   * The per-level history — one row per level×batch the student has ever
+   * been in, across every year. See model StudentEnrolment below and
+   * src/lib/student-enrolment.ts. `Student.level`/`branchId`/`tutorId`/
+   * `sessionSlot`/`classType` above remain the denormalized CURRENT pointer;
+   * this is the ledger that survives a promotion instead of being overwritten
+   * by one. Spelled with one "l" (British) deliberately, to keep it visually
+   * distinct from `enrollments` below — a different, older, pathway/Stripe-era
+   * model this does not replace.
+   */
+  enrolments StudentEnrolment[]
+
   enrollments           Enrollment[]
   progress              Progress[]
   grades                Grade[]
@@ -776,6 +789,83 @@ model StudentProfile {
   @@index([tenantId])
   @@index([city])
   @@index([country])
+}
+
+/**
+ * One row per student × level × batch — the record that survives a
+ * promotion, where `Student.level` (overwritten every time) does not.
+ *
+ * WHY THIS EXISTS. Before it, `promoteStudents()` (src/lib/promotion.ts) did
+ * `student.update({ level: next, admission: {...admission, batch: monthName}
+ * })` — a straight overwrite. The fact that somebody did A1 in the September
+ * 2024 batch, at the Lagos branch, with a given tutor, paying a given fee,
+ * was gone the moment they moved to A2. "Batch" was a bare month name with no
+ * year, so there was no way to answer "who studied with us in 2024" or tell a
+ * genuinely returning student (one with a real prior stint) from a new one.
+ *
+ * Exactly one row per student should ever be `outcome: "ongoing"` at a time —
+ * see openEnrolment/closeOpenEnrolment in src/lib/student-enrolment.ts, the
+ * only functions that write this table. A level transition closes the open
+ * row (`endedAt`, `outcome: "completed"`) and opens the next; a withdrawal or
+ * graduation closes it without opening another.
+ *
+ * `Student.level`/`branchId`/`tutorId`/`sessionSlot`/`classType` stay exactly
+ * as they were — a denormalized CURRENT pointer nothing that already reads
+ * them has to change for. This table is the history underneath that pointer,
+ * not a replacement for it.
+ */
+model StudentEnrolment {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  level String
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  tutorId String?
+  tutor   Lecturer? @relation(fields: [tutorId], references: [id], onDelete: SetNull)
+
+  sessionSlot  String
+  classType    String
+  deliveryMode String
+
+  /// Bare month name ("September"), same as the admission blob's `batch`.
+  batchMonth String?
+  /// The missing dimension — resolved via lib/batch.ts's resolveBatchWindow
+  /// at the moment this row is opened, so it is fixed once written rather
+  /// than drifting with "now" the way a live re-derivation would.
+  batchYear  Int?
+
+  /// When this level actually started for this student. Mirrors
+  /// Student.classesStartedAt for the CURRENT enrolment; for a closed one it
+  /// is when that stint began.
+  startedAt DateTime?
+  /// Null while `outcome` is "ongoing".
+  endedAt   DateTime?
+
+  /// ongoing | completed | withdrawn | transferred
+  outcome     String  @default("ongoing")
+  outcomeNote String?
+
+  /// The TuitionCharge raised for this level, and what it was at the time —
+  /// so history survives a later price change. No relation (TuitionCharge has
+  /// no back-reference here) to keep this table writable even when the charge
+  /// lookup fails; see openEnrolment's best-effort handling.
+  tuitionChargeId String?
+  feeSnapshot     Int?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, startedAt])
+  @@index([tenantId, batchYear, level])
 }
 
 model StudentSkillMastery {
@@ -1018,6 +1108,7 @@ model Branch {
   recordings     ClassRecording[]
   liveSessions   LiveClassSession[]
   quizGames      QuizGame[]
+  enrolments     StudentEnrolment[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -2299,6 +2390,7 @@ model Lecturer {
   quizGames          QuizGame[]
   tutorMessages      TutorMessage[]
   sessionNotes       SessionNote[]
+  enrolments         StudentEnrolment[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and

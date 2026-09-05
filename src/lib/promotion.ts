@@ -5,6 +5,7 @@ import { DEPOSIT_RATE, derivePaymentStatus, isReceivedPayment, isRegistrationFee
 import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
 import { writeAudit } from "@/lib/prisma-guard";
 import { naira } from "@/lib/finance/receivables";
+import { closeOpenEnrolment, openEnrolment } from "@/lib/student-enrolment";
 
 /**
  * Who has finished a level but is still sitting in it.
@@ -197,7 +198,17 @@ export async function promoteStudents(
   for (const studentId of studentIds) {
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: { id: true, level: true, admission: true },
+      select: {
+        id: true,
+        level: true,
+        admission: true,
+        branchId: true,
+        tutorId: true,
+        sessionSlot: true,
+        classType: true,
+        deliveryMode: true,
+        tenantId: true,
+      },
     });
 
     if (!student) {
@@ -268,10 +279,40 @@ export async function promoteStudents(
     // dropping out of the maths. Idempotent — a next-level payment may have
     // created it already. Best-effort: a missing charge is repaired by the
     // backfill and receivables falls back to the per-level figure meanwhile.
+    let charge: { chargeId: string; amount: number } | null = null;
     try {
-      await ensureChargeForLevel({ studentId, level: next, origin: "promotion" });
+      charge = await ensureChargeForLevel({ studentId, level: next, origin: "promotion" });
     } catch (chargeError) {
       console.error("Tuition charge creation failed on promotion", { studentId, next, chargeError });
+    }
+
+    // Close the level they just left and open the one they are moving into —
+    // see src/lib/student-enrolment.ts. This is the record that makes
+    // "returning student" and "who was here in 2024" answerable instead of
+    // guessed at: Student.level only ever held the CURRENT level, so every
+    // promotion used to erase where somebody had actually been. Best-effort,
+    // same as the tuition charge above — a missed enrolment row is repaired by
+    // the backfill and nothing here blocks the promotion itself on it.
+    try {
+      await closeOpenEnrolment(studentId, { outcome: "completed", now });
+      await openEnrolment({
+        studentId,
+        level: next,
+        branchId: student.branchId,
+        tutorId: student.tutorId,
+        sessionSlot: student.sessionSlot,
+        classType: student.classType,
+        deliveryMode: student.deliveryMode,
+        batch: monthName,
+        registeredAt: now,
+        tenantId: student.tenantId,
+        startedAt: now,
+        tuitionChargeId: charge?.chargeId ?? null,
+        feeSnapshot: charge?.amount ?? null,
+        now,
+      });
+    } catch (enrolmentError) {
+      console.error("Enrolment history update failed on promotion", { studentId, next, enrolmentError });
     }
 
     result.promoted.push(studentId);

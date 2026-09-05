@@ -196,6 +196,14 @@ export const TENANT_OWNED_MODELS = [
   "SessionNote",
   "StudentAiUsage",
   "StudentSkillMastery",
+  /**
+   * The typed profile and the per-level enrolment history — see
+   * lib/student-profile.ts and lib/student-enrolment.ts. Both are 1:1/1:many
+   * children of Student and just as clearly one school's records as the
+   * Student row itself.
+   */
+  "StudentProfile",
+  "StudentEnrolment",
 
   /**
    * The Terms and Conditions consent trail and the refund requests it gates.

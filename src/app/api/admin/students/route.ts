@@ -11,6 +11,7 @@ import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { normalizeProfileInput, mergeProfile, type StudentProfileInput } from "@/lib/student-profile";
+import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
 import {
   buildRosterWhereClause,
   hasDerivedFilter as computeHasDerivedFilter,
@@ -293,10 +294,30 @@ export async function POST(request: Request) {
       // Open the tuition ledger for the level they start in, the same as signup
       // and the CSV import do. Non-fatal: a student can still be created if this
       // trips, and an admin adjustment can add the charge later.
+      let manualAddCharge: { chargeId: string; amount: number } | null = null;
       try {
-        await ensureChargeForLevel({ studentId: student.id, level, origin: "signup" });
+        manualAddCharge = await ensureChargeForLevel({ studentId: student.id, level, origin: "signup" });
       } catch (chargeError) {
         console.error("Tuition charge creation failed on manual add", chargeError);
+      }
+
+      // Enrolment #1 — see lib/student-enrolment.ts. Non-fatal, same as above.
+      try {
+        await openEnrolment({
+          studentId: student.id,
+          level,
+          branchId,
+          tutorId,
+          sessionSlot,
+          classType,
+          deliveryMode,
+          batch,
+          tenantId: gate.session.user.tenantId,
+          tuitionChargeId: manualAddCharge?.chargeId ?? null,
+          feeSnapshot: manualAddCharge?.amount ?? null,
+        });
+      } catch (enrolmentError) {
+        console.error("Enrolment history creation failed on manual add", enrolmentError);
       }
     }
 
@@ -478,6 +499,62 @@ export async function PATCH(request: Request) {
 
     await prisma.user.update({ where: { id: student.userId }, data: updateUser });
     await prisma.student.update({ where: { id: studentId }, data: updateStudent });
+
+    /**
+     * Enrolment history — see lib/student-enrolment.ts. Two things can end or
+     * start a stint here, independently of the "Promotions" flow in
+     * promotion.ts, which already handles the normal level-up case:
+     *
+     *   - the office moves a student to graduated/withdrawn: close the open
+     *     enrolment with that outcome.
+     *   - the office brings a graduated/withdrawn student back to active: a
+     *     genuine re-enrolment, so a fresh `ongoing` row opens — this is what
+     *     makes them read as a RETURNING student from here on.
+     *   - an ad-hoc level correction from this form (not through Promotions):
+     *     closes the old level's row and opens the new one, the same as a
+     *     promotion would.
+     *
+     * "paused" is deliberately not a boundary here — see setHeldBack in
+     * germany-journey-server.ts for the reasoning: a pause is a flag on the
+     * CURRENT stint, not the end of one.
+     */
+    const levelChanged = Boolean(level && level !== student.level);
+    const enteringTerminal =
+      Boolean(status) && status !== student.status && (status === "graduated" || status === "withdrawn");
+    const leavingTerminal =
+      Boolean(status) &&
+      status !== student.status &&
+      status === "active" &&
+      (student.status === "graduated" || student.status === "withdrawn");
+
+    if (levelChanged || enteringTerminal || leavingTerminal) {
+      try {
+        if (enteringTerminal) {
+          await closeOpenEnrolment(studentId, {
+            outcome: (status === "graduated" ? "completed" : "withdrawn") as EnrolmentOutcome,
+          });
+        } else if (levelChanged) {
+          await closeOpenEnrolment(studentId, { outcome: "completed" });
+        }
+
+        if (levelChanged || leavingTerminal) {
+          const effectiveAdmission = (updateStudent.admission ?? student.admission ?? {}) as Record<string, unknown>;
+          await openEnrolment({
+            studentId,
+            level: level || student.level,
+            branchId: body.branchId !== undefined ? branchId : student.branchId,
+            tutorId: body.tutorId !== undefined ? tutorId : student.tutorId,
+            sessionSlot: sessionSlot || student.sessionSlot,
+            classType: classType || student.classType,
+            deliveryMode: updateStudent.deliveryMode || student.deliveryMode,
+            batch: typeof effectiveAdmission.batch === "string" ? effectiveAdmission.batch : undefined,
+            tenantId: gate.session.user.tenantId,
+          });
+        }
+      } catch (enrolmentError) {
+        console.error("Enrolment history update failed on admin edit", { studentId, enrolmentError });
+      }
+    }
 
     /**
      * The structured profile — see lib/student-profile.ts. Reads BOTH the

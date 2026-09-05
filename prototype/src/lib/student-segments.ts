@@ -48,10 +48,11 @@ export type SegmentInput = {
   classesStartedAt: Date | null;
   createdAt: Date;
   /**
-   * How many enrolment periods this student has ever had. Phase 1 has no
-   * enrolment-history table yet, so callers pass 1 for everyone except a
-   * student whose record shows a prior run (see `wasEverPreviouslyActive`) —
-   * this becomes exact once Phase 2's StudentEnrolment table lands.
+   * How many `StudentEnrolment` rows this student has ever had — see
+   * lib/student-enrolment.ts. Exact once a student has been through the
+   * Phase 2 backfill or was created after it landed; undefined/0 reads as
+   * "new" the same way, which is the honest answer for a not-yet-backfilled
+   * legacy row (there is no data yet to call them "returning" from).
    */
   enrolmentCount?: number;
 };

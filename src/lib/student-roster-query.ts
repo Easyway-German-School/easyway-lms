@@ -40,6 +40,12 @@ export type RosterFilters = {
    * the post-query pass since a segment can't be expressed as SQL.
    */
   tag?: string | null;
+  /**
+   * A calendar year — "who was here in 2024". Unlike `tag`, this IS a real
+   * relational filter (StudentEnrolment.batchYear), so it runs in SQL rather
+   * than the post-query pass; see buildRosterWhereClause.
+   */
+  year?: string | null;
 };
 
 export function parseRosterFilters(url: URL): RosterFilters {
@@ -57,6 +63,7 @@ export function parseRosterFilters(url: URL): RosterFilters {
     agingBucket: url.searchParams.get("agingBucket"),
     ids: url.searchParams.get("ids"),
     tag: url.searchParams.get("tag"),
+    year: url.searchParams.get("year"),
   };
 }
 
@@ -117,6 +124,12 @@ export function buildRosterWhereClause(
   if (filters.tutorId) {
     whereClause.tutorId = filters.tutorId;
   }
+  if (filters.year) {
+    const year = Number(filters.year);
+    if (Number.isInteger(year)) {
+      whereClause.enrolments = { some: { batchYear: year, deletedAt: null } };
+    }
+  }
 
   return whereClause;
 }
@@ -152,6 +165,12 @@ export const ROSTER_INCLUDE = {
     take: 1,
     select: { occurredAt: true },
   },
+  // How many level×batch stints this student has ever had — see
+  // lib/student-enrolment.ts. Feeds deriveSegments' "returning" rule; more
+  // than every existing row is created before enrolment-history existed
+  // (see the Phase 2 backfill), so this reads 0 for a not-yet-backfilled row
+  // rather than 1, which deriveSegments treats the same as "new" either way.
+  _count: { select: { enrolments: true } },
 } satisfies Prisma.StudentInclude;
 
 export type RosterRow = Prisma.StudentGetPayload<{ include: typeof ROSTER_INCLUDE }>;
@@ -219,6 +238,7 @@ export function scoreAndFilterRoster(
         heldBackAt: student.heldBackAt,
         classesStartedAt: student.classesStartedAt,
         createdAt: student.createdAt,
+        enrolmentCount: student._count.enrolments,
       },
       { now, finance, risk },
     );

@@ -196,6 +196,24 @@ type Dossier = {
   } | null;
   tags: string[];
   segments: string[];
+  // The per-level history — see lib/student-enrolment.ts. Newest first.
+  enrolments: Array<{
+    id: string;
+    level: string;
+    sessionSlot: string;
+    classType: string;
+    deliveryMode: string;
+    batchMonth: string | null;
+    batchYear: number | null;
+    startedAt: string | null;
+    endedAt: string | null;
+    outcome: string;
+    outcomeNote: string | null;
+    feeSnapshot: number | null;
+    branchName: string | null;
+    tutorName: string | null;
+    createdAt: string;
+  }>;
 };
 
 const PAYWALL_LABEL: Record<Dossier["money"]["paywall"], string> = {
@@ -1518,6 +1536,69 @@ export default function StudentDossierPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </Card>
+
+          {/* ---- Enrolment history — see lib/student-enrolment.ts ---------- */}
+          <Card
+            title="Enrolment history"
+            hint={
+              data.enrolments.length === 1
+                ? "1 stint on record"
+                : `${data.enrolments.length} stints on record`
+            }
+          >
+            {data.enrolments.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">
+                No enrolment history yet — this account predates the enrolment ledger and has not been
+                backfilled.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {data.enrolments.map((row) => {
+                  const ongoing = row.outcome === "ongoing";
+                  return (
+                    <div
+                      key={row.id}
+                      className={`rounded-2xl border px-4 py-3 ${
+                        ongoing
+                          ? "border-[var(--accent)]/40 bg-[var(--accent-soft)]"
+                          : "border-[var(--border)] bg-[var(--background)]"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="font-bold text-[var(--foreground)]">
+                          {row.level}
+                          {row.batchMonth ? ` · ${row.batchMonth}${row.batchYear ? ` ${row.batchYear}` : ""}` : ""}
+                        </p>
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                            ongoing
+                              ? "bg-[var(--accent)] text-white"
+                              : row.outcome === "completed"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-[var(--surface-soft)] text-[var(--muted)]"
+                          }`}
+                        >
+                          {ongoing ? "Ongoing" : row.outcome}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-[var(--muted)]">
+                        {row.branchName ?? "No branch on record"} · {row.classType} · {row.sessionSlot} ·{" "}
+                        {row.deliveryMode}
+                        {row.tutorName ? ` · ${row.tutorName}` : ""}
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--muted)]">
+                        {when(row.startedAt)} – {ongoing ? "now" : when(row.endedAt)}
+                        {row.feeSnapshot ? ` · ${naira(row.feeSnapshot)}` : ""}
+                      </p>
+                      {row.outcomeNote ? (
+                        <p className="mt-1 text-xs italic text-[var(--muted)]">{row.outcomeNote}</p>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </Card>
