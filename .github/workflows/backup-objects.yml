@@ -38,20 +38,22 @@ jobs:
     timeout-minutes: 120
 
     env:
-      # Source: Cloudflare R2, where the app writes.
+      # Source: wherever the app actually writes today. Not hardcoded to a
+      # provider — that assumption drifted true once (this was written
+      # expecting R2) and broke silently, so both ends read their provider
+      # and region from secrets instead of a comment's say-so.
       RCLONE_CONFIG_SRC_TYPE: s3
-      RCLONE_CONFIG_SRC_PROVIDER: Cloudflare
+      RCLONE_CONFIG_SRC_PROVIDER: ${{ secrets.STORAGE_S3_PROVIDER }}
       RCLONE_CONFIG_SRC_ENDPOINT: ${{ secrets.STORAGE_S3_ENDPOINT }}
       RCLONE_CONFIG_SRC_ACCESS_KEY_ID: ${{ secrets.STORAGE_S3_ACCESS_KEY }}
       RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY: ${{ secrets.STORAGE_S3_SECRET }}
-      RCLONE_CONFIG_SRC_REGION: auto
-      # R2 bills per operation, and rclone's default checksum probing is
-      # chatty. This keeps the nightly run to a list plus the changed objects.
+      RCLONE_CONFIG_SRC_REGION: ${{ secrets.STORAGE_S3_REGION }}
+      # Harmless no-op on providers that don't bill per operation; skips a
+      # chatty bucket-existence probe on the ones that do.
       RCLONE_CONFIG_SRC_NO_CHECK_BUCKET: "true"
 
-      # Destination: a different vendor. Backblaze B2 speaks S3 and is the
-      # cheap default; anything S3-compatible works as long as it is NOT
-      # another Cloudflare account.
+      # Destination: a different vendor account from the source above — the
+      # whole point is that one vendor's incident can't take out both copies.
       RCLONE_CONFIG_DST_TYPE: s3
       RCLONE_CONFIG_DST_PROVIDER: ${{ secrets.BACKUP_S3_PROVIDER }}
       RCLONE_CONFIG_DST_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
