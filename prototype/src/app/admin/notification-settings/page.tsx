@@ -185,6 +185,8 @@ export default function NotificationSettingsPage() {
           </div>
         )}
 
+        {data && data.smsTransport.configured && <TestSmsPanel />}
+
         {/* ---- The two senders ------------------------------------------- */}
         {data && (
           <div className="mb-5 grid gap-3 sm:grid-cols-2">
@@ -362,5 +364,76 @@ export default function NotificationSettingsPage() {
         )}
       </div>
     </AdminShell>
+  );
+}
+
+/**
+ * "Does SMS actually work?" — the honest answer, not a green checkmark
+ * because a key is present. `TERMII_API_KEY` alone proves nothing: Termii
+ * also requires a Sender ID to be registered and approved before texts
+ * deliver, and a missing/unapproved one fails at send time, not at startup.
+ * This sends a real message and reports Termii's real response.
+ */
+function TestSmsPanel() {
+  const [phone, setPhone] = useState("");
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  async function send() {
+    setState("sending");
+    setMessage("");
+    try {
+      const res = await fetch("/api/admin/notification-settings/test-sms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setState("error");
+        setMessage(data.error ?? "Termii did not confirm delivery.");
+        return;
+      }
+      setState("sent");
+      setMessage(`Sent to ${data.sentTo} — check that phone for the text.`);
+    } catch {
+      setState("error");
+      setMessage("Could not reach the server.");
+    }
+  }
+
+  return (
+    <div className="mb-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <p className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
+        <SendIcon className="h-4 w-4 shrink-0 text-[var(--accent)]" /> Send a test SMS
+      </p>
+      <p className="mt-1.5 text-xs leading-5 text-[var(--muted)]">
+        TERMII_API_KEY is set, but that only proves the key exists — Termii also requires an
+        approved Sender ID before a text actually delivers. Send one to a real phone to find out
+        for certain.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="08031234567"
+          disabled={state === "sending"}
+          className="min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={() => void send()}
+          disabled={state === "sending" || !phone.trim()}
+          className="rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+        >
+          {state === "sending" ? "Sending…" : "Send test"}
+        </button>
+      </div>
+      {message && (
+        <p className={`mt-2.5 text-sm font-medium ${state === "error" ? "text-red-600" : "text-emerald-600"}`}>
+          {message}
+        </p>
+      )}
+    </div>
   );
 }
