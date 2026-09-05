@@ -125,6 +125,12 @@ export default function PaymentsPage() {
                     Make a payment
                   </Link>
                 )}
+                <a
+                  href="/api/student/enrolment-letter"
+                  className="text-xs font-semibold text-[var(--muted)] underline underline-offset-2 hover:text-[var(--foreground)]"
+                >
+                  Download proof-of-enrolment letter
+                </a>
                 {payments.length > 0 ? (
                   <button
                     type="button"
@@ -156,11 +162,12 @@ export default function PaymentsPage() {
             </div>
 
             <div className="mt-10 overflow-hidden rounded-[32px] border border-[var(--border)] bg-[var(--surface-alt)] shadow-sm">
-              <div className="grid grid-cols-5 gap-4 border-b border-[var(--border)] bg-[var(--surface)] px-6 py-4 text-sm uppercase tracking-[0.24em] text-[var(--muted)]">
+              <div className="grid grid-cols-6 gap-4 border-b border-[var(--border)] bg-[var(--surface)] px-6 py-4 text-sm uppercase tracking-[0.24em] text-[var(--muted)]">
                 <span className="col-span-2">Payment</span>
                 <span>Status</span>
                 <span>Amount</span>
                 <span>Date</span>
+                <span></span>
               </div>
 
               <div className="space-y-3 px-6 py-6 text-sm text-[var(--foreground)]">
@@ -177,18 +184,31 @@ export default function PaymentsPage() {
                     No payments have been recorded yet. Click &quot;Make a payment&quot; to pay your next deposit or tuition balance.
                   </div>
                 ) : (
-                  payments.map((payment) => (
-                    <div key={payment.id} className="grid grid-cols-5 gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 shadow-sm">
-                      <span className="col-span-2">{payment.description || "Payment received"}</span>
-                      <span className={payment.status.toLowerCase() === "completed" ? "text-emerald-600" : "text-[var(--accent)]"}>
-                        {payment.status}
-                      </span>
-                      <span>
-                        {payment.currency.toUpperCase()} {payment.amount.toLocaleString()}
-                      </span>
-                      <span>{new Date(payment.createdAt).toLocaleDateString()}</span>
-                    </div>
-                  ))
+                  payments.map((payment) => {
+                    const received = ["completed", "partial"].includes(payment.status.toLowerCase());
+                    return (
+                      <div key={payment.id} className="grid grid-cols-6 gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 shadow-sm">
+                        <span className="col-span-2">{payment.description || "Payment received"}</span>
+                        <span className={payment.status.toLowerCase() === "completed" ? "text-emerald-600" : "text-[var(--accent)]"}>
+                          {payment.status}
+                        </span>
+                        <span>
+                          {payment.currency.toUpperCase()} {payment.amount.toLocaleString()}
+                        </span>
+                        <span>{new Date(payment.createdAt).toLocaleDateString()}</span>
+                        {received ? (
+                          <a
+                            href={`/api/student/payments/${payment.id}/receipt`}
+                            className="text-xs font-semibold text-[var(--accent)] underline underline-offset-2 hover:opacity-80"
+                          >
+                            Receipt
+                          </a>
+                        ) : (
+                          <span />
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>

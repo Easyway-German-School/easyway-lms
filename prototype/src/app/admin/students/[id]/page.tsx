@@ -1517,6 +1517,19 @@ export default function StudentDossierPage() {
               </div>
             )}
 
+            <div className="mt-5 border-t border-[var(--border)] pt-4">
+              <a
+                href={`/api/admin/students/${id}/enrolment-letter`}
+                className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] px-4 py-2 text-xs font-bold uppercase tracking-wide text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+              >
+                Proof-of-enrolment letter
+              </a>
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                For a visa office, embassy, or employer — states their level, pathway and enrolment
+                date, and whether tuition is currently settled.
+              </p>
+            </div>
+
             {engagement.videos.length > 0 && (
               <div className="mt-5 border-t border-[var(--border)] pt-4">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
