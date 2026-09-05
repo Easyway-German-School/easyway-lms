@@ -25,6 +25,7 @@ type Row = {
   inApp: boolean;
   push: boolean;
   email: boolean;
+  sms: boolean;
   mutable: boolean;
 };
 
@@ -32,6 +33,7 @@ const CHANNELS = [
   { key: "inApp" as const, label: "Bell", hint: "In the portal" },
   { key: "push" as const, label: "Push", hint: "On your device" },
   { key: "email" as const, label: "Email", hint: "In your inbox" },
+  { key: "sms" as const, label: "SMS", hint: "As a text message" },
 ];
 
 export default function NotificationPreferences({ endpoint }: { endpoint: string }) {
@@ -56,7 +58,7 @@ export default function NotificationPreferences({ endpoint }: { endpoint: string
     void load();
   }, [load]);
 
-  async function toggle(kind: string, channel: "inApp" | "push" | "email") {
+  async function toggle(kind: string, channel: "inApp" | "push" | "email" | "sms") {
     const current = rows.find((row) => row.kind === kind);
     if (!current || !current.mutable) return;
 
@@ -70,7 +72,7 @@ export default function NotificationPreferences({ endpoint }: { endpoint: string
       const response = await fetch(endpoint, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, inApp: next.inApp, push: next.push, email: next.email }),
+        body: JSON.stringify({ kind, inApp: next.inApp, push: next.push, email: next.email, sms: next.sms }),
       });
       if (!response.ok) throw new Error("save failed");
       setNote("Saved.");

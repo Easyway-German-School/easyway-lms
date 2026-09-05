@@ -31,10 +31,10 @@ const UNMUTABLE: ReadonlySet<string> = new Set([
   KIND.gatewayError,
 ]);
 
-export type MutedChannels = { inApp: boolean; push: boolean; email: boolean };
+export type MutedChannels = { inApp: boolean; push: boolean; email: boolean; sms: boolean };
 
 /** Nothing muted — what a person with no stored row gets. */
-const ALLOW_ALL: MutedChannels = { inApp: true, push: true, email: true };
+const ALLOW_ALL: MutedChannels = { inApp: true, push: true, email: true, sms: true };
 
 /**
  * Which channels each of these people still accepts for this kind.
@@ -61,11 +61,11 @@ export async function mutedChannelsFor(
     return out;
   }
 
-  let rows: Array<{ userId: string; inApp: boolean; push: boolean; email: boolean }> = [];
+  let rows: Array<{ userId: string; inApp: boolean; push: boolean; email: boolean; sms: boolean }> = [];
   try {
     rows = await prisma.notificationPreference.findMany({
       where: { userId: { in: userIds }, kind },
-      select: { userId: true, inApp: true, push: true, email: true },
+      select: { userId: true, inApp: true, push: true, email: true, sms: true },
     });
   } catch (error) {
     // A preferences table that cannot be read must not stop the school's
@@ -86,6 +86,7 @@ export async function mutedChannelsFor(
             inApp: row.inApp || severity === "critical",
             push: row.push,
             email: row.email,
+            sms: row.sms,
           }
         : ALLOW_ALL,
     );
@@ -104,10 +105,10 @@ export async function preferencesFor(userId: string): Promise<Record<string, Mut
   try {
     const rows = await prisma.notificationPreference.findMany({
       where: { userId },
-      select: { kind: true, inApp: true, push: true, email: true },
+      select: { kind: true, inApp: true, push: true, email: true, sms: true },
     });
     return Object.fromEntries(
-      rows.map((row) => [row.kind, { inApp: row.inApp, push: row.push, email: row.email }]),
+      rows.map((row) => [row.kind, { inApp: row.inApp, push: row.push, email: row.email, sms: row.sms }]),
     );
   } catch (error) {
     // The table is added by a migration that may not have been deployed yet.
@@ -129,6 +130,7 @@ export async function savePreference(
     inApp: channels.inApp ?? true,
     push: channels.push ?? true,
     email: channels.email ?? true,
+    sms: channels.sms ?? true,
   };
   await prisma.notificationPreference.upsert({
     where: { userId_kind: { userId, kind } },

@@ -160,6 +160,27 @@ export function emailsByDefault(kind: string): boolean {
   return EMAILS_BY_DEFAULT.has(kind);
 }
 
+/**
+ * Whether a kind texts by default.
+ *
+ * Far narrower than email: every SMS costs money, so only the handful of
+ * things worth a phone buzzing for even when the reader never opens the app
+ * are on here. Everything else stays off until an admin turns it on for
+ * their school specifically.
+ */
+const SMS_BY_DEFAULT = new Set<string>([
+  KIND.paymentReceived,
+  KIND.paymentFailed,
+  KIND.tuitionReminder,
+  KIND.gatewayError,
+  KIND.examRegistered,
+  KIND.examPretest,
+]);
+
+export function smsByDefault(kind: string): boolean {
+  return SMS_BY_DEFAULT.has(kind);
+}
+
 /** Human labels for the admin settings page. */
 export const KIND_LABELS: Record<string, string> = {
   [KIND.studentRegistered]: "A student registers",

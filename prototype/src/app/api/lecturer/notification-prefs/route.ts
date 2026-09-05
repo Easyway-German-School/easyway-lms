@@ -63,7 +63,7 @@ export async function GET() {
       ...entry,
       // A kind with no stored row is fully on. The client never has to know
       // that absence means "on" — it is resolved here, once.
-      ...(stored[entry.kind] ?? { inApp: true, push: true, email: true }),
+      ...(stored[entry.kind] ?? { inApp: true, push: true, email: true, sms: true }),
       mutable: isMutable(entry.kind),
     })),
   });
@@ -90,6 +90,7 @@ export async function PATCH(request: Request) {
     inApp: body.inApp !== false,
     push: body.push !== false,
     email: body.email !== false,
+    sms: body.sms !== false,
   });
 
   return NextResponse.json({ success: true });

@@ -12,6 +12,7 @@ import {
 } from "@/lib/mail-identity";
 import { allPlans, invalidateRoutingCache } from "@/lib/notification-routing";
 import { activeTransport, isEmailConfigured } from "@/lib/mailer";
+import { isSmsConfigured } from "@/lib/sms";
 import { parseAutoRelease, RESULTS_AUTO_RELEASE_KEY } from "@/lib/result-settings";
 
 /**
@@ -54,6 +55,9 @@ export async function GET() {
       configured: isEmailConfigured(),
       via: activeTransport(),
     },
+    smsTransport: {
+      configured: isSmsConfigured(),
+    },
   });
 }
 
@@ -89,6 +93,7 @@ export async function PATCH(req: NextRequest) {
   if (typeof body.inApp === "boolean") data.inApp = body.inApp;
   if (typeof body.push === "boolean") data.push = body.push;
   if (typeof body.email === "boolean") data.email = body.email;
+  if (typeof body.sms === "boolean") data.sms = body.sms;
   if (body.identity !== undefined) {
     if (body.identity !== null && !isMailIdentityKey(body.identity)) {
       return NextResponse.json({ error: "Sender must be support or noreply" }, { status: 400 });
@@ -107,6 +112,7 @@ export async function PATCH(req: NextRequest) {
       inApp: current[kind].inApp,
       push: current[kind].push,
       email: current[kind].email,
+      sms: current[kind].sms,
       identity: current[kind].identity,
       ...data,
     },

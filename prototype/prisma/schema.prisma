@@ -271,6 +271,7 @@ model Tenant {
   assignmentTargets       AssignmentTarget[]
   assignmentSubmissions   AssignmentSubmission[]
   emailMessages           EmailMessage[]
+  smsMessages             SmsMessage[]
   notificationSettings    NotificationSetting[]
   certificateTemplates    CertificateTemplate[]
   notificationPreferences NotificationPreference[]
@@ -3304,6 +3305,46 @@ model NotificationPreference {
    */
   @@unique([userId, kind])
   @@index([userId])
+  @@index([tenantId])
+}
+
+/// The SMS pipeline's queue — mirrors EmailMessage. No suppression list: a
+/// wrong number just fails to deliver, it does not blacklist a sender the way
+/// a bounced mailbox can.
+model SmsMessage {
+  id String @id @default(cuid())
+
+  /// Bare international format, no leading '+' — see normalizeNigerianPhone().
+  to      String
+  message String
+
+  /**
+   * payment_reminder | exam_reminder | bulk | ...
+   */
+  type String @default("general")
+
+  studentId String?
+
+  /**
+   * queued | sending | sent | failed | cancelled
+   */
+  status    String  @default("queued")
+  attempts  Int     @default(0)
+  lastError String?
+
+  scheduledFor DateTime  @default(now())
+  sentAt       DateTime?
+
+  campaignId String?
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+  @@index([studentId])
   @@index([tenantId])
 }
 

@@ -64,6 +64,13 @@ async function handleGET(request: NextRequest) {
   );
 
   results.push(
+    await run("sms-queue", async () => {
+      const { drainSmsQueue } = await import("@/lib/sms-queue");
+      return drainSmsQueue(50);
+    }),
+  );
+
+  results.push(
     await run("payment-plans", async () => {
       // Move plans to completed/defaulted BEFORE the reminder jobs, so a plan
       // that lapsed today is no longer holding the lock back when they run.

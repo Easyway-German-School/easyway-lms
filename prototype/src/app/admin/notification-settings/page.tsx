@@ -24,6 +24,7 @@ type Plan = {
   inApp: boolean;
   push: boolean;
   email: boolean;
+  sms: boolean;
   identity: "support" | "noreply";
   configured: boolean;
 };
@@ -36,6 +37,7 @@ type Payload = {
   plans: Record<string, Plan>;
   addresses: { support: string; noreply: string };
   transport: { configured: boolean; via: "mailersend" | "smtp" | "none" };
+  smsTransport: { configured: boolean };
   autoRelease: AutoRelease;
 };
 
@@ -168,6 +170,21 @@ export default function NotificationSettingsPage() {
           </div>
         )}
 
+        {data && !data.smsTransport.configured && (
+          <div className="mb-5 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+            <p className="flex items-center gap-2 text-sm font-bold text-amber-900">
+              <AlertIcon className="h-4 w-4 shrink-0" /> No SMS is going out
+            </p>
+            <p className="mt-1.5 text-sm leading-6 text-amber-800">
+              Nothing below marked <strong>SMS</strong> can be delivered until a Termii account is
+              connected — set <code className="rounded bg-amber-100 px-1">TERMII_API_KEY</code> (and
+              optionally <code className="rounded bg-amber-100 px-1">TERMII_SENDER_ID</code>) in the
+              environment. Every other channel is unaffected, and anything queued for SMS will send
+              itself once a key is set.
+            </p>
+          </div>
+        )}
+
         {/* ---- The two senders ------------------------------------------- */}
         {data && (
           <div className="mb-5 grid gap-3 sm:grid-cols-2">
@@ -286,9 +303,10 @@ export default function NotificationSettingsPage() {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
-                          {(["inApp", "push", "email"] as const).map((channel) => {
+                          {(["inApp", "push", "email", "sms"] as const).map((channel) => {
                             const on = plan[channel];
-                            const label = channel === "inApp" ? "Bell" : channel === "push" ? "Push" : "Email";
+                            const label =
+                              channel === "inApp" ? "Bell" : channel === "push" ? "Push" : channel === "email" ? "Email" : "SMS";
                             return (
                               <button
                                 key={channel}

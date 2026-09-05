@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { sendPushToUsers } from "@/lib/push";
 import { queueEmail } from "@/lib/email-queue";
+import { queueSms } from "@/lib/sms-queue";
+import { normalizeNigerianPhone } from "@/lib/sms";
 import { renderNotificationEmail } from "@/lib/notification-email";
 import { planFor } from "@/lib/notification-routing";
 import { mutedChannelsFor, type MutedChannels } from "@/lib/notification-prefs";
@@ -108,6 +110,13 @@ export type NotifyInput = {
   /** Also buzz their phone. Defaults on for warning and critical. */
   push?: boolean;
   /**
+   * Also text it, as an SMS, to whichever recipients are students with a
+   * phone number on file. Left undefined the admin settings decide (see
+   * notification-routing.ts); pass a boolean to force the issue for one send.
+   * Every SMS costs money, so unlike push this defaults OFF for most kinds.
+   */
+  sms?: boolean;
+  /**
    * Also send it as an email.
    *
    * Left undefined the admin settings decide, falling back to the per-kind
@@ -146,6 +155,8 @@ export type NotifyResult = {
   pushed: number;
   /** Emails put on the queue. Zero when this kind does not email. */
   queuedEmails: number;
+  /** SMS put on the queue. Zero when this kind does not text, or nobody reached has a usable phone number. */
+  queuedSms: number;
 };
 
 /** Resolve a target down to the user ids it actually reaches. */
@@ -266,7 +277,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
 
   const recipients = await resolveRecipients(input.to);
   if (recipients.length === 0) {
-    return { batchId, created: 0, skipped: 0, pushed: 0, queuedEmails: 0 };
+    return { batchId, created: 0, skipped: 0, pushed: 0, queuedEmails: 0, queuedSms: 0 };
   }
 
   // Anyone who already got this exact notification is dropped rather than
@@ -284,7 +295,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   }
 
   if (targets.length === 0) {
-    return { batchId, created: 0, skipped, pushed: 0, queuedEmails: 0 };
+    return { batchId, created: 0, skipped, pushed: 0, queuedEmails: 0, queuedSms: 0 };
   }
 
   // The student id is denormalised onto the row so the existing student-scoped
@@ -416,10 +427,57 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
     }
   }
 
+  /**
+   * The same message, by SMS.
+   *
+   * Students only, for now: the phone number lives on StudentProfile, and
+   * every kind that texts by default (payments, exam reminders) is
+   * student-facing anyway. `wantsSms` follows the same explicit-override
+   * rule as email above.
+   */
+  let queuedSms = 0;
+  const wantsSms = typeof input.sms === "boolean" ? input.sms : plan.sms;
+  if (wantsSms) {
+    try {
+      const smsTargets = targets.filter((id) => accepts(id, "sms"));
+      const studentIds = smsTargets
+        .map((userId) => studentByUser.get(userId)?.id)
+        .filter((id): id is string => Boolean(id));
+
+      if (studentIds.length > 0) {
+        const profiles = await prisma.studentProfile.findMany({
+          where: { studentId: { in: studentIds } },
+          select: { studentId: true, phone: true, whatsapp: true },
+        });
+        const phoneByStudent = new Map(
+          profiles.map((p) => [p.studentId, normalizeNigerianPhone(p.phone ?? p.whatsapp)]),
+        );
+
+        for (const userId of smsTargets) {
+          const student = studentByUser.get(userId);
+          const phone = student ? phoneByStudent.get(student.id) : null;
+          if (!phone) continue; // No usable number on file — nothing to text.
+
+          await queueSms({
+            to: phone,
+            message: `${input.title}: ${input.message}`,
+            type: kind,
+            studentId: student?.id ?? null,
+          });
+          queuedSms += 1;
+        }
+      }
+    } catch (error) {
+      // Same rule as push and email: the bell already rang, and an SMS queue
+      // problem must not undo it or fail the request that triggered it.
+      console.warn("notify: sms queueing failed", error);
+    }
+  }
+
   // Rows actually written, not recipients considered. A tutor's announcements
   // page reports `sentTo` from this, and counting people who had muted the
   // kind would tell them thirty students were reached when twenty-eight were.
-  return { batchId, created: inAppTargets.length, skipped, pushed, queuedEmails };
+  return { batchId, created: inAppTargets.length, skipped, pushed, queuedEmails, queuedSms };
 }
 
 /**

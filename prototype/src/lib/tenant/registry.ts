@@ -76,6 +76,7 @@ export const TENANT_OWNED_MODELS = [
   "NotificationPreference",
   "EmailLog",
   "EmailMessage",
+  "SmsMessage",
   "EmailSuppression",
   "PushSubscription",
   "Space",

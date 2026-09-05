@@ -3,6 +3,7 @@ import {
   emailsByDefault,
   identityForKind,
   isMailIdentityKey,
+  smsByDefault,
   type MailIdentityKey,
 } from "@/lib/mail-identity";
 
@@ -26,6 +27,7 @@ export type ChannelPlan = {
   inApp: boolean;
   push: boolean;
   email: boolean;
+  sms: boolean;
   identity: MailIdentityKey;
 };
 
@@ -34,6 +36,7 @@ type Row = {
   inApp: boolean;
   push: boolean;
   email: boolean;
+  sms: boolean;
   identity: string | null;
 };
 
@@ -73,6 +76,7 @@ export async function planFor(kind: string, pushDefault: boolean): Promise<Chann
     inApp: row?.inApp ?? true,
     push: row?.push ?? pushDefault,
     email: row?.email ?? emailsByDefault(kind),
+    sms: row?.sms ?? smsByDefault(kind),
     identity: isMailIdentityKey(row?.identity) ? row.identity : identityForKind(kind).key,
   };
 }
@@ -90,6 +94,7 @@ export async function allPlans(kinds: readonly string[]): Promise<Record<string,
       // is not a setting anybody can reason about.
       push: row?.push ?? true,
       email: row?.email ?? emailsByDefault(kind),
+      sms: row?.sms ?? smsByDefault(kind),
       identity: isMailIdentityKey(row?.identity) ? row.identity : identityForKind(kind).key,
       configured: Boolean(row),
     };
