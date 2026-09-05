@@ -14,13 +14,14 @@ async function canUseStudentGames(userId: string) {
     select: {
       classType: true,
       level: true,
+      pathway: true,
       branch: { select: { name: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
   if (!student) return false;
   if (student.classType === "private") return false;
-  const lookup = { level: student.level, branch: student.branch?.name, classType: student.classType };
+  const lookup = { level: student.level, branch: student.branch?.name, classType: student.classType, pathway: student.pathway };
   const payment = derivePaymentStatus({
     totalPaid: student.payments.reduce((sum, payment) => sum + payment.amount, 0),
     tuitionFee: tuitionFeeFor(lookup),

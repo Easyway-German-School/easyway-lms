@@ -163,6 +163,7 @@ const CAPABILITY_LABELS: Record<Capability, string> = {
   security: "Security & recovery - the activity trail, restoring deleted records (super admin)",
   work_drive: "Work Drive - staff file store, workspaces and sharing",
   events: "Staff calendar, events and webinars",
+  payroll: "Tutor payroll - pay rates and payout records (super admin)",
 };
 
 /**

@@ -75,7 +75,7 @@ export async function POST(request: Request) {
     // has not met their deposit cannot register for an exam either. Checked
     // here, at registration, rather than only at the exam centre later —
     // finding out the day of is the failure mode this closes.
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
     const totalPaid = student.payments
       .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
       .reduce((sum, payment) => sum + payment.amount, 0);

@@ -1,6 +1,14 @@
 import { describe as suite, expect, it } from "vitest";
 
-import { MIN_PART_PAYMENT, resolvePartialPaymentAmount } from "./payment";
+import {
+  MIN_PART_PAYMENT,
+  resolvePartialPaymentAmount,
+  isTravelPackagePathway,
+  tuitionFeeFor,
+  requiredDepositFor,
+  TRAVEL_PACKAGE_PRICE,
+  TRAVEL_PACKAGE_MIN_FIRST_PAYMENT,
+} from "./payment";
 
 /**
  * `resolvePartialPaymentAmount` is the only thing between "a student types how
@@ -157,5 +165,106 @@ suite("resolvePartialPaymentAmount — guards", () => {
       alreadyPaid: 0,
     });
     expect(result.ok).toBe(false);
+  });
+});
+
+/**
+ * Travel Package: a flat ₦980,000 that REPLACES the per-level ladder, with a
+ * ₦200,000 minimum first payment instead of the usual 60% deposit. These are
+ * the only two functions that decide the price and the floor — everything
+ * else (cohort, lock, dashboard) just reads whatever these two return.
+ */
+suite("isTravelPackagePathway", () => {
+  it("matches the exact pathway, case- and whitespace-insensitively", () => {
+    expect(isTravelPackagePathway("Travel Package")).toBe(true);
+    expect(isTravelPackagePathway("travel package")).toBe(true);
+    expect(isTravelPackagePathway("  TRAVEL PACKAGE  ")).toBe(true);
+  });
+
+  it("does not match any other pathway, or nothing at all", () => {
+    expect(isTravelPackagePathway("Language training")).toBe(false);
+    expect(isTravelPackagePathway("Nursing career path")).toBe(false);
+    expect(isTravelPackagePathway(null)).toBe(false);
+    expect(isTravelPackagePathway(undefined)).toBe(false);
+    expect(isTravelPackagePathway("")).toBe(false);
+  });
+});
+
+suite("tuitionFeeFor — Travel Package", () => {
+  it("prices at the flat ₦980,000 whatever the level or branch", () => {
+    for (const level of ["A1", "A2", "B1", "B2", "C1"]) {
+      for (const branch of [null, "Lagos", "Abuja", "Online"]) {
+        expect(tuitionFeeFor({ level, branch, pathway: "Travel Package" })).toBe(TRAVEL_PACKAGE_PRICE);
+      }
+    }
+  });
+
+  it("wins over the private one-to-one flat price when both are somehow set", () => {
+    expect(tuitionFeeFor({ level: "B1", branch: "Abuja", classType: "private", pathway: "Travel Package" })).toBe(
+      TRAVEL_PACKAGE_PRICE,
+    );
+  });
+
+  it("leaves every non-Travel-Package student on the normal table", () => {
+    expect(tuitionFeeFor({ level: "A1", branch: "Lagos", pathway: "Language training" })).toBe(150000);
+    expect(tuitionFeeFor({ level: "A1", branch: "Lagos" })).toBe(150000);
+  });
+});
+
+suite("requiredDepositFor — Travel Package", () => {
+  it("is the flat ₦200,000 floor, not 60% of ₦980,000", () => {
+    const deposit = requiredDepositFor({ level: "A1", branch: null, pathway: "Travel Package" });
+    expect(deposit).toBe(TRAVEL_PACKAGE_MIN_FIRST_PAYMENT);
+    expect(deposit).not.toBe(Math.round(TRAVEL_PACKAGE_PRICE * 0.6));
+  });
+
+  it("leaves every non-Travel-Package student on the normal 60% deposit", () => {
+    expect(requiredDepositFor({ level: "A1", branch: "Lagos" })).toBe(90000);
+  });
+});
+
+suite("resolvePartialPaymentAmount — Travel Package's ₦200k-then-flexible shape", () => {
+  const FEE = TRAVEL_PACKAGE_PRICE;
+  const FLOOR = TRAVEL_PACKAGE_MIN_FIRST_PAYMENT;
+
+  it("rejects a first payment under ₦200,000", () => {
+    const result = resolvePartialPaymentAmount({
+      requestedAmount: 150_000,
+      tuitionFee: FEE,
+      requiredDeposit: FLOOR,
+      alreadyPaid: 0,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("₦200,000");
+  });
+
+  it("accepts exactly ₦200,000 as the first payment", () => {
+    const result = resolvePartialPaymentAmount({
+      requestedAmount: FLOOR,
+      tuitionFee: FEE,
+      requiredDeposit: FLOOR,
+      alreadyPaid: 0,
+    });
+    expect(result).toEqual({ ok: true, amount: 200_000, settlesAccount: false });
+  });
+
+  it("once past the floor, accepts a free-form top-up of any size ≥ MIN_PART_PAYMENT", () => {
+    const result = resolvePartialPaymentAmount({
+      requestedAmount: 37_500,
+      tuitionFee: FEE,
+      requiredDeposit: FLOOR,
+      alreadyPaid: 200_000,
+    });
+    expect(result).toEqual({ ok: true, amount: 37_500, settlesAccount: false });
+  });
+
+  it("clamps an over-payment to the remaining balance and flags it settles the account", () => {
+    const result = resolvePartialPaymentAmount({
+      requestedAmount: 999_999_999,
+      tuitionFee: FEE,
+      requiredDeposit: FLOOR,
+      alreadyPaid: 900_000,
+    });
+    expect(result).toEqual({ ok: true, amount: 80_000, settlesAccount: true });
   });
 });

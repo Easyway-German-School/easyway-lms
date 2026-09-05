@@ -62,7 +62,7 @@ export async function GET() {
     }
 
     // Format the response
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const requiredDeposit = requiredDepositFor(feeLookup);
     const totalPaid = student.payments

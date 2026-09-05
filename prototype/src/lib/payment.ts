@@ -217,6 +217,24 @@ export const PRIVATE_CLASS_UPGRADE_PRICE = 350000;
 export const PRIVATE_PRICES_ARE_PLACEHOLDER = false;
 
 /**
+ * TRAVEL PACKAGE — a premium, admin-onboarded-only product that REPLACES the
+ * per-level tuition ladder entirely, not a level on top of it. One flat
+ * ₦980,000 covers the whole program, whatever level or branch the student is
+ * in, so a Travel Package student never also owes A1/A2/B1/... fees. The
+ * minimum first payment is ₦200,000 rather than the usual 60% deposit — after
+ * that floor is met, top-ups are free-form down to MIN_PART_PAYMENT like any
+ * other account. There is no self-service checkout for this pathway; staff
+ * set `Student.pathway` to this value by hand in the admin.
+ */
+export const TRAVEL_PACKAGE_PATHWAY = "Travel Package";
+export const TRAVEL_PACKAGE_PRICE = 980000;
+export const TRAVEL_PACKAGE_MIN_FIRST_PAYMENT = 200000;
+
+export function isTravelPackagePathway(pathway?: string | null): boolean {
+  return String(pathway ?? "").trim().toLowerCase() === TRAVEL_PACKAGE_PATHWAY.toLowerCase();
+}
+
+/**
  * Levels a student may buy through the portal. A1–C1 are all self-service now —
  * C1 runs as private / online tuition at the flat ₦350,000 in FEE_TABLE. C2 is
  * retired: not offered (see OFFERED_LEVELS in levels.ts) and not sold here.
@@ -262,13 +280,19 @@ export type FeeLookup = {
    * site written before private tuition existed keeps quoting what it did.
    */
   classType?: string | null;
+  /** `Student.pathway` — "Travel Package" overrides the entire fee below. */
+  pathway?: string | null;
 };
 
 export function isPrivateClassType(classType?: string | null): boolean {
   return String(classType ?? "").trim().toLowerCase() === "private";
 }
 
-export function tuitionFeeFor({ level, branch, classType }: FeeLookup): number {
+export function tuitionFeeFor({ level, branch, classType, pathway }: FeeLookup): number {
+  // Travel Package is a flat whole-program price that replaces the per-level
+  // ladder outright, so it is checked before even the private-class price.
+  if (isTravelPackagePathway(pathway)) return TRAVEL_PACKAGE_PRICE;
+
   // One flat price for one-to-one, at every branch and every level — the same
   // figure the upsell quotes and the checkout charges. See the note on
   // PRIVATE_CLASS_UPGRADE_PRICE for why these must not be computed separately.
@@ -281,6 +305,9 @@ export function tuitionFeeFor({ level, branch, classType }: FeeLookup): number {
 }
 
 export function requiredDepositFor(lookup: FeeLookup): number {
+  // Travel Package's minimum first payment is a flat floor, not 60% of the
+  // ₦980,000 package price — this must short-circuit BEFORE the multiply.
+  if (isTravelPackagePathway(lookup.pathway)) return TRAVEL_PACKAGE_MIN_FIRST_PAYMENT;
   return Math.round(tuitionFeeFor(lookup) * DEPOSIT_RATE);
 }
 

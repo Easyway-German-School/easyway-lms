@@ -145,7 +145,7 @@ export async function loadJourney(
     .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
     .reduce((sum, payment) => sum + payment.amount, 0);
 
-  const feeLookup = { level: student.level, branch: branchName, classType: student.classType };
+  const feeLookup = { level: student.level, branch: branchName, classType: student.classType, pathway: student.pathway };
   const money = derivePaymentStatus({
     totalPaid,
     tuitionFee: tuitionFeeFor(feeLookup),
@@ -778,6 +778,7 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
       level: true,
       sessionSlot: true,
       classType: true,
+      pathway: true,
       admission: true,
       classesStartedAt: true,
       startConfirmedVia: true,
@@ -806,7 +807,7 @@ export async function listCohort(filter: CohortFilter, now = new Date()): Promis
     const totalPaid = student.payments
       .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
       .reduce((sum, payment) => sum + payment.amount, 0);
-    const feeLookup = { level: student.level, branch: branchName, classType: student.classType };
+    const feeLookup = { level: student.level, branch: branchName, classType: student.classType, pathway: student.pathway };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const money = derivePaymentStatus({ totalPaid, tuitionFee, requiredDeposit: requiredDepositFor(feeLookup) });
 

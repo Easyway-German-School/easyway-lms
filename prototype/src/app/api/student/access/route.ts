@@ -29,6 +29,7 @@ export async function GET() {
       id: true,
       level: true,
       classType: true,
+      pathway: true,
       // Drives which pages exist for this student at all — the live classroom
       // is meaningless to somebody who attends on campus.
       deliveryMode: true,
@@ -65,7 +66,7 @@ export async function GET() {
   }
 
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
-  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
 
   // An on-track tuition payment plan holds the balance lock back, like grace.
   const planStatus = await planStatusForStudent(student.id);

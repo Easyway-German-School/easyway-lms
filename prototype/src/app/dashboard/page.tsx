@@ -230,7 +230,7 @@ function DashboardContent() {
             (payment: any) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description),
           );
           const totalPaid = received.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
-          const feeLookup = { level: data.level, branch: data.branchName ?? null, classType: data.classType ?? null };
+          const feeLookup = { level: data.level, branch: data.branchName ?? null, classType: data.classType ?? null, pathway: data.pathway ?? null };
           const tuitionFee = tuitionFeeFor(feeLookup);
           const requiredDeposit = requiredDepositFor(feeLookup);
           setPaymentUnlock({ requiredDeposit, totalPaid, tuitionFee });

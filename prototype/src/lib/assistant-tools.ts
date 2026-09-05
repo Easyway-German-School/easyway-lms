@@ -212,6 +212,7 @@ export async function loadStudents(filters: Filters, admin: AdminContext): Promi
       level: true,
       status: true,
       classType: true,
+      pathway: true,
       deliveryMode: true,
       germanyGoal: true,
       classesStartedAt: true,
@@ -258,7 +259,7 @@ export async function loadStudents(filters: Filters, admin: AdminContext): Promi
     if (canSeeMoney) {
       const payments = (student as { payments?: Array<{ amount: number }> }).payments ?? [];
       const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-      const lookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+      const lookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
       const tuitionFee = tuitionFeeFor(lookup);
       const money = derivePaymentStatus({
         totalPaid,

@@ -28,17 +28,18 @@ export async function GET() {
       level: true,
       sessionSlot: true,
       classType: true,
+      pathway: true,
       branch: { select: { name: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
   if (!student) return NextResponse.json({ game: null });
 
-  const tuitionFee = tuitionFeeFor({ level: student.level, branch: student.branch?.name, classType: student.classType });
+  const tuitionFee = tuitionFeeFor({ level: student.level, branch: student.branch?.name, classType: student.classType, pathway: student.pathway });
   const payment = derivePaymentStatus({
     totalPaid: student.payments.reduce((sum, row) => sum + row.amount, 0),
     tuitionFee,
-    requiredDeposit: requiredDepositFor({ level: student.level, branch: student.branch?.name, classType: student.classType }),
+    requiredDeposit: requiredDepositFor({ level: student.level, branch: student.branch?.name, classType: student.classType, pathway: student.pathway }),
   });
   if (!payment.depositPaid) return NextResponse.json({ game: null, locked: true });
 
@@ -73,16 +74,17 @@ export async function POST(request: NextRequest) {
     select: {
       level: true,
       classType: true,
+      pathway: true,
       branch: { select: { name: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
   if (!student) return NextResponse.json({ error: "Student profile not found" }, { status: 404 });
-  const tuitionFee = tuitionFeeFor({ level: student.level, branch: student.branch?.name, classType: student.classType });
+  const tuitionFee = tuitionFeeFor({ level: student.level, branch: student.branch?.name, classType: student.classType, pathway: student.pathway });
   const payment = derivePaymentStatus({
     totalPaid: student.payments.reduce((sum, row) => sum + row.amount, 0),
     tuitionFee,
-    requiredDeposit: requiredDepositFor({ level: student.level, branch: student.branch?.name, classType: student.classType }),
+    requiredDeposit: requiredDepositFor({ level: student.level, branch: student.branch?.name, classType: student.classType, pathway: student.pathway }),
   });
   if (!payment.depositPaid) {
     return NextResponse.json({ error: "Pay your tuition deposit to unlock the quiz game.", locked: true }, { status: 402 });

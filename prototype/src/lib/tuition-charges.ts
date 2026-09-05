@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { receivedPaymentFilter, tuitionFeeFor } from "@/lib/payment";
+import { isTravelPackagePathway, receivedPaymentFilter, tuitionFeeFor } from "@/lib/payment";
 import { buildLedger, type Ledger } from "@/lib/finance/ledger";
 
 /**
@@ -72,10 +72,26 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
       id: true,
       classType: true,
       tenantId: true,
+      pathway: true,
       branch: { select: { name: true } },
     },
   });
   if (!student) return null;
+
+  // Travel Package is one flat charge for the whole program, not one per
+  // level — since tuitionFeeFor now prices every level the same ₦980,000 for
+  // this pathway, the normal per-level uniqueness check below would raise a
+  // fresh ₦980,000 charge at every promotion. Look for ANY existing charge
+  // first, regardless of level, and stop there if one is already on file.
+  if (isTravelPackagePathway(student.pathway)) {
+    const existingAny = await prisma.tuitionCharge.findFirst({
+      where: { studentId: student.id, deletedAt: null },
+      select: { id: true, level: true, amount: true },
+    });
+    if (existingAny) {
+      return { created: false, chargeId: existingAny.id, level: existingAny.level, amount: existingAny.amount };
+    }
+  }
 
   const existing = await prisma.tuitionCharge.findUnique({
     where: { studentId_level: { studentId: student.id, level } },
@@ -92,6 +108,7 @@ export async function ensureChargeForLevel(input: EnsureChargeInput): Promise<En
           level,
           branch: student.branch?.name ?? null,
           classType: student.classType,
+          pathway: student.pathway,
         });
 
   const data: Prisma.TuitionChargeUncheckedCreateInput = {

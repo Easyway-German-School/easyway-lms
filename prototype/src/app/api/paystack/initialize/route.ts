@@ -44,6 +44,7 @@ export async function POST(request: Request) {
         id: true,
         level: true,
         classType: true,
+        pathway: true,
         levelCompletedFor: true,
         levelCompletedAt: true,
         branch: { select: { name: true } },
@@ -174,7 +175,7 @@ export async function POST(request: Request) {
       alreadyPaid = targetLine ? targetLine.allocated : 0;
     }
 
-    const feeLookup = { level: billingLevel, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType };
+    const feeLookup = { level: billingLevel, branch: studentRecord.branch?.name ?? null, classType: studentRecord.classType, pathway: studentRecord.pathway };
     const normalizedTuitionFee = tuitionFeeFor(feeLookup);
     const requiredDeposit = requiredDepositFor(feeLookup);
 

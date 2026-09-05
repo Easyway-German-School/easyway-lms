@@ -107,6 +107,7 @@ export const FINANCE_STUDENT_SELECT = {
   level: true,
   status: true,
   classType: true,
+  pathway: true,
   createdAt: true,
   // The clock the part-payment lock runs on, and the admin's override date —
   // so the roster can show "locks 12 Oct" / "LOCKED" / "grace to 20 Oct".
@@ -148,6 +149,8 @@ export type FinanceStudentInput = {
   level: string;
   status?: string | null;
   classType?: string | null;
+  /** `Student.pathway` — "Travel Package" overrides the entire per-level fee. */
+  pathway?: string | null;
   createdAt: Date;
   classesStartedAt?: Date | null;
   paymentGraceUntil?: Date | null;
@@ -254,6 +257,7 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     level: student.level,
     branch: student.branch?.name ?? null,
     classType: student.classType,
+    pathway: student.pathway,
   };
   const tuitionFee = tuitionFeeFor(feeLookup);
   const requiredDeposit = requiredDepositFor(feeLookup);

@@ -56,6 +56,7 @@ const STUDENT_SHAPE = {
   level: true,
   sessionSlot: true,
   classType: true,
+  pathway: true,
   deliveryMode: true,
   studentCode: true,
   admission: true,
@@ -71,6 +72,7 @@ type RawStudent = {
   level: string;
   sessionSlot: string;
   classType: string;
+  pathway: string;
   deliveryMode: string;
   studentCode: string | null;
   tutorId: string | null;
@@ -89,6 +91,7 @@ function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
     level: student.level,
     branch: student.branch?.name ?? null,
     classType: student.classType,
+    pathway: student.pathway,
   };
   const access = deriveStudentAccess({
     totalPaid,

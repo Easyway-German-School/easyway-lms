@@ -25,7 +25,7 @@ export async function GET() {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const totalPaid = student.payments
       .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))

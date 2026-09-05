@@ -153,6 +153,7 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
       id: true,
       level: true,
       classType: true,
+      pathway: true,
       studentCode: true,
       // Needed for the fee: Abuja is priced above the other branches.
       branch: { select: { name: true } },
@@ -166,7 +167,7 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
   return students
     .filter((s) => {
       if (wanted === "all") return true;
-      const feeLookup = { level: s.level, branch: s.branch?.name ?? null, classType: s.classType };
+      const feeLookup = { level: s.level, branch: s.branch?.name ?? null, classType: s.classType, pathway: s.pathway };
       const totalPaid = s.payments.reduce((sum, p) => sum + p.amount, 0);
       const { fullPaid } = derivePaymentStatus({
         totalPaid,

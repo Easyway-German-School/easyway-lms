@@ -141,6 +141,7 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
       select: {
         level: true,
         classType: true,
+        pathway: true,
         branch: { select: { name: true } },
         user: { select: { name: true, email: true } },
         payments: { where: receivedPaymentFilter(), select: { amount: true, createdAt: true } },
@@ -155,7 +156,7 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
     const balances: Array<{ name: string; level: string; branch: string | null; owed: number }> = [];
 
     for (const student of students) {
-      const lookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+      const lookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
       const tuitionFee = tuitionFeeFor(lookup);
       const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
 

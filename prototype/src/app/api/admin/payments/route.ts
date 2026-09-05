@@ -4,6 +4,7 @@ import { requireCapability } from "@/lib/admin-roles";
 import {
   isValidPaymentStatus,
   isReceivedPayment,
+  isTravelPackagePathway,
   PAYMENT_STATUSES,
   requiredDepositFor,
 } from "@/lib/payment";
@@ -77,6 +78,7 @@ export async function POST(request: Request) {
         select: {
           level: true,
           classType: true,
+          pathway: true,
           branch: { select: { name: true } },
           payments: { select: { amount: true, status: true } },
         },
@@ -89,11 +91,15 @@ export async function POST(request: Request) {
           level: student.level,
           branch: student.branch?.name ?? null,
           classType: student.classType,
+          pathway: student.pathway,
         });
         if (received < deposit) {
-          warning = `Recorded, but this is below the 60% deposit (₦${deposit.toLocaleString(
-            "en-NG",
-          )}). The student's classes will NOT unlock until the received total reaches it — currently ₦${received.toLocaleString(
+          // Travel Package's floor is a flat minimum first payment, not a 60%
+          // deposit — the wording has to match what's actually being asked for.
+          const requirement = isTravelPackagePathway(student.pathway)
+            ? `below the ₦${deposit.toLocaleString("en-NG")} minimum first payment for the Travel Package`
+            : `below the 60% deposit (₦${deposit.toLocaleString("en-NG")})`;
+          warning = `Recorded, but this is ${requirement}. The student's classes will NOT unlock until the received total reaches it — currently ₦${received.toLocaleString(
             "en-NG",
           )}.`;
         }

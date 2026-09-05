@@ -36,6 +36,7 @@ export async function GET() {
       id: true,
       level: true,
       classType: true,
+      pathway: true,
       sessionSlot: true,
       admission: true,
       studentCode: true,
@@ -59,7 +60,7 @@ export async function GET() {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
   // The live balance, which decides the provisional stamp on every certificate
   // the student holds — not just the one for their current level. Across the

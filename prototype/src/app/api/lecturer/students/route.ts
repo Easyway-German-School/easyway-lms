@@ -96,6 +96,7 @@ export async function GET() {
           level: student.level,
           branch: student.branch?.name ?? null,
           classType: student.classType,
+          pathway: student.pathway,
         };
         const access = deriveStudentAccess({
           totalPaid,

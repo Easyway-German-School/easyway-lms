@@ -174,7 +174,7 @@ export async function GET(request: Request) {
         );
       }
 
-      const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+      const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
       const totalPaid = student.payments
         .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
         .reduce((sum, payment) => sum + payment.amount, 0);

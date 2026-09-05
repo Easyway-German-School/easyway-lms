@@ -83,6 +83,7 @@ export async function buildBrief(userId: string, period: BriefPeriod): Promise<B
       examReadiness: true,
       level: true,
       classType: true,
+      pathway: true,
       createdAt: true,
       classesStartedAt: true,
       paymentGraceUntil: true,
@@ -149,13 +150,14 @@ export async function buildBrief(userId: string, period: BriefPeriod): Promise<B
 function buildPaymentNote(student: {
   level: string;
   classType: string | null;
+  pathway?: string | null;
   createdAt: Date;
   classesStartedAt: Date | null;
   paymentGraceUntil: Date | null;
   branch: { name: string } | null;
   payments: Array<{ amount: number }>;
 }): PaymentNote | null {
-  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
   const tuitionFee = tuitionFeeFor(feeLookup);
   const requiredDeposit = requiredDepositFor(feeLookup);
   const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);

@@ -143,6 +143,7 @@ export async function buildResultSheet(
       level: true,
       sessionSlot: true,
       classType: true,
+      pathway: true,
       branchId: true,
       classesStartedAt: true,
       admission: true,
@@ -306,6 +307,7 @@ export async function buildResultSheet(
         level: student.level,
         branch: student.branch?.name ?? null,
         classType: student.classType,
+        pathway: student.pathway,
       };
       const tuitionFee = tuitionFeeFor(feeLookup);
       const money = derivePaymentStatus({

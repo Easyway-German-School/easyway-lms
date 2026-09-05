@@ -3232,6 +3232,13 @@ model NotificationSetting {
    * A copy by email, sent through the queue.
    */
   email Boolean @default(true)
+  /**
+   * A copy by SMS, sent through the Termii queue. Defaults OFF — unlike the
+   * other three channels, every send costs real money, so a kind only texts
+   * once an admin (or the code default in src/lib/mail-identity.ts) turns it
+   * on, not the other way round.
+   */
+  sms Boolean @default(false)
 
   /**
    * Which sender an emailed copy uses — "support" or "noreply". Null follows
@@ -3278,6 +3285,12 @@ model NotificationPreference {
   inApp Boolean @default(true)
   push  Boolean @default(true)
   email Boolean @default(true)
+  /**
+   * False mutes SMS for this person and this kind. Only meaningful once the
+   * kind's routing (NotificationSetting.sms) has SMS on in the first place —
+   * see the "may only narrow" rule in src/lib/notification-prefs.ts.
+   */
+  sms Boolean @default(true)
 
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())

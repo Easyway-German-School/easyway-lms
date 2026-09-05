@@ -34,6 +34,7 @@ export async function GET() {
       id: true,
       level: true,
       classType: true,
+      pathway: true,
       sessionSlot: true,
       branchId: true,
       createdAt: true,
@@ -50,7 +51,7 @@ export async function GET() {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
   const tuitionFee = tuitionFeeFor(feeLookup);
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
 

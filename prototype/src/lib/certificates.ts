@@ -178,6 +178,7 @@ export async function issueCertificateForStudent(
       id: true,
       level: true,
       classType: true,
+      pathway: true,
       sessionSlot: true,
       studentCode: true,
       admission: true,
@@ -209,7 +210,7 @@ export async function issueCertificateForStudent(
       : {};
   const batch = typeof admission.batch === "string" && admission.batch.trim() ? admission.batch : null;
 
-  const feeLookup = { level, branch: student.branch?.name ?? null, classType: student.classType };
+  const feeLookup = { level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
   const ledger = buildLedger(student.tuitionCharges ?? [], totalPaid, now);
 

@@ -41,6 +41,8 @@ export const CAPABILITIES = [
   "security",     // the audit trail, restoring deleted records, backup health
   "work_drive",   // the staff file store — workspaces, folders, files, sharing
   "events",       // the staff calendar, events, and webinars
+  "payroll",      // what the school pays its tutors — separate from `payments`,
+                  // which is tuition coming IN, not compensation going OUT
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -85,7 +87,7 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
    * but editing a student record, moving them between branches or graduating
    * them is not.
    */
-  accountant: ["payments", "reports"],
+  accountant: ["payments", "reports", "payroll"],
 
   // Owns communications and the numbers, not the student records or the money.
   // `events` too: a webinar is a broadcast, and the open day is a comms job.
@@ -107,7 +109,7 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
  * investigated is the one holding them, so it stays out of every preset and is
  * granted one person at a time or not at all.
  */
-export const SUPER_ONLY_CAPABILITIES: Capability[] = ["payments", "security"];
+export const SUPER_ONLY_CAPABILITIES: Capability[] = ["payments", "security", "payroll"];
 
 /** An admin with no sub-role set is treated as super — nobody loses access. */
 export function normalizeAdminRole(value: unknown): AdminRole {

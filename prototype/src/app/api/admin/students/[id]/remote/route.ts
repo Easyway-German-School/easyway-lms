@@ -65,8 +65,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       status: true,
       sessionSlot: true,
       classType: true,
-      deliveryMode: true,
       pathway: true,
+      deliveryMode: true,
       nextLive: true,
       // The passport photo lives on the admission blob, not on User — see the
       // dossier route, which reads it from the same place.
@@ -98,7 +98,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const totalPaid = student.payments
     .filter((payment) => payment.status === "success")
     .reduce((sum, payment) => sum + payment.amount, 0);
-  const fees = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+  const fees = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
   const tuitionFee = tuitionFeeFor(fees);
   const access = deriveStudentAccess({
     totalPaid,

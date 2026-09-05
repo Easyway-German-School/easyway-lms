@@ -32,6 +32,9 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // A read-only roll-call of who has finished a batch / level. Same desk as
   // the cohort console it links out to.
   { prefix: "/admin/completions", capability: "students" },
+  // Onboarding and tracking Travel Package students is a front-desk job, same
+  // as the rest of the manual "walk-in student" workflow it grew out of.
+  { prefix: "/admin/travel-package", capability: "students" },
 
   { prefix: "/admin/attendance", capability: "attendance" },
   { prefix: "/admin/schedule", capability: "classes" },
@@ -57,6 +60,9 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // the fee book rather than a new capability for what is, underneath, a
   // billing dispute.
   { prefix: "/admin/legal", capability: "payments" },
+  // What the school pays its tutors. Its own capability — see the note on
+  // `payroll` in admin-roles.ts for why this is not folded into `payments`.
+  { prefix: "/admin/payroll", capability: "payroll" },
   // `/admin/billing` (what the school owes the platform) and `/admin/platform`
   // (the operator console) are deliberately NOT in this table. Neither is a
   // school area: `/admin/billing` is now a redirect to `/platform/billing`
