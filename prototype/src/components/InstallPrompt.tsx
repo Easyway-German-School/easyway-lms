@@ -153,11 +153,11 @@ export default function InstallPrompt() {
               round-trip for a file already in the manifest. */}
           <img src="/icon-192.png" alt="" className="h-11 w-11 flex-none rounded-2xl" />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-[var(--foreground)]">Put EasyWay on your home screen</p>
+            <p className="text-sm font-semibold text-[var(--foreground)]">Never miss a class, assignment or exam alert</p>
             <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
               {showIosHint && !deferred
-                ? "Tap the Share button below, then “Add to Home Screen”."
-                : "Opens like an app, remembers you, and works without the browser bar."}
+                ? "Tap the Share button below, then “Add to Home Screen” — alerts land instantly, and notes open offline with zero data."
+                : "Get alerts the second they drop, and read your notes offline — so a low bundle (or none at all) never costs you a class."}
             </p>
           </div>
           <button
@@ -175,7 +175,7 @@ export default function InstallPrompt() {
               onClick={install}
               className="flex-1 rounded-full bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
             >
-              Install
+              Get the app
             </button>
             <button
               onClick={close}
