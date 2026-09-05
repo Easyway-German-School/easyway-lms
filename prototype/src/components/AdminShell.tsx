@@ -125,6 +125,9 @@ const navItems: NavItem[] = [
   { label: 'Finance', href: '/admin/finance', icon: <WalletIcon />, group: 'Billing' },
   { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon />, group: 'Billing' },
   { label: 'Legal & refunds', href: '/admin/legal', icon: <AlertIcon />, group: 'Billing' },
+  // Money going OUT to tutors — its own capability, separate from `payments`
+  // (money coming in from students). See the note in admin-roles.ts.
+  { label: 'Tutor payroll', href: '/admin/payroll', icon: <WalletIcon />, group: 'Billing' },
   { label: 'Reports', href: '/admin/reports', icon: <TrendingUpIcon />, group: 'Billing' },
   // What this school owes for running on the platform ("Platform usage") is no
   // longer here. It moved to EduPrime — the platform's own space — at

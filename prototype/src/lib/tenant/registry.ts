@@ -77,6 +77,8 @@ export const TENANT_OWNED_MODELS = [
   "EmailLog",
   "EmailMessage",
   "SmsMessage",
+  "TutorPayRate",
+  "PayrollPayment",
   "EmailSuppression",
   "PushSubscription",
   "Space",

@@ -272,6 +272,8 @@ model Tenant {
   assignmentSubmissions   AssignmentSubmission[]
   emailMessages           EmailMessage[]
   smsMessages             SmsMessage[]
+  tutorPayRates           TutorPayRate[]
+  payrollPayments         PayrollPayment[]
   notificationSettings    NotificationSetting[]
   certificateTemplates    CertificateTemplate[]
   notificationPreferences NotificationPreference[]
@@ -2392,6 +2394,8 @@ model Lecturer {
   tutorMessages      TutorMessage[]
   sessionNotes       SessionNote[]
   enrolments         StudentEnrolment[]
+  payRate            TutorPayRate?
+  payrollPayments    PayrollPayment[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and
@@ -3345,6 +3349,61 @@ model SmsMessage {
 
   @@index([status, scheduledFor])
   @@index([studentId])
+  @@index([tenantId])
+}
+
+/// What the school pays one tutor, per class or per month. One row per
+/// tutor — set once, read every time payroll is computed. See
+/// src/lib/payroll.ts, which is the only place that reads this to compute
+/// what is owed; this table is just the rate, never a running balance.
+model TutorPayRate {
+  id         String   @id @default(cuid())
+  lecturerId String   @unique
+  lecturer   Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+
+  /// per_class | monthly
+  rateType String @default("per_class")
+  /// Naira. Per-class: paid for every ClassSession the tutor holds. Monthly: a flat figure regardless of how many classes ran.
+  amount   Int
+
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+/// One row per amount actually paid to a tutor — the audit trail payroll
+/// needs, deliberately separate from the rate above. Nothing here is
+/// computed automatically: an admin records a payment once it has gone out,
+/// the same way a manual Payment row records a student's bank transfer.
+model PayrollPayment {
+  id         String   @id @default(cuid())
+  lecturerId String
+  lecturer   Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+
+  amount Int
+  /// Free text, e.g. "September 2026" — the pay period this covers, for the tutor's and the office's own reading of the record.
+  periodLabel String
+  /// Snapshot of how many held classes this was computed against, when the
+  /// rate is per_class — kept even if the rate or the classes change later,
+  /// so the record stays honest about what it was actually based on.
+  classesCounted Int?
+  note           String?
+
+  createdById String?
+  paidAt      DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([lecturerId])
   @@index([tenantId])
 }
 
