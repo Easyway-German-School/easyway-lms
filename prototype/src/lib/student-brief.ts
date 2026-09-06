@@ -5,6 +5,7 @@ import { callModel, activeModelName } from "@/lib/ai";
 import { profileFor } from "@/lib/learner-intelligence";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { schoolDayStart } from "@/lib/school-time";
 
 /**
  * Becca's brief — daily / weekly / monthly, hosted rather than generated.
@@ -58,14 +59,9 @@ export type Brief = {
 };
 
 function periodStart(period: BriefPeriod, now = new Date()): Date {
-  const start = new Date(now);
-  start.setUTCHours(0, 0, 0, 0);
+  const start = schoolDayStart(now);
   if (period === "daily") return start;
-  if (period === "weekly") {
-    start.setUTCDate(start.getUTCDate() - 6);
-    return start;
-  }
-  start.setUTCDate(start.getUTCDate() - 29);
+  start.setUTCDate(start.getUTCDate() - (period === "weekly" ? 6 : 29));
   return start;
 }
 

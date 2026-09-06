@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   SCHOOL_TIMEZONE,
   instantToZonedParts,
+  schoolDayOffset,
+  schoolDayStart,
   viewerTimezone,
   zoneLabel,
   zonedClock,
@@ -71,6 +73,25 @@ describe("instantToZonedParts / zonedClock / zonedDateKey", () => {
   it("crosses midnight into the previous day for a behind-UTC zone", () => {
     const instant = new Date("2026-09-11T02:00:00.000Z");
     expect(zonedDateKey(instant, "America/Los_Angeles")).toBe("2026-09-10");
+  });
+});
+
+describe("schoolDayStart / schoolDayOffset", () => {
+  it("gives midnight Lagos for any instant on that Lagos day", () => {
+    // 23:00 UTC on Sep 14 is already Sep 15 in Lagos (01:00).
+    expect(schoolDayStart(new Date("2026-09-14T23:30:00Z"), "Africa/Lagos").toISOString()).toBe(
+      "2026-09-14T23:00:00.000Z",
+    );
+    // Midday UTC on Sep 15 is still Sep 15 in Lagos.
+    expect(schoolDayStart(new Date("2026-09-15T12:00:00Z"), "Africa/Lagos").toISOString()).toBe(
+      "2026-09-14T23:00:00.000Z",
+    );
+  });
+
+  it("offsets whole school days", () => {
+    const base = new Date("2026-09-15T12:00:00Z"); // Sep 15 in Lagos
+    expect(schoolDayOffset(base, 3, "Africa/Lagos").toISOString()).toBe("2026-09-17T23:00:00.000Z"); // midnight Sep 18 Lagos
+    expect(schoolDayOffset(base, 0, "Africa/Lagos").toISOString()).toBe(schoolDayStart(base, "Africa/Lagos").toISOString());
   });
 });
 

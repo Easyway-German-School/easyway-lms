@@ -143,6 +143,19 @@ export async function getMergedSchedule(args: {
   const byDay = new Map<string, (typeof overrides)[number]>();
   for (const o of overrides) byDay.set(o.date.toISOString(), o);
 
+  // A public holiday closes the school — a generated class on that day is off,
+  // for the group timetable too, not just private bookings. Branch-specific
+  // holidays plus the school-wide ones (`branchId: null`).
+  const holidays = await prisma.schoolHoliday.findMany({
+    where: {
+      date: { gte: windowStart, lte: windowEnd },
+      OR: [{ branchId: args.branchId }, { branchId: null }],
+    },
+    select: { date: true, label: true },
+  });
+  const holidayByDay = new Map<string, string>();
+  for (const h of holidays) holidayByDay.set(dayKey(h.date).toISOString(), h.label);
+
   // Rows that don't sit on a generated day are added classes — bucket them by
   // calendar month so they can be spliced into the right month below.
   const generatedDayKeys = new Set(allDates.map((d) => d.toISOString()));
@@ -192,6 +205,12 @@ export async function getMergedSchedule(args: {
       const timeSlot = normalizeSlot(override?.timeSlot ?? slot);
       const defaults = SLOT_DEFAULTS[timeSlot];
 
+      // A holiday closes the day unless a tutor has already moved or held the
+      // class deliberately — an explicit postponed/held override wins.
+      const holidayLabel = holidayByDay.get(dayKey(s.date).toISOString());
+      const closedByHoliday =
+        holidayLabel && (!override || override.status === "scheduled" || override.status === "cancelled");
+
       return {
         date: s.date,
         weekday: s.weekday,
@@ -203,11 +222,11 @@ export async function getMergedSchedule(args: {
         startTime: override?.startTime || defaults.startTime,
         endTime: override?.endTime || defaults.endTime,
         zoneLabel: GROUP_ZONE_LABEL,
-        topic: override?.topic ?? null,
-        notes: override?.notes ?? null,
-        status: override?.status ?? "scheduled",
+        topic: closedByHoliday ? null : override?.topic ?? null,
+        notes: closedByHoliday ? `School closed — ${holidayLabel}` : override?.notes ?? null,
+        status: closedByHoliday ? "cancelled" : override?.status ?? "scheduled",
         postponedTo: override?.postponedTo ? override.postponedTo.toISOString() : null,
-        edited: Boolean(override),
+        edited: Boolean(override) || Boolean(closedByHoliday),
         lecturerName: override?.lecturer?.user?.name ?? null,
         material: override?.material
           ? {

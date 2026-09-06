@@ -18,6 +18,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { sendEmail } from "@/lib/mailer";
 import { examReminderEmailTemplate } from "@/lib/email-templates";
+import { schoolDayOffset } from "@/lib/school-time";
 
 type RegistrationWithExam = Prisma.ExamRegistrationGetPayload<{
   include: { student: { include: { user: true } }; exam: { include: { lecturer: { include: { user: true } } } } };
@@ -58,11 +59,11 @@ export async function sendExamReminder(registration: RegistrationWithExam): Prom
 export type ExamReminderResult = { sentCount: number; totalProcessed: number; errors: string[] };
 
 export async function sendDueExamReminders(daysBeforeExam = 3): Promise<ExamReminderResult> {
-  const dayStart = new Date();
-  dayStart.setDate(dayStart.getDate() + daysBeforeExam);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
+  // The school calendar day that is `daysBeforeExam` out — a UTC-day boundary
+  // on a server behind or ahead of the school would fire a day early or late.
+  const now = new Date();
+  const dayStart = schoolDayOffset(now, daysBeforeExam);
+  const dayEnd = schoolDayOffset(now, daysBeforeExam + 1);
 
   const registrations = await prisma.examRegistration.findMany({
     where: { status: "registered", exam: { examDate: { gte: dayStart, lt: dayEnd } } },

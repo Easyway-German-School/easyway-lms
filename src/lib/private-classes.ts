@@ -63,11 +63,24 @@ export async function ensureAttendanceComputed(privateClass: {
 }
 
 /**
- * True when a proposed session `[start, start+durationMinutes)` overlaps an
- * existing one for the same tutor or the same student. Real interval overlap —
- * `newStart < existingEnd && existingStart < newEnd` — using each existing
- * row's own duration, instead of the old fixed 240-minute lookback that
- * flagged harmless back-to-back sessions and missed genuine clashes.
+ * Do two sessions `[start, start+minutes)` overlap? Real interval overlap —
+ * `aStart < bEnd && bStart < aEnd` — so a session that ends exactly when the
+ * next begins (back-to-back) does NOT clash, and a genuine overlap of any
+ * length does. Pure; the DB-touching `privateOverlaps` is built on it.
+ */
+export function sessionsOverlap(aStart: Date, aMinutes: number, bStart: Date, bMinutes: number): boolean {
+  const a0 = aStart.getTime();
+  const a1 = a0 + Math.max(1, aMinutes) * 60_000;
+  const b0 = bStart.getTime();
+  const b1 = b0 + Math.max(1, bMinutes) * 60_000;
+  return a0 < b1 && b0 < a1;
+}
+
+/**
+ * True when a proposed session overlaps an existing one for the same tutor or
+ * the same student, using each existing row's own duration — not the old fixed
+ * 240-minute lookback that flagged harmless back-to-back sessions and missed
+ * genuine clashes.
  */
 export async function privateOverlaps(args: {
   scope: { lecturerId?: string | null; studentId?: string };
@@ -89,11 +102,9 @@ export async function privateOverlaps(args: {
     },
     select: { scheduledAt: true, durationMinutes: true },
   });
-  return candidates.some((row) => {
-    const s = row.scheduledAt.getTime();
-    const e = s + (row.durationMinutes || 60) * 60_000;
-    return newStart < e && s < newEnd;
-  });
+  return candidates.some((row) =>
+    sessionsOverlap(args.start, args.durationMinutes, row.scheduledAt, row.durationMinutes || 60),
+  );
 }
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
