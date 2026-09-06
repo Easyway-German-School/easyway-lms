@@ -285,6 +285,79 @@ export async function PUT(req: NextRequest) {
 }
 
 /**
+ * POST — add a one-off class on a day the rotation engine did not generate.
+ *
+ * The engine owns which days a cohort normally meets; this is the escape hatch
+ * for the extra Saturday revision class, the catch-up session, the day the
+ * school adds by hand. It writes a normal ClassSession row, which
+ * `getMergedSchedule` now picks up alongside the skeleton, so the class appears
+ * on the tutor's timetable and every student's calendar at once.
+ */
+export async function POST(req: NextRequest) {
+  const auth = await requireStaff();
+  if ("error" in auth) return auth.error;
+  const { staff } = auth;
+
+  try {
+    const body = await req.json().catch(() => ({}));
+    const { branchId, level, timeSlot, date, topic, startTime, endTime } = body;
+
+    if (!branchId || !level || !date) {
+      return NextResponse.json({ error: "branchId, level and date are required" }, { status: 400 });
+    }
+
+    const parsedDate = new Date(date);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return NextResponse.json({ error: "That date could not be read" }, { status: 400 });
+    }
+
+    const slot = normalizeSlot(timeSlot);
+    const day = dayKey(date);
+    const normalisedLevel = String(level).toUpperCase();
+
+    if (!mayEdit(staff, branchId, normalisedLevel, slot)) {
+      return NextResponse.json({ error: "That class is not yours to edit" }, { status: 403 });
+    }
+
+    const existing = await prisma.classSession.findUnique({
+      where: {
+        branchId_level_date_timeSlot: { branchId, level: normalisedLevel, date: day, timeSlot: slot },
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      return NextResponse.json(
+        { error: "There is already a class that day for this sitting — open it to edit." },
+        { status: 409 },
+      );
+    }
+
+    const session = await prisma.classSession.create({
+      data: {
+        branchId,
+        level: normalisedLevel,
+        date: day,
+        timeSlot: slot,
+        topic: typeof topic === "string" ? topic.trim() || null : null,
+        startTime: typeof startTime === "string" ? startTime.trim() || null : null,
+        endTime: typeof endTime === "string" ? endTime.trim() || null : null,
+        status: "scheduled",
+        lecturerId: staff.lecturerId ?? undefined,
+      },
+      include: {
+        material: { select: { id: true, title: true, filePath: true, fileType: true } },
+        lecturer: { select: { user: { select: { name: true } } } },
+      },
+    });
+
+    return NextResponse.json({ session }, { status: 201 });
+  } catch (error) {
+    console.error("Lecturer sessions POST failed:", error);
+    return NextResponse.json({ error: "Unable to add this class" }, { status: 500 });
+  }
+}
+
+/**
  * Class days are stored as midnight UTC (see `dayKey`), so they must be
  * FORMATTED in UTC too. Without the timeZone pin this renders in the server's
  * local zone, and on any host behind UTC every notification named the day

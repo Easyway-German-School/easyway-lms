@@ -109,12 +109,22 @@ export async function getMergedSchedule(args: {
     return { ...generated, sessionSlot: slot, months: generated.months.map((m) => withDefaults(m, slot)) };
   }
 
+  // The rotation engine says which days a cohort normally meets; a tutor (or the
+  // office) can also ADD a one-off — an extra revision Saturday, a catch-up —
+  // via POST /api/lecturer/sessions. Those rows land on a day the skeleton
+  // never generated, so the query has to be the whole course window, not just
+  // `allDates`, or an added class would be invisible to students.
+  const first = generated.months[0];
+  const last = generated.months[generated.months.length - 1];
+  const windowStart = new Date(Date.UTC(first.year, first.monthIndex, 1));
+  const windowEnd = new Date(Date.UTC(last.year, last.monthIndex + 1, 0, 23, 59, 59, 999));
+
   const overrides = await prisma.classSession.findMany({
     where: {
       branchId: args.branchId,
       level: generated.level,
       timeSlot: slot,
-      date: { in: allDates },
+      date: { gte: windowStart, lte: windowEnd },
     },
     include: {
       lecturer: { select: { user: { select: { name: true } } } },
@@ -131,9 +141,49 @@ export async function getMergedSchedule(args: {
   const byDay = new Map<string, (typeof overrides)[number]>();
   for (const o of overrides) byDay.set(o.date.toISOString(), o);
 
+  // Rows that don't sit on a generated day are added classes — bucket them by
+  // calendar month so they can be spliced into the right month below.
+  const generatedDayKeys = new Set(allDates.map((d) => d.toISOString()));
+  const extrasByMonth = new Map<string, MergedSession[]>();
+  for (const o of overrides) {
+    if (generatedDayKeys.has(o.date.toISOString())) continue;
+    const rowSlot = normalizeSlot(o.timeSlot);
+    const rowDefaults = SLOT_DEFAULTS[rowSlot];
+    const monthKey = `${o.date.getUTCFullYear()}-${o.date.getUTCMonth()}`;
+    const list = extrasByMonth.get(monthKey) ?? [];
+    list.push({
+      date: o.date.toISOString(),
+      weekday: EXTRA_WEEKDAY_SHORT[o.date.getUTCDay()],
+      level: generated.level,
+      title: o.topic?.trim() ? o.topic.trim() : `${generated.level} · Added class`,
+      defaultFocus: "Added class",
+      slot: "Live Class",
+      timeSlot: rowSlot,
+      startTime: o.startTime || rowDefaults.startTime,
+      endTime: o.endTime || rowDefaults.endTime,
+      topic: o.topic ?? null,
+      notes: o.notes ?? null,
+      status: o.status ?? "scheduled",
+      postponedTo: o.postponedTo ? o.postponedTo.toISOString() : null,
+      edited: true,
+      lecturerName: o.lecturer?.user?.name ?? null,
+      material: o.material
+        ? {
+            id: o.material.id,
+            title: o.material.title,
+            filePath: o.material.filePath,
+            fileType: o.material.fileType,
+            aiSummary: o.material.aiSummary,
+            aiQuestCount: Array.isArray(o.material.aiQuests) ? o.material.aiQuests.length : 0,
+          }
+        : null,
+    });
+    extrasByMonth.set(monthKey, list);
+  }
+
   const months = generated.months.map((month) => ({
     ...month,
-    sessions: month.sessions.map((s) => {
+    sessions: mergeExtras(extrasByMonth.get(`${month.year}-${month.monthIndex}`) ?? [], month.sessions.map((s) => {
       const override = byDay.get(dayKey(s.date).toISOString());
       // An unedited day still belongs to the student's own sitting.
       const timeSlot = normalizeSlot(override?.timeSlot ?? slot);
@@ -168,10 +218,22 @@ export async function getMergedSchedule(args: {
             }
           : null,
       } satisfies MergedSession;
-    }),
+    })),
   }));
 
   return { ...generated, sessionSlot: slot, months };
+}
+
+const EXTRA_WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * Splice a month's added classes into its generated sessions, ordered by the
+ * moment the class actually starts (the ISO strings mix local- and UTC-midnight
+ * across timezones, so compare times, not text).
+ */
+function mergeExtras(extras: MergedSession[], base: MergedSession[]): MergedSession[] {
+  if (extras.length === 0) return base;
+  return [...base, ...extras].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 }
 
 /** Shape an unedited month so the client only deals with one session type. */
