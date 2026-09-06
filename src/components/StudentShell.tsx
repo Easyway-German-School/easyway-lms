@@ -8,6 +8,7 @@ import CommunityLauncher from "@/components/CommunityLauncher";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import OfflineBanner from "@/components/OfflineBanner";
 import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
+import OfficeReplyMoment from "@/components/moment/OfficeReplyMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
@@ -483,6 +484,14 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       */}
 
       <HelpLauncher />
+
+      {/*
+        The answer to something they asked. Not behind `hasAccess` for the same
+        reason HelpLauncher is not — a student stuck outside the paywall is the
+        one most likely to have an open question — and queue-managed so it never
+        stacks on the tour or a celebration. See OfficeReplyMoment.
+      */}
+      <OfficeReplyMoment />
 
       {/*
         Message popups, mounted once per shell so they follow the reader onto

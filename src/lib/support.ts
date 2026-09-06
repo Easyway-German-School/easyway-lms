@@ -231,7 +231,7 @@ export async function replyToTicket(input: {
 
   const ticket = await prisma.supportTicket.findUnique({
     where: { id: input.ticketId },
-    select: { id: true, userId: true, subject: true, status: true, assignedToId: true, topic: true },
+    select: { id: true, userId: true, subject: true, status: true, assignedToId: true, topic: true, fromPath: true },
   });
   if (!ticket) return null;
 
@@ -263,6 +263,16 @@ export async function replyToTicket(input: {
   });
 
   if (input.fromStaff) {
+    /**
+     * An enquiry that came in from a marketing page — the Travel Package card
+     * on /programs — is often from someone who will not open the portal again
+     * for days. The bell and the Help badge assume a student who comes back;
+     * this one might not, so the answer also goes to their inbox in full, not
+     * as a one-line "you have a reply" they still have to log in to read.
+     * Per-person email mutes are still honoured inside notify().
+     */
+    const fromMarketing = ticket.fromPath === "/programs";
+
     notifyInBackground({
       to: { userIds: [ticket.userId] },
       kind: ticket.topic === "tutor" ? KIND.lecturerMessage : KIND.supportReply,
@@ -281,6 +291,12 @@ export async function replyToTicket(input: {
       // Worth a phone buzz: the student asked and then went to do something
       // else, and an answer they do not see is the same as no answer.
       push: true,
+      // Force the email only for the marketing-origin case; every other reply
+      // follows the school's routing settings for this kind (off by default).
+      email: fromMarketing || undefined,
+      emailBody: fromMarketing
+        ? `${input.authorName ?? "The office"} replied to your enquiry "${ticket.subject}":\n\n${body}\n\nYou can reply straight back from your student portal.`
+        : undefined,
     });
   } else if (ticket.assignedToId) {
     // Routed straight to whoever is answering — the tutor on an "Ask my

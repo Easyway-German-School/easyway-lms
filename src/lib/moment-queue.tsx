@@ -104,6 +104,7 @@ export type MomentId =
   | "welcome-tour"
   | "goal"
   | "level-advance"
+  | "office-reply"
   | "lesson-complete"
   | "notifications"
   | "daily-briefing"
@@ -146,6 +147,21 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Your level is complete",
     dockBlurb: "What you finished, and what comes next.",
+  },
+  /**
+   * "The office replied to something you asked." News the student explicitly
+   * asked for and was told to expect here — an enquiry from the marketing
+   * pages, a payment question — so it outranks a single finished lesson and
+   * the notification ask. Below a finished LEVEL, which is the bigger thing
+   * about them, and well below orientation: if the two-modal cap spends its
+   * turns elsewhere this drops to the dock, and the bell and the Help badge
+   * still carry it.
+   */
+  "office-reply": {
+    priority: 68,
+    kind: "modal",
+    dockLabel: "The office replied",
+    dockBlurb: "Your question has an answer waiting.",
   },
   /**
    * A single lesson finished, not a whole level — smaller news, so it sits
