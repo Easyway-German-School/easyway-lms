@@ -182,7 +182,7 @@ export default function AdminCompletionsPage() {
           </p>
         </div>
 
-        <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="filter-grid rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
           <label className="text-sm">
             <span className="mb-1 block font-semibold text-[var(--muted)]">Branch</span>
             <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm">

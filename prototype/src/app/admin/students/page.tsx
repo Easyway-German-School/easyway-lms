@@ -940,14 +940,17 @@ function StudentsRoster() {
           </div>
         )}
 
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Admin</p>
-            <h1 className="text-3xl font-bold">Students</h1>
-            <p className="mt-2 text-sm text-[var(--muted)]">Filter, edit, and manage student enrollment records.</p>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
-            <div className="grid gap-4 sm:grid-cols-4">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Admin</p>
+          <h1 className="text-3xl font-bold">Students</h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">Filter, edit, and manage student enrollment records.</p>
+        </div>
+
+        {/* One filter per cell, each cell at least wide enough for its label
+            and longest option — the row reflows to fewer columns as the main
+            column narrows (sidebar expanded, smaller screen) rather than
+            squeezing the text. */}
+        <div className="filter-grid">
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
                 <label htmlFor="search" className="block text-sm font-semibold text-[var(--muted)]">Search</label>
                 <input
@@ -1132,8 +1135,9 @@ function StudentsRoster() {
                   <option value="failed">Failed</option>
                 </select>
               </div>
-            </div>
-            <div className="flex items-end justify-end gap-2">
+        </div>
+
+        <div className="flex flex-wrap items-end justify-end gap-2">
               {/* One at a time here; a whole cohort at once through the
                   importer, which is the launch-day case. */}
               <Link
@@ -1169,8 +1173,6 @@ function StudentsRoster() {
                   Reset roster
                 </button>
               ) : null}
-            </div>
-          </div>
         </div>
 
         {showResetModal ? (

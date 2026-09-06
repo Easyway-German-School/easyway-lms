@@ -225,7 +225,7 @@ export default function LecturerGrades() {
           {/* Exam Selection */}
           <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
             <h2 className="text-lg font-bold text-[var(--foreground)] mb-4">Select Exam/Test</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="filter-grid">
               <div>
                 <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
                   Choose Exam/Test

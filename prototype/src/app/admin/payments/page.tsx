@@ -200,7 +200,7 @@ function PaymentsLedger() {
           </div>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="filter-grid">
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
             <label htmlFor="search" className="block text-sm font-semibold text-[var(--muted)]">Search</label>
             <input
