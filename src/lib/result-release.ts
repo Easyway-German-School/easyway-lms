@@ -19,6 +19,7 @@
 import { prisma } from "@/lib/prisma";
 import { KIND, notify } from "@/lib/notify";
 import { resultAutoReleaseConfig } from "@/lib/result-settings";
+import { zonedDateKey } from "@/lib/school-time";
 
 const DAY = 86_400_000;
 
@@ -278,7 +279,7 @@ export type NudgeResult = { nudged: number };
  * ids (the assistant action passes the ids it previewed).
  */
 export async function nudgeUnreleasedResults(only?: string[]): Promise<NudgeResult> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = zonedDateKey(new Date()); // the school's calendar day, for the once-a-day dedupe key
   const wanted = only && only.length ? new Set(only) : null;
   const sittings = (await findUnreleasedSittings()).filter((s) => !wanted || wanted.has(s.id));
 

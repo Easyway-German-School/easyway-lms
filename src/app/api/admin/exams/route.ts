@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import { EXAM_BODIES } from "@/lib/exam-centre";
+import { parseTimeInput } from "@/lib/school-time";
 import { letterFor } from "@/lib/grading";
 import { isExamBodyLive } from "@/lib/tenant/features";
 import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
@@ -120,8 +121,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "A name and exam date are required" }, { status: 400 });
     }
 
-    const examDate = new Date(b.examDate);
-    const deadline = b.registrationDeadline ? new Date(b.registrationDeadline) : null;
+    // The form sends a bare "YYYY-MM-DDTHH:mm" — a wall-clock time at the
+    // centre, not the server's zone. `parseTimeInput` reads it in
+    // SCHOOL_TIMEZONE, so "09:00" is 09:00 WAT wherever this runs.
+    const examDate = parseTimeInput(String(b.examDate));
+    const deadline = b.registrationDeadline ? parseTimeInput(String(b.registrationDeadline)) : null;
 
     if (deadline && deadline > examDate) {
       return NextResponse.json(
@@ -130,18 +134,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // A mock (pretest) sitting always grades internally, and its results start
+    // hidden so the automatic release delay actually has something to delay.
+    const isMock = b.kind === "mock";
+
     const exam = await prisma.exam.create({
       data: {
         name: String(b.name).trim(),
         description: b.description?.trim() || null,
         examDate,
-        examBody: (EXAM_BODIES as readonly string[]).includes(b.examBody) ? b.examBody : "internal",
+        kind: isMock ? "mock" : "standard",
+        examBody: isMock
+          ? "internal"
+          : (EXAM_BODIES as readonly string[]).includes(b.examBody)
+            ? b.examBody
+            : "internal",
         level: b.level || null,
         branchId: b.branchId || null,
         fee: b.fee ? Number(b.fee) : null,
         capacity: b.capacity ? Number(b.capacity) : null,
         registrationDeadline: deadline,
         published: Boolean(b.published),
+        resultsReleased: isMock ? false : true,
         passThreshold: b.passThreshold ? Number(b.passThreshold) : 60,
       },
     });

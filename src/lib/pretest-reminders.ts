@@ -16,6 +16,8 @@
 import { prisma } from "@/lib/prisma";
 import { KIND, notify } from "@/lib/notify";
 import { pretestReminderEmailTemplate } from "@/lib/email-templates";
+import { schoolDayOffset } from "@/lib/school-time";
+import { examWhen } from "@/lib/exam-schedule";
 
 export type PretestReminderResult = {
   sittings: number;
@@ -24,11 +26,11 @@ export type PretestReminderResult = {
 };
 
 export async function sendDuePretestReminders(daysBefore = 3): Promise<PretestReminderResult> {
-  const dayStart = new Date();
-  dayStart.setDate(dayStart.getDate() + daysBefore);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
+  // The school calendar day exactly `daysBefore` out — a UTC-day boundary on a
+  // server behind or ahead of the centre would fire a day early or late.
+  const now = new Date();
+  const dayStart = schoolDayOffset(now, daysBefore);
+  const dayEnd = schoolDayOffset(now, daysBefore + 1);
 
   const exams = await prisma.exam.findMany({
     where: { kind: "mock", examDate: { gte: dayStart, lt: dayEnd } },
@@ -67,7 +69,7 @@ export async function sendDuePretestReminders(daysBefore = 3): Promise<PretestRe
       title: subject || "Mock exam reminder",
       message:
         `Your ${exam.level ? `${exam.level} ` : ""}class sits a mock exam on ` +
-        `${exam.examDate.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}. ` +
+        `${examWhen(exam.examDate)}. ` +
         `It is practice — the score does not go on your certificate — but sit it like the real thing.`,
       link: "/calendar",
       push: true,
@@ -90,7 +92,7 @@ export async function sendDuePretestReminders(daysBefore = 3): Promise<PretestRe
         title: `Mock exam for your ${exam.level ?? ""} class`.replace(/\s+/g, " ").trim(),
         message:
           `A mock / pretest for your ${exam.level ? `${exam.level} ` : ""}class is on ` +
-          `${exam.examDate.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}. ` +
+          `${examWhen(exam.examDate)}. ` +
           `Run it under real conditions and enter every mark in the gradebook — results release to students automatically once the class is marked.`,
         link: "/lecturer/gradebook",
         push: true,

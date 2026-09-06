@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOpenExams, registerForExam } from "@/lib/exam-centre";
+import { examWhen } from "@/lib/exam-schedule";
 import { queueEmail } from "@/lib/email-queue";
 import { ensureCandidateAccount } from "@/lib/candidates";
 import { payToken } from "@/lib/exam-payments";
@@ -157,7 +158,7 @@ export async function POST(req: NextRequest) {
         html: `
           <p>Hello ${notifyName ?? "there"},</p>
           <p>Your registration for <strong>${exam.name}</strong> is confirmed.</p>
-          <p><strong>Date:</strong> ${new Date(exam.examDate).toDateString()}<br/>
+          <p><strong>When:</strong> ${examWhen(exam.examDate)}<br/>
              <strong>Seat:</strong> ${result.seatNumber}<br/>
              ${exam.branch?.name ? `<strong>Centre:</strong> ${exam.branch.name}<br/>` : ""}
              <strong>Awarding body:</strong> ${exam.examBody}</p>

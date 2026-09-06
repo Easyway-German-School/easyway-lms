@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
 import { EXAM_BODIES } from "@/lib/exam-centre";
+import { parseTimeInput } from "@/lib/school-time";
 import { letterFor } from "@/lib/grading";
 import { isExamBodyLive } from "@/lib/tenant/features";
 import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
@@ -120,8 +121,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "A name and exam date are required" }, { status: 400 });
     }
 
-    const examDate = new Date(b.examDate);
-    const deadline = b.registrationDeadline ? new Date(b.registrationDeadline) : null;
+    // The form sends a bare "YYYY-MM-DDTHH:mm" — a wall-clock time at the
+    // centre, not the server's zone. `parseTimeInput` reads it in
+    // SCHOOL_TIMEZONE, so "09:00" is 09:00 WAT wherever this runs.
+    const examDate = parseTimeInput(String(b.examDate));
+    const deadline = b.registrationDeadline ? parseTimeInput(String(b.registrationDeadline)) : null;
 
     if (deadline && deadline > examDate) {
       return NextResponse.json(

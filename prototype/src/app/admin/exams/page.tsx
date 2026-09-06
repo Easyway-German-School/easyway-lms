@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import StatCard from "@/components/StatCard";
 import { LEVELS } from "@/lib/levels";
+import { examWhen, registrationClosesAt } from "@/lib/exam-schedule";
 import { ExamCentreIcon, UsersIcon, TrophyIcon, AlertIcon } from "@/components/icons";
 
 /**
@@ -348,11 +349,16 @@ export default function AdminExamsPage() {
                     </div>
                     <h3 className="mt-1.5 font-semibold">{exam.name}</h3>
                     <p className="text-sm text-[var(--muted)]">
-                      {new Date(exam.examDate).toDateString()}
+                      {examWhen(exam.examDate)}
                       {exam.branch && ` · ${exam.branch.name}`}
                       {exam.fee !== null && ` · ₦${exam.fee.toLocaleString()}`}
                       {isInternal(exam.examBody) && ` · pass ≥ ${exam.passThreshold}/skill`}
                     </p>
+                    {!isInternal(exam.examBody) && (
+                      <p className="text-xs text-[var(--muted)]">
+                        Registration closes {examWhen(registrationClosesAt(exam))}
+                      </p>
+                    )}
                   </div>
 
                   <div className="text-right">

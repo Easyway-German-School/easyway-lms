@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { registrationClosesAt, registrationState } from "@/lib/exam-schedule";
 
 /**
  * The ÖSD exam centre.
@@ -38,7 +39,8 @@ export async function seatState(examId: string, now = new Date()): Promise<SeatS
 
   const remaining = exam.capacity === null ? null : Math.max(0, exam.capacity - taken);
   const full = exam.capacity !== null && taken >= exam.capacity;
-  const deadlinePassed = Boolean(exam.registrationDeadline && now > exam.registrationDeadline);
+  // An unset deadline still closes registration a few days before the sitting.
+  const deadlinePassed = now > registrationClosesAt(exam);
 
   return {
     capacity: exam.capacity,
@@ -82,7 +84,7 @@ export async function registerForExam(input: RegisterInput, now = new Date()): P
     return { ok: false, error: "A name and email are required to register.", code: "invalid" };
   }
 
-  if (exam.registrationDeadline && now > exam.registrationDeadline) {
+  if (now > registrationClosesAt(exam)) {
     return { ok: false, error: "Registration for this sitting has closed.", code: "closed" };
   }
   if (exam.examDate <= now) {
@@ -170,6 +172,7 @@ export async function listOpenExams(opts?: { level?: string | null; branchId?: s
   return exams.map((exam) => {
     const taken = heldBy.get(exam.id) ?? 0;
     const remaining = exam.capacity === null ? null : Math.max(0, exam.capacity - taken);
+    const state = registrationState({ ...exam, published: true }, taken, now);
     return {
       id: exam.id,
       name: exam.name,
@@ -178,13 +181,16 @@ export async function listOpenExams(opts?: { level?: string | null; branchId?: s
       level: exam.level,
       examDate: exam.examDate,
       registrationDeadline: exam.registrationDeadline,
+      registrationClosesAt: state.closesAt,
       fee: exam.fee,
       branch: exam.branch,
       capacity: exam.capacity,
       taken,
       remaining,
       full: exam.capacity !== null && taken >= exam.capacity,
-      deadlinePassed: Boolean(exam.registrationDeadline && now > exam.registrationDeadline),
+      deadlinePassed: state.reason === "closed",
+      registrationOpen: state.isOpen,
+      closedReason: state.reason,
     };
   });
 }

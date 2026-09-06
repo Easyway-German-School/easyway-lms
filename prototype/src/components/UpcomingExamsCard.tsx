@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { examCountdown, examWhen } from "@/lib/exam-schedule";
 
 /**
  * Next exams, on the dashboard.
@@ -67,7 +68,7 @@ export default function UpcomingExamsCard() {
 
       <div className="mt-6 space-y-4">
         {exams.slice(0, 3).map((exam) => {
-          const days = Math.ceil((new Date(exam.examDate).getTime() - Date.now()) / 86_400_000);
+          const countdown = examCountdown(exam.examDate);
           return (
             <div key={exam.registrationId} className="flex items-center justify-between gap-4 rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] p-5">
               <div className="min-w-0">
@@ -84,16 +85,20 @@ export default function UpcomingExamsCard() {
                 </div>
                 <p className="mt-2 truncate font-semibold text-[var(--foreground)]">{exam.name}</p>
                 <p className="text-sm text-[var(--muted)]">
-                  {new Date(exam.examDate).toDateString()}
+                  {examWhen(exam.examDate)}
                   {exam.seatNumber && ` · seat ${exam.seatNumber}`}
                   {exam.branchName && ` · ${exam.branchName}`}
                 </p>
               </div>
               <div className="shrink-0 rounded-2xl bg-[var(--surface)] px-4 py-3 text-center shadow-sm">
-                <p className="text-2xl font-semibold text-[var(--foreground)]">{days > 0 ? days : 0}</p>
-                <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                  {days === 1 ? "day" : "days"}
-                </p>
+                {countdown.days > 1 ? (
+                  <>
+                    <p className="text-2xl font-semibold text-[var(--foreground)]">{countdown.days}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">days</p>
+                  </>
+                ) : (
+                  <p className="text-sm font-semibold capitalize text-[var(--foreground)]">{countdown.label}</p>
+                )}
               </div>
             </div>
           );
