@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { SCHEDULE_DAYS, type ScheduleDay } from "@/lib/private-schedule-preferences";
+import { SCHOOL_TIMEZONE, zonedDateKey, zonedTimeToInstant } from "@/lib/school-time";
 
 /**
  * The recurring-booking engine for private classes.
@@ -18,14 +19,10 @@ import { SCHEDULE_DAYS, type ScheduleDay } from "@/lib/private-schedule-preferen
  * touching the pattern everyone else still meets on, and only a real row can
  * carry a status.
  *
- * TIMEZONE NOTE: like every other booking path in this app today (see
- * `choosePreferredTime` in the tutor's booking page), this treats the
- * series' `startTime` as wall-clock time applied directly via `setHours()`
- * — it does not yet convert through the series' IANA `timezone` field.
- * Genuine timezone/DST-safe conversion is a deliberately separate, later
- * pass (it touches every booking path at once, not just this one) — see the
- * scheduling-platform roadmap. `timezone` is stored now so that pass has
- * something to read.
+ * TIMEZONE: `startTime` is a wall-clock time in the series' `timezone` (falling
+ * back to `SCHOOL_TIMEZONE`). Every occurrence's `scheduledAt` is computed from
+ * it through `zonedTimeToInstant`, which is DST-safe — so an 18:00 series is
+ * 18:00 in that zone on every date it lands on, even across a DST boundary.
  */
 
 const WINDOW_WEEKS = 8;
@@ -48,19 +45,15 @@ export type SeriesInput = {
   tenantId?: string | null;
 };
 
-function isoDateKey(date: Date): string {
+/** The day-only key for a holiday row (its `date` is stored as a UTC-midnight date). */
+function holidayKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function weekdayNameFor(date: Date): ScheduleDay {
-  return SCHEDULE_DAYS[(date.getDay() + 6) % 7];
-}
-
-function atStartTime(date: Date, startTime: string): Date {
-  const [hours, minutes] = startTime.split(":").map(Number);
-  const next = new Date(date);
-  next.setHours(hours, minutes, 0, 0);
-  return next;
+/** ScheduleDay for a `yyyy-mm-dd` key. */
+function weekdayForKey(dateKey: string): ScheduleDay {
+  const utc = new Date(`${dateKey}T12:00:00.000Z`);
+  return SCHEDULE_DAYS[(utc.getUTCDay() + 6) % 7];
 }
 
 /** Creates the series and immediately fills its first window of occurrences. */
@@ -107,26 +100,33 @@ export async function generateOccurrences(seriesId: string, now: Date = new Date
     : [];
   if (weekdays.length === 0) return 0;
 
+  const tz = series.timezone || SCHOOL_TIMEZONE;
+
   const windowStart = new Date(Math.max(now.getTime(), series.startDate.getTime()));
-  windowStart.setHours(0, 0, 0, 0);
-  const windowEndByPolicy = new Date(now);
-  windowEndByPolicy.setDate(windowEndByPolicy.getDate() + WINDOW_WEEKS * 7);
+  const windowEndByPolicy = new Date(now.getTime() + WINDOW_WEEKS * 7 * 86_400_000);
   const windowEnd = series.endDate && series.endDate.getTime() < windowEndByPolicy.getTime() ? series.endDate : windowEndByPolicy;
   if (windowEnd.getTime() <= windowStart.getTime()) return 0;
+
+  // Day-aligned bounds for the "what's already here" queries, so a holiday or
+  // booking earlier on the window's first day is still seen.
+  const firstKey = zonedDateKey(windowStart, tz);
+  const lastKey = zonedDateKey(windowEnd, tz);
+  const queryFrom = new Date(`${firstKey}T00:00:00.000Z`);
+  const queryTo = new Date(`${lastKey}T23:59:59.999Z`);
 
   // Every date already spoken for — by this series, another series, or a
   // one-off booking. One decision per calendar day is the rule: if the office
   // already cancelled or moved this date, generation must not silently refill
   // it out from under them.
   const existingForStudent = await prisma.privateClass.findMany({
-    where: { studentId: series.studentId, scheduledAt: { gte: windowStart, lt: windowEnd } },
+    where: { studentId: series.studentId, scheduledAt: { gte: queryFrom, lt: queryTo } },
     select: { scheduledAt: true },
   });
-  const occupiedDates = new Set(existingForStudent.map((row) => isoDateKey(row.scheduledAt)));
+  const occupiedDates = new Set(existingForStudent.map((row) => zonedDateKey(row.scheduledAt, tz)));
 
   const holidays = await prisma.schoolHoliday.findMany({
     where: {
-      date: { gte: windowStart, lt: windowEnd },
+      date: { gte: queryFrom, lt: queryTo },
       // `branchId: undefined` in a Prisma where clause means "no filter on
       // this field" — NOT "match null" — so when the student has no branch
       // this must drop the second clause entirely rather than pass it
@@ -135,15 +135,23 @@ export async function generateOccurrences(seriesId: string, now: Date = new Date
     },
     select: { date: true, label: true },
   });
-  const holidayByDate = new Map(holidays.map((h) => [isoDateKey(h.date), h.label]));
+  const holidayByDate = new Map(holidays.map((h) => [holidayKey(h.date), h.label]));
 
+  // Walk calendar days in the series' own zone, from the first to the last the
+  // window touches, and place `startTime` on each matching weekday.
   const toCreate: Prisma.PrivateClassCreateManyInput[] = [];
-  for (const cursor = new Date(windowStart); cursor.getTime() < windowEnd.getTime() && toCreate.length < MAX_GENERATE_PER_RUN; cursor.setDate(cursor.getDate() + 1)) {
-    if (!weekdays.includes(weekdayNameFor(cursor))) continue;
-    const dateKey = isoDateKey(cursor);
+  for (
+    const walk = new Date(`${firstKey}T12:00:00.000Z`);
+    toCreate.length < MAX_GENERATE_PER_RUN;
+    walk.setUTCDate(walk.getUTCDate() + 1)
+  ) {
+    const dateKey = walk.toISOString().slice(0, 10);
+    if (dateKey > lastKey) break;
+    if (!weekdays.includes(weekdayForKey(dateKey))) continue;
     if (occupiedDates.has(dateKey)) continue;
 
-    const scheduledAt = atStartTime(cursor, series.startTime);
+    const scheduledAt = zonedTimeToInstant(dateKey, series.startTime, tz);
+    if (scheduledAt.getTime() < windowStart.getTime() || scheduledAt.getTime() >= windowEnd.getTime()) continue;
     const holidayLabel = holidayByDate.get(dateKey);
 
     toCreate.push({

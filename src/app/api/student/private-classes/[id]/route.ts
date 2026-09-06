@@ -1,6 +1,7 @@
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { KIND, notify } from "@/lib/notify";
+import { formatWhen, parseTimeInput } from "@/lib/school-time";
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   let proposedAt: Date | null = null;
   if (action === "request_reschedule") {
-    proposedAt = typeof body?.proposedAt === "string" ? new Date(body.proposedAt) : new Date("invalid");
+    proposedAt = typeof body?.proposedAt === "string" ? parseTimeInput(body.proposedAt) : new Date("invalid");
     if (Number.isNaN(proposedAt.getTime())) {
       return NextResponse.json({ error: "Choose a valid proposed date and time" }, { status: 400 });
     }
@@ -50,8 +51,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const studentName = student.user.name ?? "A private student";
   const message = action === "request_cancel"
-    ? `${studentName} asked to cancel the session on ${existing.scheduledAt.toLocaleString()}.`
-    : `${studentName} asked to move the session on ${existing.scheduledAt.toLocaleString()} to ${proposedAt!.toLocaleString()}.`;
+    ? `${studentName} asked to cancel the session on ${formatWhen(existing.scheduledAt)}.`
+    : `${studentName} asked to move the session on ${formatWhen(existing.scheduledAt)} to ${formatWhen(proposedAt!)}.`;
   const title = action === "request_cancel" ? "Cancellation requested" : "Reschedule requested";
 
   // Same role-specific link split as every other private-class notification

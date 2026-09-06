@@ -10,6 +10,12 @@ import { AttachmentIcon, BroadcastIcon, PrivateClassIcon, SendIcon } from "@/com
 
 const VIEW_KEY = "easyway:private-classes-view";
 import { formatDayRanges, formatInTimezone, normalizeSchedulePreferences, scheduleMatchFor, SCHEDULE_DAYS, type ScheduleDay } from "@/lib/private-schedule-preferences";
+import { SCHOOL_TIMEZONE, instantToZonedParts, zonedTimeToInstant } from "@/lib/school-time";
+
+/** A datetime-local string ("2026-09-10T18:00", school time) → an absolute ISO instant. */
+function localInputToInstantISO(value: string): string {
+  return zonedTimeToInstant(value.slice(0, 10), value.slice(11, 16), SCHOOL_TIMEZONE).toISOString();
+}
 
 const WEEKDAY_BY_JS_INDEX: ScheduleDay[] = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
@@ -85,15 +91,18 @@ const DELIVERY_MODES = ["physical", "online", "hybrid"];
 
 function bookingPreferenceMatch(value: string, preferences: Student["schedulePreferences"]): "match" | "day" | "mismatch" | "unknown" {
   if (!value) return "unknown";
-  const date = new Date(value);
+  const normalized = normalizeSchedulePreferences(preferences);
+  // `value` is school-time wall clock; turn it into the real instant, then
+  // check it against the student's ranges IN THE STUDENT'S OWN ZONE.
+  const date = zonedTimeToInstant(value.slice(0, 10), value.slice(11, 16), SCHOOL_TIMEZONE);
   if (Number.isNaN(date.getTime())) return "unknown";
-  return scheduleMatchFor(date, normalizeSchedulePreferences(preferences).dayRanges);
+  return scheduleMatchFor(date, normalized.dayRanges, normalized.timezone);
 }
 
-/** datetime-local needs "YYYY-MM-DDTHH:mm" in LOCAL time, not an ISO UTC string. */
+/** An instant → the "YYYY-MM-DDTHH:mm" a datetime-local input wants, in SCHOOL time. */
 function toLocalInput(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const p = instantToZonedParts(date, SCHOOL_TIMEZONE);
+  return `${p.dateKey}T${p.clock}`;
 }
 
 export default function LecturerPrivateClassesPage() {
@@ -264,7 +273,7 @@ export default function LecturerPrivateClassesPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           ...(editingId ? { id: editingId } : { studentId }),
-          scheduledAt: new Date(when).toISOString(),
+          scheduledAt: localInputToInstantISO(when),
           durationMinutes: duration,
           topic,
           lecturerId: lecturerId || undefined,
@@ -292,20 +301,21 @@ export default function LecturerPrivateClassesPage() {
     if (!studentId || !when || recurWeekdays.length === 0) return;
     setRecurBusy(true);
     try {
-      const start = new Date(when);
       const res = await fetch("/api/lecturer/private-classes/series", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           studentId,
           weekdays: recurWeekdays,
-          startTime: `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}`,
+          // The wall-clock time the tutor typed, in school time — the series
+          // engine re-applies it in `timezone` on every occurrence date.
+          startTime: when.slice(11, 16),
           durationMinutes: duration,
           topic,
           lecturerId: lecturerId || undefined,
           materialId: materialId || undefined,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          startDate: start.toISOString(),
+          timezone: SCHOOL_TIMEZONE,
+          startDate: localInputToInstantISO(when),
           endDate: recurEndDate || undefined,
         }),
       });
@@ -601,9 +611,9 @@ export default function LecturerPrivateClassesPage() {
                   {bookingMatch === "match" && <span className="mt-1 block text-xs text-emerald-600">Matches the student&apos;s preferred day and time window.</span>}
                   {bookingMatch === "day" && <span className="mt-1 block text-xs text-amber-600">Matches the preferred day, but not the preferred time window.</span>}
                   {bookingMatch === "mismatch" && <span className="mt-1 block text-xs text-rose-600">This is outside the student&apos;s preferred days and time windows.</span>}
-                  {when && selectedPreferences?.timezone && formatInTimezone(new Date(when), selectedPreferences.timezone) && (
+                  {when && selectedPreferences?.timezone && formatInTimezone(zonedTimeToInstant(when.slice(0, 10), when.slice(11, 16), SCHOOL_TIMEZONE), selectedPreferences.timezone) && (
                     <span className="mt-1 block text-xs text-[var(--muted)]">
-                      {formatInTimezone(new Date(when), selectedPreferences.timezone)} for {selected?.name ?? "the student"} ({selectedPreferences.timezone})
+                      {formatInTimezone(zonedTimeToInstant(when.slice(0, 10), when.slice(11, 16), SCHOOL_TIMEZONE), selectedPreferences.timezone)} for {selected?.name ?? "the student"} ({selectedPreferences.timezone})
                     </span>
                   )}
                 </label>

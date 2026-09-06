@@ -14,6 +14,8 @@
  * one, so nothing needs a backfill migration.
  */
 
+import { instantToZonedParts, viewerTimezone } from "@/lib/school-time";
+
 export const SCHEDULE_DAYS = [
   "monday",
   "tuesday",
@@ -142,11 +144,6 @@ export function normalizeSchedulePreferences(raw: unknown): NormalizedSchedulePr
   return { dayRanges, preferredTimes, examTimes, frequency, timezone, notes };
 }
 
-/** Sunday-indexed `Date.getDay()` → our Monday-first `SCHEDULE_DAYS` index. */
-function scheduleDayFor(date: Date): ScheduleDay {
-  return SCHEDULE_DAYS[(date.getDay() + 6) % 7];
-}
-
 /**
  * Does a candidate booking time land inside what the student said works?
  *
@@ -154,12 +151,20 @@ function scheduleDayFor(date: Date): ScheduleDay {
  * range they gave for it (still worth a soft warning, not a hard block —
  * these are preferences, not a locked timetable). "mismatch" = wrong day
  * entirely. "unknown" = the student has not shared preferences yet.
+ *
+ * The day-of-week and hour are read in `timezone` (the student's own), because
+ * "Tuesday 6pm" in their preferences means Tuesday 6pm where they are.
  */
-export function scheduleMatchFor(date: Date, dayRanges: DayScheduleEntry[]): "match" | "day" | "mismatch" | "unknown" {
+export function scheduleMatchFor(
+  date: Date,
+  dayRanges: DayScheduleEntry[],
+  timezone: string,
+): "match" | "day" | "mismatch" | "unknown" {
   if (!dayRanges.length) return "unknown";
-  const entry = dayRanges.find((e) => e.day === scheduleDayFor(date));
+  const parts = instantToZonedParts(date, viewerTimezone(timezone));
+  const entry = dayRanges.find((e) => e.day === SCHEDULE_DAYS[(parts.weekday + 6) % 7]);
   if (!entry) return "mismatch";
-  const minutes = date.getHours() * 60 + date.getMinutes();
+  const minutes = parts.hour * 60 + parts.minute;
   const inRange = entry.ranges.some((range) => {
     const [startHour, startMinute] = range.start.split(":").map(Number);
     const [endHour, endMinute] = range.end.split(":").map(Number);

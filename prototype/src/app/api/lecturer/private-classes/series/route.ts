@@ -4,6 +4,7 @@ import { requireStaff } from "../route";
 import { createSeries, endSeries } from "@/lib/private-class-series";
 import { SCHEDULE_DAYS, type ScheduleDay } from "@/lib/private-schedule-preferences";
 import { KIND, notify } from "@/lib/notify";
+import { SCHOOL_TIMEZONE } from "@/lib/school-time";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
       location: typeof location === "string" ? location.trim() || null : null,
       topic: typeof topic === "string" ? topic.trim() || null : null,
       materialId: typeof materialId === "string" && materialId ? materialId : null,
-      timezone: typeof timezone === "string" && timezone.trim() ? timezone.trim() : "UTC",
+      timezone: typeof timezone === "string" && timezone.trim() ? timezone.trim() : SCHOOL_TIMEZONE,
       startDate: start,
       endDate: end,
       createdBy: auth.role === "admin" ? "admin" : "tutor",
@@ -67,7 +68,7 @@ export async function POST(req: NextRequest) {
       kind: KIND.privateClassUpdated,
       severity: "info",
       title: "Recurring private classes set up",
-      message: `${cleanWeekdays.join(", ")} at ${startTime}, starting ${start.toLocaleDateString()}.`,
+      message: `${cleanWeekdays.join(", ")} at ${startTime}, starting ${start.toLocaleDateString("en-GB", { timeZone: SCHOOL_TIMEZONE, day: "numeric", month: "long" })}.`,
       link: "/calendar",
       dedupeKey: `private-series:${series.id}:created`,
     });
