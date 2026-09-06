@@ -40,6 +40,13 @@ export type AssistantBriefing = {
   enquiries?: { open: number; newThisWeek: number };
   exams?: { upcoming: number; registrationsUnpaid: number };
   attendance?: { sessionsLast7Days: number; averagePresentPercent: number | null };
+  classes?: {
+    total: number;
+    studentsInClasses: number;
+    averageSize: number;
+    upcomingSessions7Days: number;
+  };
+  staff?: { tutors: number; active: number; onProbation: number; unassigned: number };
 };
 
 export type AssistantStatus = {

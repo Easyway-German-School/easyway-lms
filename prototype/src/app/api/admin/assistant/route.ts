@@ -56,6 +56,13 @@ type Briefing = {
   enquiries?: { open: number; newThisWeek: number };
   exams?: { upcoming: number; registrationsUnpaid: number };
   attendance?: { sessionsLast7Days: number; averagePresentPercent: number | null };
+  classes?: {
+    total: number;
+    studentsInClasses: number;
+    averageSize: number;
+    upcomingSessions7Days: number;
+  };
+  staff?: { tutors: number; active: number; onProbation: number; unassigned: number };
 };
 
 const DAY = 86_400_000;
@@ -227,6 +234,45 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
     };
   }
 
+  if (can("classes" as never)) {
+    const weekAhead = new Date(now.getTime() + 7 * DAY);
+    const [groupStudents, upcomingSessions] = await Promise.all([
+      prisma.student.findMany({
+        where: { status: "active", classType: "group" },
+        select: { level: true, sessionSlot: true, branch: { select: { name: true } } },
+      }),
+      prisma.classSession.count({
+        where: { date: { gte: now, lte: weekAhead }, status: { not: "cancelled" } },
+      }),
+    ]);
+    // A class is one branch + level + sitting — the unit the school actually teaches in.
+    const classes = new Set(
+      groupStudents.map((s) => `${s.branch?.name ?? "?"}·${s.level}·${s.sessionSlot}`),
+    );
+    briefing.classes = {
+      total: classes.size,
+      studentsInClasses: groupStudents.length,
+      averageSize: classes.size > 0 ? Math.round(groupStudents.length / classes.size) : 0,
+      upcomingSessions7Days: upcomingSessions,
+    };
+  }
+
+  if (can("staff" as never)) {
+    const tutors = await prisma.lecturer.findMany({
+      select: { status: true, branch: { select: { name: true } }, levels: true, branchIds: true },
+    });
+    briefing.staff = {
+      tutors: tutors.length,
+      active: tutors.filter((t) => (t.status || "active") === "active").length,
+      onProbation: tutors.filter((t) => t.status === "probation").length,
+      unassigned: tutors.filter((t) => {
+        const levels = Array.isArray(t.levels) ? t.levels : [];
+        const branchIds = Array.isArray(t.branchIds) ? t.branchIds : [];
+        return levels.length === 0 && branchIds.length === 0 && !t.branch;
+      }).length,
+    };
+  }
+
   return briefing;
 }
 
@@ -256,7 +302,12 @@ Rules, in order of importance:
 8. Answer in at most five sentences unless asked for more. The reader is at a
    front desk with somebody waiting.
 9. When asked to draft a message to students or staff, write the message itself
-   and nothing else — no preamble, no "here is a draft".`;
+   and nothing else — no preamble, no "here is a draft".
+
+If the admin asks what you can see or do, list the tools you were actually given
+by name — the set depends on their role, so describe that set rather than
+guessing at your own limits or saying you have no access. Every summary tool
+takes an optional "days" window when the question is about a period.`;
 
 /**
  * The half of the prompt that only exists when the brain can act.

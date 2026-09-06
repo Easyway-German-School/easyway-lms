@@ -12,7 +12,7 @@ import {
   canBrainAct,
   type BrainMessage,
 } from "@/lib/assistant-brain";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +56,13 @@ type Briefing = {
   enquiries?: { open: number; newThisWeek: number };
   exams?: { upcoming: number; registrationsUnpaid: number };
   attendance?: { sessionsLast7Days: number; averagePresentPercent: number | null };
+  classes?: {
+    total: number;
+    studentsInClasses: number;
+    averageSize: number;
+    upcomingSessions7Days: number;
+  };
+  staff?: { tutors: number; active: number; onProbation: number; unassigned: number };
 };
 
 const DAY = 86_400_000;
@@ -141,9 +148,10 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
       select: {
         level: true,
         classType: true,
+        pathway: true,
         branch: { select: { name: true } },
         user: { select: { name: true, email: true } },
-        payments: { where: { status: "completed" }, select: { amount: true, createdAt: true } },
+        payments: { where: receivedPaymentFilter(), select: { amount: true, createdAt: true } },
       },
     });
 
@@ -155,7 +163,7 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
     const balances: Array<{ name: string; level: string; branch: string | null; owed: number }> = [];
 
     for (const student of students) {
-      const lookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+      const lookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
       const tuitionFee = tuitionFeeFor(lookup);
       const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
 
@@ -226,6 +234,45 @@ async function buildBriefing(can: (c: never) => boolean): Promise<Briefing> {
     };
   }
 
+  if (can("classes" as never)) {
+    const weekAhead = new Date(now.getTime() + 7 * DAY);
+    const [groupStudents, upcomingSessions] = await Promise.all([
+      prisma.student.findMany({
+        where: { status: "active", classType: "group" },
+        select: { level: true, sessionSlot: true, branch: { select: { name: true } } },
+      }),
+      prisma.classSession.count({
+        where: { date: { gte: now, lte: weekAhead }, status: { not: "cancelled" } },
+      }),
+    ]);
+    // A class is one branch + level + sitting — the unit the school actually teaches in.
+    const classes = new Set(
+      groupStudents.map((s) => `${s.branch?.name ?? "?"}·${s.level}·${s.sessionSlot}`),
+    );
+    briefing.classes = {
+      total: classes.size,
+      studentsInClasses: groupStudents.length,
+      averageSize: classes.size > 0 ? Math.round(groupStudents.length / classes.size) : 0,
+      upcomingSessions7Days: upcomingSessions,
+    };
+  }
+
+  if (can("staff" as never)) {
+    const tutors = await prisma.lecturer.findMany({
+      select: { status: true, branch: { select: { name: true } }, levels: true, branchIds: true },
+    });
+    briefing.staff = {
+      tutors: tutors.length,
+      active: tutors.filter((t) => (t.status || "active") === "active").length,
+      onProbation: tutors.filter((t) => t.status === "probation").length,
+      unassigned: tutors.filter((t) => {
+        const levels = Array.isArray(t.levels) ? t.levels : [];
+        const branchIds = Array.isArray(t.branchIds) ? t.branchIds : [];
+        return levels.length === 0 && branchIds.length === 0 && !t.branch;
+      }).length,
+    };
+  }
+
   return briefing;
 }
 
@@ -255,7 +302,12 @@ Rules, in order of importance:
 8. Answer in at most five sentences unless asked for more. The reader is at a
    front desk with somebody waiting.
 9. When asked to draft a message to students or staff, write the message itself
-   and nothing else — no preamble, no "here is a draft".`;
+   and nothing else — no preamble, no "here is a draft".
+
+If the admin asks what you can see or do, list the tools you were actually given
+by name — the set depends on their role, so describe that set rather than
+guessing at your own limits or saying you have no access. Every summary tool
+takes an optional "days" window when the question is about a period.`;
 
 /**
  * The half of the prompt that only exists when the brain can act.
@@ -269,9 +321,15 @@ const ACTION_RULES = `
 YOU CAN ALSO DO THINGS, NOT JUST LOOK THEM UP.
 
 The action tools — message_students, send_fee_reminders, mark_attendance,
-promote_students, postpone_class, invite_leads — do NOT happen when you call
-them. Calling one prepares a plan and shows the admin a card with the exact
-number of people it affects and a Confirm button. You are drafting; they decide.
+promote_students, postpone_class, invite_leads, remind_pretest,
+chase_unreleased_results — do NOT happen when you call them. Calling one
+prepares a plan and shows the admin a card with the exact number of people it
+affects and a Confirm button. You are drafting; they decide.
+
+remind_pretest is for warning a class about a mock / pretest exam — write the
+message yourself, the same as message_students. chase_unreleased_results takes
+no arguments: it finds the tutors who have marked a mock but not released it and
+proposes nudging them. Use it when the admin asks about results that are late.
 
 10. Be willing. If the admin asks you to chase the unpaid B1 students, propose
     the action — do not answer with instructions for how they could do it

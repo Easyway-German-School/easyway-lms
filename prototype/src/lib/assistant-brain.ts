@@ -297,11 +297,18 @@ function anthropic(): Anthropic {
  * Two things here are not obvious and both cause silent breakage if missed:
  *
  *   1. System messages become the top-level `system` parameter, not entries in
- *      `messages`. The last one carries a cache breakpoint, so the system
- *      prompt and the tool list — which render ahead of it — are billed at a
- *      tenth of the price on every question after the first. That is the whole
- *      prompt-caching win, and it depends on the system text being byte-stable,
- *      which is why the briefing is cached upstream rather than rebuilt here.
+ *      `messages`. Caching breakpoints sit at TWO places, not one, because the
+ *      prompt has two very different stability profiles stacked in it:
+ *        - the tool list (see toAnthropicTools) and system[0] — the frozen
+ *          rules text — never change for a given role, so they carry their own
+ *          breakpoints and stay cached for the full ephemeral TTL;
+ *        - system[last] is the briefing, which the route rebuilds once a
+ *          minute and varies per capability set. It gets a breakpoint too, so
+ *          a burst of questions inside that minute reads the whole prefix from
+ *          cache — but when the briefing rolls over, only it (~a few hundred
+ *          tokens) re-bills, not the ~4k tokens of rules and tool schemas
+ *          ahead of it. With a single breakpoint on the briefing, every
+ *          rollover re-billed the lot.
  *
  *   2. Consecutive tool results MERGE into one user message. The API wants all
  *      results from one assistant turn in a single message; splitting them
@@ -352,6 +359,11 @@ function toAnthropic(messages: BrainMessage[]): {
   }
 
   if (system.length > 0) {
+    // system[0] is the frozen rules text; system[last] is the once-a-minute
+    // briefing. Marking both means the rules stay cached across a briefing
+    // rollover instead of re-billing behind it. Two breakpoints here plus one
+    // in toAnthropicTools is three of the four the API allows.
+    system[0] = { ...system[0], cache_control: { type: "ephemeral" } };
     system[system.length - 1] = {
       ...system[system.length - 1],
       cache_control: { type: "ephemeral" },
@@ -362,11 +374,25 @@ function toAnthropic(messages: BrainMessage[]): {
 }
 
 function toAnthropicTools(tools: ToolSpec[]): Anthropic.Tool[] {
-  return tools.map((tool) => ({
+  const mapped: Anthropic.Tool[] = tools.map((tool) => ({
     name: tool.function.name,
     description: tool.function.description,
     input_schema: tool.function.parameters as Anthropic.Tool["input_schema"],
   }));
+
+  // The tool list renders first in the prompt and is byte-identical for every
+  // question from a given role — with the full read-tool set it is ~4k tokens.
+  // A breakpoint on the last tool caches the whole array on its own, so it
+  // survives the briefing block behind it changing every minute. Without this
+  // the schemas re-billed at full price on every briefing rollover.
+  if (mapped.length > 0) {
+    mapped[mapped.length - 1] = {
+      ...mapped[mapped.length - 1],
+      cache_control: { type: "ephemeral" },
+    };
+  }
+
+  return mapped;
 }
 
 async function claudeTurn(
