@@ -158,6 +158,7 @@ export async function GET() {
     });
     return schedule.months.flatMap((month) => month.sessions.map((session) => ({
       ...session,
+      branchId: student.branch!.id,
       branchName: student.branch!.name,
       deliveryMode: student.deliveryMode,
       tutorName: session.lecturerName,
