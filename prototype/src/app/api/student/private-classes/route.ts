@@ -1,6 +1,7 @@
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { KIND, notify } from "@/lib/notify";
+import { privateOverlaps } from "@/lib/private-classes";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -57,12 +58,9 @@ export async function POST(req: Request) {
   if (Number.isNaN(scheduledAt.getTime()) || !Number.isFinite(duration) || duration < 15 || duration > 240) {
     return NextResponse.json({ error: "Choose a valid date and duration" }, { status: 400 });
   }
-  const end = new Date(scheduledAt.getTime() + Math.round(duration) * 60_000);
-  const conflict = await prisma.privateClass.findFirst({
-    where: { studentId: student.id, status: { notIn: ["cancelled", "declined"] }, scheduledAt: { lt: end, gte: new Date(scheduledAt.getTime() - 240 * 60_000) } },
-    select: { id: true },
-  });
-  if (conflict) return NextResponse.json({ error: "You already have a private session around that time" }, { status: 409 });
+  if (await privateOverlaps({ scope: { studentId: student.id }, start: scheduledAt, durationMinutes: Math.round(duration) })) {
+    return NextResponse.json({ error: "That overlaps a private session you already have" }, { status: 409 });
+  }
   const created = await prisma.privateClass.create({
     data: { studentId: student.id, scheduledAt, durationMinutes: Math.round(duration), topic: typeof body?.topic === "string" ? body.topic.trim() || null : null, status: "requested", notes: typeof body?.notes === "string" ? body.notes.trim() || null : null, lecturerId: student.tutorId },
   });

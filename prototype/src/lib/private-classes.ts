@@ -60,6 +60,40 @@ export async function ensureAttendanceComputed(privateClass: {
   return computed;
 }
 
+/**
+ * True when a proposed session `[start, start+durationMinutes)` overlaps an
+ * existing one for the same tutor or the same student. Real interval overlap —
+ * `newStart < existingEnd && existingStart < newEnd` — using each existing
+ * row's own duration, instead of the old fixed 240-minute lookback that
+ * flagged harmless back-to-back sessions and missed genuine clashes.
+ */
+export async function privateOverlaps(args: {
+  scope: { lecturerId?: string | null; studentId?: string };
+  start: Date;
+  durationMinutes: number;
+  excludeId?: string;
+}): Promise<boolean> {
+  const newStart = args.start.getTime();
+  const newEnd = newStart + Math.max(15, args.durationMinutes) * 60_000;
+  // Widen the DB scan by the longest a session can run (240 min) so a long
+  // existing session that starts before `start` is still a candidate.
+  const candidates = await prisma.privateClass.findMany({
+    where: {
+      ...(args.scope.lecturerId ? { lecturerId: args.scope.lecturerId } : {}),
+      ...(args.scope.studentId ? { studentId: args.scope.studentId } : {}),
+      status: { notIn: ["cancelled", "declined", "skipped"] },
+      scheduledAt: { gte: new Date(newStart - 240 * 60_000), lt: new Date(newEnd) },
+      ...(args.excludeId ? { id: { not: args.excludeId } } : {}),
+    },
+    select: { scheduledAt: true, durationMinutes: true },
+  });
+  return candidates.some((row) => {
+    const s = row.scheduledAt.getTime();
+    const e = s + (row.durationMinutes || 60) * 60_000;
+    return newStart < e && s < newEnd;
+  });
+}
+
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",

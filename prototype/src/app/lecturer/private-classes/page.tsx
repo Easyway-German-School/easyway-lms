@@ -5,7 +5,10 @@ export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import LecturerShell from "@/components/LecturerShell";
 import TutorLivePanel from "@/components/live/TutorLivePanel";
+import PrivateClassCalendar from "@/components/lecturer/PrivateClassCalendar";
 import { AttachmentIcon, BroadcastIcon, PrivateClassIcon, SendIcon } from "@/components/icons";
+
+const VIEW_KEY = "easyway:private-classes-view";
 import { formatDayRanges, formatInTimezone, normalizeSchedulePreferences, scheduleMatchFor, SCHEDULE_DAYS, type ScheduleDay } from "@/lib/private-schedule-preferences";
 
 const WEEKDAY_BY_JS_INDEX: ScheduleDay[] = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -99,6 +102,7 @@ export default function LecturerPrivateClassesPage() {
   const [lecturers, setLecturers] = useState<Lecturer[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [studentId, setStudentId] = useState(() => typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("studentId") ?? "");
+  const [view, setView] = useState<"calendar" | "list">("calendar");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -134,6 +138,21 @@ export default function LecturerPrivateClassesPage() {
   const [draftNote, setDraftNote] = useState("");
   const [notePrivateClassId, setNotePrivateClassId] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(VIEW_KEY);
+    // A deep link to one student's booking (?studentId=) means "open the list".
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("studentId")) {
+      setView("list");
+    } else if (saved === "calendar" || saved === "list") {
+      setView(saved);
+    }
+  }, []);
+
+  function chooseView(next: "calendar" | "list") {
+    setView(next);
+    window.localStorage.setItem(VIEW_KEY, next);
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -456,12 +475,31 @@ export default function LecturerPrivateClassesPage() {
   return (
     <LecturerShell>
       <div className="p-8">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold">Private classes</h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            One-to-one students follow no group timetable, so what you book here is their whole
-            calendar. They see changes straight away.
-          </p>
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold">Private classes</h1>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              One-to-one students follow no group timetable, so what you book here is their whole
+              calendar. They see changes straight away.
+            </p>
+          </div>
+          <div className="flex rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1">
+            {(["calendar", "list"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => chooseView(option)}
+                aria-pressed={view === option}
+                className={`rounded-md px-3 py-1.5 text-sm font-semibold capitalize transition ${
+                  view === option
+                    ? "bg-[var(--accent)] text-white"
+                    : "text-[var(--foreground-soft)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* A one-to-one already in progress, with the one student on its guest
@@ -480,6 +518,13 @@ export default function LecturerPrivateClassesPage() {
               A student becomes private when their class type is set to private on their record.
             </p>
           </div>
+        ) : view === "calendar" ? (
+          <PrivateClassCalendar
+            onOpenStudent={(id) => {
+              setStudentId(id);
+              chooseView("list");
+            }}
+          />
         ) : (
           <>
             <div className="mb-6">

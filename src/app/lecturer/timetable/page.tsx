@@ -5,7 +5,9 @@ export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PortalShell from "@/components/PortalShell";
 import ScheduleCalendar, { type DayCell, type Tone } from "@/components/schedule/ScheduleCalendar";
+import UndoToast, { type PendingUndo } from "@/components/schedule/UndoToast";
 import { ymd } from "@/components/schedule/grid";
+import { effectiveDayKey } from "@/components/schedule/effectiveDay";
 import { AttachmentIcon, CalendarIcon, ClockIcon, PlusIcon } from "@/components/icons";
 
 /**
@@ -83,10 +85,9 @@ const LEGEND = [
   { tone: "emerald" as Tone, label: "Held" },
 ];
 
-function toDateInput(value: string | null): string {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+/** Midnight-UTC ISO for a `yyyy-mm-dd` — the shape every date the sessions API stores. */
+function isoUTC(dayKey: string): string {
+  return `${dayKey}T00:00:00.000Z`;
 }
 
 function longDay(dayKey: string): string {
@@ -96,6 +97,16 @@ function longDay(dayKey: string): string {
     day: "numeric",
     month: "long",
   });
+}
+
+function shortDay(dayKey: string): string {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+/** The stable id a dot carries so a drag can be mapped back to its session. */
+function dotIdFor(branchId: string, level: string, slot: string, originKey: string): string {
+  return `g:${branchId}:${level}:${slot}:${originKey}`;
 }
 
 export default function LecturerTimetablePage() {
@@ -119,6 +130,9 @@ export default function LecturerTimetablePage() {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [editing, setEditing] = useState<Session | null>(null);
+  /** The day the open editor's class should run — starts at its effective day. */
+  const [editDate, setEditDate] = useState("");
+  const [undo, setUndo] = useState<PendingUndo | null>(null);
 
   const [adding, setAdding] = useState(false);
   const [addDraft, setAddDraft] = useState({ date: "", startTime: "", endTime: "", topic: "" });
@@ -180,10 +194,13 @@ export default function LecturerTimetablePage() {
     setCursor(new Date(target.getFullYear(), target.getMonth(), 1));
   }, [allSessions, cursorPinned]);
 
+  // Sessions bucketed by the day they ACTUALLY run — a postponed class sits on
+  // its new date, not the day it was first timetabled for.
   const sessionsByDay = useMemo(() => {
     const map = new Map<string, Session[]>();
     for (const s of allSessions) {
-      const key = ymd(new Date(s.date));
+      const key = effectiveDayKey(s);
+      if (!key) continue;
       const list = map.get(key) ?? [];
       list.push(s);
       map.set(key, list);
@@ -192,22 +209,46 @@ export default function LecturerTimetablePage() {
     return map;
   }, [allSessions]);
 
+  // dotId → its session, so a drag can be turned back into a reschedule.
+  const dotIndex = useMemo(() => {
+    const map = new Map<string, Session>();
+    for (const s of allSessions) {
+      map.set(dotIdFor(branchId, level, s.timeSlot, ymd(new Date(s.date))), s);
+    }
+    return map;
+  }, [allSessions, branchId, level]);
+
   const days = useMemo(() => {
     const map = new Map<string, DayCell>();
     for (const [key, list] of sessionsByDay) {
       map.set(key, {
-        dots: list.map((s, i) => ({ tone: STATUS_TONE[s.status] ?? "accent", key: `${key}-${i}` })),
+        dots: list.map((s) => ({
+          tone: STATUS_TONE[s.status] ?? "accent",
+          key: dotIdFor(branchId, level, s.timeSlot, ymd(new Date(s.date))),
+        })),
       });
+    }
+    // A moved class leaves a hollow marker on the day it came from.
+    for (const s of allSessions) {
+      if (s.status !== "postponed" || !s.postponedTo) continue;
+      const originKey = ymd(new Date(s.date));
+      const cell = map.get(originKey) ?? { dots: [] };
+      cell.ghosts = [...(cell.ghosts ?? []), { toLabel: shortDay(ymd(new Date(s.postponedTo))) }];
+      map.set(originKey, cell);
     }
     for (const holiday of closedDays) {
       const key = ymd(new Date(holiday.date));
       const existing = map.get(key);
-      map.set(key, { dots: existing?.dots ?? [], closed: { label: holiday.label } });
+      map.set(key, { dots: existing?.dots ?? [], ghosts: existing?.ghosts, closed: { label: holiday.label } });
     }
     return map;
-  }, [sessionsByDay, closedDays]);
+  }, [sessionsByDay, allSessions, closedDays, branchId, level]);
 
   const selectedSessions = selectedDay ? sessionsByDay.get(selectedDay) ?? [] : [];
+  // Classes that were originally on the selected day but have since moved away.
+  const movedFromSelected = selectedDay
+    ? allSessions.filter((s) => s.status === "postponed" && s.postponedTo && ymd(new Date(s.date)) === selectedDay)
+    : [];
   const selectedClosed = selectedDay ? closedDays.find((h) => ymd(new Date(h.date)) === selectedDay) : undefined;
 
   const levelMaterials = materials.filter((item) => !item.course?.level || item.course.level === level);
@@ -229,38 +270,80 @@ export default function LecturerTimetablePage() {
         ? assignment.sessionSlots
         : ["morning", "afternoon", "evening", "weekend"];
 
+  /** One raw write to a single day's override. `session` is identified by its own date. */
+  async function putSession(
+    session: Session,
+    fields: { status: string; postponedTo: string | null; startTime?: string; endTime?: string; topic?: string | null; notes?: string | null; materialId?: string | null },
+  ) {
+    const res = await fetch("/api/lecturer/sessions", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        branchId,
+        level,
+        date: session.date,
+        timeSlot: session.timeSlot,
+        topic: fields.topic !== undefined ? fields.topic : session.topic,
+        notes: fields.notes !== undefined ? fields.notes : session.notes,
+        status: fields.status,
+        startTime: fields.startTime ?? session.startTime,
+        endTime: fields.endTime ?? session.endTime,
+        materialId: fields.materialId !== undefined ? fields.materialId : (session.material?.id ?? null),
+        postponedTo: fields.status === "postponed" ? fields.postponedTo : null,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error ?? "Could not save");
+  }
+
+  /** Turn the editor's chosen day + status into the row's status/postponedTo. */
+  function resolveMove(session: Session, dayKey: string, chosenStatus: string) {
+    const naturalDay = ymd(new Date(session.date));
+    if (chosenStatus === "cancelled" || chosenStatus === "held") {
+      return { status: chosenStatus, postponedTo: null as string | null };
+    }
+    if (dayKey && dayKey !== naturalDay) {
+      return { status: "postponed", postponedTo: isoUTC(dayKey) };
+    }
+    return { status: "scheduled", postponedTo: null as string | null };
+  }
+
   async function save(session: Session, patch: Partial<Session> & { materialId?: string | null }) {
     setSavingKey(session.date);
     setSaved("");
     try {
-      const nextStatus = patch.status ?? session.status;
-      const res = await fetch("/api/lecturer/sessions", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          branchId,
-          level,
-          date: session.date,
-          timeSlot: slot,
-          topic: patch.topic ?? session.topic,
-          notes: patch.notes ?? session.notes,
-          status: nextStatus,
-          startTime: patch.startTime ?? session.startTime,
-          endTime: patch.endTime ?? session.endTime,
-          materialId: patch.materialId !== undefined ? patch.materialId : (session.material?.id ?? null),
-          postponedTo: nextStatus === "postponed" ? (patch.postponedTo ?? session.postponedTo ?? null) : null,
-        }),
+      const move = resolveMove(session, editDate, patch.status ?? session.status);
+      const before = { status: session.status, postponedTo: session.postponedTo, startTime: session.startTime, endTime: session.endTime };
+      await putSession(session, {
+        ...move,
+        startTime: patch.startTime ?? session.startTime,
+        endTime: patch.endTime ?? session.endTime,
+        topic: patch.topic ?? session.topic,
+        notes: patch.notes ?? session.notes,
+        materialId: patch.materialId !== undefined ? patch.materialId : (session.material?.id ?? null),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? "Could not save");
 
       setSaved(
-        nextStatus === "postponed"
+        move.status === "postponed"
           ? "Saved. Your students have been told the class moved, and their calendar now shows the new date."
-          : nextStatus === "cancelled"
+          : move.status === "cancelled"
             ? "Saved. Your students have been told the class is cancelled."
             : "Saved. Your students' calendars are updated.",
       );
+      if (move.status !== before.status || move.postponedTo !== before.postponedTo) {
+        setUndo({
+          label:
+            move.status === "postponed"
+              ? `Moved to ${shortDay(editDate)}`
+              : move.status === "cancelled"
+                ? "Class cancelled"
+                : "Class updated",
+          run: async () => {
+            await putSession(session, before);
+            await load();
+          },
+        });
+      }
       await load();
       setEditing(null);
       setError("");
@@ -268,6 +351,36 @@ export default function LecturerTimetablePage() {
       setError(saveError instanceof Error ? saveError.message : "Could not save");
     } finally {
       setSavingKey(null);
+    }
+  }
+
+  /** Drag: a dot dropped on `toDay`. Move (or un-move) that class. */
+  async function rescheduleDot(dotId: string, _fromDay: string, toDay: string) {
+    const session = dotIndex.get(dotId);
+    if (!session) return;
+    if (closedDays.some((h) => ymd(new Date(h.date)) === toDay)) {
+      if (!window.confirm(`${shortDay(toDay)} is marked as a school holiday. Move the class there anyway?`)) return;
+    }
+    const naturalDay = ymd(new Date(session.date));
+    const before = { status: session.status, postponedTo: session.postponedTo };
+    const next =
+      toDay === naturalDay
+        ? { status: "scheduled", postponedTo: null as string | null }
+        : { status: "postponed", postponedTo: isoUTC(toDay) };
+    setSaved("");
+    try {
+      await putSession(session, { ...next, startTime: session.startTime, endTime: session.endTime });
+      setUndo({
+        label: toDay === naturalDay ? "Move undone" : `Moved to ${shortDay(toDay)}`,
+        run: async () => {
+          await putSession(session, before);
+          await load();
+        },
+      });
+      await load();
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "Could not move this class");
+      await load();
     }
   }
 
@@ -352,8 +465,21 @@ export default function LecturerTimetablePage() {
             </p>
           )}
 
+          {movedFromSelected.map((s) => (
+            <p key={`moved-${s.date}`} className="mt-2 rounded-lg bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--muted)]">
+              {level} class originally here — moved to{" "}
+              <button
+                type="button"
+                onClick={() => s.postponedTo && setSelectedDay(ymd(new Date(s.postponedTo)))}
+                className="font-semibold text-[var(--accent)] hover:underline"
+              >
+                {s.postponedTo ? shortDay(ymd(new Date(s.postponedTo))) : "—"}
+              </button>
+            </p>
+          ))}
+
           <div className="mt-3 space-y-2">
-            {selectedSessions.length === 0 && !selectedClosed && (
+            {selectedSessions.length === 0 && !selectedClosed && movedFromSelected.length === 0 && (
               <p className="text-sm text-[var(--muted)]">No class timetabled this day.</p>
             )}
 
@@ -365,7 +491,12 @@ export default function LecturerTimetablePage() {
                     type="button"
                     onClick={() => {
                       setAdding(false);
-                      setEditing(isEditing ? null : session);
+                      if (isEditing) {
+                        setEditing(null);
+                      } else {
+                        setEditing(session);
+                        setEditDate(effectiveDayKey(session));
+                      }
                     }}
                     className="flex w-full items-start justify-between gap-2 text-left"
                   >
@@ -419,35 +550,35 @@ export default function LecturerTimetablePage() {
 
                       <div className="grid grid-cols-2 gap-3">
                         <label>
+                          <span className="text-xs font-medium text-[var(--muted)]">Day</span>
+                          <input
+                            type="date"
+                            value={editDate}
+                            onChange={(event) => setEditDate(event.target.value)}
+                            className={`mt-1 w-full rounded-lg border bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] ${
+                              editDate && editDate !== ymd(new Date(session.date))
+                                ? "border-pink-400"
+                                : "border-[var(--border)]"
+                            }`}
+                          />
+                          {editDate && editDate !== ymd(new Date(session.date)) && (
+                            <span className="mt-1 block text-[11px] text-pink-700 dark:text-pink-300">
+                              Moved from {shortDay(ymd(new Date(session.date)))} — students are told.
+                            </span>
+                          )}
+                        </label>
+                        <label>
                           <span className="text-xs font-medium text-[var(--muted)]">Status</span>
                           <select
-                            value={editing.status}
+                            value={editing.status === "postponed" ? "scheduled" : editing.status}
                             onChange={(event) => setEditing({ ...editing, status: event.target.value })}
                             className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
                           >
                             <option value="scheduled">Scheduled</option>
-                            <option value="postponed">Postponed</option>
                             <option value="cancelled">Cancelled</option>
                             <option value="held">Held</option>
                           </select>
                         </label>
-
-                        {editing.status === "postponed" && (
-                          <label>
-                            <span className="text-xs font-medium text-pink-700 dark:text-pink-300">Moved to</span>
-                            <input
-                              type="date"
-                              value={toDateInput(editing.postponedTo)}
-                              onChange={(event) =>
-                                setEditing({
-                                  ...editing,
-                                  postponedTo: event.target.value ? new Date(event.target.value).toISOString() : null,
-                                })
-                              }
-                              className="mt-1 w-full rounded-lg border border-pink-300 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
-                            />
-                          </label>
-                        )}
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
@@ -507,14 +638,11 @@ export default function LecturerTimetablePage() {
                         <button
                           type="button"
                           onClick={() => save(session, { ...editing, materialId: editing.material?.id ?? null })}
-                          disabled={savingKey === session.date || (editing.status === "postponed" && !editing.postponedTo)}
+                          disabled={savingKey === session.date || !editDate}
                           className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {savingKey === session.date ? "Saving…" : "Save class"}
                         </button>
-                        {editing.status === "postponed" && !editing.postponedTo && (
-                          <span className="text-xs text-pink-700 dark:text-pink-300">Pick the new date before saving.</span>
-                        )}
                       </div>
                     </div>
                   )}
@@ -682,10 +810,16 @@ export default function LecturerTimetablePage() {
               legend={LEGEND}
               toolbar={toolbar}
               rail={rail}
+              onMoveDot={rescheduleDot}
+              dotLabel={(dotId) => {
+                const s = dotIndex.get(dotId);
+                return s ? `${level} · ${s.startTime}` : level;
+              }}
             />
           )}
         </div>
       </div>
+      <UndoToast undo={undo} onClose={() => setUndo(null)} />
     </PortalShell>
   );
 }
