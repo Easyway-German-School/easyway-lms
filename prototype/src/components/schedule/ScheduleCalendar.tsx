@@ -1,6 +1,19 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 import { ChevronLeftIcon, ChevronRightIcon } from "@/components/icons";
 import {
   addMonths,
@@ -14,13 +27,14 @@ import {
 /**
  * The shared class-schedule calendar: a near-textless month grid on the left, a
  * caller-supplied detail rail on the right (stacked on mobile). Used by the
- * tutor timetable and the admin schedule. It knows nothing about cohorts,
- * private bookings or APIs — the caller hands it a `days` map and renders the
- * rail.
+ * tutor timetable, the admin schedule and the private-class calendar. It knows
+ * nothing about cohorts, private bookings or APIs — the caller hands it a
+ * `days` map, renders the rail, and (optionally) handles `onMoveDot` when a dot
+ * is dragged to another day.
  *
- * The grid's whole job is "where is something happening, and roughly what" —
- * a row of up to four colour dots per day, nothing more. Everything you can act
- * on lives in the rail.
+ * The grid's whole job is "where is something happening, and roughly what" — a
+ * row of up to four colour dots per day. Everything you can act on lives in the
+ * rail; dragging a dot is the one shortcut.
  */
 
 export type Tone = "accent" | "pink" | "red" | "emerald" | "gold" | "slate";
@@ -37,6 +51,8 @@ const DOT: Record<Tone, string> = {
 
 export type DayCell = {
   dots: { tone: Tone; key: string }[];
+  /** A class that used to be on this day and has since been moved off it. */
+  ghosts?: { toLabel: string }[];
   closed?: { label: string };
 };
 
@@ -52,6 +68,14 @@ type Props = {
   legend?: LegendItem[];
   /** Optional slot between the legend and the grid — a cohort switcher, filters. */
   toolbar?: React.ReactNode;
+  /**
+   * Called when a dot is dragged onto a different day. `dotId` is the `key` the
+   * caller put on that dot; the caller maps it back to a real session and does
+   * the reschedule. Drag is only enabled when this is set.
+   */
+  onMoveDot?: (dotId: string, fromDay: string, toDay: string) => void;
+  /** Short label shown in the drag pill, e.g. "A1 · 10:00". */
+  dotLabel?: (dotId: string) => string;
 };
 
 export default function ScheduleCalendar({
@@ -63,9 +87,65 @@ export default function ScheduleCalendar({
   rail,
   legend = [],
   toolbar,
+  onMoveDot,
+  dotLabel,
 }: Props) {
   const weeks = useMemo(() => monthGrid(cursor), [cursor]);
   const todayKey = ymd(new Date());
+  const [activeDot, setActiveDot] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    // A small drag threshold so an ordinary tap still selects the day.
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveDot(String(event.active.id));
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveDot(null);
+    const { active, over } = event;
+    if (!over || !onMoveDot) return;
+    const toDay = String(over.id).replace(/^day:/, "");
+    const fromDay = (active.data.current as { fromDay?: string } | undefined)?.fromDay ?? "";
+    if (toDay && fromDay && toDay !== fromDay) onMoveDot(String(active.id), fromDay, toDay);
+  }
+
+  const grid = (
+    <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--border)]">
+      <div className="grid grid-cols-7 bg-[var(--surface-alt)] text-center text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+        {WEEKDAY_LABELS.map((d) => (
+          <div key={d} className="py-2">
+            {d}
+          </div>
+        ))}
+      </div>
+      {weeks.map((week, wi) => (
+        <div key={wi} className="grid grid-cols-7">
+          {week.map((day) => {
+            const key = ymd(day);
+            const cell = days.get(key);
+            return (
+              <DayGridCell
+                key={key}
+                dayKey={key}
+                dayNumber={day.getDate()}
+                inMonth={isSameMonth(day, cursor)}
+                isToday={key === todayKey}
+                isSelected={key === selected}
+                cell={cell}
+                draggable={Boolean(onMoveDot)}
+                onSelect={() => onSelect(key === selected ? null : key)}
+              />
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -111,69 +191,140 @@ export default function ScheduleCalendar({
           </div>
         )}
 
+        {onMoveDot && (
+          <p className="mt-2 text-xs text-[var(--muted)]">Drag a dot to another day to reschedule.</p>
+        )}
+
         {toolbar && <div className="mt-3">{toolbar}</div>}
 
-        <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--border)]">
-          <div className="grid grid-cols-7 bg-[var(--surface-alt)] text-center text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-            {WEEKDAY_LABELS.map((d) => (
-              <div key={d} className="py-2">
-                {d}
-              </div>
-            ))}
-          </div>
-          {weeks.map((week, wi) => (
-            <div key={wi} className="grid grid-cols-7">
-              {week.map((day) => {
-                const key = ymd(day);
-                const cell = days.get(key);
-                const inMonth = isSameMonth(day, cursor);
-                const isToday = key === todayKey;
-                const isSelected = key === selected;
-                const dots = cell?.dots ?? [];
-                return (
-                  <button
-                    type="button"
-                    key={key}
-                    onClick={() => onSelect(isSelected ? null : key)}
-                    aria-pressed={isSelected}
-                    className={`relative min-h-[76px] border-b border-r border-[var(--border)] p-1.5 text-left align-top transition last:border-r-0 hover:bg-[var(--surface-alt)] ${
-                      inMonth ? "" : "opacity-35"
-                    } ${isSelected ? "ring-2 ring-inset ring-[var(--accent)]" : ""} ${
-                      cell?.closed ? "bg-[var(--surface-alt)]" : ""
-                    }`}
-                  >
-                    <span
-                      className={`inline-grid h-6 w-6 place-items-center rounded-full text-xs font-semibold ${
-                        isToday ? "bg-[var(--accent)] text-white" : "text-[var(--foreground-soft)]"
-                      }`}
-                    >
-                      {day.getDate()}
-                    </span>
-
-                    {cell?.closed ? (
-                      <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                        {cell.closed.label}
-                      </p>
-                    ) : dots.length > 0 ? (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                        {dots.slice(0, 4).map((dot) => (
-                          <span key={dot.key} className={`h-2 w-2 rounded-full ${DOT[dot.tone]}`} />
-                        ))}
-                        {dots.length > 4 && (
-                          <span className="text-[10px] font-semibold text-[var(--muted)]">+{dots.length - 4}</span>
-                        )}
-                      </div>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+        {onMoveDot ? (
+          <DndContext
+            sensors={sensors}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            onDragCancel={() => setActiveDot(null)}
+          >
+            {grid}
+            <DragOverlay dropAnimation={null}>
+              {activeDot ? (
+                <span className="rounded-full bg-[var(--accent)] px-2.5 py-1 text-xs font-bold text-white shadow-lg">
+                  {dotLabel?.(activeDot) ?? "Move"}
+                </span>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        ) : (
+          grid
+        )}
       </div>
 
       {/* ---- Right: caller's detail rail --------------------------------- */}
       <div className="min-w-0">{rail}</div>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
+function DayGridCell({
+  dayKey,
+  dayNumber,
+  inMonth,
+  isToday,
+  isSelected,
+  cell,
+  draggable,
+  onSelect,
+}: {
+  dayKey: string;
+  dayNumber: number;
+  inMonth: boolean;
+  isToday: boolean;
+  isSelected: boolean;
+  cell: DayCell | undefined;
+  draggable: boolean;
+  onSelect: () => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `day:${dayKey}`, disabled: !draggable });
+  const dots = cell?.dots ?? [];
+  const ghosts = cell?.ghosts ?? [];
+
+  return (
+    <button
+      type="button"
+      ref={setNodeRef}
+      onClick={onSelect}
+      aria-pressed={isSelected}
+      className={`relative min-h-[76px] border-b border-r border-[var(--border)] p-1.5 text-left align-top transition last:border-r-0 hover:bg-[var(--surface-alt)] ${
+        inMonth ? "" : "opacity-35"
+      } ${isSelected ? "ring-2 ring-inset ring-[var(--accent)]" : ""} ${
+        isOver ? "bg-[var(--accent)]/15 ring-2 ring-inset ring-[var(--accent)]" : ""
+      } ${cell?.closed ? "bg-[var(--surface-alt)]" : ""}`}
+    >
+      <span
+        className={`inline-grid h-6 w-6 place-items-center rounded-full text-xs font-semibold ${
+          isToday ? "bg-[var(--accent)] text-white" : "text-[var(--foreground-soft)]"
+        }`}
+      >
+        {dayNumber}
+      </span>
+
+      {cell?.closed ? (
+        <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+          {cell.closed.label}
+        </p>
+      ) : (
+        (dots.length > 0 || ghosts.length > 0) && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+            {dots.slice(0, 4).map((dot) =>
+              draggable ? (
+                <DraggableDot key={dot.key} id={dot.key} fromDay={dayKey} className={DOT[dot.tone]} />
+              ) : (
+                <span key={dot.key} className={`h-2 w-2 rounded-full ${DOT[dot.tone]}`} />
+              ),
+            )}
+            {dots.length > 4 && (
+              <span className="text-[10px] font-semibold text-[var(--muted)]">+{dots.length - 4}</span>
+            )}
+            {ghosts.map((g, i) => (
+              <span
+                key={`ghost-${i}`}
+                title={`Moved to ${g.toLabel}`}
+                className="h-2 w-2 rounded-full border border-dashed border-[var(--muted)]"
+              />
+            ))}
+          </div>
+        )
+      )}
+    </button>
+  );
+}
+
+function DraggableDot({
+  id,
+  fromDay,
+  className,
+}: {
+  id: string;
+  fromDay: string;
+  className: string;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id,
+    data: { fromDay },
+  });
+  return (
+    <span
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      // The dot sits inside the day button; stop the pointer-down from also
+      // counting as a day-select so a drag that never leaves the cell doesn't
+      // toggle the rail.
+      onClick={(e) => e.stopPropagation()}
+      className={`h-2.5 w-2.5 cursor-grab touch-none rounded-full ${className} ${
+        isDragging ? "opacity-30" : ""
+      }`}
+    />
   );
 }

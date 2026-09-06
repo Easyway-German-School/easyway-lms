@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { lecturerCan } from "@/lib/lecturer-features";
 import { KIND, notify } from "@/lib/notify";
 import { topUpSeriesForStudent } from "@/lib/private-class-series";
-import { ensureAttendanceComputed } from "@/lib/private-classes";
+import { ensureAttendanceComputed, privateOverlaps } from "@/lib/private-classes";
 
 /**
  * Booking and editing one-to-one classes.
@@ -67,7 +67,53 @@ export async function GET(req: NextRequest) {
 
   try {
     const studentId = req.nextUrl.searchParams.get("studentId");
+    const from = req.nextUrl.searchParams.get("from");
+    const to = req.nextUrl.searchParams.get("to");
     if (studentId) await topUpSeriesForStudent(studentId);
+
+    // Calendar mode: every private class this tutor has in a date window,
+    // across all their students. No per-student messaging payload — that stays
+    // on the studentId path.
+    if (!studentId && from && to) {
+      const scoped =
+        auth.role === "lecturer" && auth.lecturerId
+          ? { student: { tutorId: auth.lecturerId, classType: "private", status: "active" } }
+          : { student: { classType: "private", status: "active" } };
+
+      const seriesStudents = await prisma.privateClassSeries.findMany({
+        where: { status: "active", student: scoped.student },
+        select: { studentId: true },
+        distinct: ["studentId"],
+      });
+      await Promise.all(seriesStudents.map((s) => topUpSeriesForStudent(s.studentId)));
+
+      const rows = await prisma.privateClass.findMany({
+        where: { ...scoped, scheduledAt: { gte: new Date(from), lt: new Date(to) } },
+        include: {
+          student: { select: { id: true, user: { select: { name: true } }, deliveryMode: true } },
+          lecturer: { select: { user: { select: { name: true } } } },
+        },
+        orderBy: { scheduledAt: "asc" },
+      });
+
+      return NextResponse.json({
+        calendarClasses: rows.map((c) => ({
+          id: c.id,
+          studentId: c.studentId,
+          studentName: c.student.user.name ?? "Student",
+          scheduledAt: c.scheduledAt,
+          durationMinutes: c.durationMinutes,
+          topic: c.topic,
+          notes: c.notes,
+          status: c.status,
+          deliveryMode: c.deliveryMode ?? c.student.deliveryMode,
+          location: c.location,
+          seriesId: c.seriesId,
+          lecturerName: c.lecturer?.user?.name ?? null,
+          tutorName: c.lecturer?.user?.name ?? null,
+        })),
+      });
+    }
 
     const students = await prisma.student.findMany({
       where: {
@@ -200,20 +246,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "That student is not assigned to you" }, { status: 403 });
     }
 
-    const duration = Number(durationMinutes);
+    const duration = Number.isFinite(Number(durationMinutes)) && Number(durationMinutes) > 0 ? Math.round(Number(durationMinutes)) : 60;
 
-    const end = new Date(when.getTime() + (Number.isFinite(duration) && duration > 0 ? Math.round(duration) : 60) * 60_000);
-    const overlap = await prisma.privateClass.findFirst({
-      where: { lecturerId: auth.role === "lecturer" ? auth.lecturerId : (typeof lecturerId === "string" && lecturerId ? lecturerId : auth.lecturerId), status: { notIn: ["cancelled", "declined"] }, scheduledAt: { lt: end, gte: new Date(when.getTime() - 240 * 60_000) } },
-      select: { id: true },
-    });
-    if (overlap) return NextResponse.json({ error: "That tutor already has a private session around this time" }, { status: 409 });
+    const tutorForClass =
+      auth.role === "lecturer" ? auth.lecturerId : typeof lecturerId === "string" && lecturerId ? lecturerId : auth.lecturerId;
+    if (
+      (tutorForClass && (await privateOverlaps({ scope: { lecturerId: tutorForClass }, start: when, durationMinutes: duration }))) ||
+      (await privateOverlaps({ scope: { studentId }, start: when, durationMinutes: duration }))
+    ) {
+      return NextResponse.json({ error: "That clashes with another private session for this tutor or student." }, { status: 409 });
+    }
 
     const created = await prisma.privateClass.create({
       data: {
         studentId,
         scheduledAt: when,
-        durationMinutes: Number.isFinite(duration) && duration > 0 ? Math.round(duration) : 60,
+        durationMinutes: duration,
         topic: typeof topic === "string" ? topic.trim() || null : null,
         notes: typeof notes === "string" ? notes.trim() || null : null,
         // Fall back to the signed-in tutor when none was picked.
@@ -324,6 +372,20 @@ export async function PUT(req: NextRequest) {
     }
 
     const duration = Number(durationMinutes);
+
+    // A reschedule (new time, or a longer session on the same start) must not
+    // land on top of another booking for this tutor or student.
+    if (when || (Number.isFinite(duration) && duration > 0)) {
+      const checkStart = when ?? existing.scheduledAt;
+      const checkDuration = Number.isFinite(duration) && duration > 0 ? Math.round(duration) : existing.durationMinutes;
+      const clash =
+        (existing.lecturerId &&
+          (await privateOverlaps({ scope: { lecturerId: existing.lecturerId }, start: checkStart, durationMinutes: checkDuration, excludeId: existing.id }))) ||
+        (await privateOverlaps({ scope: { studentId: existing.student.id }, start: checkStart, durationMinutes: checkDuration, excludeId: existing.id }));
+      if (clash) {
+        return NextResponse.json({ error: "That clashes with another private session for this tutor or student." }, { status: 409 });
+      }
+    }
 
     const updated = await prisma.privateClass.update({
       where: { id },

@@ -6,6 +6,7 @@ import { promoteStudents } from "@/lib/promotion";
 import { inviteLeads } from "@/lib/leads";
 import { nextLevelAfter } from "@/lib/levels";
 import { normalizeSlot } from "@/lib/class-times";
+import { privateOverlaps } from "@/lib/private-classes";
 import {
   FILTER_PROPERTIES,
   applyDerivedFilters,
@@ -164,6 +165,16 @@ function isoDate(args: Record<string, unknown>, key: string, label: string): Dat
 
 const prettyDate = (date: Date) =>
   date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
+const prettyDateTime = (date: Date) =>
+  date.toLocaleString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
 
 /** Resolve the filters into real people, through the read tools' own code. */
 async function cohortFor(
@@ -661,8 +672,8 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
       const newDate = str(args, "newDate") ? isoDate(args, "newDate", "The new day") : null;
       const slot = normalizeSlot(str(args, "timeSlot") || "morning");
 
-      if (newDate && newDate.getTime() <= date.getTime()) {
-        throw new PlanError("The new day has to be after the day being moved.");
+      if (newDate && newDate.getTime() === date.getTime()) {
+        throw new PlanError("The new day is the same as the current one — nothing to move.");
       }
 
       const branch = await prisma.branch.findFirst({
@@ -766,6 +777,136 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
           ? `Moved the ${payload.branchName} ${level} ${slot} class to ${prettyDate(newDate)} and told ${told} student${told === 1 ? "" : "s"}.`
           : `Cancelled the ${payload.branchName} ${level} ${slot} class on ${prettyDate(date)} and told ${told} student${told === 1 ? "" : "s"}.`,
         details: { told, status: newDate ? "postponed" : "cancelled" },
+      };
+    },
+  },
+
+  /* ------------------------------------------------ private one-to-one move */
+  {
+    name: "reschedule_private_class",
+    capability: "classes",
+    reversible: true,
+    spec: {
+      type: "function",
+      function: {
+        name: "reschedule_private_class",
+        description:
+          "Propose moving one private (one-to-one) student's session to another day and/or time, and telling the student. Use when the admin says a named student's private class needs to move.",
+        parameters: {
+          type: "object",
+          properties: {
+            studentName: { type: "string", description: "The private student's name, as the admin said it." },
+            date: { type: "string", description: "The day the session is on now, as YYYY-MM-DD." },
+            newDate: { type: "string", description: "The day it moves to, as YYYY-MM-DD." },
+            newTime: { type: "string", description: "New start time as HH:mm (24h). Leave out to keep the current time." },
+            reason: { type: "string", description: "What the student is told. One short sentence." },
+          },
+          required: ["studentName", "date", "newDate", "reason"],
+        },
+      },
+    },
+    async plan(args) {
+      const studentName = requireStr(args, "studentName", "The student's name");
+      const reason = requireStr(args, "reason", "A reason the student can be told");
+      const currentDay = isoDate(args, "date", "The day the session is on now");
+      const newDay = isoDate(args, "newDate", "The day it moves to");
+      const newTime = str(args, "newTime");
+      if (newTime && !/^\d{2}:\d{2}$/.test(newTime)) {
+        throw new PlanError("newTime must be HH:mm, e.g. 16:00. Ask the admin for the exact time.");
+      }
+
+      const students = await prisma.student.findMany({
+        where: { classType: "private", user: { name: { contains: studentName, mode: "insensitive" } } },
+        select: { id: true, user: { select: { id: true, name: true } } },
+      });
+      if (students.length === 0) throw new PlanError(`No private student matches "${studentName}".`);
+      if (students.length > 1) {
+        throw new PlanError(
+          `More than one private student matches "${studentName}": ${students.map((s) => s.user.name).join(", ")}. Ask which one.`,
+        );
+      }
+      const student = students[0];
+
+      const dayEnd = new Date(currentDay.getTime() + DAY);
+      const sessions = await prisma.privateClass.findMany({
+        where: {
+          studentId: student.id,
+          status: { in: ["scheduled", "postponed", "reschedule_requested"] },
+          scheduledAt: { gte: currentDay, lt: dayEnd },
+        },
+        orderBy: { scheduledAt: "asc" },
+        select: { id: true, scheduledAt: true, durationMinutes: true },
+      });
+      if (sessions.length === 0) {
+        throw new PlanError(`${student.user.name} has no private session on ${prettyDate(currentDay)}.`);
+      }
+      if (sessions.length > 1) {
+        throw new PlanError(
+          `${student.user.name} has ${sessions.length} sessions on ${prettyDate(currentDay)}. Ask which time.`,
+        );
+      }
+      const session = sessions[0];
+
+      const next = new Date(newDay);
+      if (newTime) {
+        const [h, m] = newTime.split(":").map(Number);
+        next.setUTCHours(h, m, 0, 0);
+      } else {
+        next.setUTCHours(session.scheduledAt.getUTCHours(), session.scheduledAt.getUTCMinutes(), 0, 0);
+      }
+      if (next.getTime() === session.scheduledAt.getTime()) {
+        throw new PlanError("That is the same slot the session is already in.");
+      }
+
+      const clash = await privateOverlaps({
+        scope: { studentId: student.id },
+        start: next,
+        durationMinutes: session.durationMinutes,
+        excludeId: session.id,
+      });
+
+      return {
+        payload: {
+          privateClassId: session.id,
+          studentUserId: student.user.id,
+          studentName: student.user.name ?? studentName,
+          currentIso: session.scheduledAt.toISOString(),
+          nextIso: next.toISOString(),
+          reason,
+        },
+        preview: {
+          summary: `Move ${student.user.name}'s one-to-one from ${prettyDateTime(session.scheduledAt)} to ${prettyDateTime(next)}`,
+          affected: 1,
+          lines: [
+            `Reason given to the student: ${reason}`,
+            `The session, and any tutor notes on it, move with it.`,
+          ],
+          warnings: clash ? ["The student already has another private session that overlaps the new time."] : [],
+          sample: [{ name: student.user.name ?? studentName, detail: prettyDateTime(next) }],
+          reversible: true,
+        },
+      };
+    },
+    async execute(payload) {
+      const id = String(payload.privateClassId);
+      const nextIso = String(payload.nextIso);
+      const reason = String(payload.reason);
+      const updated = await prisma.privateClass.update({
+        where: { id },
+        data: { scheduledAt: new Date(nextIso), status: "scheduled", proposedAt: null },
+      });
+      await notify({
+        to: { userIds: [String(payload.studentUserId)] },
+        kind: KIND.privateClassUpdated,
+        severity: "info",
+        title: "Your private class has moved",
+        message: `It is now ${prettyDateTime(updated.scheduledAt)}. ${reason}`,
+        link: "/calendar",
+        dedupeKey: `private-class:${id}:${updated.updatedAt.toISOString()}`,
+      }).catch(() => {});
+      return {
+        summary: `Moved ${payload.studentName}'s one-to-one to ${prettyDateTime(updated.scheduledAt)} and told them.`,
+        details: { scheduledAt: updated.scheduledAt.toISOString() },
       };
     },
   },
