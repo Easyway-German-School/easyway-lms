@@ -205,9 +205,14 @@ export default function HelpLauncher() {
       >
         {open ? <CrossIcon className="h-5 w-5" /> : <HelpIcon className="h-5 w-5" />}
         {!open && unread > 0 ? (
-          <span className="absolute -right-0.5 -top-0.5 flex h-3 w-3">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--accent)]" />
-            <span className="relative inline-flex h-3 w-3 rounded-full bg-[var(--accent)] ring-2 ring-[var(--surface)]" />
+          // A counted pill, not a bare dot: "1" is a message the student can
+          // read from across the screen; a 2px dot is one they have to already
+          // suspect is there.
+          <span className="absolute -right-1.5 -top-1.5 flex h-[1.15rem] min-w-[1.15rem] items-center justify-center">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--accent)] opacity-60" />
+            <span className="relative inline-flex h-full min-w-[1.15rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold leading-none text-white ring-2 ring-[var(--surface)]">
+              {unread > 9 ? "9+" : unread}
+            </span>
           </span>
         ) : null}
       </button>
