@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import {
+  assignmentBatches,
   belongsToLecturer,
   isAssigned,
   matchesBatch,
@@ -89,10 +90,11 @@ export function cohortMatchesAssignment(
   ) {
     return false;
   }
+  const months = assignmentBatches(assignment);
   if (
     material.batch &&
-    assignment.batches.length &&
-    !assignment.batches.map((batch) => batch.toLowerCase()).includes(material.batch.toLowerCase())
+    months.length &&
+    !months.map((batch) => batch.toLowerCase()).includes(material.batch.toLowerCase())
   ) {
     return false;
   }
@@ -165,7 +167,14 @@ export async function studentIdsForMaterial(material: MaterialAudienceRow): Prom
     if (!where) return [];
     const rows = await prisma.student.findMany({
       where: where as never,
-      select: { id: true, admission: true, tutorId: true },
+      select: {
+        id: true,
+        admission: true,
+        tutorId: true,
+        branchId: true,
+        level: true,
+        sessionSlot: true,
+      },
     });
     return rows
       .filter((student) => belongsToLecturer(assignment, material.lecturerId, student))

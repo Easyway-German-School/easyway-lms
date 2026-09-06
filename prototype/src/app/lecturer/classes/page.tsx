@@ -24,6 +24,7 @@ type Assignment = {
   sessionSlots: string[];
   classTypes: string[];
   batches: string[];
+  groups?: Array<{ level: string; sessionSlot: string; batch?: string }>;
 };
 
 type Cohort = { assigned: boolean; label: string; roomName: string; studentCount: number };
@@ -45,6 +46,24 @@ type Payload = {
   roster: RosterEntry[];
   branches: Array<{ id: string; name: string; mode: string }>;
 };
+
+/**
+ * "Batch" row on the facts panel. A per-group intake — set on the teaching
+ * group rather than the standalone picker — is spelled out against its level
+ * and sitting so a tutor teaching two intakes can tell which is which.
+ */
+function batchSummary(assignment: Assignment | undefined): string {
+  const pinned = (assignment?.groups ?? []).filter((group) => group.batch);
+  if (pinned.length) {
+    const parts = pinned.map(
+      (group) =>
+        `${group.level} ${group.sessionSlot} · ${group.batch}`,
+    );
+    const rest = (assignment?.batches ?? []).filter(Boolean);
+    return [...parts, ...rest].join(", ");
+  }
+  return assignment?.batches.length ? assignment.batches.join(", ") : "All batches";
+}
 
 /**
  * My classes.
@@ -116,7 +135,7 @@ export default function LecturerClassesPage() {
         : "All sittings",
     ],
     ["Class type", assignment?.classTypes.length ? assignment.classTypes.join(", ") : "All types"],
-    ["Batch", assignment?.batches.length ? assignment.batches.join(", ") : "All batches"],
+    ["Batch", batchSummary(assignment)],
   ];
 
   return (

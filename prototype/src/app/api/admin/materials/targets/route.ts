@@ -6,6 +6,7 @@ import {
   BATCHES,
   COURSE_LEVELS,
   SESSION_SLOTS,
+  assignmentBatches,
   describeAssignment,
   isAssigned,
   readAssignment,
@@ -52,7 +53,7 @@ export async function GET() {
         branchIds: assignment.branchIds,
         levels: assignment.levels,
         sessionSlots: assignment.sessionSlots,
-        batches: assignment.batches,
+        batches: assignmentBatches(assignment),
       };
     })
     // A tutor the office has switched off can't act on an upload — leave them

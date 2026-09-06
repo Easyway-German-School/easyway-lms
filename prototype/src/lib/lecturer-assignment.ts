@@ -52,7 +52,14 @@ export type LecturerAssignment = {
   branchIds: string[];
   levels: string[];
   sessionSlots: string[];
-  groups: Array<{ branchId: string; level: string; sessionSlot: string }>;
+  /**
+   * A level paired with its sitting, and optionally the one intake month that
+   * pairing runs for. `batch` empty means "every intake" — the same as leaving
+   * the standalone batch picker alone. It is what lets one tutor take the
+   * September A1 afternoon class and the August B2 morning class without August
+   * leaking onto the A1 group.
+   */
+  groups: Array<{ branchId: string; level: string; sessionSlot: string; batch?: string }>;
   classTypes: string[];
   batches: string[];
 };
@@ -125,7 +132,10 @@ export function readAssignment(source: AssignmentSource | null | undefined): Lec
         const branchId = typeof value.branchId === "string" ? value.branchId.trim() : "";
         const level = readList([value.level], COURSE_LEVELS)[0];
         const sessionSlot = readList([value.sessionSlot], SESSION_SLOTS)[0];
-        return branchId && level && sessionSlot ? [{ branchId, level, sessionSlot }] : [];
+        const batch = readList([value.batch], BATCHES)[0];
+        return branchId && level && sessionSlot
+          ? [batch ? { branchId, level, sessionSlot, batch } : { branchId, level, sessionSlot }]
+          : [];
       })
     : [];
 
@@ -318,6 +328,39 @@ export function studentWhereForLecturerScope(
   return narrowed;
 }
 
+/** The student's intake month, lower-cased, or "" when they have none. */
+function admissionBatch(admission: unknown): string {
+  const record = admission && typeof admission === "object" ? (admission as Record<string, unknown>) : {};
+  return typeof record.batch === "string" ? record.batch.toLowerCase() : "";
+}
+
+/**
+ * Every intake month this tutor is restricted to, from the standalone picker
+ * AND from any per-group batch — a flat union for the callers that only need
+ * "does this month concern this tutor at all?" (materials targeting, the coarse
+ * `matchesBatch`). The precise "which group, which month" question is answered
+ * in `belongsToLecturer`.
+ */
+export function assignmentBatches(assignment: LecturerAssignment): string[] {
+  const groupBatches = (assignment.groups ?? [])
+    .map((group) => group.batch)
+    .filter((batch): batch is string => Boolean(batch));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const batch of [...(assignment.batches ?? []), ...groupBatches]) {
+    const key = batch.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(batch);
+  }
+  return out;
+}
+
+/** Does anything at all narrow this tutor to specific intakes? */
+export function hasBatchConstraint(assignment: LecturerAssignment): boolean {
+  return assignment.batches.length > 0 || assignment.groups.some((group) => Boolean(group.batch));
+}
+
 /**
  * The in-memory half of the same question, applied after the rows come back.
  *
@@ -325,23 +368,57 @@ export function studentWhereForLecturerScope(
  * here — and a named student must skip that filter too, for the same reason
  * they skip the branch one. Callers must select `tutorId` for this to work;
  * without it every named student silently falls through to the batch check.
+ *
+ * PER-GROUP BATCH. When any teaching group pins an intake month, this stops
+ * being a flat "is the student in one of the tutor's months?" and becomes
+ * "does the student match a group whose month they are in?" — so a September
+ * pin on the A1 afternoon group does not pull in an August A1 afternoon
+ * student, even though the tutor's other group runs in August. This needs the
+ * row's branch / level / sitting; a caller that did not select them falls back
+ * to the flat union check below, which is no stricter than before.
  */
 export function belongsToLecturer(
   assignment: LecturerAssignment,
   lecturerId: string | null | undefined,
-  student: { tutorId?: string | null; admission?: unknown },
+  student: {
+    tutorId?: string | null;
+    admission?: unknown;
+    branchId?: string | null;
+    level?: string | null;
+    sessionSlot?: string | null;
+  },
 ): boolean {
   if (lecturerId && student.tutorId && student.tutorId === lecturerId) return true;
+
+  const pinnedGroups = assignment.groups.filter((group) => Boolean(group.batch));
+  const hasGroupKeys = student.level != null && student.sessionSlot != null;
+  if (pinnedGroups.length && hasGroupKeys) {
+    const studentBatch = admissionBatch(student.admission);
+    const eq = (a: string | null | undefined, b: string | null | undefined) =>
+      (a ?? "").toLowerCase() === (b ?? "").toLowerCase();
+    return assignment.groups.some(
+      (group) =>
+        eq(group.branchId, student.branchId) &&
+        eq(group.level, student.level) &&
+        eq(group.sessionSlot, student.sessionSlot) &&
+        (!group.batch || group.batch.toLowerCase() === studentBatch),
+    );
+  }
+
   return matchesBatch(assignment, student.admission);
 }
 
-/** Batch lives in the admission JSON, so it is filtered in memory. */
+/**
+ * Batch lives in the admission JSON, so it is filtered in memory. Coarse: any
+ * of the tutor's months (standalone picker or per-group) is a match. Use
+ * `belongsToLecturer` where the group a student sits in matters.
+ */
 export function matchesBatch(assignment: LecturerAssignment, admission: unknown): boolean {
-  if (!assignment.batches.length) return true;
-  const record = admission && typeof admission === "object" ? (admission as Record<string, unknown>) : {};
-  const batch = typeof record.batch === "string" ? record.batch.toLowerCase() : "";
+  const months = assignmentBatches(assignment);
+  if (!months.length) return true;
+  const batch = admissionBatch(admission);
   if (!batch) return false;
-  return assignment.batches.some((option) => option.toLowerCase() === batch);
+  return months.some((option) => option.toLowerCase() === batch);
 }
 
 /**
@@ -369,7 +446,10 @@ export function assignmentToData(input: {
         const branchId = typeof value.branchId === "string" ? value.branchId.trim() : "";
         const level = readList([value.level], COURSE_LEVELS)[0];
         const sessionSlot = readList([value.sessionSlot], SESSION_SLOTS)[0];
-        return branchId && level && sessionSlot ? [{ branchId, level, sessionSlot }] : [];
+        const batch = readList([value.batch], BATCHES)[0];
+        return branchId && level && sessionSlot
+          ? [batch ? { branchId, level, sessionSlot, batch } : { branchId, level, sessionSlot }]
+          : [];
       })
     : [];
   const classTypes = readList(input.classTypes, CLASS_TYPES);
