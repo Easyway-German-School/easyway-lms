@@ -875,7 +875,7 @@ export default function StudentDossierPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="overflow-hidden rounded-3xl border border-[var(--border)] bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-6 text-white shadow-lg sm:p-8"
+          className="theme-dark overflow-hidden rounded-3xl border border-[var(--border)] bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-6 text-white shadow-lg sm:p-8"
         >
           <div className="flex flex-wrap items-start gap-6">
             <div className="relative">

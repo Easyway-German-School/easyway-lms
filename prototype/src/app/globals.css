@@ -121,8 +121,20 @@ html.theme-light,
    dark, not a lighter "dark teal" tint. Colour still shows up (it is what the
    accent glow, the borders' faint tint, and the scene layer are for) but it
    is no longer what the SURFACE is made of, which is what was reading as
-   "washed" rather than the deep, high-contrast dark of a native app. */
-html.theme-dark {
+   "washed" rather than the deep, high-contrast dark of a native app.
+
+   Also usable as a SCOPE class, exactly like `.theme-light` above: any
+   element carrying `.theme-dark` forces its whole subtree to Night no matter
+   which theme the page is in. This is for the app's handful of deliberately
+   dark "cover" panels — profile headers, quest banners, the briefing rail —
+   which paint their own `slate-900`/`#0b1220` background and put white text
+   on it. Their child pills/badges/dividers still reach for `--surface-alt`,
+   `--border`, `--muted`, `--foreground`; in the light theme those resolve to
+   near-white, so white text on them vanished. Scoping the panel to
+   `.theme-dark` makes every one of those tokens resolve dark instead, so the
+   panel is internally consistent in all three themes and nothing "crosses". */
+html.theme-dark,
+.theme-dark {
   color-scheme: dark;
 
   --background:
@@ -158,8 +170,10 @@ html.theme-dark {
 }
 
 /* Dusk. Same idea, indigo-violet flavoured: a near-black void with the glow
-   living in the background layer and the accent, not soaked into every card. */
-html.theme-custom {
+   living in the background layer and the accent, not soaked into every card.
+   Also a SCOPE class — see the note on `.theme-dark`. */
+html.theme-custom,
+.theme-custom {
   color-scheme: dark;
 
   --background:
