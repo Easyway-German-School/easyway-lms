@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { schoolDayStart } from "@/lib/school-time";
 import type { DetectType } from "@/lib/cohort-missions";
 import { goalFor } from "@/lib/germany-goals";
 import { storySeriesFor } from "@/lib/story/content";
@@ -23,9 +24,7 @@ import { getStoryAccess } from "@/lib/story-progress";
  */
 
 function startOfDay(now: Date): Date {
-  const start = new Date(now);
-  start.setUTCHours(0, 0, 0, 0);
-  return start;
+  return schoolDayStart(now);
 }
 
 export type DetectionContext = {

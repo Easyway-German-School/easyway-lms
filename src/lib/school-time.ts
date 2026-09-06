@@ -17,13 +17,15 @@
  * components and pull this in directly.
  *
  * ---------------------------------------------------------------------------
- * THIS IS THE TIMEZONE THE APP BELIEVES. If the school ever runs from another
- * country, change it HERE (or lift it to a SchoolSetting) and every conversion
- * follows.
+ * THIS IS THE TIMEZONE THE APP BELIEVES. Nigeria by default; override with
+ * NEXT_PUBLIC_SCHOOL_TIMEZONE (a `NEXT_PUBLIC_` var so the server and the
+ * client bundle agree). Lifting it to a per-tenant SchoolSetting is a later
+ * step — every tenant today is Nigerian.
  * ---------------------------------------------------------------------------
  */
 
-export const SCHOOL_TIMEZONE = "Africa/Lagos";
+export const SCHOOL_TIMEZONE =
+  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_SCHOOL_TIMEZONE?.trim()) || "Africa/Lagos";
 
 /**
  * Friendly zone abbreviations for the zones the school actually sees. Node's
@@ -190,6 +192,28 @@ export function parseTimeInput(raw: string, tz: string = SCHOOL_TIMEZONE): Date 
   if (/[zZ]$/.test(raw) || /[+-]\d{2}:?\d{2}$/.test(raw)) return new Date(raw);
   const [d, t = "00:00"] = raw.split("T");
   return zonedTimeToInstant(d, t.slice(0, 5), tz);
+}
+
+/**
+ * The instant midnight begins on `date`'s calendar day in `tz`. Use this for
+ * "since the start of today" windows — a UTC-day boundary on a server behind or
+ * ahead of the school misattributes the first (or last) hour of activity to the
+ * wrong day.
+ */
+export function schoolDayStart(date: Date = new Date(), tz: string = SCHOOL_TIMEZONE): Date {
+  return zonedTimeToInstant(zonedDateKey(date, tz), "00:00", tz);
+}
+
+/** `schoolDayStart` plus `days` whole days — the exclusive end of a window. */
+export function schoolDayOffset(date: Date, days: number, tz: string = SCHOOL_TIMEZONE): Date {
+  const parts = instantToZonedParts(date, tz);
+  const base = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  base.setUTCDate(base.getUTCDate() + days);
+  return zonedTimeToInstant(
+    `${base.getUTCFullYear()}-${pad(base.getUTCMonth() + 1)}-${pad(base.getUTCDate())}`,
+    "00:00",
+    tz,
+  );
 }
 
 /** "Wed 10 Sep, 06:00 PM WAT" — an instant rendered for a person to read. */

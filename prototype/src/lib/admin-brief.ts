@@ -3,6 +3,7 @@ import { cached } from "@/lib/ai-cache";
 import { callModel, activeModelName } from "@/lib/ai";
 import { receivedPaymentFilter } from "@/lib/payment";
 import { firstReachable } from "@/lib/admin-routes";
+import { schoolDayStart } from "@/lib/school-time";
 import type { Capability } from "@/lib/admin-roles";
 
 /**
@@ -96,8 +97,7 @@ function windows(period: AdminBriefPeriod, now: Date) {
     const prevStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
     return { start, end: now, prevStart, prevEnd: new Date(prevStart.getTime() + elapsed) };
   }
-  const start = new Date(now);
-  start.setUTCHours(0, 0, 0, 0);
+  const start = schoolDayStart(now);
   const span = period === "daily" ? 1 : 7;
   if (period === "weekly") start.setTime(start.getTime() - (span - 1) * DAY_MS);
   const prevStart = new Date(start.getTime() - span * DAY_MS);
