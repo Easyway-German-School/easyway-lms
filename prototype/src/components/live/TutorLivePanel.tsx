@@ -40,7 +40,12 @@ type LiveState = {
   kind: string;
   startedAt: string;
   roomName: string;
+  /** The teaching group this open room belongs to, when it maps to one. */
+  groupKey: string | null;
+  groupLabel: string | null;
 };
+
+type TeachingGroupBrief = { key: string; label: string; batchRange: string };
 
 const STATUS_META: Record<string, { label: string; tone: string; Icon: typeof CheckCircleIcon }> = {
   joined: { label: "In the room", tone: "text-emerald-600 bg-emerald-500/10", Icon: CheckCircleIcon },
@@ -50,6 +55,7 @@ const STATUS_META: Record<string, { label: string; tone: string; Icon: typeof Ch
 
 export default function TutorLivePanel({ className = "" }: { className?: string }) {
   const [live, setLive] = useState<LiveState | null>(null);
+  const [groups, setGroups] = useState<TeachingGroupBrief[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [ringing, setRinging] = useState<string | null>(null);
 
@@ -59,6 +65,7 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
       if (!res.ok) return;
       const data = await res.json();
       setLive(data.live ?? null);
+      setGroups(Array.isArray(data.groups) ? data.groups : []);
       setInvites(Array.isArray(data.invites) ? data.invites : []);
     } catch {
       // A failed poll leaves the last roster on screen. A tutor mid-class does
@@ -120,7 +127,9 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
             <BroadcastIcon className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-white/75">You are live</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-white/75">
+              {groups.length > 1 && live.groupLabel ? `You are live · ${live.groupLabel}` : "You are live"}
+            </p>
             <p className="truncate text-base font-semibold">{live.title}</p>
           </div>
         </div>
@@ -130,7 +139,7 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
             {live.joinCode}
           </span>
           <Link
-            href="/live"
+            href={live.groupKey ? `/live?group=${encodeURIComponent(live.groupKey)}` : "/live"}
             className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-bold text-[#0D7C7E] transition hover:brightness-95"
           >
             <VideoIcon className="h-3.5 w-3.5" />
@@ -138,6 +147,26 @@ export default function TutorLivePanel({ className = "" }: { className?: string 
           </Link>
         </div>
       </div>
+
+      {/* A tutor who runs more than one class can start the next one from here
+          without losing sight of the class already running. */}
+      {groups.length > 1 && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--border)] bg-[var(--surface-alt)] px-5 py-2.5 text-xs text-[var(--muted)]">
+          <span className="font-semibold text-[var(--foreground-soft)]">Your other classes:</span>
+          {groups
+            .filter((group) => group.key !== live.groupKey)
+            .map((group) => (
+              <Link
+                key={group.key}
+                href={`/live?group=${encodeURIComponent(group.key)}`}
+                className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-0.5 font-semibold text-[var(--foreground-soft)] transition hover:border-[#0D7C7E]/40 hover:text-[var(--foreground)]"
+              >
+                Start {group.label}
+                {group.batchRange ? ` · ${group.batchRange}` : ""}
+              </Link>
+            ))}
+        </div>
+      )}
 
       {invites.length === 0 ? (
         <p className="px-5 py-5 text-sm text-[var(--muted)]">

@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import BrandLoader from "@/components/BrandLoader";
@@ -227,12 +227,70 @@ function NotLiveScreen({ message, title }: { message: string; title: string | nu
   );
 }
 
+/** One of the tutor's classes, on the "which class are you starting?" screen. */
+type ChooserGroup = { key: string; label: string; branchName: string; batchRange: string };
+
+/**
+ * WHICH CLASS ARE YOU STARTING?
+ *
+ * Shown to a tutor who runs more than one class and arrived at `/live` without
+ * saying which. Picking one appends `?group=` and the page opens that cohort's
+ * room — the whole point of the separation is that starting B1 evening never
+ * rings the A1 morning students, and vice versa.
+ */
+function GroupChooser({ groups, liveKey }: { groups: ChooserGroup[]; liveKey: string | null }) {
+  const router = useRouter();
+  return (
+    <div className="space-y-6">
+      <div className="rounded-3xl bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] p-6 text-white shadow-xl sm:p-8">
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/70">Live classroom</p>
+        <h1 className="mt-3 text-2xl font-semibold sm:text-4xl">Which class are you starting?</h1>
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-white/85">
+          You run more than one class. Pick the one to open now — only its students are rung, and its room
+          stays separate from your other classes.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {groups.map((groupOption) => {
+          const isLive = groupOption.key === liveKey;
+          return (
+            <button
+              key={groupOption.key}
+              type="button"
+              onClick={() => router.push(`/live?group=${encodeURIComponent(groupOption.key)}`)}
+              className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-left transition hover:border-[#0D7C7E]/50 hover:bg-[var(--surface-alt)]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-lg font-semibold text-[var(--foreground)]">{groupOption.label}</span>
+                {isLive && (
+                  <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600">
+                    Live now
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                {groupOption.branchName}
+                {groupOption.batchRange ? ` · ${groupOption.batchRange} batch` : ""}
+              </p>
+              <span className="mt-4 inline-flex text-sm font-semibold text-[#0D7C7E]">
+                {isLive ? "Resume this class →" : "Start this class →"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function LiveClassroomPageInner() {
   const searchParams = useSearchParams();
   const code = searchParams.get("code");
   const privateClassId = searchParams.get("privateClassId");
+  const group = searchParams.get("group");
 
   const [session, setSession] = useState<LiveSession | null>(null);
+  const [chooser, setChooser] = useState<{ groups: ChooserGroup[]; liveKey: string | null } | null>(null);
   const [lockedMessage, setLockedMessage] = useState<string | null>(null);
   const [notLive, setNotLive] = useState<{ message: string; title: string | null } | null>(null);
   const [misconfigured, setMisconfigured] = useState<{
@@ -282,12 +340,35 @@ function LiveClassroomPageInner() {
       setLockedMessage(null);
       setMisconfigured(null);
       setEnded(null);
+      setChooser(null);
       setLoading(true);
 
       try {
+        /**
+         * A tutor who runs more than one class picks which one to start before
+         * a room is opened — otherwise `/api/live/session` would fall back to
+         * their primary class and quietly start the wrong cohort. Skipped the
+         * moment the URL is specific: a group key, a join code, or a private
+         * booking all name the room already.
+         */
+        if (!code && !privateClassId && !group) {
+          const stateRes = await fetch("/api/live/state", { cache: "no-store" });
+          const stateData = await stateRes.json().catch(() => ({}));
+          if (cancelled) return;
+          if (
+            stateData.role === "tutor" &&
+            Array.isArray(stateData.groups) &&
+            stateData.groups.length > 1
+          ) {
+            setChooser({ groups: stateData.groups, liveKey: stateData.live?.groupKey ?? null });
+            return;
+          }
+        }
+
         const params = new URLSearchParams();
         if (code) params.set("code", code);
         if (privateClassId) params.set("privateClassId", privateClassId);
+        if (group) params.set("group", group);
         const query = params.toString() ? `?${params.toString()}` : "";
         const res = await fetch(`/api/live/session${query}`, { cache: "no-store" });
         const data = await res.json().catch(() => ({}));
@@ -348,7 +429,7 @@ function LiveClassroomPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [code]);
+  }, [code, privateClassId, group]);
 
   /**
    * The tutor's heartbeat and the explicit, idempotent "end class" call both
@@ -391,6 +472,10 @@ function LiveClassroomPageInner() {
   const body = (() => {
     if (loading) {
       return <BrandLoader size="lg" title="Klassenzimmer wird geöffnet…" message="Setting up your classroom." />;
+    }
+
+    if (chooser) {
+      return <GroupChooser groups={chooser.groups} liveKey={chooser.liveKey} />;
     }
 
     if (error) {
@@ -546,7 +631,8 @@ function LiveClassroomPageInner() {
 
   // Tutors and students both live here, so the page picks the chrome that
   // matches whoever is signed in rather than hard-coding the student portal.
-  if (session?.role === "tutor" || misconfigured?.role === "tutor") return <LecturerShell>{content}</LecturerShell>;
+  // The class chooser is only ever shown to a tutor.
+  if (session?.role === "tutor" || misconfigured?.role === "tutor" || chooser) return <LecturerShell>{content}</LecturerShell>;
   // The not-live screen is a student's screen: it belongs inside their portal,
   // with the sidebar and the bell, not on a bare page that looks like an error.
   if (session || notLive || lockedMessage || misconfigured) return <StudentShell>{content}</StudentShell>;

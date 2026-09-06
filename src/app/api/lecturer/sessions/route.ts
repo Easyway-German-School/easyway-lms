@@ -133,7 +133,6 @@ export async function GET(req: NextRequest) {
       primaryGroup?.level ??
       assignment?.levels[0] ??
       "A1";
-    const batch = req.nextUrl.searchParams.get("batch");
     // Which sitting is being edited. A branch can run the same level morning
     // and evening, and those are different classes with different topics.
     const slot = normalizeSlot(
@@ -142,6 +141,18 @@ export async function GET(req: NextRequest) {
         assignment?.sessionSlots[0] ??
         null,
     );
+    // The intake month to build the schedule window from. Explicit param wins;
+    // otherwise take it from the teaching group being viewed, so a tutor
+    // opening a pinned class lands on the months it actually runs rather than
+    // on today. Falls back to the tutor's standalone batch, then to none.
+    const pinnedGroupBatch = assignment?.groups.find(
+      (group) =>
+        group.branchId === branchId &&
+        group.level.toUpperCase() === String(level).toUpperCase() &&
+        group.sessionSlot.toLowerCase() === slot.toLowerCase(),
+    )?.batch;
+    const batch =
+      req.nextUrl.searchParams.get("batch") ?? pinnedGroupBatch ?? assignment?.batches[0] ?? null;
 
     if (!branchId) {
       return NextResponse.json(
@@ -175,7 +186,7 @@ export async function GET(req: NextRequest) {
       timeSlots: TIME_SLOTS,
       assignment,
       /** What the editor is currently pointed at, echoed so the page can lock its controls. */
-      context: { branchId, level, slot },
+      context: { branchId, level, slot, batch },
       canChooseCohort: staff.role === "admin",
     });
   } catch (error) {

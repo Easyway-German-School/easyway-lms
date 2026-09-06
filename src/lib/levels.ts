@@ -85,6 +85,44 @@ export function sessionDurationMonths(sessionSlot?: string | null): number {
   return String(sessionSlot ?? "").toLowerCase() === "weekend" ? WEEKEND_SESSION_MONTHS : SESSION_MONTHS;
 }
 
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * The calendar months one batch actually spans.
+ *
+ * A batch is stored as its INTAKE month alone ("September"), but a tutor and
+ * the office think of "the class" as the whole level it runs for — two months
+ * on a weekday sitting, three on weekend. So a September intake of a weekday
+ * B1 group covers `["September", "October"]`. Wraps the year end: a December
+ * intake of a two-month level is `["December", "January"]`.
+ *
+ * Returns `[]` for an empty or unrecognised batch, so a caller can treat "no
+ * pinned batch" and "every intake" identically.
+ */
+export function batchMonthSpan(batch: string | null | undefined, sessionSlot?: string | null): string[] {
+  const start = MONTH_NAMES.findIndex(
+    (month) => month.toLowerCase() === String(batch ?? "").trim().toLowerCase(),
+  );
+  if (start === -1) return [];
+  const span = sessionDurationMonths(sessionSlot);
+  return Array.from({ length: span }, (_, i) => MONTH_NAMES[(start + i) % 12]);
+}
+
+/**
+ * "September – October" for a two-month level starting in September; the bare
+ * month for a one-month level; "" when there is no batch. The word "batch" is
+ * left to the caller so it can sit in a sentence or a parenthetical.
+ */
+export function batchRangeLabel(batch: string | null | undefined, sessionSlot?: string | null): string {
+  const months = batchMonthSpan(batch, sessionSlot);
+  if (!months.length) return "";
+  if (months.length === 1) return months[0];
+  return `${months[0]} – ${months[months.length - 1]}`;
+}
+
 /** Weeks of teaching in one level, used to express tuition per week. */
 export const WEEKS_OF_TEACHING = SESSION_MONTHS * 4;
 

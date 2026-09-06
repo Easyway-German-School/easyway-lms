@@ -3,7 +3,7 @@ import { AccessToken } from "livekit-server-sdk";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAttendLive, deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { isOnlineBranch, initialVideoQualityFor, readOnlineProfile } from "@/lib/online-branch";
 import { ensureRecordingStarted } from "@/lib/class-recorder";
 import { creditGate } from "@/lib/usage/guard";
@@ -26,6 +26,7 @@ import {
   type RoomRole,
 } from "@/lib/live-classroom";
 import { lecturerCan } from "@/lib/lecturer-features";
+import { assignmentHasGroup, parseGroupKey, readAssignment } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
 
@@ -174,14 +175,17 @@ export async function GET(request: Request) {
         );
       }
 
-      const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+      const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
       const totalPaid = student.payments
-        .filter((payment) => payment.status === "completed")
+        .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
         .reduce((sum, payment) => sum + payment.amount, 0);
       const access = deriveStudentAccess({
         totalPaid,
         tuitionFee: tuitionFeeFor(feeLookup),
         requiredDeposit: requiredDepositFor(feeLookup),
+        classesStartedAt: student.classesStartedAt,
+        enrolledAt: student.createdAt,
+        paymentGraceUntil: student.paymentGraceUntil,
       });
 
       if (!access.hasAccess) {
@@ -189,7 +193,10 @@ export async function GET(request: Request) {
           {
             error: "Locked",
             locked: true,
-            message: `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} to join live classes.`,
+            message:
+              access.lockReason === "unsettled_balance"
+                ? `Settle your tuition balance of ₦${access.outstandingBalance.toLocaleString()} to rejoin live classes.`
+                : `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} to join live classes.`,
             access,
           },
           { status: 403 },
@@ -197,13 +204,49 @@ export async function GET(request: Request) {
       }
     }
 
-    const branch = lecturer?.branch ?? student?.branch ?? null;
-    const level = lecturer?.level ?? student?.level ?? "A1";
-    const sessionSlot = lecturer?.sessionSlot ?? student?.sessionSlot ?? "morning";
+    /**
+     * WHICH OF THE TUTOR'S CLASSES.
+     *
+     * A tutor who runs more than one class — A1 morning and B1 evening, say —
+     * passes `?group=branchId:LEVEL:slot` to start the one they mean. Without
+     * it, or for a student, or on a private booking, the room is the legacy
+     * primary class exactly as before. A group in the query is a request, not
+     * a grant: it is checked against the assignment the office actually gave
+     * this tutor, and a mismatch is refused rather than silently ignored, so a
+     * stale link cannot open a cohort's room for someone who was moved off it.
+     */
+    const requestedGroup = parseGroupKey(url.searchParams.get("group"));
+    let groupBranch: { id: string; name: string; mode: string } | null = null;
+    let chosenGroup: ReturnType<typeof assignmentHasGroup> = null;
+    if (lecturer && requestedGroup && !privateClassId) {
+      groupBranch = await prisma.branch.findUnique({
+        where: { id: requestedGroup.branchId },
+        select: { id: true, name: true, mode: true },
+      });
+      chosenGroup = groupBranch
+        ? assignmentHasGroup(
+            readAssignment(lecturer),
+            new Map([[groupBranch.id, groupBranch.name]]),
+            requestedGroup,
+          )
+        : null;
+      if (!chosenGroup) {
+        return NextResponse.json(
+          { error: "Not your class", message: "That class is not one the office has assigned you." },
+          { status: 403 },
+        );
+      }
+    }
+
+    const branch = chosenGroup ? groupBranch : (lecturer?.branch ?? student?.branch ?? null);
+    const level = chosenGroup?.level || lecturer?.level || student?.level || "A1";
+    const sessionSlot = chosenGroup?.sessionSlot || lecturer?.sessionSlot || student?.sessionSlot || "morning";
 
     let roomName = privateClassId
       ? privateRoomName(privateClassId)
-      : cohortRoomName({ branchName: branch?.name, level, sessionSlot });
+      : chosenGroup
+        ? chosenGroup.roomName
+        : cohortRoomName({ branchName: branch?.name, level, sessionSlot });
     let displayName = privateClassId
       ? codedSession?.title ?? "Private class"
       : roomDisplayName({ branchName: branch?.name, level, sessionSlot });

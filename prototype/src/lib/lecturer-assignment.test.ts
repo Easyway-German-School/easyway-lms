@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   assignmentBatches,
+  assignmentHasGroup,
   belongsToLecturer,
   hasBatchConstraint,
   matchesBatch,
+  parseGroupKey,
   readAssignment,
   studentWhereForLecturerScope,
+  teachingGroups,
 } from "./lecturer-assignment";
+import { batchMonthSpan, batchRangeLabel } from "./levels";
 
 describe("studentWhereForLecturerScope", () => {
   it("narrows the tutor cohort to the selected session when the admin assignment is broader", () => {
@@ -107,5 +111,100 @@ describe("per-group batch", () => {
     const student = { branchId: "b1", level: "A1", sessionSlot: "morning", admission: { batch: "July" } };
     expect(belongsToLecturer(mixed, "lec-1", student)).toBe(true);
     expect(matchesBatch(mixed, student.admission)).toBe(true);
+  });
+});
+
+
+describe("teachingGroups", () => {
+  const names = new Map([
+    ["b1", "Lagos"],
+    ["b2", "Abuja"],
+  ]);
+
+  it("splits an explicit multi-group assignment into one entry per class", () => {
+    const assignment = readAssignment({
+      branchIds: ["b1"],
+      levels: ["A1", "B1"],
+      sessionSlots: ["morning", "evening"],
+      assignmentGroups: [
+        { branchId: "b1", level: "A1", sessionSlot: "morning", batch: "August" },
+        { branchId: "b1", level: "B1", sessionSlot: "evening", batch: "September" },
+      ],
+    });
+
+    const groups = teachingGroups(assignment, names);
+    expect(groups.map((group) => group.key)).toEqual(["b1:A1:morning", "b1:B1:evening"]);
+    expect(groups[0]).toMatchObject({
+      branchName: "Lagos",
+      label: "A1 · Morning",
+      batch: "August",
+      batchRange: "August – September",
+      roomName: "ew-lagos-a1-morning",
+    });
+    expect(groups[1].batchRange).toBe("September – October");
+    expect(groups[1].roomName).toBe("ew-lagos-b1-evening");
+  });
+
+  it("falls back to the flat lists for a legacy single-class tutor", () => {
+    const assignment = readAssignment({ branchId: "b2", level: "A2", sessionSlot: "afternoon" });
+    const groups = teachingGroups(assignment, names);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ key: "b2:A2:afternoon", label: "A2 · Afternoon", batchRange: "" });
+  });
+
+  it("collapses an all-sittings assignment to one slot-less entry", () => {
+    const assignment = readAssignment({ branchIds: ["b1"], levels: ["A1"] });
+    const groups = teachingGroups(assignment, names);
+    expect(groups).toEqual([
+      expect.objectContaining({ key: "b1:A1:", label: "A1", sessionSlot: "" }),
+    ]);
+  });
+
+  it("returns nothing when the tutor has no branch or level", () => {
+    expect(teachingGroups(readAssignment({}), names)).toEqual([]);
+  });
+
+  it("assignmentHasGroup gates a requested class against the assignment", () => {
+    const assignment = readAssignment({
+      branchIds: ["b1"],
+      levels: ["A1", "B1"],
+      sessionSlots: ["morning", "evening"],
+      assignmentGroups: [
+        { branchId: "b1", level: "A1", sessionSlot: "morning" },
+        { branchId: "b1", level: "B1", sessionSlot: "evening" },
+      ],
+    });
+    expect(assignmentHasGroup(assignment, names, { branchId: "b1", level: "b1", sessionSlot: "evening" })?.label).toBe(
+      "B1 · Evening",
+    );
+    expect(assignmentHasGroup(assignment, names, { branchId: "b1", level: "A1", sessionSlot: "evening" })).toBeNull();
+  });
+
+  it("parseGroupKey round-trips and rejects junk", () => {
+    expect(parseGroupKey("b1:a1:morning")).toEqual({ branchId: "b1", level: "A1", sessionSlot: "morning" });
+    expect(parseGroupKey("b1:A1")).toBeNull();
+    expect(parseGroupKey("")).toBeNull();
+    expect(parseGroupKey(null)).toBeNull();
+  });
+});
+
+describe("batchRangeLabel", () => {
+  it("spans the level from its intake month", () => {
+    expect(batchRangeLabel("September", "morning")).toBe("September – October");
+    expect(batchRangeLabel("August", "evening")).toBe("August – September");
+  });
+
+  it("gives a weekend intake three months", () => {
+    expect(batchMonthSpan("August", "weekend")).toEqual(["August", "September", "October"]);
+    expect(batchRangeLabel("August", "weekend")).toBe("August – October");
+  });
+
+  it("wraps the year end", () => {
+    expect(batchRangeLabel("December", "morning")).toBe("December – January");
+  });
+
+  it("is empty for no batch or an unknown month", () => {
+    expect(batchRangeLabel(null, "morning")).toBe("");
+    expect(batchRangeLabel("Smarch", "morning")).toBe("");
   });
 });
