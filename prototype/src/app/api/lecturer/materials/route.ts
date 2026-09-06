@@ -3,7 +3,7 @@ import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
-import { belongsToLecturer, isAssigned, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
+import { assignmentBatches, belongsToLecturer, isAssigned, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
 import { AUDIO_EMBED_FILE_TYPE, EMBED_FILE_TYPE, parseAudioLink, parseEmbed } from '@/lib/media-embed';
 import { generateForMaterial } from '@/lib/material-ai';
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     });
 
-    const allowedBatches = assignment.batches.map((b) => b.toLowerCase());
+    const allowedBatches = assignmentBatches(assignment).map((b) => b.toLowerCase());
     const materials = rows.filter((material) => {
       // Only office cohort uploads carry a batch to check; a tutor's own
       // uploads and by-name uploads always pass.

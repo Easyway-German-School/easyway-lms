@@ -13,6 +13,7 @@ import {
   CLASS_TYPES,
   COURSE_LEVELS,
   SESSION_SLOTS,
+  assignmentBatches,
   type LecturerAssignment,
 } from "@/lib/lecturer-assignment";
 import {
@@ -136,10 +137,32 @@ function AssignmentFields({
   const [groupBranch, setGroupBranch] = useState(value.branchIds[0] ?? "");
   const [groupLevel, setGroupLevel] = useState(value.levels[0] ?? "A1");
   const [groupSlot, setGroupSlot] = useState(value.sessionSlots[0] ?? "morning");
+  // "" means this level/sitting runs for every intake — the same as leaving the
+  // standalone batch picker below untouched.
+  const [groupBatch, setGroupBatch] = useState("");
 
   function addGroup() {
-    if (!groupBranch || value.groups.some((group) => group.branchId === groupBranch && group.level === groupLevel && group.sessionSlot === groupSlot)) return;
-    onChange({ ...value, groups: [...value.groups, { branchId: groupBranch, level: groupLevel, sessionSlot: groupSlot }], branchIds: [...new Set([...value.branchIds, groupBranch])], levels: [...new Set([...value.levels, groupLevel])], sessionSlots: [...new Set([...value.sessionSlots, groupSlot])] });
+    if (
+      !groupBranch ||
+      value.groups.some(
+        (group) =>
+          group.branchId === groupBranch &&
+          group.level === groupLevel &&
+          group.sessionSlot === groupSlot &&
+          (group.batch ?? "") === groupBatch,
+      )
+    )
+      return;
+    const nextGroup = groupBatch
+      ? { branchId: groupBranch, level: groupLevel, sessionSlot: groupSlot, batch: groupBatch }
+      : { branchId: groupBranch, level: groupLevel, sessionSlot: groupSlot };
+    onChange({
+      ...value,
+      groups: [...value.groups, nextGroup],
+      branchIds: [...new Set([...value.branchIds, groupBranch])],
+      levels: [...new Set([...value.levels, groupLevel])],
+      sessionSlots: [...new Set([...value.sessionSlots, groupSlot])],
+    });
   }
 
   return (
@@ -158,14 +181,15 @@ function AssignmentFields({
 
       <div className="rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4">
         <p className="text-sm font-bold text-[var(--foreground)]">Teaching groups</p>
-        <p className="mt-1 text-xs text-[var(--muted)]">Pair each level with its own sitting. A tutor can teach A1 in the morning and B2 in the afternoon.</p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_0.7fr_1fr_auto]">
+        <p className="mt-1 text-xs text-[var(--muted)]">Pair each level with its own sitting, and — if it matters — the one intake month it runs for. A tutor can teach the September A1 morning class and the August B2 afternoon class without August touching the A1 group. Leave the month on <em>Any</em> for a level/sitting that runs every intake.</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_0.7fr_0.9fr_0.9fr_auto]">
           <select value={groupBranch} onChange={(event) => setGroupBranch(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"><option value="">Choose branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
           <select value={groupLevel} onChange={(event) => setGroupLevel(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">{COURSE_LEVELS.map((level) => <option key={level}>{level}</option>)}</select>
           <select value={groupSlot} onChange={(event) => setGroupSlot(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">{SESSION_SLOTS.map((slot) => <option key={slot} value={slot}>{slot.charAt(0).toUpperCase() + slot.slice(1)}</option>)}</select>
+          <select value={groupBatch} onChange={(event) => setGroupBatch(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"><option value="">Any month</option>{BATCHES.map((batch) => <option key={batch} value={batch}>{batch.slice(0, 3)}</option>)}</select>
           <button type="button" onClick={addGroup} className="rounded-xl bg-[var(--accent-strong)] px-4 py-2 text-sm font-bold text-white">Add</button>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">{value.groups.map((group) => <button key={`${group.branchId}-${group.level}-${group.sessionSlot}`} type="button" onClick={() => onChange(pruneGroup(value, group))} className="rounded-full border border-[var(--accent)]/40 bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)]">{branches.find((branch) => branch.id === group.branchId)?.name ?? "Branch"} · {group.level} · {group.sessionSlot} ×</button>)}</div>
+        <div className="mt-3 flex flex-wrap gap-2">{value.groups.map((group) => <button key={`${group.branchId}-${group.level}-${group.sessionSlot}-${group.batch ?? "any"}`} type="button" onClick={() => onChange(pruneGroup(value, group))} className="rounded-full border border-[var(--accent)]/40 bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)]">{branches.find((branch) => branch.id === group.branchId)?.name ?? "Branch"} · {group.level} · {group.sessionSlot}{group.batch ? ` · ${group.batch}` : ""} ×</button>)}</div>
       </div>
 
       <AssignmentPicker
@@ -1000,8 +1024,10 @@ export default function AdminTutorsPage() {
                           Class types: {tutor.assignment.classTypes.map((type) => CLASS_TYPE_LABELS[type] ?? type).join(", ")}
                         </p>
                       ) : null}
-                      {tutor.assignment.batches.length ? (
-                        <p className="mt-1 text-xs text-[var(--muted)]">Batches: {tutor.assignment.batches.join(", ")}</p>
+                      {assignmentBatches(tutor.assignment).length ? (
+                        <p className="mt-1 text-xs text-[var(--muted)]">
+                          Batches: {assignmentBatches(tutor.assignment).join(", ")}
+                        </p>
                       ) : null}
                     </div>
 
