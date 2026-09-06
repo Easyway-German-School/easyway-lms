@@ -282,7 +282,7 @@ export default function AdminEmailComposePage() {
           {/* WHO. Group first, because it changes what the other controls mean —
               payment status is meaningless for a tutor, and level is matched
               against a student's own level but a tutor's ASSIGNED level. */}
-          <div className="grid gap-3 sm:grid-cols-4">
+          <div className="filter-grid">
             <select value={group} onChange={(e) => { setGroup(e.target.value); setLecturerId(""); setPreview(null); }} className="rounded-lg border px-3 py-2 text-sm">
               <option value="students">Students</option>
               <option value="tutors">Tutors</option>
