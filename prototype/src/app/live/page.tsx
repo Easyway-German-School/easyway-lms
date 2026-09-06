@@ -52,10 +52,10 @@ function Lobby({
           {/* Only shown to a student, and only because it is true: the tutor is
               already in the room by the time a student can be here at all. */}
           {!isTutor && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--surface-alt)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-white/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur">
               <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--surface)]" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--surface)]" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
               </span>
               Live
             </span>

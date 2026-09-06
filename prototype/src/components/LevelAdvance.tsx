@@ -149,7 +149,7 @@ function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClos
               initial={{ scale: 0.4, opacity: 0.5 }}
               animate={{ scale: 2.4, opacity: 0 }}
               transition={{ duration: 2.4, delay: ring * 0.7, repeat: Infinity, ease: "easeOut" }}
-              className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full border border-[var(--border)]"
+              className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full border border-white/20"
             />
           ))}
 
@@ -164,7 +164,7 @@ function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClos
 
           <div className="mt-4 flex items-center gap-4">
             <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.25 }}>
-              <div className="grid h-16 w-16 place-items-center rounded-2xl bg-[var(--surface-alt)] text-xl font-bold backdrop-blur">
+              <div className="grid h-16 w-16 place-items-center rounded-2xl border border-white/20 bg-white/15 text-xl font-bold text-white backdrop-blur">
                 {offer.currentLevel}
               </div>
             </motion.div>
