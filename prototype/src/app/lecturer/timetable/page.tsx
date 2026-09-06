@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PortalShell from "@/components/PortalShell";
+import { batchRangeLabel } from "@/lib/levels";
 import ScheduleCalendar, { type DayCell, type Tone } from "@/components/schedule/ScheduleCalendar";
 import UndoToast, { type PendingUndo } from "@/components/schedule/UndoToast";
 import { ymd } from "@/components/schedule/grid";
@@ -49,10 +50,75 @@ type Assignment = {
   branchIds: string[];
   levels: string[];
   sessionSlots: string[];
-  groups: Array<{ branchId: string; level: string; sessionSlot: string }>;
+  groups: Array<{ branchId: string; level: string; sessionSlot: string; batch?: string }>;
   classTypes: string[];
   batches: string[];
 };
+
+/** One class the tutor runs — a row in the "Class" picker. */
+type TimetableGroup = {
+  key: string;
+  branchId: string;
+  branchName: string;
+  level: string;
+  sessionSlot: string;
+  batch: string | null;
+  label: string;
+  batchRange: string;
+};
+
+/**
+ * The distinct classes a tutor runs, from the assignment the office set. A
+ * tutor with two classes gets two entries; a single-class tutor gets one and
+ * the picker collapses to a static label. Admins do not use this — they choose
+ * any cohort freely.
+ */
+function buildGroups(
+  assignment: Assignment | null,
+  branches: Array<{ id: string; name: string }>,
+): TimetableGroup[] {
+  if (!assignment) return [];
+  const names = new Map(branches.map((branch) => [branch.id, branch.name]));
+  const rows = assignment.groups.length
+    ? assignment.groups.map((group) => ({
+        branchId: group.branchId,
+        level: group.level.toUpperCase(),
+        sessionSlot: group.sessionSlot.toLowerCase(),
+        batch: group.batch ?? null,
+      }))
+    : assignment.branchIds.flatMap((branchId) =>
+        assignment.levels.flatMap((level) =>
+          (assignment.sessionSlots.length ? assignment.sessionSlots : [""]).map((sessionSlot) => ({
+            branchId,
+            level: level.toUpperCase(),
+            sessionSlot: sessionSlot.toLowerCase(),
+            batch: assignment.batches[0] ?? null,
+          })),
+        ),
+      );
+
+  const seen = new Set<string>();
+  const out: TimetableGroup[] = [];
+  for (const row of rows) {
+    const key = `${row.branchId}:${row.level}:${row.sessionSlot}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const slotLabel = row.sessionSlot
+      ? row.sessionSlot.charAt(0).toUpperCase() + row.sessionSlot.slice(1)
+      : "";
+    out.push({
+      key,
+      branchId: row.branchId,
+      branchName: names.get(row.branchId) ?? "Your branch",
+      level: row.level,
+      sessionSlot: row.sessionSlot,
+      batch: row.batch,
+      label: slotLabel ? `${row.level} · ${slotLabel}` : row.level,
+      batchRange: batchRangeLabel(row.batch, row.sessionSlot),
+    });
+  }
+  return out;
+}
 
 type ClosedDay = { id: string; date: string; label: string; branchId: string | null };
 
@@ -109,6 +175,22 @@ function dotIdFor(branchId: string, level: string, slot: string, originKey: stri
   return `g:${branchId}:${level}:${slot}:${originKey}`;
 }
 
+/**
+ * A deep link from "My classes" (`?branchId=&level=&slot=`) points the page at
+ * one class. Read straight off the URL rather than through `useSearchParams`,
+ * which would need a Suspense boundary and pull the whole route into CSR — the
+ * same trade `/lecturer/messages` makes.
+ */
+function linkedClass(): { branchId: string; level: string; slot: string } {
+  if (typeof window === "undefined") return { branchId: "", level: "", slot: "" };
+  const params = new URLSearchParams(window.location.search);
+  return {
+    branchId: params.get("branchId") ?? "",
+    level: (params.get("level") ?? "").toUpperCase(),
+    slot: (params.get("slot") ?? "").toLowerCase(),
+  };
+}
+
 export default function LecturerTimetablePage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -117,9 +199,10 @@ export default function LecturerTimetablePage() {
   const [canChooseCohort, setCanChooseCohort] = useState(false);
   const [closedDays, setClosedDays] = useState<ClosedDay[]>([]);
 
-  const [branchId, setBranchId] = useState("");
-  const [level, setLevel] = useState("");
-  const [slot, setSlot] = useState("");
+  // Seeded once from the deep link; after that the picker owns it.
+  const [branchId, setBranchId] = useState(() => linkedClass().branchId);
+  const [level, setLevel] = useState(() => linkedClass().level);
+  const [slot, setSlot] = useState(() => linkedClass().slot);
 
   const [cursor, setCursor] = useState(() => new Date());
   const [cursorPinned, setCursorPinned] = useState(false);
@@ -146,6 +229,8 @@ export default function LecturerTimetablePage() {
       if (level) query.set("level", level);
       if (slot) query.set("slot", slot);
 
+      // The server pins the schedule window to the class's pinned intake month
+      // on its own — it has the assignment — so no `batch` is sent from here.
       const res = await fetch(`/api/lecturer/sessions?${query.toString()}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Unable to load the timetable");
@@ -255,20 +340,32 @@ export default function LecturerTimetablePage() {
   const branchName = branches.find((branch) => branch.id === branchId)?.name ?? "—";
   const hasClass = Boolean(branchId && level);
 
-  const groupsForBranch = (assignment?.groups ?? []).filter((group) => !branchId || group.branchId === branchId);
+  // A tutor picks one of THEIR classes as a single unit — branch, level and
+  // sitting move together, so the old three independent pills can no longer be
+  // left in a combination that is not a real class of theirs.
+  const myGroups = useMemo(() => buildGroups(assignment, branches), [assignment, branches]);
+  const activeGroupKey = `${branchId}:${level.toUpperCase()}:${slot.toLowerCase()}`;
+  const activeGroup = myGroups.find((group) => group.key === activeGroupKey) ?? null;
+  const activeBatchRange =
+    activeGroup?.batchRange ||
+    (level && slot ? batchRangeLabel((assignment?.batches ?? [])[0], slot) : "");
+
+  function selectGroup(next: TimetableGroup) {
+    setBranchId(next.branchId);
+    setLevel(next.level);
+    setSlot(next.sessionSlot);
+    setSelectedDay(null);
+    setEditing(null);
+    setAdding(false);
+    // Re-land on the month the newly chosen class actually runs in.
+    setCursorPinned(false);
+  }
+
+  // Admin keeps the free cohort pickers — the office can fix any branch's
+  // timetable, so it is not bounded by an assignment.
   const selectableBranches = branches;
-  const selectableLevels = canChooseCohort
-    ? ["A1", "A2", "B1", "B2", "C1", "C2"]
-    : assignment?.groups?.length
-      ? [...new Set(groupsForBranch.map((group) => group.level))]
-      : (assignment?.levels ?? []);
-  const selectableSlots = canChooseCohort
-    ? ["morning", "afternoon", "evening", "weekend"]
-    : assignment?.groups?.length
-      ? [...new Set(groupsForBranch.filter((group) => group.level === level).map((group) => group.sessionSlot))]
-      : assignment?.sessionSlots.length
-        ? assignment.sessionSlots
-        : ["morning", "afternoon", "evening", "weekend"];
+  const selectableLevels = ["A1", "A2", "B1", "B2", "C1", "C2"];
+  const selectableSlots = ["morning", "afternoon", "evening", "weekend"];
 
   /** One raw write to a single day's override. `session` is identified by its own date. */
   async function putSession(
@@ -729,31 +826,67 @@ export default function LecturerTimetablePage() {
   const toolbar = hasClass ? (
     <div className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
       <span className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
-        {canChooseCohort ? "Editing" : "Your class"}
+        {canChooseCohort ? "Editing" : myGroups.length > 1 ? "Which class" : "Your class"}
       </span>
-      <div className="flex flex-wrap gap-2">
-        <Segmented
-          value={branchId}
-          options={selectableBranches.map((b) => ({ value: b.id, label: b.name }))}
-          onChange={setBranchId}
-          locked={!canChooseCohort && selectableBranches.length <= 1}
-          fallbackLabel={branchName}
-        />
-        <Segmented
-          value={level}
-          options={selectableLevels.map((l) => ({ value: l, label: l }))}
-          onChange={setLevel}
-          locked={selectableLevels.length <= 1}
-          fallbackLabel={level}
-        />
-        <Segmented
-          value={slot}
-          options={selectableSlots.map((s) => ({ value: s, label: SLOT_LABELS[s] ?? s }))}
-          onChange={setSlot}
-          locked={selectableSlots.length <= 1}
-          fallbackLabel={SLOT_LABELS[slot] ?? slot}
-        />
-      </div>
+
+      {canChooseCohort ? (
+        <div className="flex flex-wrap gap-2">
+          <Segmented
+            value={branchId}
+            options={selectableBranches.map((b) => ({ value: b.id, label: b.name }))}
+            onChange={setBranchId}
+            locked={selectableBranches.length <= 1}
+            fallbackLabel={branchName}
+          />
+          <Segmented
+            value={level}
+            options={selectableLevels.map((l) => ({ value: l, label: l }))}
+            onChange={setLevel}
+            locked={false}
+            fallbackLabel={level}
+          />
+          <Segmented
+            value={slot}
+            options={selectableSlots.map((s) => ({ value: s, label: SLOT_LABELS[s] ?? s }))}
+            onChange={setSlot}
+            locked={false}
+            fallbackLabel={SLOT_LABELS[slot] ?? slot}
+          />
+        </div>
+      ) : myGroups.length > 1 ? (
+        <div className="inline-flex flex-wrap gap-1 rounded-lg bg-[var(--surface-alt)] p-1">
+          {myGroups.map((group) => (
+            <button
+              key={group.key}
+              type="button"
+              onClick={() => selectGroup(group)}
+              className={`rounded-md px-3 py-1.5 text-left text-sm font-semibold transition ${
+                group.key === activeGroupKey
+                  ? "bg-[var(--accent)] text-white"
+                  : "text-[var(--foreground-soft)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              {group.label}
+              {group.batchRange ? (
+                <span
+                  className={`ml-1.5 text-xs font-medium ${
+                    group.key === activeGroupKey ? "text-white/80" : "text-[var(--muted)]"
+                  }`}
+                >
+                  {group.batchRange}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <span className="rounded-lg bg-[var(--surface-alt)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
+          {activeGroup?.label ?? [branchName, level, SLOT_LABELS[slot] ?? slot].filter(Boolean).join(" · ")}
+          {activeBatchRange ? (
+            <span className="ml-1.5 text-xs font-medium text-[var(--muted)]">{activeBatchRange} batch</span>
+          ) : null}
+        </span>
+      )}
     </div>
   ) : null;
 
@@ -762,13 +895,20 @@ export default function LecturerTimetablePage() {
       <div className="h-screen overflow-y-auto">
         <div className="border-b border-[var(--border)] bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6">
           <div className="mx-auto max-w-6xl">
-            <h1 className="flex items-center gap-3 text-2xl font-bold text-[var(--foreground)] sm:text-3xl">
+            <h1 className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xl font-bold text-[var(--foreground)] sm:text-3xl">
               <CalendarIcon className="h-7 w-7 text-[var(--accent)]" />
               Class timetable
+              {hasClass && !canChooseCohort && (activeGroup?.label || level) ? (
+                <span className="text-base font-semibold text-[var(--muted)]">
+                  · {activeGroup?.label ?? level}
+                  {activeBatchRange ? ` · ${activeBatchRange} batch` : ""}
+                </span>
+              ) : null}
             </h1>
             <p className="mt-2 text-sm text-[var(--muted)]">
               A dot for every class, coloured by status. Tap a day to set its topic, times and materials, postpone it,
               or add a one-off. What you save is what your students see.
+              {myGroups.length > 1 ? " Use the class picker to switch between your classes." : ""}
             </p>
           </div>
         </div>

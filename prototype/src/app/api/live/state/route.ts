@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAttendLive } from "@/lib/access";
 import { liveSessionForStudent, liveWhere } from "@/lib/live-presence";
 import { cohortRoomName } from "@/lib/live-classroom";
+import { readAssignment, teachingGroups } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,18 @@ export async function GET() {
       }),
       prisma.lecturer.findUnique({
         where: { userId: session.user.id },
-        select: { id: true, level: true, sessionSlot: true, branch: { select: { name: true } } },
+        select: {
+          id: true,
+          level: true,
+          sessionSlot: true,
+          branchId: true,
+          branchIds: true,
+          levels: true,
+          sessionSlots: true,
+          assignmentGroups: true,
+          batches: true,
+          branch: { select: { id: true, name: true } },
+        },
       }),
     ]);
 
@@ -51,6 +63,23 @@ export async function GET() {
         level: lecturer.level,
         sessionSlot: lecturer.sessionSlot,
       });
+
+      // Every class this tutor runs, so a multi-class tutor's dashboard can
+      // both label which one is live and offer to start another.
+      const activeBranches = await prisma.branch.findMany({
+        where: { status: "active" },
+        select: { id: true, name: true },
+      });
+      const groups = teachingGroups(
+        readAssignment(lecturer),
+        new Map(activeBranches.map((branch) => [branch.id, branch.name])),
+      ).map((group) => ({
+        key: group.key,
+        label: group.label,
+        branchName: group.branchName,
+        batchRange: group.batchRange,
+        roomName: group.roomName,
+      }));
 
       const open = await prisma.liveClassSession.findFirst({
         where: { OR: [{ roomName: room }, { lecturerId: lecturer.id }], ...liveWhere() },
@@ -63,10 +92,15 @@ export async function GET() {
         },
       });
 
-      if (!open) return NextResponse.json({ live: null, role: "tutor" });
+      if (!open) return NextResponse.json({ live: null, role: "tutor", groups });
+
+      // Which teaching group this open room belongs to, so "Open room" can
+      // reopen the SAME room rather than the primary one.
+      const liveGroup = groups.find((group) => group.roomName === open.roomName) ?? null;
 
       return NextResponse.json({
         role: "tutor",
+        groups,
         live: {
           id: open.id,
           title: open.title,
@@ -74,6 +108,11 @@ export async function GET() {
           kind: open.kind,
           startedAt: open.startedAt,
           roomName: open.roomName,
+          branchId: open.branchId,
+          level: open.level,
+          sessionSlot: open.sessionSlot,
+          groupKey: liveGroup?.key ?? null,
+          groupLabel: liveGroup?.label ?? null,
         },
         invites: open.invites.map((invite) => ({
           studentId: invite.studentId,

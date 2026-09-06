@@ -26,6 +26,7 @@ import {
   type RoomRole,
 } from "@/lib/live-classroom";
 import { lecturerCan } from "@/lib/lecturer-features";
+import { assignmentHasGroup, parseGroupKey, readAssignment } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
 
@@ -203,13 +204,49 @@ export async function GET(request: Request) {
       }
     }
 
-    const branch = lecturer?.branch ?? student?.branch ?? null;
-    const level = lecturer?.level ?? student?.level ?? "A1";
-    const sessionSlot = lecturer?.sessionSlot ?? student?.sessionSlot ?? "morning";
+    /**
+     * WHICH OF THE TUTOR'S CLASSES.
+     *
+     * A tutor who runs more than one class — A1 morning and B1 evening, say —
+     * passes `?group=branchId:LEVEL:slot` to start the one they mean. Without
+     * it, or for a student, or on a private booking, the room is the legacy
+     * primary class exactly as before. A group in the query is a request, not
+     * a grant: it is checked against the assignment the office actually gave
+     * this tutor, and a mismatch is refused rather than silently ignored, so a
+     * stale link cannot open a cohort's room for someone who was moved off it.
+     */
+    const requestedGroup = parseGroupKey(url.searchParams.get("group"));
+    let groupBranch: { id: string; name: string; mode: string } | null = null;
+    let chosenGroup: ReturnType<typeof assignmentHasGroup> = null;
+    if (lecturer && requestedGroup && !privateClassId) {
+      groupBranch = await prisma.branch.findUnique({
+        where: { id: requestedGroup.branchId },
+        select: { id: true, name: true, mode: true },
+      });
+      chosenGroup = groupBranch
+        ? assignmentHasGroup(
+            readAssignment(lecturer),
+            new Map([[groupBranch.id, groupBranch.name]]),
+            requestedGroup,
+          )
+        : null;
+      if (!chosenGroup) {
+        return NextResponse.json(
+          { error: "Not your class", message: "That class is not one the office has assigned you." },
+          { status: 403 },
+        );
+      }
+    }
+
+    const branch = chosenGroup ? groupBranch : (lecturer?.branch ?? student?.branch ?? null);
+    const level = chosenGroup?.level || lecturer?.level || student?.level || "A1";
+    const sessionSlot = chosenGroup?.sessionSlot || lecturer?.sessionSlot || student?.sessionSlot || "morning";
 
     let roomName = privateClassId
       ? privateRoomName(privateClassId)
-      : cohortRoomName({ branchName: branch?.name, level, sessionSlot });
+      : chosenGroup
+        ? chosenGroup.roomName
+        : cohortRoomName({ branchName: branch?.name, level, sessionSlot });
     let displayName = privateClassId
       ? codedSession?.title ?? "Private class"
       : roomDisplayName({ branchName: branch?.name, level, sessionSlot });

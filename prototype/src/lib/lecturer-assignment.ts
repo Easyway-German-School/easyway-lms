@@ -15,8 +15,12 @@
  *
  * No prisma import: the admin form and the tutor portal both need the
  * vocabularies below, and a server-only dependency would stop them reaching
- * the browser.
+ * the browser. `live-classroom` and `levels` are both browser-safe for the
+ * same reason.
  */
+
+import { cohortRoomName } from "@/lib/live-classroom";
+import { batchRangeLabel } from "@/lib/levels";
 
 export const COURSE_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
 
@@ -482,4 +486,130 @@ export function describeAssignment(
     : "All sittings";
 
   return `${branches} · ${levels} · ${slots}`;
+}
+
+/**
+ * One class a tutor runs, as a self-contained thing the portal can point at.
+ *
+ * A tutor taking A1 morning AND B1 evening has two of these, and the whole
+ * reason this type exists is that every downstream surface — the "my classes"
+ * cards, the timetable's class picker, the "go live" button — was collapsing
+ * them into one via the legacy primary `branchId`/`level`/`sessionSlot`
+ * columns, which only ever mirror the FIRST group. Each group here carries its
+ * own live room (the exact string its students derive), so opening it rings
+ * the right cohort and nobody else.
+ */
+export type TeachingGroup = {
+  /** `branchId:LEVEL:slot` — safe in a URL and a segmented-control value. */
+  key: string;
+  branchId: string;
+  branchName: string;
+  /** Upper-case, matching how `Student.level` and the room slug are built. */
+  level: string;
+  /** Lower-case sitting, or "" when the tutor takes every sitting of the level. */
+  sessionSlot: string;
+  /** Intake month pinned to this group, or null for "every intake". */
+  batch: string | null;
+  /** The cohort's live room — identical to what its students compute. */
+  roomName: string;
+  /** "B1 · Evening", or just "B1" for an all-sittings group. */
+  label: string;
+  /** "September – October" — "" when the group has no pinned batch. */
+  batchRange: string;
+};
+
+/**
+ * Every distinct class this tutor runs.
+ *
+ * Prefers the admin's explicit teaching groups. Falls back to the cartesian
+ * product of the flat branch / level / sitting lists — which, for a tutor
+ * created before groups existed (one branch, one level, one sitting), is
+ * exactly one entry that behaves as it always did. An all-sittings group
+ * (`sessionSlots` empty) collapses to a single slot-less entry rather than
+ * exploding into four.
+ */
+export function teachingGroups(
+  assignment: LecturerAssignment,
+  branchNames: Map<string, string>,
+): TeachingGroup[] {
+  if (!isAssigned(assignment)) return [];
+
+  const rows = assignment.groups.length
+    ? assignment.groups.map((group) => ({
+        branchId: group.branchId,
+        level: group.level.toUpperCase(),
+        sessionSlot: group.sessionSlot.toLowerCase(),
+        batch: group.batch ?? null,
+      }))
+    : assignment.branchIds.flatMap((branchId) =>
+        assignment.levels.flatMap((level) =>
+          (assignment.sessionSlots.length ? assignment.sessionSlots : [""]).map((sessionSlot) => ({
+            branchId,
+            level: level.toUpperCase(),
+            sessionSlot: sessionSlot.toLowerCase(),
+            // A flat-list tutor's one standalone batch applies to every group.
+            batch: assignment.batches[0] ?? null,
+          })),
+        ),
+      );
+
+  const seen = new Set<string>();
+  const out: TeachingGroup[] = [];
+  for (const row of rows) {
+    const key = `${row.branchId}:${row.level}:${row.sessionSlot}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const branchName = branchNames.get(row.branchId) ?? "Your branch";
+    const slotLabel = row.sessionSlot
+      ? row.sessionSlot.charAt(0).toUpperCase() + row.sessionSlot.slice(1)
+      : "";
+
+    out.push({
+      key,
+      branchId: row.branchId,
+      branchName,
+      level: row.level,
+      sessionSlot: row.sessionSlot,
+      batch: row.batch,
+      roomName: cohortRoomName({
+        branchName,
+        level: row.level,
+        sessionSlot: row.sessionSlot || undefined,
+      }),
+      label: slotLabel ? `${row.level} · ${slotLabel}` : row.level,
+      batchRange: batchRangeLabel(row.batch, row.sessionSlot),
+    });
+  }
+  return out;
+}
+
+/**
+ * Split a `branchId:LEVEL:slot` key back into its parts. Returns null for
+ * anything that is not exactly three non-empty-enough segments — a caller
+ * handed a bad key should fall back to the tutor's primary class, not 500.
+ */
+export function parseGroupKey(
+  key: string | null | undefined,
+): { branchId: string; level: string; sessionSlot: string } | null {
+  const parts = String(key ?? "").split(":");
+  if (parts.length !== 3) return null;
+  const [branchId, level, sessionSlot] = parts;
+  if (!branchId || !level) return null;
+  return { branchId, level: level.toUpperCase(), sessionSlot: sessionSlot.toLowerCase() };
+}
+
+/**
+ * Does this tutor's assignment actually contain the given group? The gate for
+ * "go live with THIS class" — a key in a query string is a request, not a
+ * grant, and a tutor must not be able to open a room for a cohort the office
+ * never put them on.
+ */
+export function assignmentHasGroup(
+  assignment: LecturerAssignment,
+  branchNames: Map<string, string>,
+  target: { branchId: string; level: string; sessionSlot: string },
+): TeachingGroup | null {
+  const want = `${target.branchId}:${target.level.toUpperCase()}:${target.sessionSlot.toLowerCase()}`;
+  return teachingGroups(assignment, branchNames).find((group) => group.key === want) ?? null;
 }

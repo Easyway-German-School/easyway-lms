@@ -10,6 +10,7 @@ import {
   belongsToLecturer,
   readAssignment,
   studentWhereForLecturer,
+  teachingGroups,
 } from "@/lib/lecturer-assignment";
 
 export const dynamic = "force-dynamic";
@@ -88,6 +89,7 @@ export async function GET() {
             studentCode: true,
             level: true,
             sessionSlot: true,
+            branchId: true,
             admission: true,
             tutorId: true,
             branch: { select: { name: true } },
@@ -97,6 +99,51 @@ export async function GET() {
         })
       ).filter((student) => belongsToLecturer(assignment, lecturer.id, student))
     : [];
+
+  const branchNameMap = new Map(branches.map((branch) => [branch.id, branch.name]));
+
+  /**
+   * Every class this tutor runs, split out — the "my classes" page draws one
+   * card per entry so an A1-morning tutor who also takes B1 evening sees two
+   * classes with two rosters and two "go live" buttons, not one merged blob.
+   *
+   * A student's intake month lives in the `admission` JSON, so the per-group
+   * count is done here in memory rather than in the query.
+   */
+  const studentBatch = (admission: unknown): string => {
+    const record = admission && typeof admission === "object" ? (admission as Record<string, unknown>) : {};
+    return typeof record.batch === "string" ? record.batch.toLowerCase() : "";
+  };
+  const groups = teachingGroups(assignment, branchNameMap).map((group) => {
+    const members = roster.filter(
+      (student) =>
+        student.branchId === group.branchId &&
+        (student.level ?? "").toUpperCase() === group.level &&
+        (!group.sessionSlot || (student.sessionSlot ?? "").toLowerCase() === group.sessionSlot) &&
+        (!group.batch || studentBatch(student.admission) === group.batch.toLowerCase()),
+    );
+    return {
+      key: group.key,
+      branchId: group.branchId,
+      branchName: group.branchName,
+      level: group.level,
+      sessionSlot: group.sessionSlot,
+      batch: group.batch,
+      batchRange: group.batchRange,
+      roomName: group.roomName,
+      label: group.label,
+      studentCount: members.length,
+      roster: members.map((student) => ({
+        id: student.id,
+        name: student.user.name || student.user.email,
+        email: student.user.email,
+        studentCode: student.studentCode,
+        level: student.level,
+        branchName: student.branch?.name ?? null,
+        sessionSlot: student.sessionSlot,
+      })),
+    };
+  });
 
   return NextResponse.json({
     profile: {
@@ -116,9 +163,15 @@ export async function GET() {
     // What the admin assigned. Sent so the tutor portal can SHOW it; there is
     // no longer any route by which the tutor can change it.
     assignment,
+    /**
+     * One entry per distinct class the tutor runs, each with its own roster,
+     * live room and intake range. The page prefers this over `cohort` below;
+     * `cohort` is kept for older clients and for the single-class case.
+     */
+    groups,
     cohort: {
       assigned: isAssigned(assignment),
-      label: describeAssignment(assignment, new Map(branches.map((branch) => [branch.id, branch.name]))),
+      label: describeAssignment(assignment, branchNameMap),
       /**
        * The live room is still keyed on the tutor's PRIMARY class — one tutor
        * cannot be in two rooms at once, so a multi-branch assignment still has
