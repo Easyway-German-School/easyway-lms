@@ -133,7 +133,8 @@ export default function PrivateScheduleSetup({ classType }: { classType?: string
       const response = await fetch(`/api/student/private-classes/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "request_reschedule", proposedAt: `${proposedDate}T${proposedTime}` }),
+        // A wall-clock time the student typed in their own zone → an absolute instant.
+        body: JSON.stringify({ action: "request_reschedule", proposedAt: new Date(`${proposedDate}T${proposedTime}`).toISOString() }),
       });
       if (!response.ok) throw new Error((await response.json()).error ?? "Could not send this request");
       setReschedulingId(null);
@@ -260,7 +261,7 @@ export default function PrivateScheduleSetup({ classType }: { classType?: string
     if (!requestDate || !requestTime) return;
     setRequestBusy(true);
     try {
-      const response = await fetch("/api/student/private-classes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scheduledAt: `${requestDate}T${requestTime}`, durationMinutes: 60 }) });
+      const response = await fetch("/api/student/private-classes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scheduledAt: new Date(`${requestDate}T${requestTime}`).toISOString(), durationMinutes: 60 }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not send session request");
       setRequestDate("");

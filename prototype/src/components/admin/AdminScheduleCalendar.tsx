@@ -6,6 +6,7 @@ import ScheduleCalendar, { type DayCell, type Tone } from "@/components/schedule
 import UndoToast, { type PendingUndo } from "@/components/schedule/UndoToast";
 import { ymd } from "@/components/schedule/grid";
 import { effectiveDayKey } from "@/components/schedule/effectiveDay";
+import { SCHOOL_TIMEZONE, zonedClock, zonedDateKey, zonedTimeToInstant } from "@/lib/school-time";
 import { ClockIcon } from "@/components/icons";
 import type { GroupSession, PrivateClass, PrivateAnalytics } from "@/components/admin/AdminScheduleList";
 
@@ -57,13 +58,13 @@ function shortDay(dayKey: string): string {
 function isoUTC(dayKey: string): string {
   return `${dayKey}T00:00:00.000Z`;
 }
+/** Wall-clock time of an instant, in school time. */
 function clockOf(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return zonedClock(new Date(iso), SCHOOL_TIMEZONE);
 }
-/** A local `yyyy-mm-dd` + `HH:mm` turned into an exact instant (client tz aware). */
+/** `yyyy-mm-dd` + `HH:mm` in school time → an exact ISO instant. */
 function instant(dayKey: string, clock: string): string {
-  return new Date(`${dayKey}T${clock}:00`).toISOString();
+  return zonedTimeToInstant(dayKey, clock, SCHOOL_TIMEZONE).toISOString();
 }
 
 function groupDotId(g: GroupSession): string {
@@ -158,7 +159,7 @@ export default function AdminScheduleCalendar({
     const map = new Map<string, PrivateClass[]>();
     for (const p of privates) {
       if (!privateMatches(p)) continue;
-      const key = ymd(new Date(p.scheduledAt));
+      const key = zonedDateKey(new Date(p.scheduledAt), SCHOOL_TIMEZONE);
       (map.get(key) ?? map.set(key, []).get(key)!).push(p);
     }
     for (const list of map.values())
@@ -541,7 +542,7 @@ export default function AdminScheduleCalendar({
                           } else {
                             setEditingKey(key);
                             setPrivateDraft({
-                              day: ymd(new Date(p.scheduledAt)),
+                              day: zonedDateKey(new Date(p.scheduledAt), SCHOOL_TIMEZONE),
                               start: clockOf(p.scheduledAt),
                               durationMinutes: p.durationMinutes,
                               status: ["scheduled", "completed", "cancelled"].includes(p.status) ? p.status : "scheduled",

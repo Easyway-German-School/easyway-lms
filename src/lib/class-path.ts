@@ -25,6 +25,8 @@ export type Session = {
   timeSlot: string;
   startTime: string;
   endTime: string;
+  /** Short zone the times are in ("WAT", "CEST") — shown next to the time. */
+  zoneLabel?: string;
   topic: string | null;
   notes: string | null;
   status: string;
@@ -243,7 +245,7 @@ export function buildNodes(
 /** What a popover should show for a class, honouring the lock. */
 export function nodeSummary(node: ClassNode) {
   return {
-    when: `${node.startTime}–${node.endTime}`,
+    when: `${node.startTime}–${node.endTime}${node.zoneLabel ? ` ${node.zoneLabel}` : ""}`,
     slot: SLOT_LABEL[node.timeSlot] ?? node.timeSlot,
     // Time is always shown; the topic is what the lock withholds.
     topic: isUnlocked(node) ? node.topic || node.defaultFocus : null,

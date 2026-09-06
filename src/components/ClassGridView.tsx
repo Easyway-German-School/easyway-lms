@@ -270,8 +270,8 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
                       onFocus={() => setHoverKey(key)}
                       onBlur={() => setHoverKey((k) => (k === key ? null : k))}
                       aria-label={`${node.weekday} ${shortDate(new Date(node.date))}, ${node.startTime} to ${node.endTime}${
-                        node.state === "locked" ? ", topic locked" : ""
-                      }`}
+                        node.zoneLabel ? ` ${node.zoneLabel}` : ""
+                      }${node.state === "locked" ? ", topic locked" : ""}`}
                       className={`relative flex aspect-square w-full items-center justify-center rounded-xl border-2 text-sm font-extrabold shadow-sm transition hover:scale-105 ${
                         STATE_STYLE[node.state] ?? STATE_STYLE.locked
                       }`}

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { generatePersonalizedSchedule, type ScheduleMonth } from "@/lib/schedule";
 import { SLOT_DEFAULTS, normalizeSlot, isWeekendSlot, type TimeSlot } from "@/lib/class-times";
 import { sessionDurationMonths } from "@/lib/levels";
+import { SCHOOL_TIMEZONE, zonedDateKey } from "@/lib/school-time";
 
 /**
  * Merges the generated timetable skeleton with the ClassSession overrides a
@@ -20,18 +21,17 @@ import { sessionDurationMonths } from "@/lib/levels";
 export { TIME_SLOTS, SLOT_DEFAULTS, normalizeSlot, type TimeSlot } from "@/lib/class-times";
 
 /**
- * The join key between the skeleton and its overrides: midnight UTC on the
- * calendar day.
+ * The join key between the skeleton and its overrides: midnight UTC stamped on
+ * the calendar day the class falls on **in the school's timezone**.
  *
- * Deliberately reads LOCAL date components. The generator builds each session
- * with `new Date(year, month, day)` — local midnight — so in any timezone
- * ahead of UTC (Nigeria is UTC+1) the UTC date of that instant is the previous
- * day. Reading UTC components here would file every class against the wrong
- * date and no override would ever match.
+ * Anchored to `SCHOOL_TIMEZONE` explicitly rather than to whatever zone the
+ * code runs in — so a generated session, a tutor's override write, and every
+ * read resolve to the same day whether this runs on Vercel (UTC) or a laptop
+ * in Lagos. On the UTC production server this is identical to the old
+ * local-components behaviour; it only removes the drift in local dev.
  */
 export function dayKey(date: Date | string): Date {
-  const d = new Date(date);
-  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  return new Date(`${zonedDateKey(new Date(date), SCHOOL_TIMEZONE)}T00:00:00.000Z`);
 }
 
 export type MergedSession = {
@@ -46,6 +46,8 @@ export type MergedSession = {
   timeSlot: TimeSlot;
   startTime: string;
   endTime: string;
+  /** Short zone the times are quoted in ("WAT", "CEST") — set for private sessions. */
+  zoneLabel?: string;
   topic: string | null;
   notes: string | null;
   status: string;
@@ -161,6 +163,7 @@ export async function getMergedSchedule(args: {
       timeSlot: rowSlot,
       startTime: o.startTime || rowDefaults.startTime,
       endTime: o.endTime || rowDefaults.endTime,
+      zoneLabel: GROUP_ZONE_LABEL,
       topic: o.topic ?? null,
       notes: o.notes ?? null,
       status: o.status ?? "scheduled",
@@ -199,6 +202,7 @@ export async function getMergedSchedule(args: {
         timeSlot,
         startTime: override?.startTime || defaults.startTime,
         endTime: override?.endTime || defaults.endTime,
+        zoneLabel: GROUP_ZONE_LABEL,
         topic: override?.topic ?? null,
         notes: override?.notes ?? null,
         status: override?.status ?? "scheduled",
@@ -225,6 +229,8 @@ export async function getMergedSchedule(args: {
 }
 
 const EXTRA_WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** Group classes are quoted in school hours by definition; Lagos has no DST. */
+const GROUP_ZONE_LABEL = "WAT";
 
 /**
  * Splice a month's added classes into its generated sessions, ordered by the
@@ -251,6 +257,7 @@ function withDefaults(month: ScheduleMonth, slot: TimeSlot): MergedMonth {
       timeSlot: slot,
       startTime: defaults.startTime,
       endTime: defaults.endTime,
+      zoneLabel: GROUP_ZONE_LABEL,
       topic: null,
       notes: null,
       status: "scheduled",

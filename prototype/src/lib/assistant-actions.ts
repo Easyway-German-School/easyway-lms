@@ -7,6 +7,7 @@ import { inviteLeads } from "@/lib/leads";
 import { nextLevelAfter } from "@/lib/levels";
 import { normalizeSlot } from "@/lib/class-times";
 import { privateOverlaps } from "@/lib/private-classes";
+import { SCHOOL_TIMEZONE, formatWhen, zonedClock, zonedTimeToInstant } from "@/lib/school-time";
 import {
   FILTER_PROPERTIES,
   applyDerivedFilters,
@@ -166,15 +167,8 @@ function isoDate(args: Record<string, unknown>, key: string, label: string): Dat
 const prettyDate = (date: Date) =>
   date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 
-const prettyDateTime = (date: Date) =>
-  date.toLocaleString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "UTC",
-  });
+/** An instant with a time, rendered in school time with its zone ("Wed 10 Sep, 04:00 PM WAT"). */
+const prettyDateTime = (date: Date) => formatWhen(date, SCHOOL_TIMEZONE);
 
 /** Resolve the filters into real people, through the read tools' own code. */
 async function cohortFor(
@@ -847,13 +841,11 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
       }
       const session = sessions[0];
 
-      const next = new Date(newDay);
-      if (newTime) {
-        const [h, m] = newTime.split(":").map(Number);
-        next.setUTCHours(h, m, 0, 0);
-      } else {
-        next.setUTCHours(session.scheduledAt.getUTCHours(), session.scheduledAt.getUTCMinutes(), 0, 0);
-      }
+      // `newTime` (or the session's current school-time clock) is a wall-clock
+      // time in the school's zone — convert it to a real instant.
+      const newDateKey = newDay.toISOString().slice(0, 10);
+      const clock = newTime || zonedClock(session.scheduledAt, SCHOOL_TIMEZONE);
+      const next = zonedTimeToInstant(newDateKey, clock, SCHOOL_TIMEZONE);
       if (next.getTime() === session.scheduledAt.getTime()) {
         throw new PlanError("That is the same slot the session is already in.");
       }

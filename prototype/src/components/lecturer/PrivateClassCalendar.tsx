@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ScheduleCalendar, { type DayCell, type Tone } from "@/components/schedule/ScheduleCalendar";
 import UndoToast, { type PendingUndo } from "@/components/schedule/UndoToast";
 import { ymd, monthStart, monthEnd } from "@/components/schedule/grid";
+import { SCHOOL_TIMEZONE, zonedClock, zonedDateKey, zonedTimeToInstant } from "@/lib/school-time";
 import { ClockIcon } from "@/components/icons";
 
 /**
@@ -56,11 +57,10 @@ function shortDay(k: string): string {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 function clockOf(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return zonedClock(new Date(iso), SCHOOL_TIMEZONE);
 }
 function instant(day: string, clock: string): string {
-  return new Date(`${day}T${clock}:00`).toISOString();
+  return zonedTimeToInstant(day, clock, SCHOOL_TIMEZONE).toISOString();
 }
 
 type Draft = { day: string; start: string; durationMinutes: number; status: string; topic: string | null };
@@ -106,7 +106,7 @@ export default function PrivateClassCalendar({ onOpenStudent }: { onOpenStudent:
   const byDay = useMemo(() => {
     const map = new Map<string, Cls[]>();
     for (const c of classes) {
-      const key = ymd(new Date(c.scheduledAt));
+      const key = zonedDateKey(new Date(c.scheduledAt), SCHOOL_TIMEZONE);
       (map.get(key) ?? map.set(key, []).get(key)!).push(c);
     }
     for (const list of map.values()) list.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
@@ -223,7 +223,7 @@ export default function PrivateClassCalendar({ onOpenStudent }: { onOpenStudent:
                       } else {
                         setEditingId(c.id);
                         setDraft({
-                          day: ymd(new Date(c.scheduledAt)),
+                          day: zonedDateKey(new Date(c.scheduledAt), SCHOOL_TIMEZONE),
                           start: clockOf(c.scheduledAt),
                           durationMinutes: c.durationMinutes,
                           status: ["scheduled", "completed", "cancelled"].includes(c.status) ? c.status : "scheduled",

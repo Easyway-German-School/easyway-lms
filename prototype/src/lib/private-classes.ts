@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { MergedMonth, MergedSession } from "@/lib/class-sessions";
 import { topUpSeriesForStudent } from "@/lib/private-class-series";
+import { readOnlineProfile } from "@/lib/online-branch";
+import { instantToZonedParts, viewerTimezone, zoneLabel, zonedClock } from "@/lib/school-time";
 
 /**
  * Calendars for one-to-one students.
@@ -100,10 +102,6 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-function clockTime(date: Date): string {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
 /** Maps a private-class status onto the states the calendar already renders. */
 function displayStatus(status: string): string {
   if (status === "cancelled" || status === "skipped") return "cancelled";
@@ -138,8 +136,19 @@ export async function getPrivateSchedule(args: {
   // series once its window is already full).
   await topUpSeriesForStudent(args.studentId, now);
 
-  const windowStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const windowEnd = new Date(now.getFullYear(), now.getMonth() + monthCount, 1);
+  // Show every class in the student's own timezone (online students in the
+  // diaspora set one at signup); everyone else sees school time.
+  const student = await prisma.student.findUnique({
+    where: { id: args.studentId },
+    select: { admission: true },
+  });
+  const tz = viewerTimezone(readOnlineProfile(student?.admission).timezone);
+
+  // A day of slack each side of the calendar window, so a class that is late on
+  // the last day / early on the first day in `tz` (a different UTC day) is still
+  // fetched; the per-month filter below is timezone-exact.
+  const windowStart = new Date(now.getFullYear(), now.getMonth(), 0);
+  const windowEnd = new Date(now.getFullYear(), now.getMonth() + monthCount, 2);
 
   const classes = await prisma.privateClass.findMany({
     where: {
@@ -166,22 +175,25 @@ export async function getPrivateSchedule(args: {
     const monthIndex = cursor.getMonth();
     const year = cursor.getFullYear();
 
-    const inMonth = classes.filter(
-      (c) => c.scheduledAt.getMonth() === monthIndex && c.scheduledAt.getFullYear() === year,
-    );
+    const inMonth = classes.filter((c) => {
+      const p = instantToZonedParts(c.scheduledAt, tz);
+      return p.month - 1 === monthIndex && p.year === year;
+    });
 
     const sessions: MergedSession[] = inMonth.map((c) => {
       const end = new Date(c.scheduledAt.getTime() + c.durationMinutes * 60_000);
+      const parts = instantToZonedParts(c.scheduledAt, tz);
       return {
         date: c.scheduledAt.toISOString(),
-        weekday: WEEKDAY_SHORT[c.scheduledAt.getDay()],
+        weekday: WEEKDAY_SHORT[parts.weekday],
         level: args.level,
         title: `${args.level} · Private class`,
         defaultFocus: "One-to-one session",
         slot: "Private class",
-        timeSlot: slotForHour(c.scheduledAt.getHours()),
-        startTime: clockTime(c.scheduledAt),
-        endTime: clockTime(end),
+        timeSlot: slotForHour(parts.hour),
+        startTime: zonedClock(c.scheduledAt, tz),
+        endTime: zonedClock(end, tz),
+        zoneLabel: zoneLabel(c.scheduledAt, tz),
         topic: c.topic,
         notes: c.notes,
         status: displayStatus(c.status),
@@ -209,7 +221,7 @@ export async function getPrivateSchedule(args: {
       year,
       offset: i,
       isBatchStart: i === 0,
-      patternDays: [...new Set(inMonth.map((c) => c.scheduledAt.getDay()))].sort(),
+      patternDays: [...new Set(inMonth.map((c) => instantToZonedParts(c.scheduledAt, tz).weekday))].sort(),
       patternLabel: sessions.length ? "Booked one-to-one sessions" : "No sessions booked",
       sessions,
     });

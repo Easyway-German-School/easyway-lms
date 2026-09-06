@@ -5,6 +5,7 @@ import { lecturerCan } from "@/lib/lecturer-features";
 import { KIND, notify } from "@/lib/notify";
 import { topUpSeriesForStudent } from "@/lib/private-class-series";
 import { ensureAttendanceComputed, privateOverlaps } from "@/lib/private-classes";
+import { formatWhen, parseTimeInput } from "@/lib/school-time";
 
 /**
  * Booking and editing one-to-one classes.
@@ -224,7 +225,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "studentId and scheduledAt are required" }, { status: 400 });
     }
 
-    const when = new Date(scheduledAt);
+    const when = parseTimeInput(String(scheduledAt));
     if (Number.isNaN(when.getTime())) {
       return NextResponse.json({ error: "scheduledAt is not a valid date" }, { status: 400 });
     }
@@ -279,7 +280,7 @@ export async function POST(req: NextRequest) {
       kind: KIND.privateClassUpdated,
       severity: "info",
       title: "Private class booked",
-      message: `${created.scheduledAt.toLocaleString()}${created.topic ? ` · ${created.topic}` : ""}`,
+      message: `${formatWhen(created.scheduledAt)}${created.topic ? ` · ${created.topic}` : ""}`,
       link: "/calendar",
       dedupeKey: `private-class:${created.id}:booked`,
     });
@@ -315,7 +316,7 @@ export async function PUT(req: NextRequest) {
 
     let when: Date | undefined;
     if (scheduledAt) {
-      when = new Date(scheduledAt);
+      when = parseTimeInput(String(scheduledAt));
       if (Number.isNaN(when.getTime())) {
         return NextResponse.json({ error: "scheduledAt is not a valid date" }, { status: 400 });
       }
@@ -362,7 +363,7 @@ export async function PUT(req: NextRequest) {
         title,
         message: approve
           ? isReschedule
-            ? `Your session is now ${updated.scheduledAt.toLocaleString()}.`
+            ? `Your session is now ${formatWhen(updated.scheduledAt)}.`
             : "Your session has been cancelled as requested."
           : "Your request was not approved — the original booking stands. Message your tutor if you need another option.",
         link: "/calendar",
@@ -426,13 +427,13 @@ export async function PUT(req: NextRequest) {
       title: event,
       message: status === "cancelled"
         ? "This booking is no longer scheduled. Open your calendar for the latest details."
-        : `${updated.scheduledAt.toLocaleString()}${updated.topic ? ` · ${updated.topic}` : ""}`,
+        : `${formatWhen(updated.scheduledAt)}${updated.topic ? ` · ${updated.topic}` : ""}`,
       link: "/calendar",
       dedupeKey: `private-class:${updated.id}:${updated.updatedAt.toISOString()}`,
     });
     const staffRecipients = [existing.lecturer?.userId, updated.lecturerId && updated.lecturerId !== existing.lecturerId ? (await prisma.lecturer.findUnique({ where: { id: updated.lecturerId }, select: { userId: true } }))?.userId : null].filter((id): id is string => Boolean(id));
     if (staffRecipients.length) {
-      await notify({ to: { userIds: staffRecipients }, kind: KIND.privateClassUpdated, severity: "info", title: event, message: `${updated.scheduledAt.toLocaleString()}${updated.topic ? ` · ${updated.topic}` : ""}`, link: `/lecturer/private-classes?studentId=${encodeURIComponent(existing.student.id)}`, dedupeKey: `private-class-staff:${updated.id}:${updated.updatedAt.toISOString()}` }).catch(() => {});
+      await notify({ to: { userIds: staffRecipients }, kind: KIND.privateClassUpdated, severity: "info", title: event, message: `${formatWhen(updated.scheduledAt)}${updated.topic ? ` · ${updated.topic}` : ""}`, link: `/lecturer/private-classes?studentId=${encodeURIComponent(existing.student.id)}`, dedupeKey: `private-class-staff:${updated.id}:${updated.updatedAt.toISOString()}` }).catch(() => {});
     }
 
     return NextResponse.json({ class: updated });

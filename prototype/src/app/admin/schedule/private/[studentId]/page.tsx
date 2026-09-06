@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AdminShell from "@/components/AdminShell";
+import { SCHOOL_TIMEZONE, instantToZonedParts, zonedTimeToInstant } from "@/lib/school-time";
 import { ArrowLeftIcon, BellIcon, CheckIcon } from "@/components/icons";
 import {
   formatDayRanges,
@@ -51,10 +52,10 @@ const STATUSES = ["requested", "scheduled", "completed", "cancelled", "postponed
 const PENDING_STATUSES = ["cancel_requested", "reschedule_requested"];
 const DELIVERY_MODES = ["physical", "online", "hybrid"];
 
-/** datetime-local needs "YYYY-MM-DDTHH:mm" in LOCAL time, not an ISO UTC string. */
+/** An instant → the "YYYY-MM-DDTHH:mm" a datetime-local input wants, in SCHOOL time. */
 function toLocalInput(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const p = instantToZonedParts(date, SCHOOL_TIMEZONE);
+  return `${p.dateKey}T${p.clock}`;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -220,7 +221,7 @@ export default function AdminPrivateSchedulePage() {
       const response = await fetch("/api/lecturer/private-classes", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id, scheduledAt: new Date(rescheduleWhen).toISOString() }),
+        body: JSON.stringify({ id, scheduledAt: zonedTimeToInstant(rescheduleWhen.slice(0, 10), rescheduleWhen.slice(11, 16), SCHOOL_TIMEZONE).toISOString() }),
       });
       if (!response.ok) throw new Error((await response.json()).error ?? "Could not reschedule this session");
       setEditingClassId(null);
