@@ -139,7 +139,7 @@ export default function ScheduleCalendar({
                     className={`relative min-h-[76px] border-b border-r border-[var(--border)] p-1.5 text-left align-top transition last:border-r-0 hover:bg-[var(--surface-alt)] ${
                       inMonth ? "" : "opacity-35"
                     } ${isSelected ? "ring-2 ring-inset ring-[var(--accent)]" : ""} ${
-                      cell?.closed ? "bg-[repeating-linear-gradient(135deg,var(--surface-alt)_0_6px,transparent_6px_12px)]" : ""
+                      cell?.closed ? "bg-[var(--surface-alt)]" : ""
                     }`}
                   >
                     <span
