@@ -330,7 +330,7 @@ export default function RemoteViewPage() {
         </div>
 
         {/* ---- Who, and are they here right now ------------------------- */}
-        <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-6 text-white shadow-lg sm:p-8">
+        <div className="theme-dark overflow-hidden rounded-3xl border border-[var(--border)] bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-6 text-white shadow-lg sm:p-8">
           <div className="flex flex-wrap items-start gap-6">
             <div className="relative">
               {identity.photoUrl ? (

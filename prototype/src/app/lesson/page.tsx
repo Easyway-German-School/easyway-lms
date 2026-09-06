@@ -81,7 +81,7 @@ function LessonContent() {
     <div className="min-h-screen bg-[var(--surface-alt)] py-10">
       <div className="mx-auto max-w-4xl px-6 md:px-10 space-y-8">
         {/* Header */}
-        <header className="rounded-3xl bg-gradient-to-br from-slate-950 to-emerald-700 p-8 text-white shadow-sm">
+        <header className="theme-dark rounded-3xl bg-gradient-to-br from-slate-950 to-emerald-700 p-8 text-white shadow-sm">
           <div className="mb-4">
             <Link href="/dashboard" className="inline-flex items-center gap-2 text-emerald-100 hover:text-white text-sm font-semibold">
               <ArrowLeftIcon /> Back to dashboard
