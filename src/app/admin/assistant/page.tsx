@@ -16,6 +16,8 @@ import {
 import {
   AlertIcon,
   ArrowRightIcon,
+  BookOpenIcon,
+  GraduationCapIcon,
   PulseIcon,
   RobotIcon,
   ToolboxIcon,
@@ -305,6 +307,24 @@ export default function AdminAssistantPage() {
                     : `${briefing.attendance.averagePresentPercent}%`
                 }
                 hint={`${briefing.attendance.sessionsLast7Days} marks recorded`}
+              />
+            )}
+            {briefing?.classes && (
+              <Stat
+                icon={<BookOpenIcon className="h-4 w-4" />}
+                label="Classes"
+                value={String(briefing.classes.total)}
+                hint={`${briefing.classes.studentsInClasses} students · ~${briefing.classes.averageSize} per class`}
+              />
+            )}
+            {briefing?.staff && (
+              <Stat
+                icon={<GraduationCapIcon className="h-4 w-4" />}
+                label="Tutors"
+                value={String(briefing.staff.tutors)}
+                hint={`${briefing.staff.active} active${
+                  briefing.staff.onProbation ? ` · ${briefing.staff.onProbation} on probation` : ""
+                }`}
               />
             )}
           </div>
