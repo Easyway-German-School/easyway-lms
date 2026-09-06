@@ -88,6 +88,15 @@ async function handleGET(request: NextRequest) {
   );
 
   results.push(
+    await run("admin-brief-digest", async () => {
+      // The daily (every run) + weekly (Mondays) office brief to payments
+      // holders. Idempotent per day / per ISO week via the dedupeKey.
+      const { sendAdminBriefDigest } = await import("@/lib/admin-brief");
+      return sendAdminBriefDigest();
+    }),
+  );
+
+  results.push(
     await run("payment-warnings", async () => {
       const { runPaymentWarnings } = await import("@/lib/payment-warnings");
       return runPaymentWarnings({ dryRun: false });

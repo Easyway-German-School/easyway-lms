@@ -6,6 +6,7 @@ import { useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from '@/components/BrandLogo';
 import AdminAssistantLauncher from '@/components/AdminAssistantLauncher';
+import AdminDailyBriefing from '@/components/AdminDailyBriefing';
 import NotificationCenter from '@/components/NotificationCenter';
 import ThemeToggle, { useHideFloatingThemeToggle } from '@/components/ThemeToggle';
 import PortalUpdates from '@/components/PortalUpdates';
@@ -139,6 +140,10 @@ const navItems: NavItem[] = [
   // /platform/billing, alongside the operator console. It stays reachable from
   // the low-balance notification and the top-up callback.
 
+  // "What happened today / this week" and what to do about it — the daily,
+  // weekly and monthly counterpart to the dashboard's overall view. Open to
+  // any admin; the brief itself only shows the money half to a payments holder.
+  { label: 'Office brief', href: '/admin/briefing', icon: <TrendingUpIcon />, group: 'Intelligence' },
   // What the school's students actually DO, read as patterns rather than as a
   // list of page views. First in this group because it is the one screen here
   // that answers a question about students rather than about the software.
@@ -514,6 +519,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         just be a second copy of itself.
       */}
       {!blocked && pathname !== '/admin/assistant' && <AdminAssistantLauncher />}
+
+      {/* Once-a-day "good morning" card — the office counterpart to the
+          students' daily brief. Self-gates on a localStorage date key. */}
+      {!blocked && <AdminDailyBriefing />}
 
     </div>
   );

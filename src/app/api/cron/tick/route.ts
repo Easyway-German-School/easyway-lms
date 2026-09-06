@@ -64,6 +64,13 @@ async function handleGET(request: NextRequest) {
   );
 
   results.push(
+    await run("sms-queue", async () => {
+      const { drainSmsQueue } = await import("@/lib/sms-queue");
+      return drainSmsQueue(50);
+    }),
+  );
+
+  results.push(
     await run("payment-plans", async () => {
       // Move plans to completed/defaulted BEFORE the reminder jobs, so a plan
       // that lapsed today is no longer holding the lock back when they run.
@@ -77,6 +84,15 @@ async function handleGET(request: NextRequest) {
       // Self-gated: idempotent per ISO week via the notification dedupeKey.
       const { sendAccountantDigest } = await import("@/lib/accountant-digest");
       return sendAccountantDigest();
+    }),
+  );
+
+  results.push(
+    await run("admin-brief-digest", async () => {
+      // The daily (every run) + weekly (Mondays) office brief to payments
+      // holders. Idempotent per day / per ISO week via the dedupeKey.
+      const { sendAdminBriefDigest } = await import("@/lib/admin-brief");
+      return sendAdminBriefDigest();
     }),
   );
 

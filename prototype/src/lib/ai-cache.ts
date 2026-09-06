@@ -20,6 +20,7 @@ export type CacheTask =
   | "material_quests"
   | "cohort_missions"
   | "student_brief_line"
+  | "admin_brief_line"
   | "class_transcript_notes"
   | "class_note_personal_line";
 

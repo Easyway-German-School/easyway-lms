@@ -7,6 +7,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 
 import AdminShell from "@/components/AdminShell";
+import AdminActivityStrip from "@/components/admin/AdminActivityStrip";
 import PrivacyToggle from "@/components/PrivacyToggle";
 import Secret from "@/components/Secret";
 import { usePrivacyMode } from "@/lib/use-privacy-mode";
@@ -389,6 +390,10 @@ export default function AdminHomePage() {
             )}
           </div>
         )}
+
+        {/* Daily / weekly activity — the "what moved since I last looked"
+            counterpart to the monthly KPI row below. */}
+        <AdminActivityStrip />
 
         {/* KPI row */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
