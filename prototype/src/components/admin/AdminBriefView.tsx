@@ -1,7 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import Secret from "@/components/Secret";
-import { TrendingUpIcon, TrendingDownIcon, SparklesIcon, AlertIcon, CheckCircleIcon } from "@/components/icons";
+import {
+  TrendingUpIcon,
+  TrendingDownIcon,
+  SparklesIcon,
+  AlertIcon,
+  CheckCircleIcon,
+  ArrowRightIcon,
+} from "@/components/icons";
 
 /**
  * Renders one office brief — headline, the figures with their deltas, and the
@@ -23,6 +31,7 @@ export type BriefMetric = {
   deltaPct: number | null;
   higherIsBetter: boolean;
   hint?: string;
+  href?: string;
 };
 
 export type BriefFlag = { level: "good" | "watch" | "bad"; text: string };
@@ -36,6 +45,7 @@ export type Brief = {
   metrics: BriefMetric[];
   flags: BriefFlag[];
   advice: string[] | null;
+  adviceTargets?: (string | null)[];
   scope: { money: boolean; students: boolean; attendance: boolean };
 };
 
@@ -94,26 +104,45 @@ export default function AdminBriefView({
           compact ? "grid-cols-2 sm:grid-cols-3" : "sm:grid-cols-2 lg:grid-cols-3"
         }`}
       >
-        {brief.metrics.map((m) => (
-          <div
-            key={m.key}
-            className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5"
-            title={m.hint}
-          >
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
-              {m.label}
-            </p>
-            <div className="mt-1.5 flex items-baseline justify-between gap-2">
-              <span className="text-2xl font-black tracking-tight text-[var(--foreground)]">
-                <Secret hidden={hidden}>{m.display}</Secret>
-              </span>
-              {!hidden && <DeltaBadge metric={m} />}
+        {brief.metrics.map((m) => {
+          const inner = (
+            <>
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                {m.label}
+              </p>
+              <div className="mt-1.5 flex items-baseline justify-between gap-2">
+                <span className="text-2xl font-black tracking-tight text-[var(--foreground)]">
+                  <Secret hidden={hidden}>{m.display}</Secret>
+                </span>
+                {!hidden && <DeltaBadge metric={m} />}
+              </div>
+              {m.hint && !compact && (
+                <p className="mt-1 text-[11px] leading-snug text-[var(--muted)]">{m.hint}</p>
+              )}
+              {m.href && (
+                <span className="mt-1.5 flex items-center gap-1 text-[11px] font-bold text-[var(--accent)] opacity-0 transition group-hover:opacity-100">
+                  See the list <ArrowRightIcon className="h-3 w-3" />
+                </span>
+              )}
+            </>
+          );
+          const cls =
+            "group block rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-left transition";
+          return m.href ? (
+            <Link
+              key={m.key}
+              href={m.href}
+              title={m.hint ? `${m.hint} — open the list` : "Open the list"}
+              className={`${cls} hover:-translate-y-0.5 hover:border-[var(--accent)]/40 hover:shadow-md`}
+            >
+              {inner}
+            </Link>
+          ) : (
+            <div key={m.key} className={cls} title={m.hint}>
+              {inner}
             </div>
-            {m.hint && !compact && (
-              <p className="mt-1 text-[11px] leading-snug text-[var(--muted)]">{m.hint}</p>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {Boolean(brief.advice?.length || brief.flags.length) && (
@@ -124,12 +153,32 @@ export default function AdminBriefView({
           </p>
           <ul className="mt-2.5 space-y-2">
             {brief.advice?.length
-              ? brief.advice.map((line, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm leading-snug text-[var(--foreground)]">
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />
-                    {line}
-                  </li>
-                ))
+              ? brief.advice.map((line, i) => {
+                  const target = brief.adviceTargets?.[i] ?? null;
+                  const row = (
+                    <>
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />
+                      <span className="flex-1">{line}</span>
+                      {target && (
+                        <ArrowRightIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)] opacity-0 transition group-hover:opacity-100" />
+                      )}
+                    </>
+                  );
+                  return (
+                    <li key={i} className="text-sm leading-snug text-[var(--foreground)]">
+                      {target ? (
+                        <Link
+                          href={target}
+                          className="group flex items-start gap-2 rounded-lg -mx-1 px-1 py-0.5 transition hover:bg-[var(--accent)]/10"
+                        >
+                          {row}
+                        </Link>
+                      ) : (
+                        <span className="flex items-start gap-2">{row}</span>
+                      )}
+                    </li>
+                  );
+                })
               : brief.flags.map((f, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm leading-snug text-[var(--foreground)]">
                     {flagIcon(f.level)}

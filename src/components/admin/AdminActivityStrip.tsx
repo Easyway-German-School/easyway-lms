@@ -122,19 +122,37 @@ export default function AdminActivityStrip() {
           ? [0, 1, 2, 3].map((i) => (
               <div key={i} className="h-16 animate-pulse rounded-2xl bg-[var(--surface-alt)]" />
             ))
-          : shown.map((m) => (
-              <div key={m.key} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
-                <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
-                  {m.label}
-                </p>
-                <div className="mt-1 flex items-baseline gap-1.5">
-                  <span className="text-xl font-black tracking-tight text-[var(--foreground)]">
-                    <Secret hidden={hidden}>{m.display}</Secret>
-                  </span>
-                  {!hidden && <Delta metric={m} />}
+          : shown.map((m) => {
+              const inner = (
+                <>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
+                    {m.label}
+                  </p>
+                  <div className="mt-1 flex items-baseline gap-1.5">
+                    <span className="text-xl font-black tracking-tight text-[var(--foreground)]">
+                      <Secret hidden={hidden}>{m.display}</Secret>
+                    </span>
+                    {!hidden && <Delta metric={m} />}
+                  </div>
+                </>
+              );
+              const cls =
+                "block rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left transition";
+              return m.href ? (
+                <Link
+                  key={m.key}
+                  href={m.href}
+                  title="Open the list"
+                  className={`${cls} hover:border-[var(--accent)]/40 hover:shadow-sm`}
+                >
+                  {inner}
+                </Link>
+              ) : (
+                <div key={m.key} className={cls}>
+                  {inner}
                 </div>
-              </div>
-            ))}
+              );
+            })}
       </div>
     </div>
   );

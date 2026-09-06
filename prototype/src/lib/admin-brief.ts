@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/ai-cache";
 import { callModel, activeModelName } from "@/lib/ai";
 import { receivedPaymentFilter } from "@/lib/payment";
+import { firstReachable } from "@/lib/admin-routes";
 import type { Capability } from "@/lib/admin-roles";
 
 /**
@@ -44,6 +45,8 @@ export type AdminBriefMetric = {
   /** For a delta, does up mean good? (false for "still owes", etc.) */
   higherIsBetter: boolean;
   hint?: string;
+  /** Where clicking the figure takes you — the list behind it. */
+  href?: string;
 };
 
 export type AdminBriefFlag = { level: "good" | "watch" | "bad"; text: string };
@@ -58,6 +61,8 @@ export type AdminBrief = {
   flags: AdminBriefFlag[];
   /** Claude's "what to act on", one line per entry — null when unavailable. */
   advice: string[] | null;
+  /** Per advice line, the list it is about (same index) — or null. */
+  adviceTargets: (string | null)[];
   scope: { money: boolean; students: boolean; attendance: boolean };
 };
 
@@ -132,6 +137,33 @@ export async function buildAdminBrief(
   const canStudents = admin.can("students" as Capability);
   const canAttendance = admin.can("attendance" as Capability);
 
+  const caps = admin.capabilities as string[];
+
+  /**
+   * Where a figure links to. Student cohorts go to the roster filtered to the
+   * EXACT ids the figure counted (see `ids=` in student-roster-query.ts), so
+   * "8 still owing" opens those eight and nothing else. `firstReachable` picks
+   * the best page the caller can actually open — an Accountant with no
+   * `students` capability lands on the receivables ledger instead — and returns
+   * undefined when there is none, so the card renders as plain text rather than
+   * a link that 404s or apologises.
+   */
+  const roster = (ids: string[]): string | undefined => {
+    // A very long id list would blow the URL; fall back to the plain roster.
+    const idParam = ids.length > 0 && ids.length <= 200 ? `?ids=${ids.join(",")}` : "";
+    return firstReachable(
+      caps,
+      `/admin/students${idParam}`,
+      "/admin/finance?tab=receivables",
+      "/admin/students",
+    );
+  };
+  const cashHref = (): string | undefined =>
+    firstReachable(caps, "/admin/finance?tab=cash", "/admin/payments", "/admin/reports");
+  const leadsHref = (): string | undefined => firstReachable(caps, "/admin/leads", "/admin/enquiries");
+  const attendanceHref = (): string | undefined =>
+    firstReachable(caps, "/admin/attendance", "/admin/reports");
+
   const metrics: AdminBriefMetric[] = [];
   const push = (
     key: string,
@@ -141,6 +173,7 @@ export async function buildAdminBrief(
     format: MetricFormat,
     higherIsBetter = true,
     hint?: string,
+    href?: string,
   ) =>
     metrics.push({
       key,
@@ -153,6 +186,7 @@ export async function buildAdminBrief(
       deltaPct: deltaPct(value, prev),
       higherIsBetter,
       hint,
+      href,
     });
 
   // ---- Registrations & same-day payment ------------------------------------
@@ -162,10 +196,17 @@ export async function buildAdminBrief(
   let stillUnpaid = 0;
   let prevRegistrations = 0;
   let prevPaidSameDay = 0;
+  // The exact student sets each figure counts, so the figure can link to them.
+  let registrantIds: string[] = [];
+  let startedIds: string[] = [];
+  let paidSameDayIds: string[] = [];
+  let paidInWindowIds: string[] = [];
+  let stillUnpaidIds: string[] = [];
 
   if (canStudents || canMoney) {
     // Only pull each registrant's payments when the caller may see money.
     const registrantSelect = {
+      id: true,
       createdAt: true,
       ...(canMoney
         ? {
@@ -188,8 +229,11 @@ export async function buildAdminBrief(
           select: registrantSelect,
         }),
         canStudents
-          ? prisma.student.count({ where: { classesStartedAt: { gte: start, lte: end } } })
-          : Promise.resolve(0),
+          ? prisma.student.findMany({
+              where: { classesStartedAt: { gte: start, lte: end } },
+              select: { id: true },
+            })
+          : Promise.resolve([] as Array<{ id: string }>),
         canStudents
           ? prisma.student.count({ where: { classesStartedAt: { gte: prevStart, lt: prevEnd } } })
           : Promise.resolve(0),
@@ -201,19 +245,26 @@ export async function buildAdminBrief(
           : Promise.resolve(0),
       ]);
 
+    type Registrant = { id: string; createdAt: Date; payments?: Array<{ amount: number; createdAt: Date }> };
     registrations = thisWindow.length;
     prevRegistrations = lastWindow.length;
+    registrantIds = (thisWindow as Registrant[]).map((s) => s.id);
+    startedIds = startedThis.map((s) => s.id);
 
     if (canMoney) {
-      type Registrant = { createdAt: Date; payments?: Array<{ amount: number; createdAt: Date }> };
       for (const s of thisWindow as Registrant[]) {
         const pays = s.payments ?? [];
         if (pays.length === 0) {
           stillUnpaid += 1;
+          stillUnpaidIds.push(s.id);
           continue;
         }
         paidInWindow += 1;
-        if (pays.some((p) => sameUtcDay(p.createdAt, s.createdAt))) paidSameDay += 1;
+        paidInWindowIds.push(s.id);
+        if (pays.some((p) => sameUtcDay(p.createdAt, s.createdAt))) {
+          paidSameDay += 1;
+          paidSameDayIds.push(s.id);
+        }
       }
       for (const s of lastWindow as Registrant[]) {
         const pays = s.payments ?? [];
@@ -222,9 +273,9 @@ export async function buildAdminBrief(
     }
 
     if (canStudents) {
-      push("registrations", "New registrations", registrations, prevRegistrations, "count");
-      push("startedClasses", "Started classes", startedThis, startedPrev, "count");
-      push("newLeads", "New enquiries", newLeads, prevLeads, "count");
+      push("registrations", "New registrations", registrations, prevRegistrations, "count", true, undefined, roster(registrantIds));
+      push("startedClasses", "Started classes", startedIds.length, startedPrev, "count", true, undefined, roster(startedIds));
+      push("newLeads", "New enquiries", newLeads, prevLeads, "count", true, undefined, leadsHref());
     }
 
     if (canMoney) {
@@ -236,6 +287,7 @@ export async function buildAdminBrief(
         "count",
         true,
         "New sign-ups who paid tuition on the day they registered",
+        roster(paidSameDayIds),
       );
       const conv = registrations > 0 ? (paidInWindow / registrations) * 100 : 0;
       const prevConv =
@@ -248,6 +300,7 @@ export async function buildAdminBrief(
         "percent",
         true,
         `${paidInWindow} of ${registrations} new sign-ups ${RANGE_LABEL[period]} have paid tuition`,
+        roster(paidInWindowIds),
       );
       push(
         "stillUnpaid",
@@ -257,6 +310,7 @@ export async function buildAdminBrief(
         "count",
         false,
         "Registered in this window with no tuition payment yet — chase these",
+        roster(stillUnpaidIds),
       );
     }
   }
@@ -275,8 +329,8 @@ export async function buildAdminBrief(
     ]);
     const collected = thisPays.reduce((s, p) => s + p.amount, 0);
     const prevCollected = prevPays.reduce((s, p) => s + p.amount, 0);
-    push("tuitionCollected", "Tuition collected", collected, prevCollected, "naira");
-    push("paymentsCount", "Payments received", thisPays.length, prevPays.length, "count");
+    push("tuitionCollected", "Tuition collected", collected, prevCollected, "naira", true, undefined, cashHref());
+    push("paymentsCount", "Payments received", thisPays.length, prevPays.length, "count", true, undefined, cashHref());
   }
 
   // ---- Attendance ------------------------------------------------------------
@@ -293,7 +347,7 @@ export async function buildAdminBrief(
     ]);
     const presentOf = (r: { status: string | null; present: boolean | null }) =>
       r.present === true || r.status === "present" || r.status === "late";
-    push("attendanceMarks", "Attendance marks logged", rows.length, prevRows.length, "count");
+    push("attendanceMarks", "Attendance marks logged", rows.length, prevRows.length, "count", true, undefined, attendanceHref());
     if (rows.length > 0) {
       const rate = (rows.filter(presentOf).length / rows.length) * 100;
       const prevRate =
@@ -304,6 +358,9 @@ export async function buildAdminBrief(
         Math.round(rate),
         prevRate === null ? null : Math.round(prevRate),
         "percent",
+        true,
+        undefined,
+        attendanceHref(),
       );
     }
   }
@@ -314,6 +371,7 @@ export async function buildAdminBrief(
   const advice = await adviceFor(period, admin.capabilities, { headline, metrics, flags }).catch(
     () => null,
   );
+  const adviceTargets = (advice ?? []).map((line) => adviceTargetFor(line, metrics));
 
   return {
     period,
@@ -324,6 +382,7 @@ export async function buildAdminBrief(
     metrics,
     flags,
     advice,
+    adviceTargets,
     scope: { money: canMoney, students: canStudents, attendance: canAttendance },
   };
 }
@@ -331,6 +390,35 @@ export async function buildAdminBrief(
 function metricValue(metrics: AdminBriefMetric[], key: string): number | null {
   const m = metrics.find((x) => x.key === key);
   return m ? m.value : null;
+}
+
+function hrefOf(metrics: AdminBriefMetric[], key: string): string | null {
+  return metrics.find((x) => x.key === key)?.href ?? null;
+}
+
+/**
+ * Point an advice line at the list it is about, by what it talks about. The
+ * lines are the model's own words, so this is a keyword match, not a promise —
+ * a miss just means that one bullet is not a link, which is fine.
+ */
+function adviceTargetFor(line: string, metrics: AdminBriefMetric[]): string | null {
+  const t = line.toLowerCase();
+  if (/\b(owe|owing|unpaid|arrear|balance|chase)\b/.test(t)) {
+    return hrefOf(metrics, "stillUnpaid") ?? hrefOf(metrics, "tuitionCollected");
+  }
+  if (/\b(attendance|register|mark)\b/.test(t) && /\bmark|attendance\b/.test(t)) {
+    return hrefOf(metrics, "attendanceMarks");
+  }
+  if (/\b(enquir|lead|outreach|prospect)\b/.test(t)) return hrefOf(metrics, "newLeads");
+  if (/\b(convert|conversion|pay(ment)? habit)\b/.test(t)) {
+    return hrefOf(metrics, "conversion") ?? hrefOf(metrics, "stillUnpaid");
+  }
+  if (/\b(collect|revenue|cash|tuition in)\b/.test(t)) return hrefOf(metrics, "tuitionCollected");
+  if (/\b(start(ed)? class|class start|begin)\b/.test(t)) return hrefOf(metrics, "startedClasses");
+  if (/\b(register|registration|sign-?up|new student|enrol)\b/.test(t)) {
+    return hrefOf(metrics, "registrations");
+  }
+  return hrefOf(metrics, "registrations") ?? metrics.find((m) => m.href)?.href ?? null;
 }
 
 function deriveHeadline(

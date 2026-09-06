@@ -84,6 +84,12 @@ export default function AdminDailyBriefing() {
 
   const topMetrics = brief.metrics.slice(0, 4);
   const topAction = brief.advice?.[0] ?? brief.flags[0]?.text ?? null;
+  // The advice line links to the list it is about, when we mapped one; else
+  // fall back to whichever headline metric has a destination.
+  const topActionHref =
+    (brief.advice?.length ? brief.adviceTargets?.[0] : null) ??
+    topMetrics.find((m) => m.href)?.href ??
+    null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/40 p-4 backdrop-blur-sm sm:items-center">
@@ -114,16 +120,28 @@ export default function AdminDailyBriefing() {
           <p className="text-base font-bold leading-snug text-[var(--foreground)]">{brief.headline}</p>
 
           <div className="grid grid-cols-2 gap-2.5">
-            {topMetrics.map((m) => (
-              <div key={m.key} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-3">
-                <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
-                  {m.label}
-                </p>
-                <p className="mt-0.5 text-lg font-black tracking-tight text-[var(--foreground)]">
-                  <Secret hidden={hidden}>{m.display}</Secret>
-                </p>
-              </div>
-            ))}
+            {topMetrics.map((m) => {
+              const inner = (
+                <>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
+                    {m.label}
+                  </p>
+                  <p className="mt-0.5 text-lg font-black tracking-tight text-[var(--foreground)]">
+                    <Secret hidden={hidden}>{m.display}</Secret>
+                  </p>
+                </>
+              );
+              const cls = "block rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-3 text-left";
+              return m.href ? (
+                <Link key={m.key} href={m.href} onClick={dismiss} className={`${cls} transition hover:border-[var(--accent)]/40`}>
+                  {inner}
+                </Link>
+              ) : (
+                <div key={m.key} className={cls}>
+                  {inner}
+                </div>
+              );
+            })}
           </div>
 
           {topAction && (
@@ -132,7 +150,17 @@ export default function AdminDailyBriefing() {
                 <SparklesIcon className="h-3 w-3" />
                 {brief.advice?.length ? "Do this first" : "Heads up"}
               </p>
-              <p className="mt-1.5 text-sm leading-snug text-[var(--foreground)]">{topAction}</p>
+              {topActionHref ? (
+                <Link
+                  href={topActionHref}
+                  onClick={dismiss}
+                  className="mt-1.5 block text-sm leading-snug text-[var(--foreground)] underline-offset-2 hover:underline"
+                >
+                  {topAction}
+                </Link>
+              ) : (
+                <p className="mt-1.5 text-sm leading-snug text-[var(--foreground)]">{topAction}</p>
+              )}
             </div>
           )}
         </div>
