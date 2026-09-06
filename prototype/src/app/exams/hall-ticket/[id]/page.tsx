@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import BrandLogo from "@/components/BrandLogo";
 import { ArrowLeftIcon, PrinterIcon } from "@/components/icons";
 import { safeJson } from "@/lib/safe-json";
+import { examWhen } from "@/lib/exam-schedule";
 
 /**
  * One admission slip, ready to print.
@@ -111,7 +112,8 @@ export default function HallTicketPage() {
         </div>
 
         <h1 className="mt-6 text-2xl font-extrabold text-[var(--foreground)]">{ticket.examBody === "internal" ? "EasyWay" : ticket.examBody} exam</h1>
-        <p className="text-sm text-[var(--muted)]">{new Date(ticket.examDate).toDateString()}</p>
+        <p className="text-sm text-[var(--muted)]">{examWhen(ticket.examDate)}</p>
+        <p className="mt-1 text-xs font-semibold text-[var(--accent)]">Please arrive 30 minutes early.</p>
 
         <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-[var(--border)] pt-6 text-sm">
           <div>

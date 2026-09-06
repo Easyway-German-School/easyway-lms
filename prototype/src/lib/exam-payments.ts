@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { queueEmail } from "@/lib/email-queue";
+import { examWhen } from "@/lib/exam-schedule";
 
 /**
  * Paying an exam fee.
@@ -179,7 +180,7 @@ async function queueReceipt(registrationId: string, reference: string, amount: n
         <p>Hello ${name},</p>
         <p>We have received ₦${amount.toLocaleString()} for <strong>${registration.examName}</strong>.
            Your seat is now confirmed.</p>
-        <p><strong>Date:</strong> ${new Date(registration.examDate).toDateString()}<br/>
+        <p><strong>When:</strong> ${examWhen(registration.examDate)}<br/>
            <strong>Seat:</strong> ${registration.seatNumber ?? "—"}<br/>
            <strong>Reference:</strong> ${reference}</p>
         <p>Please arrive 30 minutes early with a valid photo ID.</p>

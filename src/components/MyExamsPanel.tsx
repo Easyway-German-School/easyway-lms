@@ -3,6 +3,7 @@ import { CalendarIcon, ExternalLinkIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useState } from "react";
 import ExamBodyComingSoon from "@/components/ExamBodyComingSoon";
+import { examCountdown, examWhen } from "@/lib/exam-schedule";
 
 /**
  * Everything the signed-in person has booked — Easyway tests and ÖSD centre
@@ -47,6 +48,9 @@ type Available = {
   remaining: number | null;
   full: boolean;
   deadlinePassed: boolean;
+  registrationClosesAt: string;
+  registrationOpen: boolean;
+  closedReason: "closed" | "full" | "past" | null;
 };
 
 const BODY_TONE: Record<string, string> = {
@@ -84,10 +88,6 @@ function matchesFilter(filter: ExamFilter, body: string | null | undefined): boo
   return filter === "easyway" ? isEasywayExam(body) : !isEasywayExam(body);
 }
 
-function daysUntil(iso: string) {
-  const diff = new Date(iso).getTime() - Date.now();
-  return Math.ceil(diff / 86_400_000);
-}
 
 export default function MyExamsPanel() {
   const [upcoming, setUpcoming] = useState<MyExam[]>([]);
@@ -252,7 +252,7 @@ export default function MyExamsPanel() {
         ) : (
           <div className="mt-3 space-y-3">
             {shownUpcoming.map((e) => {
-              const days = daysUntil(e.examDate);
+              const countdown = examCountdown(e.examDate);
               return (
                 <div key={e.registrationId} className="rounded-3xl cinematic-card p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -273,7 +273,7 @@ export default function MyExamsPanel() {
                       </div>
                       <h3 className="mt-2 font-semibold">{e.name}</h3>
                       <p className="mt-1 text-sm text-[var(--muted)]">
-                        {new Date(e.examDate).toDateString()}
+                        {examWhen(e.examDate)}
                         {e.branchName && ` · ${e.branchName}`}
                         {e.seatNumber && ` · seat ${e.seatNumber}`}
                       </p>
@@ -302,10 +302,14 @@ export default function MyExamsPanel() {
                     </div>
 
                     <div className="shrink-0 rounded-2xl bg-[var(--surface-alt)] px-4 py-3 text-center">
-                      <p className="text-2xl font-bold">{days > 0 ? days : 0}</p>
-                      <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                        {days === 1 ? "day away" : "days away"}
-                      </p>
+                      {countdown.days > 1 ? (
+                        <>
+                          <p className="text-2xl font-bold">{countdown.days}</p>
+                          <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">days away</p>
+                        </>
+                      ) : (
+                        <p className="text-sm font-bold capitalize">{countdown.label}</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -334,19 +338,34 @@ export default function MyExamsPanel() {
                       </div>
                       <h3 className="mt-2 font-semibold">{e.name}</h3>
                       <p className="mt-1 text-sm text-[var(--muted)]">
-                        {new Date(e.examDate).toDateString()}
+                        {examWhen(e.examDate)}
                         {e.branch && ` · ${e.branch.name}`}
                         {e.capacity !== null && ` · ${e.remaining} of ${e.capacity} seats left`}
+                      </p>
+                      <p className="mt-0.5 text-xs text-[var(--muted)]">
+                        {e.registrationOpen
+                          ? `Registration closes ${examWhen(e.registrationClosesAt)}`
+                          : e.closedReason === "full"
+                            ? "This sitting is full"
+                            : e.closedReason === "past"
+                              ? "This sitting has taken place"
+                              : "Registration has closed"}
                       </p>
                     </div>
                     <div className="shrink-0 text-right">
                       {e.fee !== null && <p className="text-lg font-bold">₦{e.fee.toLocaleString()}</p>}
                       <button
                         onClick={() => book(e.id)}
-                        disabled={busyId === e.id || e.full || e.deadlinePassed}
+                        disabled={busyId === e.id || !e.registrationOpen}
                         className="mt-2 rounded-full btn-glow px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
                       >
-                        {e.full ? "Full" : busyId === e.id ? "Booking…" : "Register"}
+                        {e.closedReason === "full"
+                          ? "Full"
+                          : !e.registrationOpen
+                            ? "Closed"
+                            : busyId === e.id
+                              ? "Booking…"
+                              : "Register"}
                       </button>
                     </div>
                   </div>
@@ -367,7 +386,7 @@ export default function MyExamsPanel() {
                   <div className="min-w-0">
                     <h3 className="font-semibold">{e.name}</h3>
                     <p className="mt-1 text-sm text-[var(--muted)]">
-                      {new Date(e.examDate).toDateString()}
+                      {examWhen(e.examDate)}
                       {e.seatNumber && ` · seat ${e.seatNumber}`}
                     </p>
                     {e.result?.skills && (
