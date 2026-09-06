@@ -7,6 +7,13 @@ import AdminShell from "@/components/AdminShell";
 import CohortResult, { type Cohort } from "@/components/admin/CohortResult";
 import ActionProposal, { type Proposal } from "@/components/admin/ActionProposal";
 import {
+  askAssistant,
+  loadAssistant,
+  type AssistantBriefing as Briefing,
+  type AssistantStatus as Status,
+  type AssistantTurn as Turn,
+} from "@/lib/assistant-stream";
+import {
   AlertIcon,
   ArrowRightIcon,
   PulseIcon,
@@ -34,40 +41,6 @@ import {
  * from a hallucinated balance is bad, and two hundred fees chased from one is
  * worse.
  */
-
-type Briefing = {
-  generatedAt: string;
-  students?: {
-    total: number;
-    active: number;
-    byLevel: Record<string, number>;
-    byBranch: Record<string, number>;
-    newThisWeek: number;
-    newThisMonth: number;
-  };
-  money?: {
-    collectedAllTime: number;
-    collectedThisMonth: number;
-    outstandingTotal: number;
-    studentsOwing: number;
-    fullyPaid: number;
-    biggestBalances: Array<{ name: string; level: string; branch: string | null; owed: number }>;
-  };
-  enquiries?: { open: number; newThisWeek: number };
-  exams?: { upcoming: number; registrationsUnpaid: number };
-  attendance?: { sessionsLast7Days: number; averagePresentPercent: number | null };
-};
-
-type Status = {
-  provider: "claude" | "groq" | "ollama";
-  model: string;
-  ready: boolean;
-  canAct: boolean;
-  note: string;
-  reason?: string;
-};
-
-type Turn = { role: "user" | "assistant"; content: string };
 
 const naira = (value: number) => `NGN ${value.toLocaleString()}`;
 
@@ -138,18 +111,13 @@ export default function AdminAssistantPage() {
   const endRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
-    try {
-      const response = await fetch("/api/admin/assistant", { cache: "no-store" });
-      if (!response.ok) return;
-      const data = await response.json();
-      setStatus(data.status ?? null);
-      setBriefing(data.briefing ?? null);
-      setCapabilities(data.capabilities ?? []);
-    } catch {
-      /* The chat will report its own failure if it comes to it. */
-    } finally {
-      setLoading(false);
+    const data = await loadAssistant();
+    if (data) {
+      setStatus(data.status);
+      setBriefing(data.briefing);
+      setCapabilities(data.capabilities);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -175,129 +143,55 @@ export default function AdminAssistantPage() {
     setTurns((current) => [...current, { role: "user", content: trimmed }]);
     setThinking(true);
 
-    try {
-      const response = await fetch("/api/admin/assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmed, history }),
+    // An empty assistant turn is pushed on the first delta and then grown in
+    // place, so the admin reads the reply as the model writes it. `streamed`
+    // tracks whether anything actually arrived, for the stub-cleanup below.
+    let opened = false;
+    let streamed = false;
+    const appendToLastTurn = (content: string) =>
+      setTurns((current) => {
+        const next = [...current];
+        next[next.length - 1] = { role: "assistant", content };
+        return next;
       });
 
-      // Auth and validation still fail as honest status codes, because they
-      // happen before the stream opens. Everything after arrives as frames.
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        setError(data.error ?? "The assistant could not answer.");
-        return;
-      }
-      if (!response.body) {
-        setError("The assistant returned nothing.");
-        return;
-      }
-
-      /**
-       * The answer arrives a few words at a time.
-       *
-       * An empty assistant turn is pushed first and then grown in place, so
-       * the admin reads the reply as the model writes it instead of watching a
-       * spinner for half a minute. `streamed` is the source of truth for the
-       * text; React state is only ever caught up to it.
-       */
-      let streamed = "";
-      let opened = false;
-      const appendToLastTurn = (content: string) =>
-        setTurns((current) => {
-          const next = [...current];
-          next[next.length - 1] = { role: "assistant", content };
-          return next;
-        });
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let failed = "";
-
-      const handle = (line: string) => {
-        const trimmedLine = line.trim();
-        if (!trimmedLine) return;
-        let frame: {
-          type?: string;
-          text?: string;
-          name?: string;
-          error?: string;
-          answer?: string;
-          briefing?: Briefing;
-          cohort?: Cohort | null;
-          toolsUsed?: Array<{ name: string }>;
-          proposal?: Proposal | null;
-          degraded?: string;
-        };
-        try {
-          frame = JSON.parse(trimmedLine);
-        } catch {
-          return;
-        }
-
-        if (frame.type === "delta" && frame.text) {
-          if (!opened) {
-            opened = true;
-            setTurns((current) => [...current, { role: "assistant", content: "" }]);
-          }
-          streamed += frame.text;
-          appendToLastTurn(streamed);
-        } else if (frame.type === "tool") {
-          // The lookup stretch is silent by nature — the model emits no words
-          // while it is deciding. Naming the tool turns that gap into visible
-          // progress rather than an application that appears to have frozen.
-          setToolsUsed((current) => [...current, { name: frame.name ?? "lookup" }]);
-        } else if (frame.type === "proposal") {
-          // Shown the moment it is planned rather than at the end, so the card
-          // is already there to read while the model writes its sentence about
-          // it. On a slow answer that is several seconds of head start.
-          if (frame.proposal) setProposal(frame.proposal);
-        } else if (frame.type === "error") {
-          failed = frame.error ?? "The assistant could not answer.";
-        } else if (frame.type === "done") {
-          // The streamed text is authoritative; `answer` is the same string and
-          // is used only when nothing streamed at all.
-          const finalText = streamed || frame.answer || "";
-          if (!opened) setTurns((current) => [...current, { role: "assistant", content: "" }]);
-          appendToLastTurn(finalText || "(the model returned nothing)");
-          if (frame.briefing) setBriefing(frame.briefing);
-          // Null clears the table on a question that looked nothing up, so a
-          // cohort from two questions ago can never be mistaken for this one's.
-          setCohort(frame.cohort ?? null);
-          setToolsUsed(frame.toolsUsed ?? []);
-          // Only overwrite from `done` when it carries one: the proposal frame
-          // arrived earlier in the same stream, and a done frame without the
-          // field would otherwise wipe a card the admin is already reading.
-          if (frame.proposal !== undefined) setProposal(frame.proposal);
-          if (frame.degraded) setError(frame.degraded);
-        }
-      };
-
-      // Ollama's frames are newline-delimited JSON and a network read can
-      // split one down the middle, so the tail waits for its newline.
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) handle(line);
-      }
-      handle(buffer);
-
-      if (failed) {
-        setError(failed);
+    await askAssistant(trimmed, history, {
+      onOpen: () => {
+        opened = true;
+        setTurns((current) => [...current, { role: "assistant", content: "" }]);
+      },
+      onDelta: (full) => {
+        streamed = true;
+        appendToLastTurn(full);
+      },
+      // The lookup stretch is silent by nature — naming the tool turns that gap
+      // into visible progress rather than an application that appears frozen.
+      onTool: (name) => setToolsUsed((current) => [...current, { name }]),
+      // Shown the moment it is planned rather than at the end, so the card is
+      // already there to read while the model writes its sentence about it.
+      onProposal: (p) => setProposal(p),
+      onDone: (result) => {
+        appendToLastTurn(result.answer);
+        if (result.briefing) setBriefing(result.briefing);
+        // Null clears the table on a question that looked nothing up, so a
+        // cohort from two questions ago can never be mistaken for this one's.
+        setCohort(result.cohort);
+        setToolsUsed(result.toolsUsed);
+        // Only overwrite when `done` carries one: the proposal frame arrived
+        // earlier in the same stream, and a done frame without the field would
+        // otherwise wipe a card the admin is already reading.
+        if (result.proposal !== undefined) setProposal(result.proposal);
+        if (result.degraded) setError(result.degraded);
+      },
+      onError: (message) => {
+        setError(message);
         // A failure part-way through leaves a stub turn behind; drop it so the
         // transcript does not keep an empty bubble the admin cannot act on.
         if (opened && !streamed) setTurns((current) => current.slice(0, -1));
-      }
-    } catch {
-      setError("Could not reach the server.");
-    } finally {
-      setThinking(false);
-    }
+      },
+    });
+
+    setThinking(false);
   }
 
   const offline = Boolean(status && !status.ready);

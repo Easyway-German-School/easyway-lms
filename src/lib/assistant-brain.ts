@@ -142,19 +142,29 @@ const CLAUDE_MODEL = process.env.ANTHROPIC_ASSISTANT_MODEL || "claude-opus-5";
 const MAX_TOKENS = 4_000;
 
 /**
- * Claude is gated behind an explicit opt-in for THIS brain, separate from
- * whether the key exists.
+ * Claude is the admin assistant's brain whenever the key is present.
  *
- * The key is funded for the student-facing features in ai.ts, on a small
- * test budget ($20). Every admin-assistant question would otherwise also bid
- * against that budget at Opus rates, and the assistant already has a hosted
- * brain that costs the platform nothing: Groq, trusted the same as Claude
- * for actions (see canBrainAct()). So the admin assistant stays on Groq by
- * default and Claude is reserved for students until the budget is proven out
- * — flip ASSISTANT_USE_CLAUDE=true to let this brain spend from it too.
+ * It did not used to be. The key started on a small ($20) test budget funded
+ * for the student features in ai.ts, so this brain was held on Groq's free
+ * tier and Claude was an explicit opt-in (ASSISTANT_USE_CLAUDE=true). That
+ * trade has flipped: the Anthropic account is funded for real now, and Groq's
+ * free tier rate-limits hard enough that the office regularly sees "try again
+ * in a moment" on a normal question — which for a front-desk tool is the same
+ * as broken. So the default is Claude: it answers in a couple of seconds and
+ * its tool arguments survive being checked, which is the whole job.
+ *
+ * The escape hatch is kept, just inverted. A school that does not want student
+ * names and balances going to Anthropic sets ASSISTANT_USE_CLAUDE=false and
+ * drops back to Groq (or, with no Groq key either, the local model). Groq also
+ * still catches a Claude outage automatically — see the fallback in brainTurn().
+ *
+ * Cost is roughly two US cents per question at the Opus default, less after
+ * the first (the system prompt and tool list are cached). Move to a cheaper
+ * model with ANTHROPIC_ASSISTANT_MODEL — claude-sonnet-5 is most of the
+ * quality at a fraction of the price.
  */
 export function hasHostedBrain(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY) && process.env.ASSISTANT_USE_CLAUDE === "true";
+  return Boolean(process.env.ANTHROPIC_API_KEY) && process.env.ASSISTANT_USE_CLAUDE !== "false";
 }
 
 export function hasGroqBrain(): boolean {

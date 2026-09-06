@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from '@/components/BrandLogo';
+import AdminAssistantLauncher from '@/components/AdminAssistantLauncher';
 import NotificationCenter from '@/components/NotificationCenter';
 import ThemeToggle, { useHideFloatingThemeToggle } from '@/components/ThemeToggle';
 import PortalUpdates from '@/components/PortalUpdates';
@@ -40,6 +41,7 @@ import {
   PaletteIcon,
   PaymentIcon,
   PencilIcon,
+  PlaneIcon,
   PulseIcon,
   ResultsIcon,
   RobotIcon,
@@ -80,6 +82,9 @@ const navItems: NavItem[] = [
 
   { label: 'Students', href: '/admin/students', icon: <UsersIcon />, group: 'Academics' },
   { label: 'Import students', href: '/admin/students/import', icon: <UserPlusIcon />, group: 'Academics' },
+  // The relocation track — its own console because ₦980,000 walk-in
+  // students need watching differently from the self-service roster.
+  { label: 'Travel Package', href: '/admin/travel-package', icon: <PlaneIcon />, group: 'Academics' },
   { label: 'Parents', href: '/admin/parents', icon: <FamilyIcon />, group: 'Academics' },
   // Two different things that both used to be called "Enquiries". A ticket is
   // a student who is already here and stuck; a lead is a stranger the school is
@@ -125,6 +130,9 @@ const navItems: NavItem[] = [
   { label: 'Finance', href: '/admin/finance', icon: <WalletIcon />, group: 'Billing' },
   { label: 'Payments', href: '/admin/payments', icon: <PaymentIcon />, group: 'Billing' },
   { label: 'Legal & refunds', href: '/admin/legal', icon: <AlertIcon />, group: 'Billing' },
+  // Money going OUT to tutors — its own capability, separate from `payments`
+  // (money coming in from students). See the note in admin-roles.ts.
+  { label: 'Tutor payroll', href: '/admin/payroll', icon: <WalletIcon />, group: 'Billing' },
   { label: 'Reports', href: '/admin/reports', icon: <TrendingUpIcon />, group: 'Billing' },
   // What this school owes for running on the platform ("Platform usage") is no
   // longer here. It moved to EduPrime — the platform's own space — at
@@ -499,6 +507,13 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         See PortalUpdates for why the card carries the real message text.
       */}
       <PortalUpdates />
+
+      {/*
+        The office assistant as a floating launcher — same idea as the student
+        portal's CommunityLauncher. Hidden on its own full page, where it would
+        just be a second copy of itself.
+      */}
+      {!blocked && pathname !== '/admin/assistant' && <AdminAssistantLauncher />}
 
     </div>
   );

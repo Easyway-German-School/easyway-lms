@@ -7,6 +7,9 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 
 import AdminShell from "@/components/AdminShell";
+import PrivacyToggle from "@/components/PrivacyToggle";
+import Secret from "@/components/Secret";
+import { usePrivacyMode } from "@/lib/use-privacy-mode";
 import { firstReachable } from "@/lib/admin-routes";
 
 type Overview = {
@@ -142,6 +145,8 @@ function Kpi({
   tone = "neutral",
   index,
   href,
+  secret = false,
+  hidden = false,
 }: {
   label: string;
   value: string;
@@ -149,6 +154,9 @@ function Kpi({
   tone?: "neutral" | "good" | "warn" | "bad";
   index: number;
   href?: string;
+  /** This figure is money or a headcount — blank it when privacy mode is on. */
+  secret?: boolean;
+  hidden?: boolean;
 }) {
   const toneClass = {
     neutral: "text-[var(--foreground)]",
@@ -160,8 +168,14 @@ function Kpi({
   const body = (
     <>
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">{label}</p>
-      <p className={`mt-2.5 text-3xl font-black tracking-tight ${toneClass}`}>{value}</p>
-      {sub && <div className="mt-1.5 text-xs text-[var(--muted)]">{sub}</div>}
+      <p className={`mt-2.5 text-3xl font-black tracking-tight ${toneClass}`}>
+        {secret ? <Secret hidden={hidden}>{value}</Secret> : value}
+      </p>
+      {sub && (
+        <div className={`mt-1.5 text-xs text-[var(--muted)] ${secret && hidden ? "blur-[5px] select-none" : ""}`}>
+          {sub}
+        </div>
+      )}
       {href && (
         <span className="mt-2 block text-[11px] font-bold text-[var(--accent)] opacity-0 transition group-hover:opacity-100">
           Open →
@@ -195,7 +209,7 @@ function SectionCard({
   className = "",
 }: {
   title: string;
-  hint?: string;
+  hint?: ReactNode;
   href?: string;
   hrefLabel?: string;
   children: React.ReactNode;
@@ -233,6 +247,8 @@ export default function AdminHomePage() {
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // "Hide the balance", front-desk edition — blanks every figure below to dots.
+  const { hidden } = usePrivacyMode();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -304,7 +320,8 @@ export default function AdminHomePage() {
                 : "Loading the school's numbers…"}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <PrivacyToggle />
             <button
               type="button"
               onClick={() => void load()}
@@ -378,6 +395,8 @@ export default function AdminHomePage() {
           <Kpi
             index={0}
             label="Students"
+            secret
+            hidden={hidden}
             value={String(data?.school.students ?? "—")}
             href={to("/admin/students", "/admin/finance?tab=receivables")}
             sub={
@@ -393,6 +412,8 @@ export default function AdminHomePage() {
           <Kpi
             index={1}
             label="Behind the paywall"
+            secret
+            hidden={hidden}
             value={String(data?.lockedOut ?? "—")}
             tone={data && data.lockedOut > 0 ? "warn" : "good"}
             href={focusHref("locked_out")}
@@ -403,6 +424,8 @@ export default function AdminHomePage() {
               <Kpi
                 index={2}
                 label="Collected"
+                secret
+                hidden={hidden}
                 value={naira(finance.collectedRevenue)}
                 tone="good"
                 sub={`${finance.collectionRate}% of expected`}
@@ -411,6 +434,8 @@ export default function AdminHomePage() {
               <Kpi
                 index={3}
                 label="Outstanding"
+                secret
+                hidden={hidden}
                 value={naira(finance.outstanding)}
                 tone={finance.outstanding > 0 ? "bad" : "good"}
                 sub="Tuition still owed"
@@ -419,6 +444,8 @@ export default function AdminHomePage() {
               <Kpi
                 index={4}
                 label="This month"
+                secret
+                hidden={hidden}
                 value={naira(finance.revenueThisMonth)}
                 tone={finance.monthOnMonthPercent != null && finance.monthOnMonthPercent < 0 ? "bad" : "good"}
                 href={to("/admin/finance?tab=cash")}
@@ -440,6 +467,8 @@ export default function AdminHomePage() {
           <Kpi
             index={5}
             label="Attendance (30d)"
+            secret
+            hidden={hidden}
             value={data?.attendance.rate != null ? `${data.attendance.rate}%` : "—"}
             tone={data?.attendance.rate != null && data.attendance.rate < 70 ? "warn" : "good"}
             href={to("/admin/attendance", "/admin/reports")}
@@ -461,7 +490,7 @@ export default function AdminHomePage() {
                   const bar = (
                     <>
                       <span className="text-[10px] font-bold text-[var(--muted)]">
-                        {point.amount > 0 ? naira(point.amount) : ""}
+                        {point.amount > 0 ? <Secret hidden={hidden}>{naira(point.amount)}</Secret> : ""}
                       </span>
                       <motion.div
                         className="w-full rounded-t-xl bg-gradient-to-t from-[var(--accent)]/70 to-[var(--accent)] group-hover:brightness-110"
@@ -495,7 +524,7 @@ export default function AdminHomePage() {
           {/* Payment funnel */}
           <SectionCard
             title="Payment funnel"
-            hint={`${cohortTotal} students`}
+            hint={<><Secret hidden={hidden}>{String(cohortTotal)}</Secret> students</>}
             href={to("/admin/finance?tab=receivables", "/admin/students")}
           >
             <div className="space-y-3">
@@ -511,7 +540,7 @@ export default function AdminHomePage() {
                   <RowLink key={row.label} href={focusHref(row.focus)} className="-mx-2 rounded-xl px-2 py-1">
                     <div className="flex items-center justify-between text-xs font-semibold">
                       <span className="text-[var(--foreground)] group-hover:text-[var(--accent)]">{row.label}</span>
-                      <span className="text-[var(--muted)]">{row.value}</span>
+                      <span className="text-[var(--muted)]"><Secret hidden={hidden}>{String(row.value)}</Secret></span>
                     </div>
                     <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-[var(--surface-alt)]">
                       <motion.div
@@ -530,7 +559,11 @@ export default function AdminHomePage() {
         {/* Action queue */}
         <SectionCard
           title="Needs attention"
-          hint={data ? `${data.actionQueue.atRiskCount} students behind on tuition` : undefined}
+          hint={
+            data ? (
+              <><Secret hidden={hidden}>{String(data.actionQueue.atRiskCount)}</Secret> students behind on tuition</>
+            ) : undefined
+          }
         >
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {[
@@ -581,7 +614,9 @@ export default function AdminHomePage() {
                   href={item.href}
                   className="group rounded-3xl border border-[var(--border)] bg-[var(--accent)]/5 p-5 text-left transition hover:-translate-y-0.5 hover:bg-[var(--accent)]/10"
                 >
-                  <p className="text-3xl font-black text-[var(--foreground)]">{item.value}</p>
+                  <p className="text-3xl font-black text-[var(--foreground)]">
+                    <Secret hidden={hidden}>{String(item.value)}</Secret>
+                  </p>
                   <p className="mt-1.5 text-sm font-bold text-[var(--foreground)]">{item.label}</p>
                   <p className="mt-0.5 text-xs text-[var(--muted)]">{item.hint}</p>
                 </Link>
@@ -590,7 +625,9 @@ export default function AdminHomePage() {
                   key={item.label}
                   className="rounded-3xl border border-[var(--border)] bg-[var(--accent)]/5 p-5 text-left opacity-70"
                 >
-                  <p className="text-3xl font-black text-[var(--foreground)]">{item.value}</p>
+                  <p className="text-3xl font-black text-[var(--foreground)]">
+                    <Secret hidden={hidden}>{String(item.value)}</Secret>
+                  </p>
                   <p className="mt-1.5 text-sm font-bold text-[var(--foreground)]">{item.label}</p>
                   <p className="mt-0.5 text-xs text-[var(--muted)]">{item.hint}</p>
                 </div>
@@ -666,15 +703,17 @@ export default function AdminHomePage() {
                         </td>
                         {showsMoney && (
                           <td className="py-2.5 text-right text-[var(--muted)]">
-                            ₦{(student.paid ?? 0).toLocaleString("en-NG")}
+                            <Secret hidden={hidden}>{`₦${(student.paid ?? 0).toLocaleString("en-NG")}`}</Secret>
                           </td>
                         )}
                         {showsMoney && (
                           <td className="py-2.5 text-right font-bold text-red-600">
-                            ₦{(student.owed ?? 0).toLocaleString("en-NG")}
+                            <Secret hidden={hidden}>{`₦${(student.owed ?? 0).toLocaleString("en-NG")}`}</Secret>
                           </td>
                         )}
-                        <td className="py-2.5 text-right text-[var(--muted)]">{student.daysEnrolled}d</td>
+                        <td className="py-2.5 text-right text-[var(--muted)]">
+                          <Secret hidden={hidden}>{`${student.daysEnrolled}d`}</Secret>
+                        </td>
                       </tr>
                     );
                   })}
@@ -685,7 +724,7 @@ export default function AdminHomePage() {
                   href={focusHref("behind_tuition")!}
                   className="mt-4 inline-block text-xs font-bold text-[var(--accent)] hover:underline"
                 >
-                  See all {data.actionQueue.atRiskCount} →
+                  See all <Secret hidden={hidden}>{String(data.actionQueue.atRiskCount)}</Secret> →
                 </Link>
               )}
             </div>
@@ -706,10 +745,14 @@ export default function AdminHomePage() {
                       <span className="font-bold text-[var(--foreground)] group-hover:text-[var(--accent)]">
                         {branch.name}
                       </span>
-                      <span className="text-xs text-[var(--muted)]">
-                        {branch.students} students
-                        {branch.collected != null && ` · ${naira(branch.collected)} collected`}
-                        {branch.outstanding != null && branch.outstanding > 0 && ` · ${naira(branch.outstanding)} owed`}
+                    <span className="text-xs text-[var(--muted)]">
+                        <Secret hidden={hidden}>{String(branch.students)}</Secret> students
+                        {branch.collected != null && (
+                          <> · <Secret hidden={hidden}>{naira(branch.collected)}</Secret> collected</>
+                        )}
+                        {branch.outstanding != null && branch.outstanding > 0 && (
+                          <> · <Secret hidden={hidden}>{naira(branch.outstanding)}</Secret> owed</>
+                        )}
                       </span>
                     </div>
                     {branch.collectionRate != null && (
@@ -723,7 +766,7 @@ export default function AdminHomePage() {
                           />
                         </div>
                         <span className="w-10 text-right text-xs font-bold text-[var(--muted)]">
-                          {branch.collectionRate}%
+                          <Secret hidden={hidden}>{`${branch.collectionRate}%`}</Secret>
                         </span>
                       </div>
                     )}
@@ -749,7 +792,9 @@ export default function AdminHomePage() {
                   );
                   const bar = (
                     <>
-                      <span className="text-xs font-bold text-[var(--foreground)]">{count}</span>
+                      <span className="text-xs font-bold text-[var(--foreground)]">
+                        <Secret hidden={hidden}>{String(count)}</Secret>
+                      </span>
                       <motion.div
                         className="w-full rounded-t-xl bg-gradient-to-t from-[var(--accent-strong)]/60 to-[var(--accent-strong)] group-hover:brightness-110"
                         initial={{ height: 0 }}
@@ -906,14 +951,18 @@ export default function AdminHomePage() {
                         href={item.href}
                         className="rounded-2xl bg-[var(--accent)]/5 p-3 transition hover:bg-[var(--accent)]/10"
                       >
-                        <p className="text-lg font-black text-[var(--foreground)]">{item.value}</p>
+                        <p className="text-lg font-black text-[var(--foreground)]">
+                          <Secret hidden={hidden}>{String(item.value)}</Secret>
+                        </p>
                         <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
                           {item.label}
                         </p>
                       </Link>
                     ) : (
                       <div key={item.label} className="rounded-2xl bg-[var(--accent)]/5 p-3 opacity-70">
-                        <p className="text-lg font-black text-[var(--foreground)]">{item.value}</p>
+                        <p className="text-lg font-black text-[var(--foreground)]">
+                          <Secret hidden={hidden}>{String(item.value)}</Secret>
+                        </p>
                         <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
                           {item.label}
                         </p>

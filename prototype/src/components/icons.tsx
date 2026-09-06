@@ -834,6 +834,14 @@ export const EyeIcon = icon("EyeIcon", (
     <circle cx="12" cy="12" r="3.2" />
   </>
 ));
+/** Figures hidden — the "peek" control next to a masked balance. */
+export const EyeOffIcon = icon("EyeOffIcon", (
+  <>
+    <path d="M3 3l18 18" />
+    <path d="M10.6 6.1A9.7 9.7 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-3.3 3.9M6.5 7.2A16 16 0 0 0 2.5 12S6 18 12 18a9.4 9.4 0 0 0 4.2-1" />
+    <path d="M9.8 9.9a3.2 3.2 0 0 0 4.4 4.4" />
+  </>
+));
 
 /* ----------------------------------------------------------------------- ai */
 

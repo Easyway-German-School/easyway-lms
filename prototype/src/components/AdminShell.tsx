@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import BrandLogo from '@/components/BrandLogo';
+import AdminAssistantLauncher from '@/components/AdminAssistantLauncher';
 import NotificationCenter from '@/components/NotificationCenter';
 import ThemeToggle, { useHideFloatingThemeToggle } from '@/components/ThemeToggle';
 import PortalUpdates from '@/components/PortalUpdates';
@@ -506,6 +507,13 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         See PortalUpdates for why the card carries the real message text.
       */}
       <PortalUpdates />
+
+      {/*
+        The office assistant as a floating launcher — same idea as the student
+        portal's CommunityLauncher. Hidden on its own full page, where it would
+        just be a second copy of itself.
+      */}
+      {!blocked && pathname !== '/admin/assistant' && <AdminAssistantLauncher />}
 
     </div>
   );
