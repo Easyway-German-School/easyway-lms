@@ -318,10 +318,9 @@ function DraggableDot({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      // The dot sits inside the day button; stop the pointer-down from also
-      // counting as a day-select so a drag that never leaves the cell doesn't
-      // toggle the rail.
-      onClick={(e) => e.stopPropagation()}
+      // A plain tap on the dot falls through to the day button and selects the
+      // day; dnd-kit only takes over once the pointer has moved past its
+      // threshold, and it swallows the synthetic click after a real drag.
       className={`h-2.5 w-2.5 cursor-grab touch-none rounded-full ${className} ${
         isDragging ? "opacity-30" : ""
       }`}
