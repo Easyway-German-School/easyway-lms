@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
-import { prisma } from "@/lib/prisma";
-import { unguardedPrisma, writeAudit } from "@/lib/prisma-guard";
+import { prisma, unguardedPrisma } from "@/lib/prisma";
+import { writeAudit } from "@/lib/prisma-guard";
 import { batchFromAdmission } from "@/lib/batch";
 import {
   buildClusters,
