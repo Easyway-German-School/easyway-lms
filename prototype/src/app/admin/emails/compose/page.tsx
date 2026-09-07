@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import EmailBlockEditor from "@/components/EmailBlockEditor";
 import { LEVELS } from "@/lib/levels";
+import { MONTH_NAMES } from "@/lib/batch";
 import { newBlock, type EmailBlock } from "@/lib/email-blocks";
 import { EMAIL_TEMPLATES, templateBlocks } from "@/lib/email-template-library";
 
@@ -52,6 +53,9 @@ export default function AdminEmailComposePage() {
   const [branchId, setBranchId] = useState("");
   const [level, setLevel] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("all");
+  const [deliveryMode, setDeliveryMode] = useState("");
+  const [sessionSlot, setSessionSlot] = useState("");
+  const [batch, setBatch] = useState("");
   const [group, setGroup] = useState("students");
   const [lecturerId, setLecturerId] = useState("");
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
@@ -109,12 +113,18 @@ export default function AdminEmailComposePage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // The mode / sitting / intake filters describe a student, not a tutor, so a
+  // "tutors" send drops them; "both" keeps them, narrowing only the student half.
+  const studentOnly = group !== "tutors";
   const audience = {
     branchId: branchId || null,
     level: level || null,
     paymentStatus,
     group,
     lecturerId: group === "students" ? null : lecturerId || null,
+    deliveryMode: studentOnly ? deliveryMode || null : null,
+    sessionSlot: studentOnly ? sessionSlot || null : null,
+    batch: studentOnly ? batch || null : null,
   };
 
   /** Draft the whole thing, into blocks the editor can then edit. */
@@ -301,7 +311,27 @@ export default function AdminEmailComposePage() {
               <option value="unpaid">Outstanding balance</option>
               <option value="paid">Fully paid</option>
             </select>
+            <select value={deliveryMode} onChange={(e) => { setDeliveryMode(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+              <option value="">Any attendance</option>
+              <option value="physical">Physical — campus</option>
+              <option value="hybrid">Hybrid</option>
+              <option value="online">Online</option>
+            </select>
+            <select value={sessionSlot} onChange={(e) => { setSessionSlot(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+              <option value="">Any sitting</option>
+              <option value="morning">Morning</option>
+              <option value="afternoon">Afternoon</option>
+              <option value="evening">Evening</option>
+              <option value="weekend">Weekend</option>
+            </select>
+            <select value={batch} onChange={(e) => { setBatch(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+              <option value="">Any intake month</option>
+              {MONTH_NAMES.map((m) => <option key={m} value={m}>{m} intake</option>)}
+            </select>
           </div>
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            Attendance, sitting and intake month narrow the send to one class — e.g. Physical · A1 · Morning · September. They apply to students only.
+          </p>
 
           {group !== "students" && (
             <div className="mt-3">

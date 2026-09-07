@@ -28,6 +28,11 @@ import { KIND, notify, type NotifyTarget } from "@/lib/notify";
  */
 
 const SLOTS = ["morning", "afternoon", "evening", "weekend"];
+const DELIVERY_MODES = ["physical", "hybrid", "online"];
+const MONTHS = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
 
 async function requireNotificationAdmin() {
   return requireCapability("emails");
@@ -91,6 +96,19 @@ export async function POST(request: NextRequest) {
     typeof body.sessionSlot === "string" && SLOTS.includes(body.sessionSlot.trim().toLowerCase())
       ? body.sessionSlot.trim().toLowerCase()
       : null;
+  /**
+   * How they attend — physical | hybrid | online. A "class on campus tomorrow"
+   * notice must not buzz the online cohort, and vice versa.
+   */
+  const deliveryMode =
+    typeof body.deliveryMode === "string" && DELIVERY_MODES.includes(body.deliveryMode.trim().toLowerCase())
+      ? body.deliveryMode.trim().toLowerCase()
+      : null;
+  /** The intake month, e.g. "September" — matched against admission.batch. */
+  const batch =
+    typeof body.batch === "string" && MONTHS.includes(body.batch.trim().toLowerCase())
+      ? body.batch.trim()
+      : null;
   const link = typeof body.link === "string" && body.link.trim() ? body.link.trim() : null;
   /** students | lecturers | everyone — who this is addressed to. */
   const audience = ["students", "lecturers", "everyone"].includes(String(body.audience))
@@ -110,7 +128,7 @@ export async function POST(request: NextRequest) {
    * target in notify.ts). "Everyone" takes no filter at all — a school-wide
    * notice that quietly went to one branch would be the worst kind of wrong.
    */
-  if (audience === "everyone" && (studentId || lecturerId || branchId || level || sessionSlot)) {
+  if (audience === "everyone" && (studentId || lecturerId || branchId || level || sessionSlot || deliveryMode || batch)) {
     return NextResponse.json(
       { error: "Sending to everyone takes no filters — pick Students or Tutors to narrow it." },
       { status: 400 },
@@ -122,9 +140,9 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
-  if (sessionSlot && audience !== "students") {
+  if ((sessionSlot || deliveryMode || batch) && audience !== "students") {
     return NextResponse.json(
-      { error: "The sitting filter only applies when sending to students." },
+      { error: "The sitting, attendance and intake filters only apply when sending to students." },
       { status: 400 },
     );
   }
@@ -143,10 +161,12 @@ export async function POST(request: NextRequest) {
   } else if (studentId) {
     target = { studentIds: [studentId] };
   } else {
-    // All three optional — omitting them reaches every active student, which is
-    // what a school-wide notice wants. Given, `sessionSlot` narrows a level to
-    // one sitting so a room change does not buzz the other groups.
-    target = { students: { branchId, level, sessionSlot } };
+    // All optional — omitting them reaches every active student, which is what
+    // a school-wide notice wants. Given, each one narrows the send: `sessionSlot`
+    // to one sitting, `deliveryMode` to campus- or video-only, `batch` to one
+    // intake — so "A1 physical morning September class starts tomorrow" reaches
+    // exactly that class and nobody else.
+    target = { students: { branchId, level, sessionSlot, deliveryMode, batch } };
   }
 
   try {

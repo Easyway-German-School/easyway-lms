@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { sendPushToUsers } from "@/lib/push";
 import { queueEmail } from "@/lib/email-queue";
+import { queueSms } from "@/lib/sms-queue";
+import { normalizeNigerianPhone } from "@/lib/sms";
 import { renderNotificationEmail } from "@/lib/notification-email";
 import { planFor } from "@/lib/notification-routing";
 import { mutedChannelsFor, type MutedChannels } from "@/lib/notification-prefs";
 import { KIND as KINDS, type Severity } from "@/lib/notification-kinds";
+import { readAssignment } from "@/lib/lecturer-assignment";
+import { batchFromAdmission } from "@/lib/batch";
 
 /**
  * Everything that reaches somebody's bell goes through here.
@@ -67,6 +71,19 @@ export type NotifyTarget =
          * buzzing the evening students trains everybody to ignore the bell.
          */
         sessionSlot?: string | null;
+        /**
+         * physical | hybrid | online — how the student attends. A "come to
+         * campus tomorrow" notice must not buzz the online cohort, and a
+         * "join the video room" one must not buzz the physical-only students
+         * who have no live tab to join it from.
+         */
+        deliveryMode?: string | null;
+        /**
+         * The intake month, e.g. "September". Stored on `admission.batch`
+         * (a bare month name, JSON, not a column) so it is filtered in memory
+         * after the query rather than in the `where`.
+         */
+        batch?: string | null;
       };
     }
   /**
@@ -74,6 +91,14 @@ export type NotifyTarget =
    * cleared for that area, so the bursar is not woken for a community report.
    */
   | { audience: "admin" | "lecturer" | "student" | "all"; capability?: string }
+  /**
+   * Tutors, narrowed. `{ audience: "lecturer" }` reaches every one of them;
+   * this reaches the ones at a branch, teaching a level, or a named few. Level
+   * is matched against the tutor's ASSIGNMENT (the `levels` list an admin set),
+   * not a level they are at — a tutor has none. `lecturerIds`, when given,
+   * wins outright: the office picked those people by name.
+   */
+  | { lecturers: { branchId?: string | null; level?: string | null; lecturerIds?: string[] } }
   /**
    * Every parent/guardian linked to any of these students, via ParentStudent.
    * A student with two linked guardians reaches both; a student nobody has
@@ -98,6 +123,13 @@ export type NotifyInput = {
   dedupeKey?: string;
   /** Also buzz their phone. Defaults on for warning and critical. */
   push?: boolean;
+  /**
+   * Also text it, as an SMS, to whichever recipients are students with a
+   * phone number on file. Left undefined the admin settings decide (see
+   * notification-routing.ts); pass a boolean to force the issue for one send.
+   * Every SMS costs money, so unlike push this defaults OFF for most kinds.
+   */
+  sms?: boolean;
   /**
    * Also send it as an email.
    *
@@ -137,6 +169,8 @@ export type NotifyResult = {
   pushed: number;
   /** Emails put on the queue. Zero when this kind does not email. */
   queuedEmails: number;
+  /** SMS put on the queue. Zero when this kind does not text, or nobody reached has a usable phone number. */
+  queuedSms: number;
 };
 
 /** Resolve a target down to the user ids it actually reaches. */
@@ -162,6 +196,7 @@ async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
   }
 
   if ("students" in to) {
+    const wantBatch = to.students.batch?.trim().toLowerCase() || null;
     const students = await prisma.student.findMany({
       where: {
         status: "active",
@@ -169,10 +204,59 @@ async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
         ...(to.students.level ? { level: to.students.level } : {}),
         ...(to.students.tutorId ? { tutorId: to.students.tutorId } : {}),
         ...(to.students.sessionSlot ? { sessionSlot: to.students.sessionSlot } : {}),
+        ...(to.students.deliveryMode ? { deliveryMode: to.students.deliveryMode } : {}),
       },
-      select: { userId: true },
+      // `admission` only when a batch filter is in play — it is a JSON blob and
+      // not worth pulling for every school-wide send.
+      select: { userId: true, ...(wantBatch ? { admission: true } : {}) },
     });
-    return [...new Set(students.map((s) => s.userId))];
+    const matched = wantBatch
+      ? students.filter(
+          (s) => batchFromAdmission((s as { admission?: unknown }).admission)?.toLowerCase() === wantBatch,
+        )
+      : students;
+    return [...new Set(matched.map((s) => s.userId))];
+  }
+
+  if ("lecturers" in to) {
+    const picked = (to.lecturers.lecturerIds ?? []).filter(Boolean);
+    const lecturers = await prisma.lecturer.findMany({
+      where: {
+        status: { not: "inactive" },
+        ...(picked.length ? { id: { in: picked } } : {}),
+      },
+      select: {
+        userId: true,
+        branchId: true,
+        level: true,
+        branchIds: true,
+        levels: true,
+        assignmentGroups: true,
+      },
+    });
+
+    // A named list is a named list — the filters do not get to trim it. When no
+    // names were given, branch and level are matched against the tutor's
+    // ASSIGNMENT (the lists an admin set), not just the primary column, so a
+    // tutor whose Lagos posting is their second campus is still reached. A
+    // tutor is not "at" a level, so level only ever means an assigned level.
+    const level = !picked.length && to.lecturers.level ? to.lecturers.level.toUpperCase() : null;
+    const branchId = !picked.length ? to.lecturers.branchId ?? null : null;
+
+    const matched = lecturers.filter((lecturer) => {
+      if (picked.length) return true;
+      const assignment = readAssignment(lecturer);
+      const branches = assignment.branchIds.length
+        ? assignment.branchIds
+        : lecturer.branchId
+          ? [lecturer.branchId]
+          : [];
+      if (branchId && !branches.includes(branchId)) return false;
+      if (level && !assignment.levels.includes(level)) return false;
+      return true;
+    });
+
+    return [...new Set(matched.map((lecturer) => lecturer.userId))];
   }
 
   const roles =
@@ -216,7 +300,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
 
   const recipients = await resolveRecipients(input.to);
   if (recipients.length === 0) {
-    return { batchId, created: 0, skipped: 0, pushed: 0, queuedEmails: 0 };
+    return { batchId, created: 0, skipped: 0, pushed: 0, queuedEmails: 0, queuedSms: 0 };
   }
 
   // Anyone who already got this exact notification is dropped rather than
@@ -234,7 +318,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   }
 
   if (targets.length === 0) {
-    return { batchId, created: 0, skipped, pushed: 0, queuedEmails: 0 };
+    return { batchId, created: 0, skipped, pushed: 0, queuedEmails: 0, queuedSms: 0 };
   }
 
   // The student id is denormalised onto the row so the existing student-scoped
@@ -366,10 +450,57 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
     }
   }
 
+  /**
+   * The same message, by SMS.
+   *
+   * Students only, for now: the phone number lives on StudentProfile, and
+   * every kind that texts by default (payments, exam reminders) is
+   * student-facing anyway. `wantsSms` follows the same explicit-override
+   * rule as email above.
+   */
+  let queuedSms = 0;
+  const wantsSms = typeof input.sms === "boolean" ? input.sms : plan.sms;
+  if (wantsSms) {
+    try {
+      const smsTargets = targets.filter((id) => accepts(id, "sms"));
+      const studentIds = smsTargets
+        .map((userId) => studentByUser.get(userId)?.id)
+        .filter((id): id is string => Boolean(id));
+
+      if (studentIds.length > 0) {
+        const profiles = await prisma.studentProfile.findMany({
+          where: { studentId: { in: studentIds } },
+          select: { studentId: true, phone: true, whatsapp: true },
+        });
+        const phoneByStudent = new Map(
+          profiles.map((p) => [p.studentId, normalizeNigerianPhone(p.phone ?? p.whatsapp)]),
+        );
+
+        for (const userId of smsTargets) {
+          const student = studentByUser.get(userId);
+          const phone = student ? phoneByStudent.get(student.id) : null;
+          if (!phone) continue; // No usable number on file — nothing to text.
+
+          await queueSms({
+            to: phone,
+            message: `${input.title}: ${input.message}`,
+            type: kind,
+            studentId: student?.id ?? null,
+          });
+          queuedSms += 1;
+        }
+      }
+    } catch (error) {
+      // Same rule as push and email: the bell already rang, and an SMS queue
+      // problem must not undo it or fail the request that triggered it.
+      console.warn("notify: sms queueing failed", error);
+    }
+  }
+
   // Rows actually written, not recipients considered. A tutor's announcements
   // page reports `sentTo` from this, and counting people who had muted the
   // kind would tell them thirty students were reached when twenty-eight were.
-  return { batchId, created: inAppTargets.length, skipped, pushed, queuedEmails };
+  return { batchId, created: inAppTargets.length, skipped, pushed, queuedEmails, queuedSms };
 }
 
 /**

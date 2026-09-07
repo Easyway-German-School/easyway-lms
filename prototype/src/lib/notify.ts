@@ -9,6 +9,7 @@ import { planFor } from "@/lib/notification-routing";
 import { mutedChannelsFor, type MutedChannels } from "@/lib/notification-prefs";
 import { KIND as KINDS, type Severity } from "@/lib/notification-kinds";
 import { readAssignment } from "@/lib/lecturer-assignment";
+import { batchFromAdmission } from "@/lib/batch";
 
 /**
  * Everything that reaches somebody's bell goes through here.
@@ -70,6 +71,19 @@ export type NotifyTarget =
          * buzzing the evening students trains everybody to ignore the bell.
          */
         sessionSlot?: string | null;
+        /**
+         * physical | hybrid | online — how the student attends. A "come to
+         * campus tomorrow" notice must not buzz the online cohort, and a
+         * "join the video room" one must not buzz the physical-only students
+         * who have no live tab to join it from.
+         */
+        deliveryMode?: string | null;
+        /**
+         * The intake month, e.g. "September". Stored on `admission.batch`
+         * (a bare month name, JSON, not a column) so it is filtered in memory
+         * after the query rather than in the `where`.
+         */
+        batch?: string | null;
       };
     }
   /**
@@ -182,6 +196,7 @@ async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
   }
 
   if ("students" in to) {
+    const wantBatch = to.students.batch?.trim().toLowerCase() || null;
     const students = await prisma.student.findMany({
       where: {
         status: "active",
@@ -189,10 +204,18 @@ async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
         ...(to.students.level ? { level: to.students.level } : {}),
         ...(to.students.tutorId ? { tutorId: to.students.tutorId } : {}),
         ...(to.students.sessionSlot ? { sessionSlot: to.students.sessionSlot } : {}),
+        ...(to.students.deliveryMode ? { deliveryMode: to.students.deliveryMode } : {}),
       },
-      select: { userId: true },
+      // `admission` only when a batch filter is in play — it is a JSON blob and
+      // not worth pulling for every school-wide send.
+      select: { userId: true, ...(wantBatch ? { admission: true } : {}) },
     });
-    return [...new Set(students.map((s) => s.userId))];
+    const matched = wantBatch
+      ? students.filter(
+          (s) => batchFromAdmission((s as { admission?: unknown }).admission)?.toLowerCase() === wantBatch,
+        )
+      : students;
+    return [...new Set(matched.map((s) => s.userId))];
   }
 
   if ("lecturers" in to) {
