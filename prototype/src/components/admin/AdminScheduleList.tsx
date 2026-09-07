@@ -92,6 +92,7 @@ export default function AdminScheduleList({
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const [branchFilter, setBranchFilter] = useState("");
+  const [levelFilter, setLevelFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [modeFilter, setModeFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -109,6 +110,14 @@ export default function AdminScheduleList({
     return [...names].sort();
   }, [groups, privates]);
 
+  const levels = useMemo(() => {
+    const set = new Set<string>();
+    groups.forEach((g) => {
+      if (g.level) set.add(g.level);
+    });
+    return [...set].sort();
+  }, [groups]);
+
   function inRange(iso: string) {
     const time = new Date(iso).getTime();
     if (fromDate && time < new Date(fromDate).getTime()) return false;
@@ -121,25 +130,28 @@ export default function AdminScheduleList({
       groups.filter(
         (g) =>
           (!branchFilter || g.branchName === branchFilter) &&
+          (!levelFilter || g.level === levelFilter) &&
           (!statusFilter || g.status === statusFilter) &&
           (!modeFilter || g.deliveryMode === modeFilter) &&
           (!search || g.cohort.toLowerCase().includes(search.toLowerCase())) &&
           inRange(g.date),
       ),
-    [groups, branchFilter, statusFilter, modeFilter, search, fromDate, toDate],
+    [groups, branchFilter, levelFilter, statusFilter, modeFilter, search, fromDate, toDate],
   );
 
   const filteredPrivates = useMemo(
     () =>
       privates.filter(
         (p) =>
+          // Private bookings have no level, so a level filter hides them all.
+          !levelFilter &&
           (!branchFilter || p.branchName === branchFilter) &&
           (!statusFilter || p.status === statusFilter) &&
           (!modeFilter || p.deliveryMode === modeFilter) &&
           (!search || p.studentName.toLowerCase().includes(search.toLowerCase())) &&
           inRange(p.scheduledAt),
       ),
-    [privates, branchFilter, statusFilter, modeFilter, search, fromDate, toDate],
+    [privates, branchFilter, levelFilter, statusFilter, modeFilter, search, fromDate, toDate],
   );
 
   async function setPrivateStatus(id: string, status: string) {
@@ -159,96 +171,96 @@ export default function AdminScheduleList({
     }
   }
 
-  const activeFilterCount = [branchFilter, statusFilter, modeFilter, search, fromDate, toDate].filter(Boolean).length;
+  const activeFilterCount = [branchFilter, levelFilter, statusFilter, modeFilter, search, fromDate, toDate].filter(
+    Boolean,
+  ).length;
+
+  const control =
+    "mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--foreground)]";
+  const fieldLabel = "block text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]";
 
   return (
     <>
-      <div className="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-        <label>
-          <span className="block text-xs font-medium text-[var(--foreground-soft)]">Search</span>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Student or cohort"
-            className="mt-1 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm"
-          />
-        </label>
-        <label>
-          <span className="block text-xs font-medium text-[var(--foreground-soft)]">Branch</span>
-          <select
-            value={branchFilter}
-            onChange={(e) => setBranchFilter(e.target.value)}
-            className="mt-1 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm"
-          >
-            <option value="">All branches</option>
-            {branches.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span className="block text-xs font-medium text-[var(--foreground-soft)]">Status</span>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="mt-1 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm"
-          >
-            <option value="">Any status</option>
-            {PRIVATE_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s.replace("_", " ")}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span className="block text-xs font-medium text-[var(--foreground-soft)]">Delivery</span>
-          <select
-            value={modeFilter}
-            onChange={(e) => setModeFilter(e.target.value)}
-            className="mt-1 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm"
-          >
-            <option value="">Any mode</option>
-            <option value="physical">Physical</option>
-            <option value="online">Online</option>
-            <option value="hybrid">Hybrid</option>
-          </select>
-        </label>
-        <label>
-          <span className="block text-xs font-medium text-[var(--foreground-soft)]">From</span>
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="mt-1 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm"
-          />
-        </label>
-        <label>
-          <span className="block text-xs font-medium text-[var(--foreground-soft)]">To</span>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-            className="mt-1 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm"
-          />
-        </label>
+      <div className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+        <div className="filter-grid">
+          <label>
+            <span className={fieldLabel}>Search</span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Student or cohort"
+              className={control}
+            />
+          </label>
+          <label>
+            <span className={fieldLabel}>Branch</span>
+            <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className={control}>
+              <option value="">All branches</option>
+              {branches.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span className={fieldLabel}>Level</span>
+            <select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} className={control}>
+              <option value="">All levels</option>
+              {levels.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span className={fieldLabel}>Status</span>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={control}>
+              <option value="">Any status</option>
+              {PRIVATE_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s.replace("_", " ")}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span className={fieldLabel}>Delivery</span>
+            <select value={modeFilter} onChange={(e) => setModeFilter(e.target.value)} className={control}>
+              <option value="">Any mode</option>
+              <option value="physical">Physical</option>
+              <option value="online">Online</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
+          </label>
+          <label>
+            <span className={fieldLabel}>From</span>
+            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className={control} />
+          </label>
+          <label>
+            <span className={fieldLabel}>To</span>
+            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className={control} />
+          </label>
+        </div>
         {activeFilterCount > 0 && (
-          <button
-            type="button"
-            onClick={() => {
-              setBranchFilter("");
-              setStatusFilter("");
-              setModeFilter("");
-              setSearch("");
-              setFromDate("");
-              setToDate("");
-            }}
-            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--muted)] hover:text-[var(--foreground)]"
-          >
-            Clear filters ({activeFilterCount})
-          </button>
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setBranchFilter("");
+                setLevelFilter("");
+                setStatusFilter("");
+                setModeFilter("");
+                setSearch("");
+                setFromDate("");
+                setToDate("");
+              }}
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)] hover:text-[var(--foreground)]"
+            >
+              Clear filters ({activeFilterCount})
+            </button>
+          </div>
         )}
       </div>
 
@@ -256,7 +268,7 @@ export default function AdminScheduleList({
       {loading ? (
         <p className="py-12 text-center text-[var(--muted)]">Loading school schedule...</p>
       ) : (
-        <div className="grid gap-8 xl:grid-cols-2">
+        <div className={`grid gap-8 ${levelFilter ? "" : "xl:grid-cols-2"}`}>
           <section>
             <h2 className="mb-3 text-lg font-semibold">Group and batch timetable ({filteredGroups.length})</h2>
             <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
@@ -287,6 +299,7 @@ export default function AdminScheduleList({
               )}
             </div>
           </section>
+          {!levelFilter && (
           <section>
             <h2 className="mb-3 text-lg font-semibold">Private one-to-one bookings ({filteredPrivates.length})</h2>
 
@@ -411,6 +424,7 @@ export default function AdminScheduleList({
               )}
             </div>
           </section>
+          )}
         </div>
       )}
     </>
