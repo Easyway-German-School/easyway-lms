@@ -56,6 +56,7 @@ type ThreadMessage = {
   authorName: string | null;
   mine: boolean;
   createdAt: string;
+  edited?: boolean;
 };
 
 const POLL_MS = 90_000;
@@ -374,6 +375,7 @@ export default function HelpLauncher() {
                     <div key={message.id} className={`flex flex-col ${message.mine ? "items-end" : "items-start"}`}>
                       <span className="px-1 text-[10px] font-medium text-[var(--muted)]">
                         {message.mine ? "You" : message.authorName ?? "The office"}
+                        {message.edited ? <span className="italic"> · edited</span> : null}
                       </span>
                       <div
                         className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${

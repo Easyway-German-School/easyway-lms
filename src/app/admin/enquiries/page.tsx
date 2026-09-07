@@ -26,9 +26,11 @@ import BrandLoader from "@/components/BrandLoader";
 import {
   CheckCircleIcon,
   InboxIcon,
+  PencilIcon,
   RefreshIcon,
   SendIcon,
   TicketIcon,
+  TrashIcon,
   UserIcon,
 } from "@/components/icons";
 import {
@@ -63,6 +65,7 @@ type ThreadMessage = {
   authorName: string | null;
   mine: boolean;
   createdAt: string;
+  edited?: boolean;
 };
 
 type Thread = {
@@ -117,6 +120,10 @@ function EnquiriesInner() {
   const [thread, setThread] = useState<Thread | null>(null);
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
+  // An office message being corrected in place. `null` when nothing is open
+  // for editing; the id + working text otherwise.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -166,6 +173,50 @@ function EnquiriesInner() {
       });
       if (res.ok) {
         setReply("");
+        await openThread(selected);
+        await load();
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Save an in-place correction to an office message.
+  async function saveEdit() {
+    if (!selected || !editingId || !editText.trim()) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/support/tickets/${selected}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "edit", messageId: editingId, body: editText }),
+      });
+      if (res.ok) {
+        setEditingId(null);
+        setEditText("");
+        await openThread(selected);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Take a message back. On the student's side it — and the popup and bell that
+  // announced it — simply vanish; here the bubble goes with the next refetch.
+  async function removeMessage(messageId: string) {
+    if (!selected) return;
+    if (!window.confirm("Delete this message? It disappears from the student's side too, as if it was never sent.")) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/support/tickets/${selected}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", messageId }),
+      });
+      if (res.ok) {
+        if (editingId === messageId) setEditingId(null);
         await openThread(selected);
         await load();
       }
@@ -330,19 +381,79 @@ function EnquiriesInner() {
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
                 {thread.messages.map((message) => {
                   const fromOffice = message.authorRole === "admin";
+                  const editing = editingId === message.id;
                   return (
-                    <div key={message.id} className={`flex flex-col ${fromOffice ? "items-end" : "items-start"}`}>
+                    <div key={message.id} className={`group flex flex-col ${fromOffice ? "items-end" : "items-start"}`}>
                       <span className="px-1 text-[10px] font-medium text-[var(--muted)]">
                         {fromOffice ? message.authorName ?? "The office" : message.authorName ?? "Student"} ·{" "}
                         {timeAgo(message.createdAt)}
+                        {message.edited ? <span className="italic"> · edited</span> : null}
                       </span>
-                      <div
-                        className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm ${
-                          fromOffice ? "bg-[var(--accent)] text-white" : "bg-[var(--surface-alt)] text-[var(--foreground)]"
-                        }`}
-                      >
-                        {message.body}
-                      </div>
+
+                      {editing ? (
+                        <div className="w-[min(80%,28rem)] space-y-2">
+                          <textarea
+                            value={editText}
+                            onChange={(event) => setEditText(event.target.value.slice(0, 4000))}
+                            rows={4}
+                            autoFocus
+                            className="w-full resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-sm text-[var(--foreground)]"
+                          />
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={saveEdit}
+                              disabled={busy || !editText.trim()}
+                              className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingId(null);
+                                setEditText("");
+                              }}
+                              disabled={busy}
+                              className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)]"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm ${
+                            fromOffice ? "bg-[var(--accent)] text-white" : "bg-[var(--surface-alt)] text-[var(--foreground)]"
+                          }`}
+                        >
+                          {message.body}
+                        </div>
+                      )}
+
+                      {/* Only the office's own lines, and never while one is
+                          already open for editing. Hover on desktop, always
+                          shown on touch (no :hover to reveal them). */}
+                      {fromOffice && !editing ? (
+                        <div className="mt-1 flex gap-3 px-1 text-[10px] font-semibold text-[var(--muted)] opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                          <button
+                            onClick={() => {
+                              setEditingId(message.id);
+                              setEditText(message.body);
+                            }}
+                            className="inline-flex items-center gap-1 hover:text-[var(--accent)]"
+                          >
+                            <PencilIcon className="h-3 w-3" />
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => removeMessage(message.id)}
+                            disabled={busy}
+                            className="inline-flex items-center gap-1 hover:text-rose-500"
+                          >
+                            <TrashIcon className="h-3 w-3" />
+                            Delete
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
