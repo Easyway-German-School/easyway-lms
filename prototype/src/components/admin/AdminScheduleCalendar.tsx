@@ -109,6 +109,7 @@ export default function AdminScheduleCalendar({
   const [tutor, setTutor] = useState("");
   const [mode, setMode] = useState("");
   const [track, setTrack] = useState("");
+  const [level, setLevel] = useState("");
 
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [groupDraft, setGroupDraft] = useState<GroupDraft | null>(null);
@@ -132,13 +133,24 @@ export default function AdminScheduleCalendar({
     return [...set].sort();
   }, [groups, privates]);
 
+  const levelNames = useMemo(() => {
+    const set = new Set<string>();
+    groups.forEach((g) => g.level && set.add(g.level));
+    return [...set].sort();
+  }, [groups]);
+
+  // One rule both the grid and the rail read, so a filtered-out class never
+  // leaks back in as a dot, a ghost or a "moved from here" note.
   const groupMatches = (g: GroupSession) =>
     (!branch || g.branchName === branch) &&
     (!tutor || g.tutorName === tutor) &&
     (!mode || g.deliveryMode === mode) &&
+    (!level || g.level === level) &&
     track !== "private";
 
+  // Private bookings carry no level, so any level filter hides them entirely.
   const privateMatches = (p: PrivateClass) =>
+    !level &&
     (!branch || p.branchName === branch) &&
     (!tutor || p.tutorName === tutor) &&
     (!mode || p.deliveryMode === mode) &&
@@ -153,7 +165,7 @@ export default function AdminScheduleCalendar({
     }
     for (const list of map.values()) list.sort((a, b) => a.startTime.localeCompare(b.startTime));
     return map;
-  }, [groups, branch, tutor, mode, track]);
+  }, [groups, branch, tutor, mode, track, level]);
 
   const privatesByDay = useMemo(() => {
     const map = new Map<string, PrivateClass[]>();
@@ -165,14 +177,14 @@ export default function AdminScheduleCalendar({
     for (const list of map.values())
       list.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
     return map;
-  }, [privates, branch, tutor, mode, track]);
+  }, [privates, branch, tutor, mode, track, level]);
 
   const dotIndex = useMemo(() => {
     const map = new Map<string, { kind: "group"; g: GroupSession } | { kind: "private"; p: PrivateClass }>();
     for (const g of groups) if (groupMatches(g)) map.set(groupDotId(g), { kind: "group", g });
     for (const p of privates) if (privateMatches(p)) map.set(`p:${p.id}`, { kind: "private", p });
     return map;
-  }, [groups, privates, branch, tutor, mode, track]);
+  }, [groups, privates, branch, tutor, mode, track, level]);
 
   const days = useMemo(() => {
     const map = new Map<string, DayCell>();
@@ -191,13 +203,15 @@ export default function AdminScheduleCalendar({
       cellAt(ymd(new Date(holiday.date))).closed = { label: holiday.label };
     }
     return map;
-  }, [groupsByDay, privatesByDay, groups, closedDays, branch, tutor, mode, track]);
+  }, [groupsByDay, privatesByDay, groups, closedDays, branch, tutor, mode, track, level]);
 
   const dayGroups = selectedDay ? groupsByDay.get(selectedDay) ?? [] : [];
   const dayPrivates = selectedDay ? privatesByDay.get(selectedDay) ?? [] : [];
   const dayClosed = selectedDay ? closedDays.find((h) => ymd(new Date(h.date)) === selectedDay) : undefined;
   const movedFromSelected = selectedDay
-    ? groups.filter((g) => g.status === "postponed" && g.postponedTo && ymd(new Date(g.date)) === selectedDay)
+    ? groups.filter(
+        (g) => groupMatches(g) && g.status === "postponed" && g.postponedTo && ymd(new Date(g.date)) === selectedDay,
+      )
     : [];
 
   /* ------------------------------------------------------------- group write */
@@ -659,29 +673,58 @@ export default function AdminScheduleCalendar({
     </div>
   );
 
+  const activeFilters = [track, level, branch, tutor, mode].filter(Boolean).length;
+
   const toolbar = (
-    <div className="flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+    <div className="space-y-3">
       {privateAnalytics && (
-        <div className="flex flex-wrap gap-2 text-xs">
+        <div className="flex flex-wrap gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
           <Pill label="No tutor" value={privateAnalytics.unassignedStudents} warn />
           <Pill label="Nothing booked" value={privateAnalytics.noUpcomingSession} warn />
           <Pill label="Pending" value={privateAnalytics.pendingRequests} warn />
           <Pill label="Private next 7d" value={privateAnalytics.upcoming7Days} />
         </div>
       )}
-      <div className="flex flex-wrap gap-2">
-        <ChipSelect value={track} onChange={setTrack} options={TRACKS} />
-        <ChipSelect
-          value={branch}
-          onChange={setBranch}
-          options={[{ value: "", label: "All branches" }, ...branchNames.map((b) => ({ value: b, label: b }))]}
-        />
-        <ChipSelect
-          value={tutor}
-          onChange={setTutor}
-          options={[{ value: "", label: "All tutors" }, ...tutorNames.map((t) => ({ value: t, label: t }))]}
-        />
-        <ChipSelect value={mode} onChange={setMode} options={MODES} />
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+        <div className="filter-grid">
+          <LabeledSelect label="Show" value={track} onChange={setTrack} options={TRACKS} />
+          <LabeledSelect
+            label="Level"
+            value={level}
+            onChange={setLevel}
+            options={[{ value: "", label: "All levels" }, ...levelNames.map((l) => ({ value: l, label: l }))]}
+          />
+          <LabeledSelect
+            label="Branch"
+            value={branch}
+            onChange={setBranch}
+            options={[{ value: "", label: "All branches" }, ...branchNames.map((b) => ({ value: b, label: b }))]}
+          />
+          <LabeledSelect
+            label="Tutor"
+            value={tutor}
+            onChange={setTutor}
+            options={[{ value: "", label: "All tutors" }, ...tutorNames.map((t) => ({ value: t, label: t }))]}
+          />
+          <LabeledSelect label="Mode" value={mode} onChange={setMode} options={MODES} />
+        </div>
+        {activeFilters > 0 && (
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setTrack("");
+                setLevel("");
+                setBranch("");
+                setTutor("");
+                setMode("");
+              }}
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)] hover:text-[var(--foreground)]"
+            >
+              Clear filters ({activeFilters})
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -729,30 +772,35 @@ function Pill({ label, value, warn }: { label: string; value: number; warn?: boo
   );
 }
 
-function ChipSelect({
+function LabeledSelect({
+  label,
   value,
   onChange,
   options,
 }: {
+  label: string;
   value: string;
   onChange: (next: string) => void;
   options: { value: string; label: string }[];
 }) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${
-        value
-          ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--foreground)]"
-          : "border-[var(--border)] bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
-      }`}
-    >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+    <label className="flex flex-col gap-1">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold ${
+          value
+            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--foreground)]"
+            : "border-[var(--border)] bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
+        }`}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
