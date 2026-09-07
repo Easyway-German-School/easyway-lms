@@ -53,6 +53,13 @@ export default function AdminNotificationsPage() {
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [lecturers, setLecturers] = useState<LecturerOption[]>([]);
+  /**
+   * Who the current filters actually resolve to. Null until "Preview
+   * recipients" is pressed; cleared the moment any filter changes. Send is
+   * disabled until this is set — a few hundred bells cannot be un-rung.
+   */
+  const [preview, setPreview] = useState<{ count: number; sample: { name: string | null; email: string }[] } | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
 
   // Students and tutors each get branch + level, plus their own "one person"
   // picker. "Everyone" takes no filter — the server rejects any combination the
@@ -120,6 +127,46 @@ export default function AdminNotificationsPage() {
     loadRelationships();
   }, []);
 
+  // Who the send is aimed at, in the shape the API wants. Shared by the preview
+  // and the real send so the number you approve is the number that goes out.
+  const audiencePayload = {
+    audience,
+    studentId: targetingStudents ? studentId || null : null,
+    lecturerId: targetingLecturers ? lecturerId || null : null,
+    branchId: targetingEveryone ? null : branchId || null,
+    level: targetingEveryone ? null : level || null,
+    sessionSlot: targetingStudents ? sessionSlot || null : null,
+    deliveryMode: targetingStudents ? deliveryMode || null : null,
+    batch: targetingStudents ? batch || null : null,
+  };
+
+  // Any change to who-it-goes-to invalidates a preview taken against the old
+  // filters. Serialising is simpler than nine deps and cannot fall out of step.
+  const audienceKey = JSON.stringify(audiencePayload);
+  useEffect(() => {
+    setPreview(null);
+  }, [audienceKey]);
+
+  async function runPreview() {
+    setFormError("");
+    setPreviewBusy(true);
+    try {
+      const res = await fetch("/api/admin/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...audiencePayload, preview: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not work out the audience");
+      setPreview({ count: data.count ?? 0, sample: data.sample ?? [] });
+    } catch (error) {
+      setPreview(null);
+      setFormError(error instanceof Error ? error.message : "Could not work out the audience");
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
   async function handleCreateNotification() {
     setFormError("");
     setFormNotice("");
@@ -128,26 +175,20 @@ export default function AdminNotificationsPage() {
       setFormError("Title and message are required.");
       return;
     }
+    if (!preview) {
+      setFormError("Preview the recipients first, so you can see who this reaches.");
+      return;
+    }
 
     setFormBusy(true);
 
     const payload = {
+      ...audiencePayload,
       title: title.trim(),
       message: message.trim(),
-      audience,
       link: link.trim() || null,
       alsoEmail,
       alsoPush,
-      // Branch and level narrow students or tutors; the single-person pickers
-      // are role-specific. "Everyone" sends all of it as null. The server
-      // refuses any combination that does not belong to the chosen audience.
-      studentId: targetingStudents ? studentId || null : null,
-      lecturerId: targetingLecturers ? lecturerId || null : null,
-      branchId: targetingEveryone ? null : branchId || null,
-      level: targetingEveryone ? null : level || null,
-      sessionSlot: targetingStudents ? sessionSlot || null : null,
-      deliveryMode: targetingStudents ? deliveryMode || null : null,
-      batch: targetingStudents ? batch || null : null,
     };
 
     try {
@@ -196,7 +237,7 @@ export default function AdminNotificationsPage() {
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Admin</p>
             <h1 className="text-3xl font-bold">Notifications</h1>
-            <p className="mt-2 text-sm text-[var(--muted)]">Create and monitor messages — to students or tutors, filtered by branch, level, or one person.</p>
+            <p className="mt-2 text-sm text-[var(--muted)]">Create and monitor messages — to students or tutors, narrowed by branch, level, sitting, attendance and intake, or to one person. Preview who it reaches before sending.</p>
           </div>
           <button
             type="button"
@@ -243,23 +284,6 @@ export default function AdminNotificationsPage() {
                   <option value="everyone">Everyone (students, tutors and staff)</option>
                 </select>
               </label>
-              {targetingStudents ? (
-                <label className="space-y-2 text-sm">
-                  <span className="font-semibold text-[var(--muted)]">Student</span>
-                  <select
-                    value={studentId}
-                    onChange={(event) => setStudentId(event.target.value)}
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                  >
-                    <option value="">All students</option>
-                    {students.map((student) => (
-                      <option key={student.id} value={student.id}>
-                        {student.user.name || student.user.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
               {targetingLecturers ? (
                 <label className="space-y-2 text-sm">
                   <span className="font-semibold text-[var(--muted)]">Tutor</span>
@@ -284,7 +308,7 @@ export default function AdminNotificationsPage() {
                   <select
                     value={branchId}
                     onChange={(event) => setBranchId(event.target.value)}
-                    disabled={targetingLecturers && lecturerId !== ""}
+                    disabled={(targetingLecturers && lecturerId !== "") || (targetingStudents && studentId !== "")}
                     className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
                   >
                     <option value="">All branches</option>
@@ -369,7 +393,29 @@ export default function AdminNotificationsPage() {
                 <p className="text-xs text-[var(--muted)] md:col-span-2">
                   Branch, level, sitting, attendance and intake stack — leave one on &ldquo;all&rdquo; and it does not narrow.
                   Set all of them and the send reaches exactly one class, e.g. <strong>Lagos · A1 · Morning · Physical · September</strong>.
+                  Then press <strong>Preview recipients</strong> to see exactly who is on the list.
                 </p>
+              ) : null}
+              {targetingStudents ? (
+                <label className="space-y-2 text-sm md:col-span-2">
+                  <span className="font-semibold text-[var(--muted)]">Or send to one person</span>
+                  <select
+                    value={studentId}
+                    onChange={(event) => setStudentId(event.target.value)}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    <option value="">— use the filters above —</option>
+                    {students.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.user.name || student.user.email}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Picking a name here <strong>overrides every filter above</strong> and sends to just that student.
+                    Leave it on &ldquo;use the filters above&rdquo; for a group send.
+                  </span>
+                </label>
               ) : null}
               <label className="space-y-2 text-sm md:col-span-2">
                 <span className="font-semibold text-[var(--muted)]">Message</span>
@@ -419,14 +465,50 @@ export default function AdminNotificationsPage() {
                 </p>
               </div>
             </div>
+            {/* WHO THIS REACHES. Resolved by the same server code the send runs,
+                so the number here is the number that goes out. Send stays
+                disabled until it has been shown — a bell cannot be un-rung. */}
+            <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={runPreview}
+                  disabled={previewBusy || formBusy}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold disabled:opacity-60"
+                >
+                  {previewBusy ? "Checking…" : "Preview recipients"}
+                </button>
+                {preview ? (
+                  <span className={`text-sm font-semibold ${preview.count === 0 ? "text-red-500" : "text-[var(--foreground)]"}`}>
+                    {preview.count === 0
+                      ? "Nobody matches these filters — nothing would be sent."
+                      : `This will reach ${preview.count} ${preview.count === 1 ? "person" : "people"}.`}
+                  </span>
+                ) : (
+                  <span className="text-sm text-[var(--muted)]">Not previewed yet.</span>
+                )}
+              </div>
+              {preview && preview.sample.length > 0 ? (
+                <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 text-xs text-[var(--muted)]">
+                  {preview.sample.map((r) => (
+                    <div key={r.email}>{r.name || r.email}{r.name ? ` · ${r.email}` : ""}</div>
+                  ))}
+                  {preview.count > preview.sample.length ? (
+                    <p className="mt-1 italic">…and {preview.count - preview.sample.length} more</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
                 type="button"
                 onClick={handleCreateNotification}
-                disabled={formBusy}
+                disabled={formBusy || !preview || preview.count === 0}
                 className="rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                title={!preview ? "Preview the recipients first" : undefined}
               >
-                {formBusy ? "Sending…" : "Send notification"}
+                {formBusy ? "Sending…" : preview ? `Send to ${preview.count}` : "Preview first"}
               </button>
               <button
                 type="button"
