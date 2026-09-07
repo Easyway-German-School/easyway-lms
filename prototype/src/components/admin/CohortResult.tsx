@@ -32,6 +32,7 @@ import {
   UsersIcon,
   AlertIcon,
 } from "@/components/icons";
+import { buildCsv, csvDateStamp, csvSlug, downloadCsv } from "@/lib/csv";
 
 export type CohortRow = {
   id: string;
@@ -62,14 +63,6 @@ const EMAIL_FLAG: Record<string, string> = {
 export type Cohort = { label: string; rows: CohortRow[]; truncated: boolean };
 
 const naira = (value: number) => `NGN ${Math.round(value).toLocaleString()}`;
-
-function csvEscape(value: unknown): string {
-  const text = value === null || value === undefined ? "" : String(value);
-  // Excel opens a field starting with = as a formula. Prefixing a quote is the
-  // standard defence and matters here because student names are user input.
-  const guarded = /^[=+\-@]/.test(text) ? `'${text}` : text;
-  return `"${guarded.replace(/"/g, '""')}"`;
-}
 
 export default function CohortResult({
   cohort,
@@ -105,8 +98,15 @@ export default function CohortResult({
       return next;
     });
 
+  const selectedRows = useMemo(
+    () => cohort.rows.filter((row) => selected.has(row.id)),
+    [cohort.rows, selected],
+  );
+
+  /** `/admin/students?ids=…` — the roster already highlights exactly these rows. */
+  const rosterHref = `/admin/students?ids=${[...selected].join(",")}`;
+
   const exportCsv = () => {
-    const rows = cohort.rows.filter((row) => selected.has(row.id));
     const headers = [
       "Name",
       "Email",
@@ -122,38 +122,25 @@ export default function CohortResult({
       ...(showAttendance ? ["Last seen", "Days since seen"] : []),
     ];
 
-    const body = rows.map((row) =>
-      [
-        row.name,
-        row.email,
-        ...(showContact ? [row.emailQuality ?? "", row.phone ?? ""] : []),
-        row.studentCode ?? "",
-        row.level,
-        row.branch ?? "",
-        row.status,
-        row.goal ?? "",
-        row.startedClasses ? "yes" : "no",
-        row.registeredOn,
-        ...(showMoney ? [row.owed ?? 0, row.paymentState ?? ""] : []),
-        ...(showAttendance ? [row.lastSeen ?? "never", row.daysSinceSeen ?? ""] : []),
-      ]
-        .map(csvEscape)
-        .join(","),
-    );
+    const body = selectedRows.map((row) => [
+      row.name,
+      row.email,
+      ...(showContact ? [row.emailQuality ?? "", row.phone ?? ""] : []),
+      row.studentCode ?? "",
+      row.level,
+      row.branch ?? "",
+      row.status,
+      row.goal ?? "",
+      row.startedClasses ? "yes" : "no",
+      row.registeredOn,
+      ...(showMoney ? [row.owed ?? 0, row.paymentState ?? ""] : []),
+      ...(showAttendance ? [row.lastSeen ?? "never", row.daysSinceSeen ?? ""] : []),
+    ]);
 
-    // BOM first: without it Excel on Windows reads UTF-8 names as mojibake,
-    // and this school's register is full of names with diacritics.
-    const blob = new Blob(["﻿" + [headers.map(csvEscape).join(","), ...body].join("\r\n")], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `easyway-${cohort.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date()
-      .toISOString()
-      .slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(
+      `easyway-${csvSlug(cohort.label)}-${csvDateStamp()}.csv`,
+      buildCsv(headers, body),
+    );
   };
 
   const send = async () => {
@@ -198,6 +185,18 @@ export default function CohortResult({
             {selected.size} selected
             {showMoney && totalOwed > 0 ? ` · ${naira(totalOwed)} owed` : ""}
           </span>
+          <a
+            href={selected.size > 0 ? rosterHref : undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-disabled={selected.size === 0}
+            className={`flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--foreground-soft)] transition hover:bg-[var(--surface-alt)] ${
+              selected.size === 0 ? "pointer-events-none opacity-40" : ""
+            }`}
+          >
+            <UsersIcon className="h-3.5 w-3.5" />
+            Open {selected.size} in roster
+          </a>
           <button
             type="button"
             onClick={exportCsv}
@@ -330,7 +329,15 @@ export default function CohortResult({
                     </span>
                   </td>
                   <td className="px-3 py-2.5">
-                    <span className="block font-semibold text-[var(--foreground)]">{row.name}</span>
+                    <a
+                      href={`/admin/students/${row.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(event) => event.stopPropagation()}
+                      className="block font-semibold text-[var(--foreground)] hover:text-[var(--accent)] hover:underline"
+                    >
+                      {row.name}
+                    </a>
                     <span className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
                       <span className="truncate">{row.email || "—"}</span>
                       {row.emailQuality && row.emailQuality !== "ok" && (
