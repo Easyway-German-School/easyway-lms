@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { classifyPaymentTransaction, isReceivedPayment, RECEIVED_PAYMENT_STATUSES } from "@/lib/payment";
 import { promoteIfNextLevelPayment } from "@/lib/promotion";
+import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { safeJson } from "@/lib/safe-json";
 import { setTenantScope } from "@/lib/tenant/context";
 
@@ -200,6 +201,13 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
   });
 
   await enrollIfPathwayExists({ studentId, pathwayId, reference });
+
+  // Travel Package is a flat ₦980,000, not the per-level fee. If this student
+  // is on that pathway (a balance top-up through the gateway), keep the ledger
+  // in step with the payment just recorded. No-op for everyone else.
+  await reconcileTravelPackageStudent({ studentId, setPathway: false }).catch((error) => {
+    console.error("Paystack verify: Travel Package reconcile failed", { studentId, reference, error });
+  });
 
   await promoteIfNextLevelPayment(studentId, metadata).catch((error) => {
     console.error("Paystack verify: next-level promotion failed", { studentId, reference, error });

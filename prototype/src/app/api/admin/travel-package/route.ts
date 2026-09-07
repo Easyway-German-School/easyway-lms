@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { computeStudentFinance, FINANCE_STUDENT_SELECT, type FinanceStudentInput } from "@/lib/finance/receivables";
-import { TRAVEL_PACKAGE_MIN_FIRST_PAYMENT, TRAVEL_PACKAGE_PATHWAY, TRAVEL_PACKAGE_PRICE } from "@/lib/payment";
+import { isTravelPackagePathway, TRAVEL_PACKAGE_MIN_FIRST_PAYMENT, TRAVEL_PACKAGE_PATHWAY, TRAVEL_PACKAGE_PRICE } from "@/lib/payment";
+import { reconcileTravelPackageStudent } from "@/lib/travel-package";
+import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 
 /**
  * The Travel Package roster — every student on the pathway, with the exact
@@ -24,6 +26,11 @@ export async function GET() {
 
   const rows = students.map((student) => {
     const finance = computeStudentFinance(student as unknown as FinanceStudentInput);
+    // What the balance SHOULD be for a flat ₦980,000 programme. When the live
+    // `owed` disagrees, the student's tuition ledger still carries a per-level
+    // charge (onboarded before flat pricing, a failed charge-create, or the
+    // pathway switched after the charge was raised) and needs reconciling.
+    const expectedOwed = Math.max(0, TRAVEL_PACKAGE_PRICE - finance.paid);
     return {
       id: student.id,
       studentCode: student.studentCode,
@@ -37,6 +44,7 @@ export async function GET() {
       progressPercent: finance.progressPercent,
       fullPaid: finance.fullPaid,
       lockedOut: finance.lockedOut,
+      ledgerOutOfStep: finance.owed !== expectedOwed,
     };
   });
 
@@ -44,5 +52,122 @@ export async function GET() {
     packagePrice: TRAVEL_PACKAGE_PRICE,
     minFirstPayment: TRAVEL_PACKAGE_MIN_FIRST_PAYMENT,
     students: rows,
+  });
+}
+
+/**
+ * Put Travel Package standing straight — the office button.
+ *
+ *   { studentId }   move that student onto the pathway (if they are not already)
+ *                   AND collapse their tuition ledger to the one flat ₦980,000
+ *                   charge.
+ *   { all: true }   sweep every student already on the pathway and reconcile the
+ *                   ones whose ledger is out of step — the one-click "fix
+ *                   everyone caught in the loop" pass.
+ *
+ * Idempotent: running it on an already-correct student is a no-op. It never
+ * touches money that came in — only the debit side. When the fix moves a
+ * student from "paid in full" to "balance owing", they get a warm heads-up on
+ * their portal (see travel-package-notice.ts); nothing else is shown to them.
+ *
+ * Gated on `payments`, not `students`: turning a student into a ₦980,000
+ * liability is a money decision, and it mirrors the "Record payment" button on
+ * this same page, which already posts to a `payments`-gated route.
+ */
+export async function PATCH(request: Request) {
+  const gate = await requireCapability("payments");
+  if (!gate.ok) return gate.response;
+
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+
+  // ---- Bulk: reconcile every out-of-step student on the pathway ------------
+  if (body.all === true) {
+    const onPathway = await prisma.student.findMany({
+      where: { pathway: TRAVEL_PACKAGE_PATHWAY },
+      select: { id: true },
+    });
+    let reconciled = 0;
+    let notified = 0;
+    const errors: string[] = [];
+    for (const { id } of onPathway) {
+      try {
+        const r = await reconcileTravelPackageStudent({ studentId: id, setPathway: true });
+        if (r && (r.pathwaySet || r.chargeFixed || r.chargesRetired > 0)) {
+          reconciled += 1;
+          try {
+            await travelPackagePartPaymentNotice(r);
+            if (r.wasFullPaidBefore && !r.fullPaidAfter) notified += 1;
+          } catch (noticeError) {
+            console.error("Travel Package bulk notice failed", { id, noticeError });
+          }
+        }
+      } catch (error) {
+        errors.push(id);
+        console.error("Travel Package bulk reconcile failed", { id, error });
+      }
+    }
+    return NextResponse.json({
+      ok: true,
+      scanned: onPathway.length,
+      reconciled,
+      notified,
+      failed: errors.length,
+    });
+  }
+
+  const studentId = typeof body.studentId === "string" ? body.studentId.trim() : "";
+  if (!studentId) {
+    return NextResponse.json({ error: "studentId is required" }, { status: 400 });
+  }
+
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: {
+      id: true,
+      pathway: true,
+      branch: { select: { tenantId: true } },
+      user: { select: { tenantId: true, name: true } },
+    },
+  });
+  if (!student) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+  // Same tenant fence the rest of the admin API uses — match on the branch or
+  // the user account, so a no-branch (online / imported) student is still ours.
+  const tenantId = gate.session.user.tenantId ?? null;
+  if (
+    tenantId &&
+    student.branch?.tenantId !== tenantId &&
+    student.user?.tenantId !== tenantId
+  ) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+
+  const wasOnPathway = isTravelPackagePathway(student.pathway);
+
+  let result;
+  try {
+    result = await reconcileTravelPackageStudent({ studentId, setPathway: true });
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Could not reconcile this student", detail: error instanceof Error ? error.message : "Unknown" },
+      { status: 500 },
+    );
+  }
+  if (!result) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+
+  try {
+    await travelPackagePartPaymentNotice(result);
+  } catch (noticeError) {
+    console.error("Travel Package part-payment notice failed", { studentId, noticeError });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    wasOnPathway,
+    name: student.user?.name ?? null,
+    reconcile: result,
   });
 }

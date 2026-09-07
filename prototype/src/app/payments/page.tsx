@@ -30,6 +30,10 @@ export default function PaymentsPage() {
     fullPaid: boolean;
     paymentProgressPercent: number;
   } | null>(null);
+  // Travel Package is a flat ₦980,000 that replaces the per-level ladder — a
+  // part-payer on it should see plainly that the money in is a PART payment,
+  // not a settled fee.
+  const [pathway, setPathway] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadPayments() {
@@ -48,6 +52,7 @@ export default function PaymentsPage() {
         if (summaryRes.ok) {
           const student = await summaryRes.json();
           if (student?.paymentSummary) setSummary(student.paymentSummary);
+          if (typeof student?.pathway === "string") setPathway(student.pathway);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unable to load payments");
@@ -91,6 +96,7 @@ export default function PaymentsPage() {
   const fullPaid = summary?.fullPaid ?? false;
   const amountDue = Math.max(0, tuitionFee - totalPaid);
   const paymentProgress = Math.min(100, Math.round((totalPaid / tuitionFee) * 100));
+  const isTravelPackage = pathway === "Travel Package";
 
   return (
     <StudentShell>
@@ -98,6 +104,17 @@ export default function PaymentsPage() {
         <div className="mx-auto max-w-7xl px-6 py-10">
           {/* Renders nothing once tuition is settled. */}
           <TuitionNudge className="mb-6" />
+
+          {isTravelPackage && !fullPaid && (
+            <div className="mb-6 rounded-2xl border border-amber-400/40 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+              <p className="font-semibold">Travel Package — part payment</p>
+              <p className="mt-1">
+                You&apos;ve paid ₦{totalPaid.toLocaleString()} of the ₦{tuitionFee.toLocaleString()} Travel
+                Package fee. That leaves ₦{amountDue.toLocaleString()} to go — you can pay it in any
+                amounts, any time, and your classes stay open.
+              </p>
+            </div>
+          )}
           <div className="rounded-[32px] cinematic-card p-8 shadow-[var(--shadow)]">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>

@@ -7,6 +7,7 @@ import { LEVELS } from "@/lib/levels";
 import { bestMatch, matchBatch, matchDeliveryMode, matchLevel, matchSessionSlot } from "@/lib/fuzzy-match";
 import { generateTempPassword } from "@/lib/student-password";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { normalizeProfileInput } from "@/lib/student-profile";
 import { openEnrolment } from "@/lib/student-enrolment";
@@ -395,6 +396,13 @@ export async function POST(request: NextRequest) {
                 description: "Recorded on import — returning student, paid before this run",
               },
             });
+            // Keep a Travel Package student's flat-₦980,000 ledger in step with
+            // the payment just recorded. No-op for everyone else.
+            try {
+              await reconcileTravelPackageStudent({ studentId: existingStudentId, setPathway: false });
+            } catch (reconcileError) {
+              console.error("Travel Package reconcile failed on import (existing)", reconcileError);
+            }
           }
           results.push({
             ...base,
@@ -499,6 +507,15 @@ export async function POST(request: NextRequest) {
             importCharge = await ensureChargeForLevel({ studentId: student.id, level, origin: "import" });
           } catch (chargeError) {
             console.error("Tuition charge creation failed on import", chargeError);
+          }
+
+          // Travel Package = one flat ₦980,000 charge, not the per-level fee.
+          // Collapse the ledger if this row's pathway put them on it. No-op
+          // otherwise.
+          try {
+            await reconcileTravelPackageStudent({ studentId: student.id, setPathway: false });
+          } catch (reconcileError) {
+            console.error("Travel Package reconcile failed on import (new)", reconcileError);
           }
 
           // Enrolment #1 (as far as this import can tell) — see
