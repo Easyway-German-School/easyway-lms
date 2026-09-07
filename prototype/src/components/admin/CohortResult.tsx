@@ -37,6 +37,7 @@ export type CohortRow = {
   id: string;
   name: string;
   email: string;
+  emailQuality?: "ok" | "placeholder" | "invalid" | "missing";
   studentCode: string | null;
   level: string;
   branch: string | null;
@@ -46,8 +47,16 @@ export type CohortRow = {
   paymentState?: "unpaid" | "partial" | "paid";
   daysSinceSeen?: number | null;
   lastSeen?: string | null;
+  /** Present only when the admin has the `contact` capability. */
+  phone?: string | null;
   startedClasses: boolean;
   registeredOn: string;
+};
+
+const EMAIL_FLAG: Record<string, string> = {
+  placeholder: "no real email",
+  invalid: "bad email",
+  missing: "no email",
 };
 
 export type Cohort = { label: string; rows: CohortRow[]; truncated: boolean };
@@ -80,6 +89,7 @@ export default function CohortResult({
 
   const showMoney = cohort.rows.some((row) => row.owed !== undefined);
   const showAttendance = cohort.rows.some((row) => row.daysSinceSeen !== undefined);
+  const showContact = cohort.rows.some((row) => row.phone !== undefined);
   const allSelected = selected.size === cohort.rows.length && cohort.rows.length > 0;
 
   const totalOwed = useMemo(
@@ -100,6 +110,7 @@ export default function CohortResult({
     const headers = [
       "Name",
       "Email",
+      ...(showContact ? ["Email status", "Phone"] : []),
       "Student code",
       "Level",
       "Branch",
@@ -115,6 +126,7 @@ export default function CohortResult({
       [
         row.name,
         row.email,
+        ...(showContact ? [row.emailQuality ?? "", row.phone ?? ""] : []),
         row.studentCode ?? "",
         row.level,
         row.branch ?? "",
@@ -289,6 +301,7 @@ export default function CohortResult({
                 </button>
               </th>
               <th className="px-3 py-2.5 font-semibold">Student</th>
+              {showContact && <th className="px-3 py-2.5 font-semibold">Phone</th>}
               <th className="px-3 py-2.5 font-semibold">Level</th>
               <th className="px-3 py-2.5 font-semibold">Branch</th>
               {showMoney && <th className="px-3 py-2.5 font-semibold">Owed</th>}
@@ -318,8 +331,30 @@ export default function CohortResult({
                   </td>
                   <td className="px-3 py-2.5">
                     <span className="block font-semibold text-[var(--foreground)]">{row.name}</span>
-                    <span className="block text-xs text-[var(--muted)]">{row.email}</span>
+                    <span className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+                      <span className="truncate">{row.email || "—"}</span>
+                      {row.emailQuality && row.emailQuality !== "ok" && (
+                        <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                          {EMAIL_FLAG[row.emailQuality] ?? row.emailQuality}
+                        </span>
+                      )}
+                    </span>
                   </td>
+                  {showContact && (
+                    <td className="px-3 py-2.5 text-[var(--foreground-soft)]">
+                      {row.phone ? (
+                        <a
+                          href={`tel:${row.phone.replace(/[^\d+]/g, "")}`}
+                          onClick={(event) => event.stopPropagation()}
+                          className="font-medium hover:text-[var(--accent)] hover:underline"
+                        >
+                          {row.phone}
+                        </a>
+                      ) : (
+                        <span className="text-rose-600">none</span>
+                      )}
+                    </td>
+                  )}
                   <td className="px-3 py-2.5 text-[var(--foreground-soft)]">{row.level}</td>
                   <td className="px-3 py-2.5 text-[var(--foreground-soft)]">{row.branch ?? "—"}</td>
                   {showMoney && (

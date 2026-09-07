@@ -27,6 +27,9 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
 
 export const CAPABILITIES = [
   "students",     // enrol, edit, move, graduate
+  "contact",      // see student phone numbers and email addresses in bulk —
+                  // the assistant's cohort export. Viewing one profile is
+                  // covered by `students`; this gates the list.
   "attendance",
   "classes",      // timetables, sittings, postponements — coordinating classes
   "exams",        // exams and exam registrations
@@ -74,7 +77,7 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   // to money, staffing or bulk communications. `events` because the front desk
   // is who books the staff meeting and the open day; `work_drive` is left
   // hand-granted for now (see docs/WORK_DRIVE.md open questions).
-  secretary: ["students", "attendance", "classes", "exams", "materials", "branches", "events"],
+  secretary: ["students", "contact", "attendance", "classes", "exams", "materials", "branches", "events"],
 
   /**
    * The fee book and what explains it. Narrow on purpose.

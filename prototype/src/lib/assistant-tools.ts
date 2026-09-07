@@ -60,10 +60,31 @@ const DAY = 86_400_000;
 /* The shape of an answer                                                     */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * How usable a student's email address is.
+ *
+ *  - `ok`          a syntactically valid address that is not an obvious stand-in.
+ *  - `placeholder` a stand-in the office never expects to reach: the importer's
+ *                  minted `noemail.…@students.placeholder.…` address (see
+ *                  api/admin/students/import/route.ts), an `@example.com`, an
+ *                  `.invalid` / `.test` domain, a `noreply@` sender.
+ *  - `invalid`     malformed — no `@`, no domain dot, a stray space, a double
+ *                  dot, or a bare word like `nil` someone typed to clear a form.
+ *  - `missing`     nothing on file at all.
+ *
+ * The office imports from spreadsheets whose email column is often blank, so a
+ * large intake leaves a tail of `placeholder` / `missing` rows that have to be
+ * chased for a real address — or a phone number — later. This is how the
+ * assistant finds them again.
+ */
+export type EmailQuality = "ok" | "placeholder" | "invalid" | "missing";
+
 export type StudentRow = {
   id: string;
   name: string;
   email: string;
+  /** Always set. How reachable `email` is — see EmailQuality. */
+  emailQuality: EmailQuality;
   studentCode: string | null;
   level: string;
   branch: string | null;
@@ -78,6 +99,13 @@ export type StudentRow = {
   /** Only present when the caller has `attendance`. */
   lastSeen?: string | null;
   daysSinceSeen?: number | null;
+  /**
+   * Best phone number on file — the typed `StudentProfile.phone`, then its
+   * `whatsapp` / `altPhone`, then a number salvaged from the free-form
+   * admission blob. Only present when the caller has `contact`; `null` means
+   * the row was checked and no number was found anywhere.
+   */
+  phone?: string | null;
   startedClasses: boolean;
   registeredOn: string;
 };
@@ -111,6 +139,8 @@ export type Filters = {
   status?: string;
   classType?: string;
   deliveryMode?: string;
+  /** Sitting: morning / afternoon / evening / weekend. Matched case-insensitively. */
+  sessionSlot?: string;
   goal?: string;
   batch?: string;
   search?: string;
@@ -118,6 +148,13 @@ export type Filters = {
   notSeenForDays?: number;
   startedClasses?: boolean;
   registeredWithinDays?: number;
+  /**
+   * Filter on how reachable the email is. `"problem"` is the union of
+   * placeholder + invalid + missing — "everyone whose email we can't use".
+   */
+  emailQuality?: EmailQuality | "problem";
+  /** Only students with no phone number on file anywhere. Needs `contact`. */
+  missingPhone?: boolean;
 };
 
 export function readFilters(args: Record<string, unknown>): Filters {
@@ -132,6 +169,7 @@ export function readFilters(args: Record<string, unknown>): Filters {
   const bool = (key: string) => (typeof args[key] === "boolean" ? (args[key] as boolean) : undefined);
 
   const paymentState = str("paymentState")?.toLowerCase();
+  const emailQuality = str("emailQuality")?.toLowerCase();
 
   return {
     branch: str("branch"),
@@ -139,6 +177,7 @@ export function readFilters(args: Record<string, unknown>): Filters {
     status: str("status")?.toLowerCase(),
     classType: str("classType")?.toLowerCase(),
     deliveryMode: str("deliveryMode")?.toLowerCase(),
+    sessionSlot: str("sessionSlot")?.toLowerCase(),
     goal: str("goal")?.toLowerCase(),
     batch: str("batch"),
     search: str("search"),
@@ -149,6 +188,15 @@ export function readFilters(args: Record<string, unknown>): Filters {
     notSeenForDays: num("notSeenForDays"),
     startedClasses: bool("startedClasses"),
     registeredWithinDays: num("registeredWithinDays"),
+    emailQuality:
+      emailQuality === "ok" ||
+      emailQuality === "placeholder" ||
+      emailQuality === "invalid" ||
+      emailQuality === "missing" ||
+      emailQuality === "problem"
+        ? (emailQuality as Filters["emailQuality"])
+        : undefined,
+    missingPhone: bool("missingPhone"),
   };
 }
 
@@ -175,6 +223,8 @@ function whereFor(filters: Filters, branchIdByName: Map<string, string>) {
   if (filters.status) where.status = filters.status;
   if (filters.classType) where.classType = filters.classType;
   if (filters.deliveryMode) where.deliveryMode = filters.deliveryMode;
+  // Case-insensitive: older imports wrote "MORNING", the newer path writes "morning".
+  if (filters.sessionSlot) where.sessionSlot = { equals: filters.sessionSlot, mode: "insensitive" };
   if (filters.goal) where.germanyGoal = filters.goal;
   if (filters.startedClasses === true) where.classesStartedAt = { not: null };
   if (filters.startedClasses === false) where.classesStartedAt = null;
@@ -200,6 +250,7 @@ function whereFor(filters: Filters, branchIdByName: Map<string, string>) {
 export async function loadStudents(filters: Filters, admin: AdminContext): Promise<StudentRow[]> {
   const canSeeMoney = admin.can("payments");
   const canSeeAttendance = admin.can("attendance");
+  const canSeeContact = admin.can("contact");
 
   const branches = await prisma.branch.findMany({ select: { id: true, name: true } });
   const branchIdByName = new Map(branches.map((b) => [b.name.toLowerCase(), b.id]));
@@ -227,6 +278,14 @@ export async function loadStudents(filters: Filters, admin: AdminContext): Promi
       ...(canSeeMoney
         ? { payments: { where: receivedPaymentFilter(), select: { amount: true } } }
         : {}),
+      // Same rule for contact details: the typed phone fields plus the raw
+      // admission blob (an older intake path only wrote the number there).
+      ...(canSeeContact
+        ? {
+            profile: { select: { phone: true, altPhone: true, whatsapp: true } },
+            admission: true,
+          }
+        : {}),
       ...(canSeeAttendance
         ? {
             attendances: {
@@ -243,10 +302,12 @@ export async function loadStudents(filters: Filters, admin: AdminContext): Promi
   const now = Date.now();
 
   return students.map((student) => {
+    const email = student.user?.email ?? "";
     const row: StudentRow = {
       id: student.id,
       name: student.user?.name ?? "(no name)",
-      email: student.user?.email ?? "",
+      email,
+      emailQuality: classifyEmail(email),
       studentCode: student.studentCode,
       level: student.level,
       branch: student.branch?.name ?? null,
@@ -257,6 +318,19 @@ export async function loadStudents(filters: Filters, admin: AdminContext): Promi
       startedClasses: Boolean(student.classesStartedAt),
       registeredOn: student.createdAt.toISOString().slice(0, 10),
     };
+
+    if (canSeeContact) {
+      const profile = (student as {
+        profile?: { phone: string | null; altPhone: string | null; whatsapp: string | null } | null;
+      }).profile;
+      const admission = (student as { admission?: unknown }).admission;
+      row.phone =
+        profile?.phone?.trim() ||
+        profile?.whatsapp?.trim() ||
+        profile?.altPhone?.trim() ||
+        phoneFromAdmission(admission) ||
+        null;
+    }
 
     if (canSeeMoney) {
       const payments = (student as { payments?: Array<{ amount: number }> }).payments ?? [];
@@ -311,6 +385,21 @@ export function applyDerivedFilters(
     );
   }
 
+  if (filters.emailQuality) {
+    // Email is on every row already, so this needs no extra capability — it is
+    // a fact about a field the caller can see, not a new field.
+    result = result.filter((row) =>
+      filters.emailQuality === "problem"
+        ? row.emailQuality !== "ok"
+        : row.emailQuality === filters.emailQuality,
+    );
+  }
+
+  if (filters.missingPhone) {
+    if (!admin.can("contact")) return [];
+    result = result.filter((row) => !row.phone);
+  }
+
   return result;
 }
 
@@ -324,6 +413,12 @@ export const FILTER_PROPERTIES = {
   status: { type: "string", enum: ["active", "inactive", "graduated", "withdrawn"], description: "Enrolment status." },
   classType: { type: "string", enum: ["group", "private"] },
   deliveryMode: { type: "string", enum: ["physical", "hybrid", "online"] },
+  sessionSlot: {
+    type: "string",
+    enum: ["morning", "afternoon", "evening", "weekend"],
+    description:
+      "The sitting a student attends. 'the A1 morning class' with no branch = level A1 + sessionSlot morning across every branch.",
+  },
   goal: {
     type: "string",
     enum: ["study", "ausbildung", "work", "care", "family", "aupair", "settle", "explore", "custom"],
@@ -343,6 +438,17 @@ export const FILTER_PROPERTIES = {
   },
   startedClasses: { type: "boolean", description: "Whether they have confirmed their first class." },
   registeredWithinDays: { type: "number", description: "Only students who registered in the last N days." },
+  emailQuality: {
+    type: "string",
+    enum: ["problem", "placeholder", "invalid", "missing", "ok"],
+    description:
+      "Filter by how usable the student's email is. 'placeholder' = a stand-in address the importer minted for a spreadsheet row that had no email; 'invalid' = malformed (no @, a typo, a bare word); 'missing' = none on file; 'problem' = any of those three. Use 'problem' for 'students with a wrong or template email' and pair it with missingPhone or the contact details to find who has to be chased another way.",
+  },
+  missingPhone: {
+    type: "boolean",
+    description:
+      "true = only students with no phone number on file anywhere. Needs the contact capability. Combine with emailQuality:'problem' to find students with no working way to reach them.",
+  },
 } as const;
 
 export type AssistantTool = {
@@ -369,7 +475,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
             ...FILTER_PROPERTIES,
             groupBy: {
               type: "string",
-              enum: ["level", "branch", "status", "goal", "paymentState", "deliveryMode"],
+              enum: ["level", "branch", "status", "goal", "paymentState", "deliveryMode", "emailQuality"],
               description: "Optional. Returns a breakdown by this field as well as the total.",
             },
           },
@@ -473,17 +579,26 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
            * right and then recited the instruction back to the admin verbatim,
            * telling them not to list names. Anything phrased as prose in a tool
            * result is copy for the model to lift; a snake_case token is not.
+           *
+           * The contact variant exists because "give me their phone numbers" is
+           * a real request and the honest answer is "they are in the table, use
+           * Export CSV" — not the model reading three of sixty numbers aloud and
+           * stopping.
            */
           how_to_answer:
             rows.length === 0
               ? "no_matches__say_so_and_suggest_loosening_one_filter"
-              : "state_matched_number__then_describe_group_from_breakdown__never_list_names",
+              : rows.some((row) => row.phone !== undefined)
+                ? "state_matched_number__then_say_the_contact_details_are_in_the_table_below_and_the_admin_can_Export_CSV__never_list_them"
+                : "state_matched_number__then_describe_group_from_breakdown__never_list_names",
           filtersApplied: filters,
           breakdown: summarise(rows),
           examples_only_never_count_these: rows.slice(0, 3).map((row) => ({
             name: row.name,
             level: row.level,
             branch: row.branch,
+            ...(row.emailQuality !== "ok" ? { emailQuality: row.emailQuality } : {}),
+            ...(row.phone !== undefined ? { phone: row.phone ?? "(none on file)" } : {}),
             ...(row.owed !== undefined ? { owed: row.owed } : {}),
             ...(row.daysSinceSeen !== undefined ? { daysSinceSeen: row.daysSinceSeen } : {}),
           })),
@@ -2528,11 +2643,17 @@ function summarise(rows: StudentRow[]): Record<string, unknown> | undefined {
     .map((row) => row.daysSinceSeen)
     .filter((value): value is number => typeof value === "number");
   const neverSeen = rows.filter((row) => row.daysSinceSeen === null).length;
+  const emailProblems = rows.filter((row) => row.emailQuality !== "ok").length;
+  const noPhone = rows.filter((row) => row.phone === null).length;
 
   return {
     byLevel: tally((row) => row.level),
     byBranch: tally((row) => row.branch ?? "No branch"),
     byGoal: tally((row) => row.goal ?? "Not asked yet"),
+    // Only surfaced when there is something to say — a clean cohort should not
+    // grow an "all fine" line the model then reads out.
+    ...(emailProblems ? { byEmailQuality: tally((row) => row.emailQuality) } : {}),
+    ...(noPhone ? { withNoPhoneOnFile: noPhone } : {}),
     ...(owed.length
       ? {
           totalOwedNGN: owed.reduce((sum, value) => sum + value, 0),
@@ -2556,6 +2677,7 @@ export function describeFilters(filters: Filters): string {
   if (filters.status) parts.push(filters.status);
   if (filters.classType) parts.push(filters.classType);
   if (filters.deliveryMode) parts.push(filters.deliveryMode);
+  if (filters.sessionSlot) parts.push(`${filters.sessionSlot} sitting`);
   if (filters.goal) parts.push(goalFor(filters.goal).label);
   if (filters.batch) parts.push(filters.batch);
   if (filters.paymentState) parts.push(`${filters.paymentState} tuition`);
@@ -2563,6 +2685,9 @@ export function describeFilters(filters: Filters): string {
   if (filters.startedClasses === false) parts.push("not started classes");
   if (filters.startedClasses === true) parts.push("started classes");
   if (filters.registeredWithinDays) parts.push(`registered in last ${filters.registeredWithinDays} days`);
+  if (filters.emailQuality === "problem") parts.push("wrong / template email");
+  else if (filters.emailQuality) parts.push(`${filters.emailQuality} email`);
+  if (filters.missingPhone) parts.push("no phone on file");
   if (filters.search) parts.push(`"${filters.search}"`);
   return parts.length ? parts.join(" · ") : "All students";
 }
@@ -2616,6 +2741,64 @@ function roundAvg(total: number, n: number): number {
 }
 
 /**
+ * Classify an email address by how reachable it is. See EmailQuality.
+ *
+ * The `placeholder` rules track what the writers actually mint: the importer's
+ * `noemail.<hex>@students.placeholder.easywayschoollms.com.ng`
+ * (api/admin/students/import/route.ts), plus the `@example.com` / `.invalid` /
+ * `.test` stubs that QA and hand-entry leave behind. `invalid` is a syntax
+ * check — anything that is not `local@domain.tld`, or has a doubled dot.
+ */
+export function classifyEmail(raw: string | null | undefined): EmailQuality {
+  const email = (raw ?? "").trim().toLowerCase();
+  if (!email) return "missing";
+
+  if (
+    email.includes(".placeholder.") ||
+    email.includes("noemail") ||
+    email.endsWith(".invalid") ||
+    email.endsWith(".test") ||
+    email.endsWith(".local") ||
+    email.endsWith(".example") ||
+    /@(example|test|sample|invalid|localhost)\.[a-z.]+$/.test(email) ||
+    /^(no-?reply|donotreply|test|placeholder)@/.test(email)
+  ) {
+    return "placeholder";
+  }
+
+  if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(email) || email.includes("..")) {
+    return "invalid";
+  }
+
+  return "ok";
+}
+
+/**
+ * Salvage a phone number from the free-form admission blob — an older intake
+ * path wrote the number there and nowhere else. Returns a trimmed string or "".
+ */
+function phoneFromAdmission(admission: unknown): string {
+  if (!admission || typeof admission !== "object") return "";
+  const blob = admission as Record<string, unknown>;
+  for (const key of [
+    "phone",
+    "phoneNumber",
+    "phone_number",
+    "mobile",
+    "tel",
+    "telephone",
+    "contact",
+    "contactPhone",
+    "whatsapp",
+  ]) {
+    const value = blob[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
+}
+
+/**
  * The Prisma `select` that `basicStudentRow` expects — the minimum needed to
  * render a student in the browser cohort table, without the money/attendance
  * columns `loadStudents` adds. Used by the tools that build their own cohort
@@ -2650,10 +2833,12 @@ type BasicStudent = {
 };
 
 function basicStudentRow(student: BasicStudent): StudentRow {
+  const email = student.user?.email ?? "";
   return {
     id: student.id,
     name: student.user?.name ?? "(no name)",
-    email: student.user?.email ?? "",
+    email,
+    emailQuality: classifyEmail(email),
     studentCode: student.studentCode,
     level: student.level,
     branch: student.branch?.name ?? null,
