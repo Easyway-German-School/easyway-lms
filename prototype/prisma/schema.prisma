@@ -4253,6 +4253,18 @@ model SupportTicketMessage {
    */
   editedAt DateTime?
 
+  /**
+   * Screenshots and photos the author attached — an error on screen, a payment
+   * receipt, a photo of a letter. A JSON array of
+   * `{ url, contentType, name, size }`; `[]` when the message is text only.
+   * Images only (see /api/media/presign), and a message may carry attachments
+   * with an empty `body` — "here, look" is a whole thought with a picture under
+   * it. Half of "this isn't working" is a picture of what isn't working, and
+   * before this the only place to put one was WhatsApp, which is the channel
+   * the whole help desk exists to replace.
+   */
+  attachments Json @default("[]")
+
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)

@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { MAX_BODY, MAX_SUBJECT, isTicketTopic, openTicket } from "@/lib/support";
+import {
+  MAX_BODY,
+  MAX_SUBJECT,
+  isTicketTopic,
+  openTicket,
+  sanitizeTicketAttachments,
+} from "@/lib/support";
 
 export const dynamic = "force-dynamic";
 
@@ -66,9 +72,12 @@ export async function POST(request: Request) {
     const message = String(body.body ?? "").trim();
     const topic = isTicketTopic(body.topic) ? body.topic : "other";
     const fromPath = typeof body.fromPath === "string" ? body.fromPath.slice(0, 200) : null;
+    const attachments = sanitizeTicketAttachments(body.attachments);
 
     if (!subject) return NextResponse.json({ error: "Give your question a subject" }, { status: 400 });
-    if (!message) return NextResponse.json({ error: "Tell us what is happening" }, { status: 400 });
+    if (!message && attachments.length === 0) {
+      return NextResponse.json({ error: "Tell us what is happening, or attach a screenshot" }, { status: 400 });
+    }
     if (subject.length > MAX_SUBJECT || message.length > MAX_BODY) {
       return NextResponse.json({ error: "That is longer than we can accept" }, { status: 400 });
     }
@@ -106,6 +115,7 @@ export async function POST(request: Request) {
       fromPath,
       authorRole: String(session.user.role ?? "student").toLowerCase(),
       authorName: session.user.name ?? null,
+      attachments,
     });
 
     return NextResponse.json({ ok: true, id: ticket.id });

@@ -46,6 +46,26 @@ export const TICKET_STATUS_LABELS: Record<TicketStatus, string> = {
 export const MAX_SUBJECT = 140;
 export const MAX_BODY = 4000;
 
+/**
+ * How many images one message may carry. A handful covers "here are the three
+ * screens it goes wrong on"; more than that is a folder, not a message.
+ */
+export const MAX_ATTACHMENTS = 6;
+
+/**
+ * An image attached to a ticket message — a screenshot, a photo of an error or
+ * a receipt. Images only; the bytes live in storage by the time this is
+ * written (see lib/upload.ts and /api/media/presign) and only the metadata
+ * travels with the message. Kept here, in the import-free leaf module, so both
+ * the browser composer and the server writer can name the same shape.
+ */
+export type TicketAttachment = {
+  url: string;
+  contentType: string;
+  name: string;
+  size: number;
+};
+
 export function isTicketTopic(value: unknown): value is TicketTopic {
   return typeof value === "string" && (TICKET_TOPICS as readonly string[]).includes(value);
 }

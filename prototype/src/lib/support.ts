@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { KIND, notifyInBackground } from "@/lib/notify";
-import { MAX_BODY, MAX_SUBJECT, type TicketTopic } from "@/lib/support-copy";
+import {
+  MAX_ATTACHMENTS,
+  MAX_BODY,
+  MAX_SUBJECT,
+  type TicketAttachment,
+  type TicketTopic,
+} from "@/lib/support-copy";
 import { isAssigned, readAssignment } from "@/lib/lecturer-assignment";
 
 /**
@@ -41,10 +47,46 @@ export {
   TICKET_STATUS_LABELS,
   MAX_SUBJECT,
   MAX_BODY,
+  MAX_ATTACHMENTS,
   isTicketTopic,
   isTicketStatus,
 } from "@/lib/support-copy";
-export type { TicketTopic, TicketStatus } from "@/lib/support-copy";
+export type { TicketTopic, TicketStatus, TicketAttachment } from "@/lib/support-copy";
+
+/**
+ * Keep only what a ticket attachment is allowed to be.
+ *
+ * The browser uploads each image through lib/upload.ts first, so by the time
+ * this list arrives the bytes already sit in storage and this is the guard on
+ * the METADATA that gets written next to the message — not on the upload, which
+ * /api/media/presign has already refused if it was not an image. Both ends
+ * (the student's composer and the office's) send the same shape through the
+ * same routes, so both are sanitised here in one place: an `url` that points at
+ * our own file route or the configured bucket, an `image/*` type, capped at
+ * MAX_ATTACHMENTS. Anything that fails is dropped rather than rejected — a
+ * message with one good screenshot and one bad row should still send.
+ */
+export function sanitizeTicketAttachments(raw: unknown): TicketAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TicketAttachment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const url = String(record.url ?? "").trim();
+    const contentType = String(record.contentType ?? "").trim().toLowerCase();
+    const servedByUs =
+      url.startsWith("/api/files/") || url.startsWith("/uploads/") || url.startsWith("https://");
+    if (!servedByUs || !contentType.startsWith("image/")) continue;
+    out.push({
+      url,
+      contentType,
+      name: String(record.name ?? "image").slice(0, 200),
+      size: Number.isFinite(Number(record.size)) ? Math.max(0, Math.trunc(Number(record.size))) : 0,
+    });
+    if (out.length >= MAX_ATTACHMENTS) break;
+  }
+  return out;
+}
 
 /**
  * WHICH TUTOR "my tutor" MEANS, for one student.
@@ -135,9 +177,11 @@ export async function openTicket(input: {
   fromPath: string | null;
   authorRole: string;
   authorName: string | null;
+  attachments?: TicketAttachment[];
 }) {
   const subject = input.subject.trim().slice(0, MAX_SUBJECT);
   const body = input.body.trim().slice(0, MAX_BODY);
+  const attachments = sanitizeTicketAttachments(input.attachments ?? []);
 
   /**
    * "Ask my tutor" skips the office entirely and goes straight to the one
@@ -167,6 +211,7 @@ export async function openTicket(input: {
           authorId: input.userId,
           authorRole: input.authorRole,
           body,
+          attachments,
         },
       },
     },
@@ -225,9 +270,14 @@ export async function replyToTicket(input: {
   authorName: string | null;
   body: string;
   fromStaff: boolean;
+  attachments?: TicketAttachment[];
 }) {
   const body = input.body.trim().slice(0, MAX_BODY);
-  if (!body) return null;
+  const attachments = sanitizeTicketAttachments(input.attachments ?? []);
+  // A picture on its own is a complete reply — "here's the screen it's stuck
+  // on" needs no sentence — so an empty body is fine as long as something is
+  // attached. Both empty is the only nothing.
+  if (!body && attachments.length === 0) return null;
 
   const ticket = await prisma.supportTicket.findUnique({
     where: { id: input.ticketId },
@@ -241,8 +291,14 @@ export async function replyToTicket(input: {
       authorId: input.authorId,
       authorRole: input.authorRole,
       body,
+      attachments,
     },
   });
+
+  // For the notification line and the marketing-email fallback, a wordless
+  // message needs a stand-in the recipient can read.
+  const bodyForNotice =
+    body || (attachments.length === 1 ? "📷 Sent a photo" : `📷 Sent ${attachments.length} photos`);
 
   await prisma.supportTicket.update({
     where: { id: ticket.id },
@@ -295,7 +351,7 @@ export async function replyToTicket(input: {
       // follows the school's routing settings for this kind (off by default).
       email: fromMarketing || undefined,
       emailBody: fromMarketing
-        ? `${input.authorName ?? "The office"} replied to your enquiry "${ticket.subject}":\n\n${body}\n\nYou can reply straight back from your student portal.`
+        ? `${input.authorName ?? "The office"} replied to your enquiry "${ticket.subject}":\n\n${bodyForNotice}\n\nYou can reply straight back from your student portal.`
         : undefined,
     });
   } else if (ticket.assignedToId) {

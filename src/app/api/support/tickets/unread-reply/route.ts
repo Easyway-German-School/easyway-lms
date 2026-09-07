@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { sanitizeTicketAttachments } from "@/lib/support";
 
 export const dynamic = "force-dynamic";
 
@@ -35,10 +36,14 @@ export async function GET() {
         messages: {
           orderBy: { createdAt: "desc" },
           take: 1,
-          select: { body: true, author: { select: { name: true } } },
+          select: { body: true, attachments: true, author: { select: { name: true } } },
         },
       },
     });
+
+    const last = ticket?.messages[0];
+    const images = sanitizeTicketAttachments(last?.attachments);
+    const bodyPreview = (last?.body ?? "").trim();
 
     return NextResponse.json({
       reply: ticket
@@ -46,10 +51,16 @@ export async function GET() {
             ticketId: ticket.id,
             subject: ticket.subject,
             topic: ticket.topic,
-            from: ticket.messages[0]?.author?.name ?? "The office",
+            from: last?.author?.name ?? "The office",
             // Enough to recognise the answer, not the whole thing — the panel
-            // it links to has the full thread.
-            preview: (ticket.messages[0]?.body ?? "").slice(0, 240),
+            // it links to has the full thread. A wordless reply that is just a
+            // screenshot still needs a line to show.
+            preview: (
+              bodyPreview ||
+              (images.length === 1 ? "📷 Sent a photo" : `📷 Sent ${images.length} photos`)
+            ).slice(0, 240),
+            // The first image, so the greeting can show a thumbnail of the answer.
+            image: images[0]?.url ?? null,
             at: ticket.lastMessageAt,
           }
         : null,

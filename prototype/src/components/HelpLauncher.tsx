@@ -36,8 +36,10 @@ import {
 import {
   TICKET_TOPICS,
   TICKET_TOPIC_LABELS,
+  type TicketAttachment,
   type TicketTopic,
 } from "@/lib/support-copy";
+import { AttachmentPicker, MessageAttachments } from "@/components/support/TicketAttachments";
 
 type TicketSummary = {
   id: string;
@@ -57,6 +59,7 @@ type ThreadMessage = {
   mine: boolean;
   createdAt: string;
   edited?: boolean;
+  attachments?: TicketAttachment[];
 };
 
 const POLL_MS = 90_000;
@@ -83,7 +86,9 @@ export default function HelpLauncher() {
   const [subject, setSubject] = useState("");
   const [topic, setTopic] = useState<TicketTopic>("classes");
   const [body, setBody] = useState("");
+  const [newFiles, setNewFiles] = useState<TicketAttachment[]>([]);
   const [reply, setReply] = useState("");
+  const [replyFiles, setReplyFiles] = useState<TicketAttachment[]>([]);
 
   const loadTickets = useCallback(async () => {
     try {
@@ -142,8 +147,8 @@ export default function HelpLauncher() {
   }, [openThread]);
 
   async function submitNew() {
-    if (!subject.trim() || !body.trim()) {
-      setError("A subject and a description, and the office can help.");
+    if (!subject.trim() || (!body.trim() && newFiles.length === 0)) {
+      setError("A subject and a description — or a screenshot — and the office can help.");
       return;
     }
     setBusy(true);
@@ -152,7 +157,7 @@ export default function HelpLauncher() {
       const res = await fetch("/api/support/tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, topic, body, fromPath: pathname }),
+        body: JSON.stringify({ subject, topic, body, fromPath: pathname, attachments: newFiles }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -161,6 +166,7 @@ export default function HelpLauncher() {
       }
       setSubject("");
       setBody("");
+      setNewFiles([]);
       setSent(true);
       await loadTickets();
       setView("list");
@@ -171,16 +177,17 @@ export default function HelpLauncher() {
   }
 
   async function submitReply() {
-    if (!reply.trim() || !threadId) return;
+    if ((!reply.trim() && replyFiles.length === 0) || !threadId) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/support/tickets/${threadId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: reply }),
+        body: JSON.stringify({ body: reply, attachments: replyFiles }),
       });
       if (res.ok) {
         setReply("");
+        setReplyFiles([]);
         await openThread(threadId, threadSubject);
         await loadTickets();
       }
@@ -193,18 +200,19 @@ export default function HelpLauncher() {
     <>
       {/*
         Bottom RIGHT. The community launcher owns bottom-right on the student
-        portal already — so this sits above it rather than beside it, because
-        two round buttons of the same size side by side read as a pair of
-        equals, and one of them is "chat to your class" while the other is "I
-        am stuck". They are not equals.
+        portal already — so this sits above it rather than beside it. It is a
+        LABELLED PILL, not a matching circle: a lone "?" was read by too few
+        people as "get help", and a pill that says so in words cannot be
+        mistaken for the round "chat to your class" button next to it.
       */}
       <button
         onClick={() => setOpen((value) => !value)}
         aria-label={open ? "Close help" : "Need help?"}
         title="Need help?"
-        className="fixed bottom-24 right-5 z-40 grid h-11 w-11 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground-soft)] shadow-[var(--shadow)] transition hover:text-[var(--accent)] sm:bottom-6 sm:right-24"
+        className="fixed bottom-40 right-4 z-40 inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-semibold text-[var(--foreground-soft)] shadow-[var(--shadow)] transition hover:text-[var(--accent)] sm:bottom-6 sm:right-24"
       >
-        {open ? <CrossIcon className="h-5 w-5" /> : <HelpIcon className="h-5 w-5" />}
+        {open ? <CrossIcon className="h-4 w-4" /> : <HelpIcon className="h-4 w-4" />}
+        <span>{open ? "Close" : "Need help?"}</span>
         {!open && unread > 0 ? (
           // A counted pill, not a bare dot: "1" is a message the student can
           // read from across the screen; a 2px dot is one they have to already
@@ -354,6 +362,15 @@ export default function HelpLauncher() {
                     />
                   </div>
 
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--foreground-soft)]">
+                      A screenshot helps
+                    </label>
+                    <div className="mt-1">
+                      <AttachmentPicker value={newFiles} onChange={setNewFiles} disabled={busy} />
+                    </div>
+                  </div>
+
                   {error ? <p className="text-xs font-medium text-rose-500">{error}</p> : null}
 
                   <p className="text-[11px] leading-4 text-[var(--muted)]">
@@ -377,19 +394,26 @@ export default function HelpLauncher() {
                         {message.mine ? "You" : message.authorName ?? "The office"}
                         {message.edited ? <span className="italic"> · edited</span> : null}
                       </span>
-                      <div
-                        className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
-                          message.mine
-                            ? "bg-[var(--accent)] text-white"
-                            : "bg-[var(--surface-alt)] text-[var(--foreground)]"
-                        }`}
-                      >
-                        {message.body}
-                      </div>
+                      {message.body ? (
+                        <div
+                          className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
+                            message.mine
+                              ? "bg-[var(--accent)] text-white"
+                              : "bg-[var(--surface-alt)] text-[var(--foreground)]"
+                          }`}
+                        >
+                          {message.body}
+                        </div>
+                      ) : null}
+                      <MessageAttachments
+                        attachments={message.attachments}
+                        align={message.mine ? "end" : "start"}
+                      />
                     </div>
                   ))}
 
                   <div className="flex items-end gap-2 pt-1">
+                    <AttachmentPicker value={replyFiles} onChange={setReplyFiles} disabled={busy} compact />
                     <textarea
                       value={reply}
                       onChange={(event) => setReply(event.target.value.slice(0, 4000))}
@@ -399,7 +423,7 @@ export default function HelpLauncher() {
                     />
                     <button
                       onClick={submitReply}
-                      disabled={busy || !reply.trim()}
+                      disabled={busy || (!reply.trim() && replyFiles.length === 0)}
                       aria-label="Send reply"
                       className="shrink-0 rounded-xl bg-[var(--accent)] p-2.5 text-white transition hover:brightness-110 disabled:opacity-40"
                     >
