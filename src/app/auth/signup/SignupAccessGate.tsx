@@ -1,6 +1,10 @@
 import SignUpForm from "@/app/auth/signup/SignUpForm";
 import SignupBlocked from "@/components/SignupBlocked";
-import { validateSignupAccess, verifyInviteSig } from "@/lib/signup-access";
+import {
+  SIGNUP_ACCESS_GATE_ENABLED,
+  validateSignupAccess,
+  verifyInviteSig,
+} from "@/lib/signup-access";
 
 /**
  * The server-side gate in front of the public student signup form.
@@ -44,6 +48,38 @@ export default async function SignupAccessGate({
   // `reference` / `trxref`. Accept any of them.
   const ref = first(params.ref) || first(params.reference) || first(params.trxref);
   const sig = first(params.sig);
+
+  // Gate switched off (the default): the signup form is open to anyone, so a
+  // returning student can reach the LMS without going back through the
+  // marketing-site registration form. Any token / ref / signed invite that IS
+  // on the URL is still used to prefill the form.
+  if (!SIGNUP_ACCESS_GATE_ENABLED) {
+    const inviteParams = {
+      email: first(params.email),
+      name: first(params.name),
+      level: first(params.level),
+      branchId: first(params.branchId),
+      sessionSlot: first(params.sessionSlot),
+    };
+    let initialPrefill: Awaited<ReturnType<typeof validateSignupAccess>>["prefill"] | undefined;
+    if (!token && !ref && sig && verifyInviteSig(inviteParams, sig)) {
+      initialPrefill = inviteParams;
+    } else if (token || ref) {
+      try {
+        const result = await validateSignupAccess({ token, ref });
+        if (result.valid) initialPrefill = result.prefill;
+      } catch {
+        // Prefill is a nicety here, not a gate — fall through with none.
+      }
+    }
+    return (
+      <SignUpForm
+        pageTitle={pageTitle}
+        initialBranchName={initialBranchName}
+        initialPrefill={initialPrefill}
+      />
+    );
+  }
 
   // First-party signed invite link: no token, no ref, but a signature over the
   // prefilled params.

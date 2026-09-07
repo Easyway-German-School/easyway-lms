@@ -16,7 +16,7 @@ import { OFFERED_LEVELS } from "@/lib/levels";
 import { TIME_SLOTS } from "@/lib/class-times";
 import { TERMS_CONTEXT, TERMS_VERSION } from "@/lib/terms";
 import { REGISTRATION_FEE } from "@/lib/payment";
-import { validateSignupAccess, verifyInviteSig } from "@/lib/signup-access";
+import { SIGNUP_ACCESS_GATE_ENABLED, validateSignupAccess, verifyInviteSig } from "@/lib/signup-access";
 import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
 import { normalizeProfileInput } from "@/lib/student-profile";
 import { openEnrolment } from "@/lib/student-enrolment";
@@ -327,7 +327,9 @@ export async function POST(request: NextRequest) {
     const paystackRefValue = typeof paystackRef === "string" ? paystackRef.trim() : "";
     const inviteSigValue = typeof inviteSig === "string" ? inviteSig.trim() : "";
 
-    let accessSource: "token" | "ref" | "invite-sig" = "token";
+    // "none" — no usable proof on the request. Accepted while the gate is off
+    // (SIGNUP_ACCESS_GATE_ENABLED === false); rejected below when it is on.
+    let accessSource: "token" | "ref" | "invite-sig" | "none" = "none";
     let accessRefAmountNaira: number | undefined;
     let accessRefCurrency: string | undefined;
 
@@ -344,24 +346,39 @@ export async function POST(request: NextRequest) {
         },
         inviteSigValue,
       );
-      if (!okSig) return accessDenied();
-      accessSource = "invite-sig";
-    } else {
-      const gate = await validateSignupAccess({ token: signupTokenValue, ref: paystackRefValue });
-      if (!gate.valid) return accessDenied();
-
-      accessSource = gate.source === "ref" ? "ref" : "token";
-      accessRefAmountNaira = gate.refAmountNaira;
-      accessRefCurrency = gate.refCurrency;
-
-      // The proof was issued FOR an email; the account being created must use
-      // it, or a leaked-but-unused link is a free account for whoever finds it.
-      if (gate.email && gate.email.toLowerCase() !== normalizedEmail) {
-        return NextResponse.json(
-          { error: "This signup link was issued for a different email address." },
-          { status: 403, headers: buildCorsHeaders(request) },
-        );
+      if (okSig) {
+        accessSource = "invite-sig";
+      } else if (SIGNUP_ACCESS_GATE_ENABLED) {
+        return accessDenied();
       }
+    } else if (signupTokenValue || paystackRefValue) {
+      const gate = await validateSignupAccess({ token: signupTokenValue, ref: paystackRefValue });
+      if (gate.valid) {
+        accessSource = gate.source === "ref" ? "ref" : "token";
+        accessRefAmountNaira = gate.refAmountNaira;
+        accessRefCurrency = gate.refCurrency;
+
+        // The proof was issued FOR an email; the account being created must use
+        // it, or a leaked-but-unused link is a free account for whoever finds it.
+        if (gate.email && gate.email.toLowerCase() !== normalizedEmail) {
+          if (SIGNUP_ACCESS_GATE_ENABLED) {
+            return NextResponse.json(
+              { error: "This signup link was issued for a different email address." },
+              { status: 403, headers: buildCorsHeaders(request) },
+            );
+          }
+          // Gate off: don't block the signup, but don't spend a proof that
+          // belongs to someone else either.
+          accessSource = "none";
+          accessRefAmountNaira = undefined;
+          accessRefCurrency = undefined;
+        }
+      } else if (SIGNUP_ACCESS_GATE_ENABLED) {
+        return accessDenied();
+      }
+    } else if (SIGNUP_ACCESS_GATE_ENABLED) {
+      // No token, no ref, no invite signature anywhere on the request.
+      return accessDenied();
     }
     // ──────────────────────────────────────────────────────────────────────
 
