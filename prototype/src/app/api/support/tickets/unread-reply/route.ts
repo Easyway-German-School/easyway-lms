@@ -63,12 +63,12 @@ export async function GET() {
             // The first image, so the greeting can show a thumbnail of the answer.
             image: images[0]?.url ?? null,
             at: ticket.lastMessageAt,
-            // True when the enquiry came from the public /programs page — the
-            // Travel Package card and the other marketing enquiries. These are
-            // people who are not living in the portal yet and whose next update
-            // (documents, payment steps, a deadline) is time-sensitive, so this
-            // is the one reply worth spending a notification-permission ask on.
-            fromMarketing: (ticket.fromPath ?? "").startsWith("/programs"),
+            // True when the enquiry came from a marketing surface — the /programs
+            // Travel Package card, or the /exams/osd exam-campaign page. These
+            // are people whose next update (documents, payment steps, a
+            // deadline) is time-sensitive, so this is the one reply worth
+            // spending a notification-permission ask on.
+            fromMarketing: /^\/(programs|exams\/osd)/.test(ticket.fromPath ?? ""),
           }
         : null,
     });

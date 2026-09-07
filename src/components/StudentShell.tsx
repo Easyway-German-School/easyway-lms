@@ -9,6 +9,7 @@ import ImpersonationBanner from "@/components/ImpersonationBanner";
 import OfflineBanner from "@/components/OfflineBanner";
 import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import OfficeReplyMoment from "@/components/moment/OfficeReplyMoment";
+import ExamCampaignMoment from "@/components/moment/ExamCampaignMoment";
 import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
 import TravelPackageNotifyNudge from "@/components/moment/TravelPackageNotifyNudge";
 import PortalUpdates from "@/components/PortalUpdates";
@@ -494,6 +495,15 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         stacks on the tour or a celebration. See OfficeReplyMoment.
       */}
       <OfficeReplyMoment />
+
+      {/*
+        "The ÖSD exam is now in Lagos — register before it closes." A daily
+        campaign popup, once a calendar day, for every student until they mark
+        themselves registered. Ungated by `hasAccess` on purpose — the office
+        wants it in front of everyone, paid or not — and queue-ranked at 63 so
+        it never preempts earned news. See components/moment/ExamCampaignMoment.tsx.
+      */}
+      <ExamCampaignMoment />
 
       {/*
         Becca recreating the important parts of the sign-up form for a student

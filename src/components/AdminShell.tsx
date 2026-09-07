@@ -108,6 +108,9 @@ const navItems: NavItem[] = [
   { label: 'Certificates', href: '/admin/certificates', icon: <CertificateIcon />, group: 'Academics' },
 
   { label: 'Exams', href: '/admin/exams', icon: <ExamIcon />, group: 'Exams' },
+  // The ÖSD October 2026 registration campaign — the on/off switch, the dates
+  // and fees the popup and the /exams/osd page show, and who has registered.
+  { label: 'ÖSD campaign', href: '/admin/exam-campaign', icon: <BroadcastIcon />, group: 'Exams' },
   // The dashboard has counted unmarked work since it was built and had nowhere
   // to send anybody. This is that somewhere.
   { label: 'Marking queue', href: '/admin/marking', icon: <PencilIcon />, group: 'Exams' },

@@ -106,6 +106,7 @@ export type MomentId =
   | "level-advance"
   | "office-reply"
   | "lesson-complete"
+  | "exam-campaign"
   | "notifications"
   | "notifications-travel"
   | "daily-briefing"
@@ -193,6 +194,22 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Nice work",
     dockBlurb: "You finished something — come see.",
+  },
+  /**
+   * "The ÖSD exam is now in Lagos — register before it closes." A time-boxed
+   * campaign with a hard external deadline, shown once a calendar day while it
+   * runs, to every student who has not marked themselves registered. It sits
+   * below a finished lesson / level and the office reply — news about THEM
+   * always wins — but above the standing notification ask and Becca's daily
+   * hello, so on an ordinary day it takes the first slot and only docks behind
+   * genuine earned-news. Counts against the two-modal cap like any other modal;
+   * the bell, the pinned banner and the 3×/week reminder carry it when it docks.
+   */
+  "exam-campaign": {
+    priority: 63,
+    kind: "modal",
+    dockLabel: "Register for the ÖSD exam",
+    dockBlurb: "Dates, fees and the free prep class — before registration closes.",
   },
   /**
    * Asking for notification permission, and where it sits.

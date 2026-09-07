@@ -116,45 +116,46 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  student            Student?
-  lecturer           Lecturer?
-  parent             Parent?
-  sessions           Session[]
-  missionProgress    MissionProgress[]
-  dailyMissions      DailyMission[]
-  messages           Message[]
-  moderatedMessages  Message[]                @relation("MessageModerator")
-  pinnedMessages     Message[]                @relation("MessagePinner")
-  messageReactions   MessageReaction[]
-  communityMute      CommunityMute?           @relation("MutedMember")
-  mutesIssued        CommunityMute[]          @relation("MuteAuthor")
-  channelReads       ChannelRead[]
-  typingPings        TypingPing[]
-  pushSubs           PushSubscription[]
-  examRegistrations  ExamRegistration[]
-  notifications      Notification[]           @relation("NotificationRecipient")
-  notificationPrefs  NotificationPreference[]
-  sentNotifications  Notification[]           @relation("NotificationSender")
-  proposedActions    AdminAction[]            @relation("AdminActionCreator")
-  executedActions    AdminAction[]            @relation("AdminActionExecutor")
-  auditEvents        AuditLog[]               @relation("AuditActor")
-  auditRestores      AuditLog[]               @relation("AuditRestorer")
-  supportTickets     SupportTicket[]          @relation("SupportTicketAuthor")
-  assignedTickets    SupportTicket[]          @relation("SupportTicketAssignee")
-  supportReplies     SupportTicketMessage[]
-  gameMatches        GameMatch[]
-  gameTurnsAssigned  GameTurn[]               @relation("GameTurnAssignee")
-  gameTurnsWritten   GameTurn[]               @relation("GameTurnAuthor")
-  constraintDecks    ConstraintDeck[]
-  sentTutorMessages  TutorMessage[]
-  studentAiUsage     StudentAiUsage[]
-  betaFeedback       BetaFeedback[]
-  learnerUsage       LearnerUsageEvent[]
-  behaviourProfile   LearnerBehaviourProfile?
-  termsAcceptances   TermsAcceptance[]
-  refundRequests     RefundRequest[]          @relation("RefundRequestStudent")
-  refundsDecided     RefundRequest[]          @relation("RefundRequestDecider")
-  analyticsConsentAt DateTime?
+  student               Student?
+  lecturer              Lecturer?
+  parent                Parent?
+  sessions              Session[]
+  missionProgress       MissionProgress[]
+  dailyMissions         DailyMission[]
+  messages              Message[]
+  moderatedMessages     Message[]                @relation("MessageModerator")
+  pinnedMessages        Message[]                @relation("MessagePinner")
+  messageReactions      MessageReaction[]
+  communityMute         CommunityMute?           @relation("MutedMember")
+  mutesIssued           CommunityMute[]          @relation("MuteAuthor")
+  channelReads          ChannelRead[]
+  typingPings           TypingPing[]
+  pushSubs              PushSubscription[]
+  examRegistrations     ExamRegistration[]
+  notifications         Notification[]           @relation("NotificationRecipient")
+  notificationPrefs     NotificationPreference[]
+  sentNotifications     Notification[]           @relation("NotificationSender")
+  proposedActions       AdminAction[]            @relation("AdminActionCreator")
+  executedActions       AdminAction[]            @relation("AdminActionExecutor")
+  auditEvents           AuditLog[]               @relation("AuditActor")
+  auditRestores         AuditLog[]               @relation("AuditRestorer")
+  supportTickets        SupportTicket[]          @relation("SupportTicketAuthor")
+  assignedTickets       SupportTicket[]          @relation("SupportTicketAssignee")
+  supportReplies        SupportTicketMessage[]
+  gameMatches           GameMatch[]
+  gameTurnsAssigned     GameTurn[]               @relation("GameTurnAssignee")
+  gameTurnsWritten      GameTurn[]               @relation("GameTurnAuthor")
+  constraintDecks       ConstraintDeck[]
+  sentTutorMessages     TutorMessage[]
+  studentAiUsage        StudentAiUsage[]
+  betaFeedback          BetaFeedback[]
+  learnerUsage          LearnerUsageEvent[]
+  behaviourProfile      LearnerBehaviourProfile?
+  termsAcceptances      TermsAcceptance[]
+  refundRequests        RefundRequest[]          @relation("RefundRequestStudent")
+  refundsDecided        RefundRequest[]          @relation("RefundRequestDecider")
+  examCampaignResponses ExamCampaignResponse[]
+  analyticsConsentAt    DateTime?
   /**
    * Set only when the person has ASKED to be left out of learning analytics.
    * `analyticsConsentAt` above cannot express this: null there means "never
@@ -163,7 +164,7 @@ model User {
    * a handful of volunteers and none on the other two hundred students it is
    * responsible for. An explicit column means an explicit refusal.
    */
-  analyticsOptOutAt  DateTime?
+  analyticsOptOutAt     DateTime?
 
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
@@ -302,6 +303,7 @@ model Tenant {
   auditLogs               AuditLog[]
   backupRuns              BackupRun[]
   schoolSettings          SchoolSetting[]
+  examCampaignResponses   ExamCampaignResponse[]
   messageReactions        MessageReaction[]
   communityMutes          CommunityMute[]
 
@@ -315,19 +317,19 @@ model Tenant {
   paymentPlans     PaymentPlan[]
 
   /// Back-relations for the Work Drive tables. See docs/WORK_DRIVE.md.
-  workspaces        Workspace[]
-  workspaceMembers  WorkspaceMember[]
-  driveFolders      DriveFolder[]
-  driveFiles        DriveFile[]
-  driveFileVersions DriveFileVersion[]
-  driveFileTexts    DriveFileText[]
-  fileShares        FileShare[]
-  fileActivity      FileActivity[]
-  fileComments      FileComment[]
-  workEvents        WorkEvent[]
-  eventAttendees    EventAttendee[]
-  eventTasks        EventTask[]
-  eventResources    EventResource[]
+  workspaces           Workspace[]
+  workspaceMembers     WorkspaceMember[]
+  driveFolders         DriveFolder[]
+  driveFiles           DriveFile[]
+  driveFileVersions    DriveFileVersion[]
+  driveFileTexts       DriveFileText[]
+  fileShares           FileShare[]
+  fileActivity         FileActivity[]
+  fileComments         FileComment[]
+  workEvents           WorkEvent[]
+  eventAttendees       EventAttendee[]
+  eventTasks           EventTask[]
+  eventResources       EventResource[]
   webinars             Webinar[]
   webinarQuestions     WebinarQuestion[]
   webinarQuestionVotes WebinarQuestionVote[]
@@ -363,6 +365,36 @@ model SchoolSetting {
 
   @@unique([tenantId, key])
   @@index([tenantId])
+}
+
+/// One student's standing with one marketing campaign — currently the ÖSD
+/// October 2026 exam push. The campaign CONTENT (dates, fees, links, the on/off
+/// switch) is a `SchoolSetting` row keyed `exam.campaign`; this table is only
+/// the per-person "I've registered" / "I asked the office" flags, which the
+/// daily popup, the reminder sweep and the admin tracker all read.
+///
+/// Keyed on User rather than Student so a phone-only account with no Student row
+/// can still dismiss the popup. `campaignKey` (not a FK) so the next sitting is
+/// a new key and the old rows stay as history rather than needing a wipe.
+model ExamCampaignResponse {
+  id           String    @id @default(cuid())
+  campaignKey  String
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Denormalised for the admin tracker's branch/level breakdown without a join.
+  studentId    String?
+  registered   Boolean   @default(false)
+  enquired     Boolean   @default(false)
+  registeredAt DateTime?
+  enquiredAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, campaignKey])
+  @@index([tenantId, campaignKey])
 }
 
 /// A partner's credential for the public API.
@@ -634,7 +666,7 @@ model Student {
    * within a fortnight. Null until the student answers the one-question card
    * on the study-plan tab.
    */
-  learningPreferences   Json?
+  learningPreferences Json?
 
   /**
    * Admin-authored classification labels — "scholarship", "corporate", "vip",
@@ -735,7 +767,6 @@ model Student {
  * manual add / CSV import (see src/lib/student-profile.ts, the one parser all
  * three writers now share) and never re-collected on promotion — a level
  * change touches `Student.level`, not this row.
- *
  * Not itself soft-deleted: it cascades with its Student, and Student deletes
  * are already rewritten into soft updates by prisma-guard.ts, so this row is
  * simply carried along with a soft-deleted student rather than orphaned.
@@ -797,7 +828,6 @@ model StudentProfile {
 /**
  * One row per student × level × batch — the record that survives a
  * promotion, where `Student.level` (overwritten every time) does not.
- *
  * WHY THIS EXISTS. Before it, `promoteStudents()` (src/lib/promotion.ts) did
  * `student.update({ level: next, admission: {...admission, batch: monthName}
  * })` — a straight overwrite. The fact that somebody did A1 in the September
@@ -805,13 +835,11 @@ model StudentProfile {
  * was gone the moment they moved to A2. "Batch" was a bare month name with no
  * year, so there was no way to answer "who studied with us in 2024" or tell a
  * genuinely returning student (one with a real prior stint) from a new one.
- *
  * Exactly one row per student should ever be `outcome: "ongoing"` at a time —
  * see openEnrolment/closeOpenEnrolment in src/lib/student-enrolment.ts, the
  * only functions that write this table. A level transition closes the open
  * row (`endedAt`, `outcome: "completed"`) and opens the next; a withdrawal or
  * graduation closes it without opening another.
- *
  * `Student.level`/`branchId`/`tutorId`/`sessionSlot`/`classType` stay exactly
  * as they were — a denormalized CURRENT pointer nothing that already reads
  * them has to change for. This table is the history underneath that pointer,
@@ -1315,14 +1343,12 @@ model Material {
 
   /**
    * ADMIN TARGETING — who an office upload is aimed at.
-   *
    * A tutor uploading through their own portal owns the material via
    * `lecturerId` and it reaches their roster. An admin has no single roster, so
    * an office upload instead describes the cohort it is for: a level (`level`
    * below), and optionally one branch, one sitting and one intake batch. Any
    * left null means "no restriction on that axis" — `branchId` null is every
    * branch at the level, exactly as a plain level upload behaved before this.
-   *
    * The tutor portal reads these the same way it reads a tutor's own
    * assignment, so an office upload for "Lagos · A1 · morning" surfaces for
    * every tutor whose assignment covers it, across branches and batches, and
@@ -1367,16 +1393,16 @@ model Material {
    * always did — a tutor uploading at 6am for a 9am class must not have their
    * material hidden because a queue has not run.
    */
-  aiSummary     String?
+  aiSummary        String?
   /**
    * Bullet points a student can skim in fifteen seconds.
    */
-  aiKeyPoints   Json?
+  aiKeyPoints      Json?
   /**
    * Quests generated from this material: short, concrete tasks with an answer,
    * so reading it turns into something to do rather than something to file.
    */
-  aiQuests      Json?
+  aiQuests         Json?
   /**
    * A written-up study note built from this material in the same background
    * pass as `aiSummary`/`aiQuests` — see src/lib/material-ai.ts. Shape:
@@ -1386,9 +1412,9 @@ model Material {
    * sign-off as the quests (`questsReviewedAt`) — the model's output never
    * reaches a student unmoderated.
    */
-  aiNotes       Json?
-  aiState       String    @default("none") // none | pending | ready | failed
-  aiUpdatedAt   DateTime?
+  aiNotes          Json?
+  aiState          String    @default("none") // none | pending | ready | failed
+  aiUpdatedAt      DateTime?
   /**
    * A tutor's sign-off on the AI-generated quests, separate from `aiState`
    * (which only tracks whether generation finished, not whether anyone
@@ -1402,19 +1428,19 @@ model Material {
    * purpose — a class recording belongs to a level but not always to a
    * course, and the library filters on level far more often than it joins.
    */
-  level         String?
+  level            String?
   /**
    * Groups episodes into a shelf, e.g. "A1 Speaking Lab". Free text: the
    * tutor names their own series, the library rows come from whatever exists.
    */
-  series        String?
-  episodeNumber Int?
+  series           String?
+  episodeNumber    Int?
   /**
    * Recorded-on date for a class tape, which is what the library sorts and
    * labels by. Distinct from createdAt, since a tutor often uploads last
    * week's class today.
    */
-  recordedAt    DateTime?
+  recordedAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1635,12 +1661,12 @@ model ClassTranscript {
    * there is no reliable "this correction was FOR this student"; with
    * exactly two, there is.
    */
-  isPrivate Boolean @default(false)
+  isPrivate          Boolean @default(false)
   /**
    * Private only. [{mistake, correction, note?}] — corrected in this
    * session, named from the transcript, never invented.
    */
-  corrections Json?
+  corrections        Json?
   /**
    * Private only. Short list of concrete moments the tutor praised or the
    * student visibly improved on.
@@ -1694,7 +1720,6 @@ model ClassTranscript {
  * later re-generation of the AI notes above. That last part matters:
  * `ClassTranscript` can be regenerated (a retried failure, a better model
  * later) without ever clobbering something a student wrote in their own copy.
- *
  * One per (student, material) rather than per transcript, so a student can
  * start jotting notes while watching even before the AI pass finishes — the
  * two are independent, exactly like `VideoProgress` tracks a position
@@ -2493,8 +2518,8 @@ model Exam {
   /**
    * Only published sittings are bookable by candidates.
    */
-  published       Boolean @default(false)
-  resultsReleased Boolean @default(true)
+  published         Boolean   @default(false)
+  resultsReleased   Boolean   @default(true)
   /**
    * When results were last released to students — set by the manual toggle and
    * by the automatic release sweep. Lets both tell "released" from "released
@@ -2592,8 +2617,8 @@ model Channel {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  messages Message[]
-  reads    ChannelRead[]
+  messages    Message[]
+  reads       ChannelRead[]
   typingPings TypingPing[]
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
@@ -3243,7 +3268,7 @@ model NotificationSetting {
    * once an admin (or the code default in src/lib/mail-identity.ts) turns it
    * on, not the other way round.
    */
-  sms Boolean @default(false)
+  sms   Boolean @default(false)
 
   /**
    * Which sender an emailed copy uses — "support" or "noreply". Null follows
@@ -3295,7 +3320,7 @@ model NotificationPreference {
    * kind's routing (NotificationSetting.sms) has SMS on in the first place —
    * see the "may only narrow" rule in src/lib/notification-prefs.ts.
    */
-  sms Boolean @default(true)
+  sms   Boolean @default(true)
 
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
@@ -3386,9 +3411,9 @@ model PayrollPayment {
   lecturerId String
   lecturer   Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
 
-  amount Int
+  amount         Int
   /// Free text, e.g. "September 2026" — the pay period this covers, for the tutor's and the office's own reading of the record.
-  periodLabel String
+  periodLabel    String
   /// Snapshot of how many held classes this was computed against, when the
   /// rate is per_class — kept even if the rate or the classes change later,
   /// so the record stays honest about what it was actually based on.
@@ -5074,7 +5099,7 @@ model MaterialQuestAttempt {
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
-  tenantRef Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([studentId, materialId, questIndex])
   @@index([tenantId])
@@ -5303,7 +5328,6 @@ model ConstraintDeck {
 
 /**
  * The gate on public student signup.
- *
  * `/auth/signup` is reached from two WordPress enrolment forms. A returning
  * student arrives with a one-time `token` minted here (via POST
  * /api/signup-tokens); a new student pays the registration fee on the
@@ -5311,14 +5335,12 @@ model ConstraintDeck {
  * required — both by the page (SignupAccessGate) and by the API
  * (POST /api/auth/signup) — so nobody can type the URL, or POST the endpoint,
  * to create an account without going through enrolment / paying the fee.
- *
  * ONE ROW, TWO SHAPES:
- *   token set        a returning-student invite. Consumed (used = true) the
- *                    moment that student's account is created.
- *   paystackRef set  written AT signup as the consumption marker for a
- *                    new-student Paystack reference, so the same paid ref
- *                    cannot be replayed to mint a second account.
- *
+ * token set        a returning-student invite. Consumed (used = true) the
+ * moment that student's account is created.
+ * paystackRef set  written AT signup as the consumption marker for a
+ * new-student Paystack reference, so the same paid ref
+ * cannot be replayed to mint a second account.
  * GLOBAL, not tenant-owned — see src/lib/tenant/registry.ts. Like
  * PasswordResetToken it is looked up by an unguessable secret BEFORE anyone is
  * signed in (the whole point is that the visitor has no session yet), so a
@@ -5389,35 +5411,35 @@ model SignupToken {
 /// the record of who did what.
 
 model Workspace {
-  id          String  @id @default(cuid())
-  name        String
+  id               String    @id @default(cuid())
+  name             String
   /// URL-safe, unique per tenant. The workspace's address under /admin/work-drive.
-  slug        String
-  description String?
+  slug             String
+  description      String?
   /// A name from the shared icon set (components/icons.tsx), never an emoji.
-  icon        String  @default("folder")
+  icon             String    @default("folder")
   /// A theme token key ("sky" | "amber" | ...), resolved through the theme so
   /// it stays legible in Tag/Nacht/Daemmerung. Never a raw hex.
-  color       String  @default("slate")
+  color            String    @default("slate")
   /// general | department | project | event — grouping plus which empty state
   /// and defaults to show. An `event` workspace is built around one WorkEvent
   /// and archived with it.
-  kind        String  @default("general")
+  kind             String    @default("general")
   /// private | staff | branch
   ///   private  only WorkspaceMembers
   ///   staff    every admin/lecturer in the tenant (read-only unless a member)
   ///   branch   staff at `branchId`
   /// Fail closed: an unknown value is read as `private`.
-  visibility  String  @default("private")
+  visibility       String    @default("private")
   /// Set only when visibility = branch.
-  branchId    String?
-  createdById String?
+  branchId         String?
+  createdById      String?
   /// Soft archive: hidden from the default list, files intact. Distinct from
   /// deletedAt, which is the trash.
-  archivedAt  DateTime?
+  archivedAt       DateTime?
   /// Denormalised sum of live DriveFile.sizeBytes here, kept in step on
   /// upload/delete so the quota meter needs no aggregate.
-  storageUsedBytes BigInt @default(0)
+  storageUsedBytes BigInt    @default(0)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -5463,16 +5485,16 @@ model WorkspaceMember {
 
 /// A folder in a workspace's tree.
 model DriveFolder {
-  id          String    @id @default(cuid())
+  id          String        @id @default(cuid())
   workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   parentId    String?
   parent      DriveFolder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
   children    DriveFolder[] @relation("FolderTree")
   name        String
   /// Materialised path from the workspace root, e.g. "/Finance/2026/Q3". Kept
   /// in step on move/rename so breadcrumbs and prefix search need no recursion.
-  path        String   @default("/")
+  path        String        @default("/")
   createdById String?
 
   createdAt DateTime  @default(now())
@@ -5493,25 +5515,25 @@ model DriveFolder {
 /// One file. The bytes live in the object bucket at `storageKey`; this row is
 /// the metadata everything else reads.
 model DriveFile {
-  id          String    @id @default(cuid())
-  workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  folderId    String?
-  folder      DriveFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  name        String
-  mimeType    String   @default("application/octet-stream")
-  sizeBytes   BigInt   @default(0)
+  id               String            @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folderId         String?
+  folder           DriveFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  name             String
+  mimeType         String            @default("application/octet-stream")
+  sizeBytes        BigInt            @default(0)
   /// R2 object key under the `work-drive/` prefix. See src/lib/storage.ts.
-  storageKey  String
+  storageKey       String
   /// sha256 of the current bytes — integrity checks and duplicate detection.
-  checksum    String?
+  checksum         String?
   /// document | spreadsheet | image | video | audio | pdf | archive | other —
   /// derived from mimeType on upload, drives the icon and the type filter.
-  kind        String   @default("other")
+  kind             String            @default("other")
   /// FK to the current DriveFileVersion. Null until the first version row is
   /// written (which happens on upload). @unique so a version is "current" for
   /// exactly one file.
-  currentVersionId String? @unique
+  currentVersionId String?           @unique
   currentVersion   DriveFileVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
 
   createdById      String?
@@ -5527,9 +5549,9 @@ model DriveFile {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  versions DriveFileVersion[] @relation("FileVersions")
-  text     DriveFileText?
-  comments FileComment[]
+  versions       DriveFileVersion[] @relation("FileVersions")
+  text           DriveFileText?
+  comments       FileComment[]
   eventResources EventResource[]
 
   /// Full-text search vector over the FILENAME only — a Postgres generated
@@ -5594,20 +5616,20 @@ model DriveFileText {
 /// member of. No public link tokens in v1 — sharing is always to a named
 /// person inside the tenant.
 model FileShare {
-  id         String @id @default(cuid())
+  id               String    @id @default(cuid())
   /// file | folder
-  targetType String
-  targetId   String
-  sharedById String?
+  targetType       String
+  targetId         String
+  sharedById       String?
   /// The recipient's user id. Plain string, no relation — matches the actor
   /// columns. A revoke or the account's deletion is what ends a share; an
   /// orphaned row is filtered out at read time by the recipient lookup.
   sharedWithUserId String
   /// view | edit
-  permission String   @default("view")
-  expiresAt  DateTime?
-  revokedAt  DateTime?
-  createdAt  DateTime @default(now())
+  permission       String    @default("view")
+  expiresAt        DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
 
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -5685,14 +5707,14 @@ model WorkEvent {
   /// Free text: a room, an address, or "Online".
   location    String?
 
-  startAt DateTime
+  startAt  DateTime
   /// Null for a point-in-time entry (a deadline). Otherwise the end.
-  endAt   DateTime?
-  allDay  Boolean  @default(false)
+  endAt    DateTime?
+  allDay   Boolean   @default(false)
   /// RFC 5545 recurrence string, or null for a one-off. Expanded at read time.
   rrule    String?
   /// IANA zone the times are anchored to, e.g. "Africa/Lagos".
-  timezone String  @default("UTC")
+  timezone String    @default("UTC")
 
   /// workspace | staff | branch | public
   ///   workspace  members of `workspaceId`
@@ -5743,8 +5765,8 @@ model EventAttendee {
   /// host | co_host | presenter | attendee
   role     String @default("attendee")
 
-  checkInAt      DateTime?
-  reminderSentAt DateTime?
+  checkInAt          DateTime?
+  reminderSentAt     DateTime?
   /// landing_page | manual | import
   registrationSource String?
 
@@ -5786,14 +5808,14 @@ model EventTask {
 
 /// A Work Drive file attached to an event — an agenda deck, a handout.
 model EventResource {
-  id      String    @id @default(cuid())
-  eventId String
-  event   WorkEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  fileId  String
-  file    DriveFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
-  label   String?
+  id                 String    @id @default(cuid())
+  eventId            String
+  event              WorkEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  fileId             String
+  file               DriveFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  label              String?
   /// Publish this file to registrants after the event.
-  visibleToAttendees Boolean @default(false)
+  visibleToAttendees Boolean   @default(false)
 
   createdAt DateTime @default(now())
 
@@ -5833,11 +5855,11 @@ model Webinar {
   /// gets the landing page and external registration.
   audience String @default("staff")
 
-  registrationRequired   Boolean   @default(true)
-  registrationOpensAt    DateTime?
-  registrationClosesAt   DateTime?
+  registrationRequired Boolean   @default(true)
+  registrationOpensAt  DateTime?
+  registrationClosesAt DateTime?
   /// Null = no cap.
-  capacity               Int?
+  capacity             Int?
 
   /// The public page lives at /w/<landingSlug>. Set only for a `public`
   /// audience. Unique per tenant.
@@ -5851,7 +5873,7 @@ model Webinar {
   /// Start a LiveKit egress capture when the host joins, the same as a class.
   recordAutomatically Boolean @default(true)
   /// The Material row for the finished recording, once there is one.
-  recordingId String?
+  recordingId         String?
 
   startedAt DateTime?
   endedAt   DateTime?
@@ -5886,7 +5908,7 @@ model WebinarQuestion {
   upvotes Int @default(0)
 
   /// pending | answered | dismissed
-  status     String  @default("pending")
+  status       String    @default("pending")
   answeredById String?
   answeredAt   DateTime?
   answerText   String?
