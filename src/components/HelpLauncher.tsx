@@ -193,18 +193,19 @@ export default function HelpLauncher() {
     <>
       {/*
         Bottom RIGHT. The community launcher owns bottom-right on the student
-        portal already — so this sits above it rather than beside it, because
-        two round buttons of the same size side by side read as a pair of
-        equals, and one of them is "chat to your class" while the other is "I
-        am stuck". They are not equals.
+        portal already — so this sits above it rather than beside it. It is a
+        LABELLED PILL, not a matching circle: a lone "?" was read by too few
+        people as "get help", and a pill that says so in words cannot be
+        mistaken for the round "chat to your class" button next to it.
       */}
       <button
         onClick={() => setOpen((value) => !value)}
         aria-label={open ? "Close help" : "Need help?"}
         title="Need help?"
-        className="fixed bottom-24 right-5 z-40 grid h-11 w-11 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground-soft)] shadow-[var(--shadow)] transition hover:text-[var(--accent)] sm:bottom-6 sm:right-24"
+        className="fixed bottom-40 right-4 z-40 inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-semibold text-[var(--foreground-soft)] shadow-[var(--shadow)] transition hover:text-[var(--accent)] sm:bottom-6 sm:right-24"
       >
-        {open ? <CrossIcon className="h-5 w-5" /> : <HelpIcon className="h-5 w-5" />}
+        {open ? <CrossIcon className="h-4 w-4" /> : <HelpIcon className="h-4 w-4" />}
+        <span>{open ? "Close" : "Need help?"}</span>
         {!open && unread > 0 ? (
           // A counted pill, not a bare dot: "1" is a message the student can
           // read from across the screen; a 2px dot is one they have to already
