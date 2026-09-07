@@ -216,6 +216,19 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * Students with no branch set get a once-a-week nudge from Becca to place
+   * themselves. Self-gated: idempotent per ISO week via the dedupeKey, and a
+   * student drops out of it the moment they pick a branch. See
+   * src/lib/branch-nudge.ts.
+   */
+  results.push(
+    await run("profile-branch-nudge", async () => {
+      const { nudgeStudentsWithoutBranch } = await import("@/lib/branch-nudge");
+      return nudgeStudentsWithoutBranch();
+    }),
+  );
+
+  /**
    * Ask, once a day, whether the backups are still happening.
    *
    * Deliberately runs here rather than as its own schedule. This tick is the

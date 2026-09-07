@@ -31,8 +31,27 @@ export const KIND = {
   gatewayError: "gateway.error",
   tuitionReminder: "tuition.reminder",
   examRegistered: "exam.registered",
+  /** A mock / pretest sitting is coming up — sent to the class and the tutor. */
+  examPretest: "exam.pretest",
+  /**
+   * Internal, to the tutor (and the office if it drags): a sitting has marks
+   * in the gradebook but the results have not been released to students. The
+   * nudge the auto-release flow falls back to. See src/lib/result-release.ts.
+   */
+  resultReleaseNudge: "result.release_nudge",
   levelAdvance: "level.advance",
   materialPublished: "material.published",
+  /**
+   * To the tutor: the AI has finished reading an uploaded material and its
+   * quests / study notes are waiting for a sign-off before students see them.
+   * See src/lib/material-ai.ts.
+   */
+  questsToReview: "quests.to_review",
+  /**
+   * To the student: their tutor signed off the quests + written-up notes for a
+   * material, so both are now live. See the quests review PATCH.
+   */
+  studyNotesReady: "study_notes.ready",
   assignmentDue: "assignment.due",
   /** A student handed in work. The tutor who set it is waiting to mark it. */
   assignmentSubmitted: "assignment.submitted",
@@ -66,6 +85,10 @@ export const KIND = {
   recordingExpiring: "recording.expiring",
   /** Becca couldn't write up notes for a tutor's uploaded material — the tutor can retry. See src/lib/material-ai.ts. */
   studyNotesFailed: "study_notes.failed",
+  /** A student still has no profile photo — Becca nudges them, at most once a week. See src/lib/profile-photo-nudge.ts. */
+  profilePhotoMissing: "profile.photo_missing",
+  /** A student has no branch set — Becca asks them to place themselves, at most once a week. See src/lib/branch-nudge.ts. */
+  profileBranchMissing: "profile.branch_missing",
   general: "general",
 } as const;
 

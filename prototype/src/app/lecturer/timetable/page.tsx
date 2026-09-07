@@ -294,15 +294,6 @@ export default function LecturerTimetablePage() {
     return map;
   }, [allSessions]);
 
-  // dotId → its session, so a drag can be turned back into a reschedule.
-  const dotIndex = useMemo(() => {
-    const map = new Map<string, Session>();
-    for (const s of allSessions) {
-      map.set(dotIdFor(branchId, level, s.timeSlot, ymd(new Date(s.date))), s);
-    }
-    return map;
-  }, [allSessions, branchId, level]);
-
   const days = useMemo(() => {
     const map = new Map<string, DayCell>();
     for (const [key, list] of sessionsByDay) {
@@ -451,36 +442,6 @@ export default function LecturerTimetablePage() {
     }
   }
 
-  /** Drag: a dot dropped on `toDay`. Move (or un-move) that class. */
-  async function rescheduleDot(dotId: string, _fromDay: string, toDay: string) {
-    const session = dotIndex.get(dotId);
-    if (!session) return;
-    if (closedDays.some((h) => ymd(new Date(h.date)) === toDay)) {
-      if (!window.confirm(`${shortDay(toDay)} is marked as a school holiday. Move the class there anyway?`)) return;
-    }
-    const naturalDay = ymd(new Date(session.date));
-    const before = { status: session.status, postponedTo: session.postponedTo };
-    const next =
-      toDay === naturalDay
-        ? { status: "scheduled", postponedTo: null as string | null }
-        : { status: "postponed", postponedTo: isoUTC(toDay) };
-    setSaved("");
-    try {
-      await putSession(session, { ...next, startTime: session.startTime, endTime: session.endTime });
-      setUndo({
-        label: toDay === naturalDay ? "Move undone" : `Moved to ${shortDay(toDay)}`,
-        run: async () => {
-          await putSession(session, before);
-          await load();
-        },
-      });
-      await load();
-    } catch (moveError) {
-      setError(moveError instanceof Error ? moveError.message : "Could not move this class");
-      await load();
-    }
-  }
-
   async function addClass() {
     if (!addDraft.date) return;
     setAddBusy(true);
@@ -611,7 +572,10 @@ export default function LecturerTimetablePage() {
                         </span>
                       </div>
                       <p className="mt-1 truncate text-sm font-medium text-[var(--foreground)]">
-                        {session.topic || <span className="italic text-[var(--muted)]">{session.defaultFocus}</span>}
+                        {session.topic || session.defaultFocus}
+                        {!session.topic && (
+                          <span className="ml-1.5 text-xs font-normal text-[var(--muted)]">· suggested</span>
+                        )}
                       </p>
                       <p className="mt-0.5 flex items-center gap-1 text-xs text-[var(--muted)]">
                         <ClockIcon className="h-3.5 w-3.5" />
@@ -638,7 +602,7 @@ export default function LecturerTimetablePage() {
                       <label>
                         <span className="text-xs font-medium text-[var(--muted)]">Topic for this class</span>
                         <input
-                          defaultValue={session.topic ?? ""}
+                          defaultValue={session.topic || session.defaultFocus}
                           placeholder={session.defaultFocus}
                           onChange={(event) => setEditing({ ...editing, topic: event.target.value })}
                           className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
@@ -950,11 +914,6 @@ export default function LecturerTimetablePage() {
               legend={LEGEND}
               toolbar={toolbar}
               rail={rail}
-              onMoveDot={rescheduleDot}
-              dotLabel={(dotId) => {
-                const s = dotIndex.get(dotId);
-                return s ? `${level} · ${s.startTime}` : level;
-              }}
             />
           )}
         </div>

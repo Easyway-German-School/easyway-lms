@@ -36,6 +36,8 @@ export default function AdminNotificationsPage() {
   const [lecturerId, setLecturerId] = useState("");
   const [branchId, setBranchId] = useState("");
   const [level, setLevel] = useState("");
+  /** Students only — narrows a level to one sitting. See /api/admin/notifications. */
+  const [sessionSlot, setSessionSlot] = useState("");
   const [link, setLink] = useState("");
   const [alsoEmail, setAlsoEmail] = useState(false);
   const [alsoPush, setAlsoPush] = useState(true);
@@ -123,6 +125,7 @@ export default function AdminNotificationsPage() {
       lecturerId: targetingLecturers ? lecturerId || null : null,
       branchId: targetingEveryone ? null : branchId || null,
       level: targetingEveryone ? null : level || null,
+      sessionSlot: targetingStudents ? sessionSlot || null : null,
     };
 
     try {
@@ -150,6 +153,7 @@ export default function AdminNotificationsPage() {
       setLecturerId("");
       setBranchId("");
       setLevel("");
+      setSessionSlot("");
       setLink("");
       setShowForm(false);
       setLoading(true);
@@ -287,6 +291,26 @@ export default function AdminNotificationsPage() {
                     placeholder={targetingLecturers ? "Any assigned level or e.g. B1" : "All levels or e.g. B1"}
                     className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
                   />
+                </label>
+              ) : null}
+              {targetingStudents ? (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Sitting</span>
+                  <select
+                    value={sessionSlot}
+                    onChange={(event) => setSessionSlot(event.target.value)}
+                    disabled={studentId !== ""}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    <option value="">All sittings</option>
+                    <option value="morning">Morning</option>
+                    <option value="afternoon">Afternoon</option>
+                    <option value="evening">Evening</option>
+                    <option value="weekend">Weekend</option>
+                  </select>
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Narrows a level to one group — so a room or time change does not buzz the other sittings.
+                  </span>
                 </label>
               ) : null}
               <label className="space-y-2 text-sm">
