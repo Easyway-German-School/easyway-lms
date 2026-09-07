@@ -10,7 +10,7 @@ import BulkStudentAdd from "@/components/BulkStudentAdd";
 import { goalFor } from "@/lib/germany-goals";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { isOnlineBranchName } from "@/lib/online-branch";
-import { CalendarIcon } from "@/components/icons";
+import { CalendarIcon, CameraIcon } from "@/components/icons";
 import { packageOptions, countries } from "@/app/auth/signup/options";
 import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload";
 import { DERIVED_SEGMENT_IDS, SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
@@ -1679,6 +1679,19 @@ function StudentsRoster() {
                   const isPrivateMember = student.classType === "private";
                   const isWeekender = student.sessionSlot === "weekend";
                   const money = (student as unknown as { _finance?: StudentFinanceRow })._finance;
+                  // No photo on file → the student's portal is walled off from
+                  // every class page (see lib/access.ts isPhotoGatedRoute / the
+                  // PhotoLockScreen). Same field and gating as the weekly Becca
+                  // nudge, which only chases active students, so match that here.
+                  const hasNoPhoto =
+                    (student.status ?? "active") === "active" &&
+                    !(
+                      student.admission &&
+                      typeof student.admission === "object" &&
+                      !Array.isArray(student.admission) &&
+                      typeof (student.admission as Record<string, unknown>).photoUrl === "string" &&
+                      String((student.admission as Record<string, unknown>).photoUrl).trim().length > 0
+                    );
                   return (
                   <tr
                     key={student.id}
@@ -1718,6 +1731,15 @@ function StudentsRoster() {
                         >
                           <CalendarIcon className="h-3 w-3" />
                           Weekend
+                        </span>
+                      ) : null}
+                      {hasNoPhoto ? (
+                        <span
+                          title="No profile photo on file — this student's portal is locked to their profile, notifications and payments only. Every class page shows an &quot;add your photo&quot; wall until one is uploaded. Becca nudges them once a week automatically; the office can set one from this student's Edit form."
+                          className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700"
+                        >
+                          <CameraIcon className="h-3 w-3" />
+                          No photo · portal locked
                         </span>
                       ) : null}
                       {highlighted && money && (
