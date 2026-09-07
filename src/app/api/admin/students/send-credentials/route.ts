@@ -64,6 +64,14 @@ export async function POST(request: NextRequest) {
     }
 
     const tenantId = gate.session.user.tenantId ?? null;
+    // `force` re-issues even for a student we already sent a login to — for
+    // when the first batch of mail genuinely did not arrive (provider down,
+    // wrong address since corrected). Without it, a student who already has a
+    // login on the way is left alone so a second click cannot silently move a
+    // password out from under someone who has started using it.
+    const force = body.force === true;
+    const includeSelfRegistered = body.includeSelfRegistered === true;
+
     const users = await prisma.user.findMany({
       where: {
         email: { in: emailList },
@@ -76,20 +84,23 @@ export async function POST(request: NextRequest) {
         id: true,
         name: true,
         email: true,
-        student: { select: { studentCode: true, admission: true } },
+        student: { select: { id: true, studentCode: true, admission: true } },
       },
     });
 
     const found = new Set(users.map((u) => u.email.toLowerCase()));
-    const includeSelfRegistered = body.includeSelfRegistered === true;
 
     const perUser = await Promise.all(
       users.map(async (user) => {
         const admission = (user.student?.admission ?? null) as Record<string, unknown> | null;
         const wasImported = Boolean(admission && typeof admission === "object" && admission.importedAt);
+        const alreadySent = Boolean(admission && typeof admission === "object" && admission.loginSentAt);
 
         if (!wasImported && !includeSelfRegistered) {
           return { email: user.email, emailed: false, skipped: "registered themselves" as const };
+        }
+        if (alreadySent && !force) {
+          return { email: user.email, emailed: false, alreadySent: true as const };
         }
 
         const password = generateTempPassword();
@@ -104,6 +115,13 @@ export async function POST(request: NextRequest) {
             temporaryPassword: password,
             studentCode: user.student?.studentCode ?? null,
           });
+          // Mark it so a later "send again" does not re-roll this password.
+          if (user.student?.id) {
+            await prisma.student.update({
+              where: { id: user.student.id },
+              data: { admission: { ...(admission ?? {}), loginSentAt: new Date().toISOString() } },
+            });
+          }
           return { email: user.email, emailed: true, reset: true };
         } catch (error) {
           console.error("Could not reset + send login for", user.email, error);
@@ -112,16 +130,17 @@ export async function POST(request: NextRequest) {
       }),
     );
 
-    const notFound = emailList
-      .filter((email) => !found.has(email))
-      .map((email) => ({ email, emailed: false, notFound: true as const }));
+    const notFoundEmails = emailList.filter((email) => !found.has(email));
+    const notFound = notFoundEmails.map((email) => ({ email, emailed: false, notFound: true as const }));
 
-    const results = [...perUser, ...notFound];
     return NextResponse.json({
-      results,
+      results: [...perUser, ...notFound],
       sent: perUser.filter((r) => r.emailed).length,
+      alreadySent: perUser.filter((r) => "alreadySent" in r && r.alreadySent).length,
       skipped: perUser.filter((r) => "skipped" in r && r.skipped).length,
+      skippedEmails: perUser.filter((r) => "skipped" in r && r.skipped).map((r) => r.email),
       notFound: notFound.length,
+      notFoundEmails,
     });
   }
 
