@@ -103,6 +103,7 @@ export type MomentId =
   | "payment-success"
   | "welcome-tour"
   | "goal"
+  | "login-upgrade"
   | "level-advance"
   | "office-reply"
   | "lesson-complete"
@@ -149,6 +150,25 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Your level is complete",
     dockBlurb: "What you finished, and what comes next.",
+  },
+  /**
+   * "Set your real login." Shown only to a student who is signed in with a
+   * temporary login the office built for them — their phone number at a school
+   * subdomain, or an importer placeholder — and wants them to trade it for
+   * their own email and a chosen password. See LoginUpgradeMoment.
+   *
+   * Above the earned-news and reply modals: it is the one interruption here
+   * about the student not really owning their own account, and a person who
+   * fixes it stops depending on a password sheet the office holds. Still below
+   * orientation — a brand-new portal user meets the tour and the goal question
+   * first and this waits in the dock for their second visit, by which point
+   * the ask makes sense.
+   */
+  "login-upgrade": {
+    priority: 74,
+    kind: "modal",
+    dockLabel: "Set your email & password",
+    dockBlurb: "Swap the temporary login we made for your own email and a password you choose.",
   },
   /**
    * "The office replied to something you asked." News the student explicitly
