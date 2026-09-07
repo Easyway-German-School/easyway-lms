@@ -67,6 +67,10 @@ function ladderIndex(level: string): number {
  * @param setPathway  when true, also move the student ONTO the Travel Package
  *   pathway if they are not already on it. The caller that is itself writing
  *   `pathway` in the same request passes false and lets its own write stand.
+ *
+ * With `setPathway` false and the student NOT on the Travel Package pathway,
+ * this is a no-op that returns `null` after a single lookup — so a payment
+ * handler can call it unconditionally without first checking the pathway.
  */
 export async function reconcileTravelPackageStudent({
   studentId,
@@ -97,6 +101,10 @@ export async function reconcileTravelPackageStudent({
     },
   });
   if (!student) return null;
+
+  // Nothing to do for a student who is not on the pathway and is not being
+  // put on it now — lets payment handlers call this on every payment.
+  if (!setPathway && !isTravelPackagePathway(student.pathway)) return null;
 
   const paid = student.payments
     .filter(

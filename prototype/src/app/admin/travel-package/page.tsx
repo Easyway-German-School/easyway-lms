@@ -181,8 +181,35 @@ export default function TravelPackagePage() {
     }
   }
 
+  async function reconcileAll() {
+    setReconcilingId("__all__");
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch("/api/admin/travel-package", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not reconcile the roster");
+      setNotice(
+        `Swept ${data.scanned} Travel Package student${data.scanned === 1 ? "" : "s"} — ` +
+          `${data.reconciled} needed fixing` +
+          (data.notified > 0 ? `, ${data.notified} told it's now a part payment` : "") +
+          (data.failed > 0 ? `. ${data.failed} could not be updated — check the logs.` : "."),
+      );
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reconcile the roster");
+    } finally {
+      setReconcilingId(null);
+    }
+  }
+
   const totalCollected = students.reduce((sum, s) => sum + s.paid, 0);
   const totalOutstanding = students.reduce((sum, s) => sum + s.owed, 0);
+  const outOfStepCount = students.filter((s) => s.ledgerOutOfStep).length;
 
   return (
     <AdminShell>
@@ -302,6 +329,24 @@ export default function TravelPackagePage() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {!loading && outOfStepCount > 0 && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-400/40 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            <span className="min-w-0">
+              {outOfStepCount} student{outOfStepCount === 1 ? "" : "s"} on this pathway {outOfStepCount === 1 ? "is" : "are"} still
+              priced on the old per-level ladder. Reconcile {outOfStepCount === 1 ? "it" : "them all"} to the flat {naira(packagePrice)} —
+              money received is kept, and anyone who now owes a balance is told it&apos;s a part payment.
+            </span>
+            <button
+              type="button"
+              disabled={reconcilingId === "__all__"}
+              onClick={() => void reconcileAll()}
+              className="shrink-0 rounded-full bg-amber-600 px-4 py-2 text-xs font-bold text-white hover:brightness-110 disabled:opacity-50"
+            >
+              {reconcilingId === "__all__" ? "Reconciling…" : `Reconcile all ${outOfStepCount}`}
+            </button>
           </div>
         )}
 

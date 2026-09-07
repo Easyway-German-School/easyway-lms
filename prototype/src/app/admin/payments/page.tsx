@@ -51,6 +51,10 @@ function PaymentsLedger() {
   const [formError, setFormError] = useState("");
   const [formNotice, setFormNotice] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  // Correcting a hand-entered payment after the fact — a typo'd amount, the
+  // wrong status, the wrong method. Gateway rows are not editable here.
+  const [editPayment, setEditPayment] = useState<PaymentRecord | null>(null);
+  const [rowBusy, setRowBusy] = useState("");
   // Seeded from the URL: the finance workspace links straight to the pending
   // and failed transactions, and to one payment method at a time.
   const [filterStatus, setFilterStatus] = useState<string>(params.get("status") ?? "");
@@ -117,6 +121,55 @@ function PaymentsLedger() {
       await loadPaymentsList();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Unable to update payment status");
+    }
+  }
+
+  async function savePaymentEdit(fields: { amount: number; status: string; method: string; description: string }) {
+    if (!editPayment) return;
+    setRowBusy(editPayment.id);
+    setFormError("");
+    setFormNotice("");
+    try {
+      const res = await fetch("/api/admin/payments", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editPayment.id,
+          amount: Math.round(fields.amount),
+          status: fields.status,
+          method: fields.method.trim(),
+          description: fields.description.trim() || null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Unable to update payment");
+      if (data.travelPackage?.wasFullPaidBefore && !data.travelPackage?.fullPaidAfter) {
+        setFormNotice("Payment updated. This student now owes a balance on their Travel Package — they've been notified it's a part payment.");
+      }
+      setEditPayment(null);
+      await loadPaymentsList();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Unable to update payment");
+    } finally {
+      setRowBusy("");
+    }
+  }
+
+  async function voidPayment(payment: PaymentRecord) {
+    if (!window.confirm(`Void this ${naira(payment.amount)} ${payment.method} payment from ${payment.student.user.name || payment.student.user.email}? It is removed from every total but kept in the audit trail.`)) {
+      return;
+    }
+    setRowBusy(payment.id);
+    setFormError("");
+    try {
+      const res = await fetch(`/api/admin/payments?id=${encodeURIComponent(payment.id)}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Unable to void payment");
+      await loadPaymentsList();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Unable to void payment");
+    } finally {
+      setRowBusy("");
     }
   }
 
@@ -440,6 +493,24 @@ function PaymentsLedger() {
                             Fail
                           </button>
                         )}
+                        {payment.status !== "not_paid" && payment.method !== "paystack" && (
+                          <>
+                            <button
+                              className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-semibold hover:bg-[var(--surface-alt)] disabled:opacity-50"
+                              disabled={rowBusy === payment.id}
+                              onClick={() => setEditPayment(payment)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="rounded-lg border border-red-400 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950/30"
+                              disabled={rowBusy === payment.id}
+                              onClick={() => void voidPayment(payment)}
+                            >
+                              {rowBusy === payment.id ? "…" : "Void"}
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -475,7 +546,103 @@ function PaymentsLedger() {
           </div>
         </div>
       </div>
+
+      {editPayment && (
+        <EditPaymentModal
+          key={editPayment.id}
+          payment={editPayment}
+          busy={rowBusy === editPayment.id}
+          onCancel={() => setEditPayment(null)}
+          onSave={(fields) => void savePaymentEdit(fields)}
+        />
+      )}
     </AdminShell>
+  );
+}
+
+function EditPaymentModal({
+  payment,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  payment: PaymentRecord;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (fields: { amount: number; status: string; method: string; description: string }) => void;
+}) {
+  const [amount, setAmount] = useState(String(payment.amount));
+  const [status, setStatus] = useState(payment.status);
+  const [method, setMethod] = useState(payment.method);
+  const [description, setDescription] = useState(payment.description ?? "");
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" onClick={() => !busy && onCancel()}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl">
+        <h2 className="text-lg font-bold text-[var(--foreground)]">
+          Edit payment — {payment.student.user.name || payment.student.user.email}
+        </h2>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Recorded {new Date(payment.createdAt).toLocaleDateString()}. Corrections update every total this
+          payment feeds, straight away.
+        </p>
+
+        <label className="mt-4 block text-xs font-semibold text-[var(--muted)]">Amount (₦)</label>
+        <input
+          type="number"
+          min={1}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          disabled={busy}
+          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+        />
+
+        <label className="mt-3 block text-xs font-semibold text-[var(--muted)]">Status</label>
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          disabled={busy}
+          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+        >
+          <option value="pending">pending</option>
+          <option value="partial">part-payment</option>
+          <option value="completed">completed</option>
+          <option value="failed">failed</option>
+        </select>
+
+        <label className="mt-3 block text-xs font-semibold text-[var(--muted)]">Method</label>
+        <input
+          type="text"
+          value={method}
+          onChange={(e) => setMethod(e.target.value)}
+          disabled={busy}
+          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+        />
+
+        <label className="mt-3 block text-xs font-semibold text-[var(--muted)]">Description</label>
+        <input
+          type="text"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          disabled={busy}
+          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+        />
+
+        <div className="mt-5 flex justify-end gap-2.5">
+          <button type="button" onClick={onCancel} disabled={busy} className="rounded-full border border-[var(--border)] px-5 py-2.5 text-sm font-semibold hover:bg-[var(--surface-alt)] disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onSave({ amount: Number(amount), status, method, description })}
+            disabled={busy || !Number(amount) || Number(amount) <= 0 || !method.trim()}
+            className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+          >
+            {busy ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

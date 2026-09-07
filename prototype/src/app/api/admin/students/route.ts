@@ -329,6 +329,17 @@ export async function POST(request: Request) {
         console.error("Tuition charge creation failed on manual add", chargeError);
       }
 
+      // Travel Package is a flat ₦980,000 that replaces the per-level charge.
+      // `ensureChargeForLevel` already prices it right when the pathway is set —
+      // this is the belt-and-braces pass for the case where that call raced or
+      // failed, so a Travel Package student added with an up-front payment can
+      // never land on the portal reading "paid in full". No-op otherwise.
+      try {
+        await reconcileTravelPackageStudent({ studentId: student.id, setPathway: false });
+      } catch (reconcileError) {
+        console.error("Travel Package reconcile failed on manual add", reconcileError);
+      }
+
       // Enrolment #1 — see lib/student-enrolment.ts. Non-fatal, same as above.
       try {
         await openEnrolment({
