@@ -6,6 +6,7 @@ import { assignStudentCode } from "@/lib/student-code";
 import { LEVELS } from "@/lib/levels";
 import { bestMatch, matchBatch, matchDeliveryMode, matchLevel, matchSessionSlot } from "@/lib/fuzzy-match";
 import { generateTempPassword } from "@/lib/student-password";
+import { defaultBatchMonth } from "@/lib/intake-server";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { isOnlineBranch } from "@/lib/online-branch";
@@ -113,6 +114,12 @@ export async function POST(request: NextRequest) {
       label: branch.name,
       aliases: /port\s*harcourt/i.test(branch.name) ? ["ph", "phc"] : [],
     }));
+
+    // A row whose sheet had no batch column, or a blank one, falls back to the
+    // school's current intake month (lib/intake.ts) rather than importing with
+    // no batch — which is the exact state the promotion engine and every
+    // cohort send cannot read. Read once here, not per row.
+    const fallbackBatch = await defaultBatchMonth(gate.session.user.tenantId);
 
     // Resolved lazily — most imports have branches for every row and never
     // need this looked up.
@@ -234,7 +241,7 @@ export async function POST(request: NextRequest) {
 
       const batchInput = str(row, "batch", "start_month", "started");
       const batchMatch = batchInput ? note(matchBatch(batchInput)) : null;
-      const batch = batchMatch?.value ?? batchInput;
+      const batch = batchMatch?.value ?? (batchInput || fallbackBatch);
 
       const slotMatch = note(matchSessionSlot(str(row, "session", "session_slot", "slot", "time")));
       const sessionSlot = slotMatch?.value ?? "morning";
@@ -432,9 +439,13 @@ export async function POST(request: NextRequest) {
       }
 
       if (dryRun) {
-        const timetableNote = batch
-          ? "Will be created and placed on the timetable from their batch month"
-          : "Will be created. Without a batch month their level-end date cannot be worked out";
+        // `batch` always resolves now — a chosen/matched month, or the
+        // school's current intake as the fallback — so the timetable can
+        // always be placed.
+        const timetableNote =
+          batchInput || batchMatch
+            ? "Will be created and placed on the timetable from their batch month"
+            : `Will be created in the ${batch} intake (no batch on the sheet — set the school's current intake, or fix this on /admin/cohorts)`;
         results.push({
           ...base,
           status: "ready",

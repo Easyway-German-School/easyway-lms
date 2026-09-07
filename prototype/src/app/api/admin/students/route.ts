@@ -9,6 +9,7 @@ import { setStudentTutor } from "@/lib/tutor-pairing";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
+import { defaultBatchMonth } from "@/lib/intake-server";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { isTravelPackagePathway } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
@@ -180,8 +181,14 @@ export async function POST(request: Request) {
   // Batch month — the timetable generator and the promotion engine both read
   // this off the admission blob, so a student added without it has no
   // level-end date and never auto-promotes. Stored as a bare month name
-  // ("September") to match signup and the roster's Batch filter.
-  const batch = typeof body.batch === "string" ? body.batch.trim() : "";
+  // ("September") to match signup and the roster's Batch filter. When the
+  // office leaves the field blank it falls back to the school's current intake
+  // (lib/intake.ts) rather than landing empty; a mid-course returning student
+  // gets their real month typed in, or fixed later on /admin/cohorts.
+  const batch =
+    typeof body.batch === "string" && body.batch.trim()
+      ? body.batch.trim()
+      : await defaultBatchMonth(gate.session.user.tenantId);
   // Where the student lives — the signup form collects this into the admission
   // blob; the manual-add form now offers it too, chiefly for online students
   // who have no branch to place them.

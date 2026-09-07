@@ -10,6 +10,8 @@ import {
   type SessionSettings as Settings,
   type SessionSlot,
 } from "@/lib/school-settings";
+import { MONTH_NAMES } from "@/lib/batch";
+import { defaultCurrentIntake, type CurrentIntake } from "@/lib/intake";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(() => defaultSessionSettings());
@@ -17,9 +19,50 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
+  // The school's current intake — the month a new student joins by default
+  // when the sign-up form, the Add-student form or the CSV import did not
+  // carry one. See lib/intake.ts.
+  const [intake, setIntake] = useState<CurrentIntake>(() => defaultCurrentIntake());
+  const [intakeSaving, setIntakeSaving] = useState(false);
+  const [intakeMsg, setIntakeMsg] = useState("");
+
   useEffect(() => {
     loadSettings();
+    loadIntake();
   }, []);
+
+  async function loadIntake() {
+    try {
+      const res = await fetch("/api/admin/settings/intake", { cache: "no-store" });
+      if (res.ok) setIntake(await res.json());
+    } catch (error) {
+      console.error("Failed to load current intake:", error);
+    }
+  }
+
+  async function saveIntake() {
+    setIntakeSaving(true);
+    setIntakeMsg("");
+    try {
+      const res = await fetch("/api/admin/settings/intake", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(intake),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIntakeMsg("Saved. New students without a batch will join this intake.");
+        setTimeout(() => setIntakeMsg(""), 4000);
+      } else {
+        setIntakeMsg(data.error || "Failed to save the current intake");
+      }
+    } catch (error) {
+      console.error("Failed to save current intake:", error);
+      setIntakeMsg("Failed to save the current intake");
+    } finally {
+      setIntakeSaving(false);
+    }
+  }
 
   async function loadSettings() {
     try {
@@ -112,11 +155,69 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* Current intake */}
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+          <h2 className="mb-2 text-lg font-bold text-[var(--foreground)]">Current intake</h2>
+          <p className="mb-6 text-sm text-[var(--muted)]">
+            The month a new student is placed in when no batch was chosen — on the public
+            sign-up form, the Add-student form, or a CSV import row with no batch column.
+            Set this to the intake you are currently taking people into. It does not touch
+            students who already have a batch.
+          </p>
+
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-[var(--foreground)]">
+              Month
+              <select
+                value={intake.month}
+                onChange={(e) => setIntake((prev) => ({ ...prev, month: e.target.value }))}
+                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-normal text-[var(--foreground)]"
+              >
+                {MONTH_NAMES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-[var(--foreground)]">
+              Year
+              <input
+                type="number"
+                value={intake.year}
+                min={new Date().getFullYear() - 5}
+                max={new Date().getFullYear() + 5}
+                onChange={(e) => setIntake((prev) => ({ ...prev, year: Number(e.target.value) }))}
+                className="w-28 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-normal text-[var(--foreground)]"
+              />
+            </label>
+
+            <button
+              onClick={saveIntake}
+              disabled={intakeSaving}
+              className="rounded-lg bg-[var(--accent)] px-6 py-2.5 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+            >
+              {intakeSaving ? "Saving..." : "Save intake"}
+            </button>
+          </div>
+
+          {intakeMsg && (
+            <p
+              className={`mt-3 text-sm font-medium ${
+                intakeMsg.startsWith("Saved") ? "text-emerald-700" : "text-red-700"
+              }`}
+            >
+              {intakeMsg}
+            </p>
+          )}
+        </div>
+
         {/* Sessions Configuration */}
         <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
           <h2 className="mb-6 text-lg font-bold text-[var(--foreground)]">Class Sessions</h2>
           <p className="mb-6 text-sm text-[var(--muted)]">
-            Toggle which session slots are available for each course level. Disabled sessions won't appear during student registration and their communities will be hidden.
+            Toggle which session slots are available for each course level. Disabled sessions won&apos;t appear during student registration and their communities will be hidden.
           </p>
 
           <div className="space-y-6">
