@@ -87,6 +87,8 @@ export const KIND = {
   studyNotesFailed: "study_notes.failed",
   /** A student still has no profile photo — Becca nudges them, at most once a week. See src/lib/profile-photo-nudge.ts. */
   profilePhotoMissing: "profile.photo_missing",
+  /** A student has no branch set — Becca asks them to place themselves, at most once a week. See src/lib/branch-nudge.ts. */
+  profileBranchMissing: "profile.branch_missing",
   general: "general",
 } as const;
 
