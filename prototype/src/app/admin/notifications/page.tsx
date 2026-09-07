@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
+import { LEVELS } from "@/lib/levels";
+import { MONTH_NAMES } from "@/lib/batch";
 
 type NotificationRecord = {
   id: string;
@@ -38,6 +40,10 @@ export default function AdminNotificationsPage() {
   const [level, setLevel] = useState("");
   /** Students only — narrows a level to one sitting. See /api/admin/notifications. */
   const [sessionSlot, setSessionSlot] = useState("");
+  /** Students only — physical | hybrid | online. */
+  const [deliveryMode, setDeliveryMode] = useState("");
+  /** Students only — intake month name, matched against admission.batch. */
+  const [batch, setBatch] = useState("");
   const [link, setLink] = useState("");
   const [alsoEmail, setAlsoEmail] = useState(false);
   const [alsoPush, setAlsoPush] = useState(true);
@@ -70,16 +76,30 @@ export default function AdminNotificationsPage() {
 
   async function loadRelationships() {
     try {
-      const [studentsRes, branchesRes, lecturersRes] = await Promise.all([
-        fetch("/api/admin/students"),
+      const [branchesRes, lecturersRes] = await Promise.all([
         fetch("/api/admin/branches"),
         fetch("/api/admin/lecturers"),
       ]);
 
-      if (studentsRes.ok) {
-        const data = await studentsRes.json();
-        setStudents(data.students || []);
+      /**
+       * The single-student picker needs EVERY active student, not the first
+       * page. `/api/admin/students` caps a page at 100 and defaults to 20, so
+       * page through until a short page comes back. Safety cap at 5,000 so a
+       * bad response can't spin forever.
+       */
+      const collected: StudentOption[] = [];
+      for (let page = 1; page <= 50; page += 1) {
+        const res = await fetch(`/api/admin/students?page=${page}&pageSize=100`);
+        if (!res.ok) break;
+        const data = await res.json();
+        const rows: StudentOption[] = data.students || [];
+        collected.push(...rows);
+        if (rows.length < 100) break;
       }
+      collected.sort((a, b) =>
+        (a.user.name || a.user.email).localeCompare(b.user.name || b.user.email),
+      );
+      setStudents(collected);
 
       if (branchesRes.ok) {
         const data = await branchesRes.json();
@@ -126,6 +146,8 @@ export default function AdminNotificationsPage() {
       branchId: targetingEveryone ? null : branchId || null,
       level: targetingEveryone ? null : level || null,
       sessionSlot: targetingStudents ? sessionSlot || null : null,
+      deliveryMode: targetingStudents ? deliveryMode || null : null,
+      batch: targetingStudents ? batch || null : null,
     };
 
     try {
@@ -154,6 +176,8 @@ export default function AdminNotificationsPage() {
       setBranchId("");
       setLevel("");
       setSessionSlot("");
+      setDeliveryMode("");
+      setBatch("");
       setLink("");
       setShowForm(false);
       setLoading(true);
@@ -272,25 +296,22 @@ export default function AdminNotificationsPage() {
                   </select>
                 </label>
               ) : null}
-              <label className="space-y-2 text-sm md:col-span-2">
-                <span className="font-semibold text-[var(--muted)]">Message</span>
-                <textarea
-                  rows={4}
-                  value={message}
-                  onChange={(event) => setMessage(event.target.value)}
-                  className="w-full rounded-3xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 text-sm"
-                />
-              </label>
               {!targetingEveryone ? (
                 <label className="space-y-2 text-sm">
                   <span className="font-semibold text-[var(--muted)]">Level</span>
-                  <input
+                  <select
                     value={level}
                     onChange={(event) => setLevel(event.target.value)}
-                    disabled={targetingLecturers && lecturerId !== ""}
-                    placeholder={targetingLecturers ? "Any assigned level or e.g. B1" : "All levels or e.g. B1"}
+                    disabled={(targetingLecturers && lecturerId !== "") || (targetingStudents && studentId !== "")}
                     className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
-                  />
+                  >
+                    <option value="">{targetingLecturers ? "Any assigned level" : "All levels"}</option>
+                    {LEVELS.map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               ) : null}
               {targetingStudents ? (
@@ -308,11 +329,57 @@ export default function AdminNotificationsPage() {
                     <option value="evening">Evening</option>
                     <option value="weekend">Weekend</option>
                   </select>
-                  <span className="block text-xs font-normal text-[var(--muted)]">
-                    Narrows a level to one group — so a room or time change does not buzz the other sittings.
-                  </span>
                 </label>
               ) : null}
+              {targetingStudents ? (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Attendance</span>
+                  <select
+                    value={deliveryMode}
+                    onChange={(event) => setDeliveryMode(event.target.value)}
+                    disabled={studentId !== ""}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    <option value="">Any attendance</option>
+                    <option value="physical">Physical — campus</option>
+                    <option value="hybrid">Hybrid</option>
+                    <option value="online">Online</option>
+                  </select>
+                </label>
+              ) : null}
+              {targetingStudents ? (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Intake month</span>
+                  <select
+                    value={batch}
+                    onChange={(event) => setBatch(event.target.value)}
+                    disabled={studentId !== ""}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    <option value="">Any intake</option>
+                    {MONTH_NAMES.map((m) => (
+                      <option key={m} value={m}>
+                        {m} intake
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {targetingStudents ? (
+                <p className="text-xs text-[var(--muted)] md:col-span-2">
+                  Branch, level, sitting, attendance and intake stack — leave one on &ldquo;all&rdquo; and it does not narrow.
+                  Set all of them and the send reaches exactly one class, e.g. <strong>Lagos · A1 · Morning · Physical · September</strong>.
+                </p>
+              ) : null}
+              <label className="space-y-2 text-sm md:col-span-2">
+                <span className="font-semibold text-[var(--muted)]">Message</span>
+                <textarea
+                  rows={4}
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                  className="w-full rounded-3xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 text-sm"
+                />
+              </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Opens (optional)</span>
                 <input

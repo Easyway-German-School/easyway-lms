@@ -13,6 +13,7 @@ import {
 } from "@/lib/email-blocks";
 import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 import { readAssignment } from "@/lib/lecturer-assignment";
+import { batchFromAdmission } from "@/lib/batch";
 
 /**
  * An announcement from the office, to a selected audience.
@@ -47,6 +48,12 @@ type Audience = {
   group?: string | null;
   /** One tutor, by Lecturer id. Tutors/both only; wins over branch + level. */
   lecturerId?: string | null;
+  /** physical | hybrid | online — students only. */
+  deliveryMode?: string | null;
+  /** morning | afternoon | evening | weekend — students only. Narrows a level to one sitting. */
+  sessionSlot?: string | null;
+  /** Intake month name, e.g. "September" — students only. Matched against admission.batch. */
+  batch?: string | null;
 };
 
 /**
@@ -143,11 +150,15 @@ async function resolveAudience(audience: Audience): Promise<Recipient[]> {
 }
 
 async function resolveStudents(audience: Audience): Promise<Recipient[]> {
+  const wantBatch = audience.batch?.trim().toLowerCase() || null;
+
   const students = await prisma.student.findMany({
     where: {
       status: "active",
       ...(audience.branchId ? { branchId: audience.branchId } : {}),
       ...(audience.level ? { level: audience.level } : {}),
+      ...(audience.deliveryMode ? { deliveryMode: audience.deliveryMode } : {}),
+      ...(audience.sessionSlot ? { sessionSlot: audience.sessionSlot } : {}),
     },
     select: {
       id: true,
@@ -155,6 +166,9 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
       classType: true,
       pathway: true,
       studentCode: true,
+      // Only for the batch filter: admission.batch is a JSON month name, not a
+      // column, so it is matched in memory below.
+      admission: true,
       // Needed for the fee: Abuja is priced above the other branches.
       branch: { select: { name: true } },
       user: { select: { id: true, name: true, email: true } },
@@ -165,6 +179,10 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
   const wanted = audience.paymentStatus ?? "all";
 
   return students
+    .filter((s) => {
+      if (!wantBatch) return true;
+      return batchFromAdmission(s.admission)?.toLowerCase() === wantBatch;
+    })
     .filter((s) => {
       if (wanted === "all") return true;
       const feeLookup = { level: s.level, branch: s.branch?.name ?? null, classType: s.classType, pathway: s.pathway };
