@@ -11,7 +11,9 @@ import {
   renderEmailBlocks,
   type EmailBlock,
 } from "@/lib/email-blocks";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { readAssignment } from "@/lib/lecturer-assignment";
+import { batchFromAdmission } from "@/lib/batch";
 
 /**
  * An announcement from the office, to a selected audience.
@@ -44,6 +46,14 @@ type Audience = {
   paymentStatus?: string | null;
   /** students | tutors | both */
   group?: string | null;
+  /** One tutor, by Lecturer id. Tutors/both only; wins over branch + level. */
+  lecturerId?: string | null;
+  /** physical | hybrid | online — students only. */
+  deliveryMode?: string | null;
+  /** morning | afternoon | evening | weekend — students only. Narrows a level to one sitting. */
+  sessionSlot?: string | null;
+  /** Intake month name, e.g. "September" — students only. Matched against admission.batch. */
+  batch?: string | null;
 };
 
 /**
@@ -85,21 +95,42 @@ async function resolveAudience(audience: Audience): Promise<Recipient[]> {
 
   if (group === "tutors" || group === "both") {
     /**
-     * Tutors are filtered by branch only. Level on a Lecturer is the class
-     * they are ASSIGNED to teach, not a level they are at, and payment status
-     * is meaningless for staff — applying either would silently drop tutors
-     * from a message meant for all of them.
+     * Payment status is meaningless for staff and never applies. Branch and
+     * level DO narrow now: both are matched against the tutor's ASSIGNMENT
+     * (the lists an admin set — a tutor is not "at" a level), through
+     * `readAssignment`. A named `lecturerId` skips the filters entirely.
      */
+    const picked = audience.lecturerId?.trim() || null;
+    const wantBranch = picked ? null : audience.branchId?.trim() || null;
+    const wantLevel = picked ? null : audience.level?.trim().toUpperCase() || null;
+
     const lecturers = await prisma.lecturer.findMany({
       where: {
-        ...(audience.branchId ? { branchId: audience.branchId } : {}),
         status: { not: "inactive" },
+        ...(picked ? { id: picked } : {}),
       },
-      select: { level: true, user: { select: { id: true, name: true, email: true } } },
+      select: {
+        level: true,
+        branchId: true,
+        branchIds: true,
+        levels: true,
+        assignmentGroups: true,
+        user: { select: { id: true, name: true, email: true } },
+      },
     });
 
     for (const lecturer of lecturers) {
       if (!lecturer.user?.email) continue;
+      if (!picked) {
+        const assignment = readAssignment(lecturer);
+        const branches = assignment.branchIds.length
+          ? assignment.branchIds
+          : lecturer.branchId
+            ? [lecturer.branchId]
+            : [];
+        if (wantBranch && !branches.includes(wantBranch)) continue;
+        if (wantLevel && !assignment.levels.includes(wantLevel)) continue;
+      }
       out.push({
         userId: lecturer.user.id,
         studentId: null,
@@ -119,21 +150,29 @@ async function resolveAudience(audience: Audience): Promise<Recipient[]> {
 }
 
 async function resolveStudents(audience: Audience): Promise<Recipient[]> {
+  const wantBatch = audience.batch?.trim().toLowerCase() || null;
+
   const students = await prisma.student.findMany({
     where: {
       status: "active",
       ...(audience.branchId ? { branchId: audience.branchId } : {}),
       ...(audience.level ? { level: audience.level } : {}),
+      ...(audience.deliveryMode ? { deliveryMode: audience.deliveryMode } : {}),
+      ...(audience.sessionSlot ? { sessionSlot: audience.sessionSlot } : {}),
     },
     select: {
       id: true,
       level: true,
       classType: true,
+      pathway: true,
       studentCode: true,
+      // Only for the batch filter: admission.batch is a JSON month name, not a
+      // column, so it is matched in memory below.
+      admission: true,
       // Needed for the fee: Abuja is priced above the other branches.
       branch: { select: { name: true } },
       user: { select: { id: true, name: true, email: true } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
+      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
 
@@ -141,8 +180,12 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
 
   return students
     .filter((s) => {
+      if (!wantBatch) return true;
+      return batchFromAdmission(s.admission)?.toLowerCase() === wantBatch;
+    })
+    .filter((s) => {
       if (wanted === "all") return true;
-      const feeLookup = { level: s.level, branch: s.branch?.name ?? null, classType: s.classType };
+      const feeLookup = { level: s.level, branch: s.branch?.name ?? null, classType: s.classType, pathway: s.pathway };
       const totalPaid = s.payments.reduce((sum, p) => sum + p.amount, 0);
       const { fullPaid } = derivePaymentStatus({
         totalPaid,

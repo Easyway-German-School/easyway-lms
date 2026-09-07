@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import EmailBlockEditor from "@/components/EmailBlockEditor";
 import { LEVELS } from "@/lib/levels";
+import { MONTH_NAMES } from "@/lib/batch";
 import { newBlock, type EmailBlock } from "@/lib/email-blocks";
 import { EMAIL_TEMPLATES, templateBlocks } from "@/lib/email-template-library";
 
@@ -52,8 +53,13 @@ export default function AdminEmailComposePage() {
   const [branchId, setBranchId] = useState("");
   const [level, setLevel] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("all");
+  const [deliveryMode, setDeliveryMode] = useState("");
+  const [sessionSlot, setSessionSlot] = useState("");
+  const [batch, setBatch] = useState("");
   const [group, setGroup] = useState("students");
+  const [lecturerId, setLecturerId] = useState("");
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [lecturers, setLecturers] = useState<{ id: string; name: string | null; label: string | null }[]>([]);
 
   // AI drafting
   const [brief, setBrief] = useState("");
@@ -72,16 +78,26 @@ export default function AdminEmailComposePage() {
 
   const load = useCallback(async () => {
     try {
-      const [dash, br, ai] = await Promise.all([
+      const [dash, br, ai, tut] = await Promise.all([
         fetch("/api/admin/emails/bulk", { cache: "no-store" }).then((r) => r.json()),
         fetch("/api/branches", { cache: "no-store" }).then((r) => r.json()),
         fetch("/api/admin/emails/draft", { cache: "no-store" }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/admin/lecturers", { cache: "no-store" }).then((r) => r.json()).catch(() => ({})),
       ]);
       if (dash.error) throw new Error(dash.error);
       setCounts(dash.counts ?? {});
       setRecent(dash.recent ?? []);
       setSuppressions(dash.suppressions ?? []);
       setBranches(br.branches ?? []);
+      setLecturers(
+        Array.isArray(tut.lecturers)
+          ? tut.lecturers.map((l: { id: string; user?: { name?: string | null }; assignmentLabel?: string | null }) => ({
+              id: l.id,
+              name: l.user?.name ?? null,
+              label: l.assignmentLabel ?? null,
+            }))
+          : [],
+      );
       if (Array.isArray(ai.engines)) {
         setEngines(ai.engines);
         // Land on something that can actually answer, so the first click does
@@ -97,7 +113,19 @@ export default function AdminEmailComposePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const audience = { branchId: branchId || null, level: level || null, paymentStatus, group };
+  // The mode / sitting / intake filters describe a student, not a tutor, so a
+  // "tutors" send drops them; "both" keeps them, narrowing only the student half.
+  const studentOnly = group !== "tutors";
+  const audience = {
+    branchId: branchId || null,
+    level: level || null,
+    paymentStatus,
+    group,
+    lecturerId: group === "students" ? null : lecturerId || null,
+    deliveryMode: studentOnly ? deliveryMode || null : null,
+    sessionSlot: studentOnly ? sessionSlot || null : null,
+    batch: studentOnly ? batch || null : null,
+  };
 
   /** Draft the whole thing, into blocks the editor can then edit. */
   async function draft() {
@@ -261,19 +289,20 @@ export default function AdminEmailComposePage() {
         </div>
 
         <div className="rounded-xl border bg-[var(--surface)] p-6">
-          {/* WHO. Group first, because it changes what the other three mean —
-              payment status is meaningless for a tutor. */}
-          <div className="grid gap-3 sm:grid-cols-4">
-            <select value={group} onChange={(e) => { setGroup(e.target.value); setPreview(null); }} className="rounded-lg border px-3 py-2 text-sm">
+          {/* WHO. Group first, because it changes what the other controls mean —
+              payment status is meaningless for a tutor, and level is matched
+              against a student's own level but a tutor's ASSIGNED level. */}
+          <div className="filter-grid">
+            <select value={group} onChange={(e) => { setGroup(e.target.value); setLecturerId(""); setPreview(null); }} className="rounded-lg border px-3 py-2 text-sm">
               <option value="students">Students</option>
               <option value="tutors">Tutors</option>
               <option value="both">Students and tutors</option>
             </select>
-            <select value={branchId} onChange={(e) => { setBranchId(e.target.value); setPreview(null); }} className="rounded-lg border px-3 py-2 text-sm">
+            <select value={branchId} onChange={(e) => { setBranchId(e.target.value); setPreview(null); }} disabled={group !== "students" && lecturerId !== ""} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
               <option value="">All branches</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
-            <select value={level} onChange={(e) => { setLevel(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+            <select value={level} onChange={(e) => { setLevel(e.target.value); setPreview(null); }} disabled={group !== "students" && lecturerId !== ""} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
               <option value="">All levels</option>
               {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
             </select>
@@ -282,7 +311,45 @@ export default function AdminEmailComposePage() {
               <option value="unpaid">Outstanding balance</option>
               <option value="paid">Fully paid</option>
             </select>
+            <select value={deliveryMode} onChange={(e) => { setDeliveryMode(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+              <option value="">Any attendance</option>
+              <option value="physical">Physical — campus</option>
+              <option value="hybrid">Hybrid</option>
+              <option value="online">Online</option>
+            </select>
+            <select value={sessionSlot} onChange={(e) => { setSessionSlot(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+              <option value="">Any sitting</option>
+              <option value="morning">Morning</option>
+              <option value="afternoon">Afternoon</option>
+              <option value="evening">Evening</option>
+              <option value="weekend">Weekend</option>
+            </select>
+            <select value={batch} onChange={(e) => { setBatch(e.target.value); setPreview(null); }} disabled={group === "tutors"} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40">
+              <option value="">Any intake month</option>
+              {MONTH_NAMES.map((m) => <option key={m} value={m}>{m} intake</option>)}
+            </select>
           </div>
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            Attendance, sitting and intake month narrow the send to one class — e.g. Physical · A1 · Morning · September. They apply to students only.
+          </p>
+
+          {group !== "students" && (
+            <div className="mt-3">
+              <select
+                value={lecturerId}
+                onChange={(e) => { setLecturerId(e.target.value); setPreview(null); }}
+                className="w-full rounded-lg border px-3 py-2 text-sm sm:max-w-md"
+              >
+                <option value="">All tutors{group === "both" ? " (plus the students above)" : ""}</option>
+                {lecturers.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name ?? "Unnamed tutor"}{l.label ? ` — ${l.label}` : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-[var(--muted)]">One tutor overrides the branch and level filters above.</p>
+            </div>
+          )}
 
           {/*
             START FROM SOMETHING. Above the assistant, because picking a
