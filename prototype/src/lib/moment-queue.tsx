@@ -107,6 +107,7 @@ export type MomentId =
   | "office-reply"
   | "lesson-complete"
   | "notifications"
+  | "notifications-travel"
   | "daily-briefing"
   | "journey"
   | "poster"
@@ -163,6 +164,23 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "The office replied",
     dockBlurb: "Your question has an answer waiting.",
+  },
+  /**
+   * "Turn on notifications so your Travel Package updates reach you."
+   *
+   * Raised only right after a reply to a marketing-page enquiry (see
+   * TravelPackageNotifyNudge). Sits just under "office-reply" so the answer
+   * they asked for is read first and this follows as its consequence, and
+   * above the generic "notifications" ask because the reason here is concrete
+   * and time-boxed — a document, a payment step, a deadline — rather than the
+   * standing "hear about class" one. Same snooze / ask-cap memory as the
+   * generic invite, so "don't ask again" anywhere silences both.
+   */
+  "notifications-travel": {
+    priority: 66,
+    kind: "modal",
+    dockLabel: "Turn on updates",
+    dockBlurb: "So your Travel Package news reaches you in time.",
   },
   /**
    * A single lesson finished, not a whole level — smaller news, so it sits
