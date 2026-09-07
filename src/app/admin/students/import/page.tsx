@@ -17,7 +17,7 @@ type ImportResult = {
   batch: string | null;
   sessionSlot: string;
   amountPaid: number;
-  status: "ready" | "created" | "skipped" | "error";
+  status: "ready" | "created" | "skipped" | "error" | "updated" | "review";
   note: string;
   /** "portharcourt → Port Harcourt" — what the importer read differently. */
   corrections?: string[];
@@ -110,6 +110,11 @@ const STATUS_STYLES: Record<ImportResult["status"], string> = {
   created: "bg-emerald-500/10 text-emerald-700",
   skipped: "bg-[var(--surface-alt)]0/10 text-[var(--muted)]",
   error: "bg-rose-500/10 text-rose-700",
+  // Existing account, new money recorded against it — a returning student who
+  // paid again. Amber: something happened, but nothing was overwritten.
+  updated: "bg-amber-500/10 text-amber-700",
+  // Needs a human before anything is written (duplicate row, shared phone).
+  review: "bg-violet-500/10 text-violet-700",
 };
 
 export default function ImportStudentsPage() {
@@ -121,6 +126,10 @@ export default function ImportStudentsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sendState, setSendState] = useState<"idle" | "sending" | "done">("idle");
+  // Recovery: reset + resend logins for students already imported in a past run
+  // (the results screen that held their passwords was closed before sending).
+  const [resendState, setResendState] = useState<"idle" | "sending" | "done">("idle");
+  const [resendSummary, setResendSummary] = useState("");
 
   const rows = useMemo(() => parseCsv(csv), [csv]);
 
@@ -186,6 +195,61 @@ export default function ImportStudentsPage() {
     }
   }
 
+  /**
+   * "I imported these people days ago and never sent their logins."
+   *
+   * The temp passwords only ever lived in this page's memory, so once it was
+   * closed there is nothing to resend — the server mints a fresh one per
+   * account and emails it. Keyed off the emails in the file that resolved to a
+   * real account (created OR skipped OR updated), skipping the placeholder and
+   * error rows. The server itself only touches office-imported accounts, so a
+   * student in this file who signed up on their own is left alone.
+   */
+  async function resendLoginsFromFile() {
+    const emails = Array.from(
+      new Set(
+        results
+          .filter(
+            (r) => r.email && !r.placeholderEmail && r.status !== "error" && r.status !== "review",
+          )
+          .map((r) => r.email.trim().toLowerCase()),
+      ),
+    );
+    if (emails.length === 0) return;
+    if (
+      !window.confirm(
+        `Set a fresh temporary password for the office-imported students in this file and email each one their login?\n\n` +
+          `${emails.length} row(s) will be checked. Students who signed up themselves are left untouched. ` +
+          `An imported student who has already signed in will need the new password.`,
+      )
+    )
+      return;
+    setResendState("sending");
+    setResendSummary("");
+    try {
+      const res = await fetch("/api/admin/students/send-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emails }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResendSummary(data.error || "Could not send.");
+      } else {
+        setResendSummary(
+          `${data.sent ?? 0} emailed` +
+            (data.skipped ? `, ${data.skipped} left alone (self-registered)` : "") +
+            (data.notFound ? `, ${data.notFound} not found` : "") +
+            ".",
+        );
+      }
+    } catch {
+      setResendSummary("Could not send.");
+    } finally {
+      setResendState("done");
+    }
+  }
+
   function downloadPasswords() {
     const created = results.filter((result) => result.status === "created");
     const body = [
@@ -201,6 +265,11 @@ export default function ImportStudentsPage() {
   }
 
   const readyCount = results.filter((r) => r.status === "ready").length;
+  // "updated" rows (existing account, payment to record) also need the real
+  // run to click through — a file of nothing but returning students would
+  // otherwise leave the Import button dead with their payments unrecorded.
+  const updatedCount = results.filter((r) => r.status === "updated").length;
+  const actionableCount = readyCount + updatedCount;
 
   return (
     <AdminShell>
@@ -309,10 +378,14 @@ export default function ImportStudentsPage() {
             </button>
             <button
               onClick={() => run(false)}
-              disabled={busy || !previewed || imported || readyCount === 0}
+              disabled={busy || !previewed || imported || actionableCount === 0}
               className="rounded-lg bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
             >
-              {imported ? "Imported" : `Import ${readyCount} student${readyCount === 1 ? "" : "s"}`}
+              {imported
+                ? "Imported"
+                : updatedCount > 0
+                  ? `Import ${readyCount}, record payment for ${updatedCount}`
+                  : `Import ${readyCount} student${readyCount === 1 ? "" : "s"}`}
             </button>
             {/* Nothing is written until the office has seen the preview. */}
             {!previewed && rows.length > 0 ? (
@@ -369,6 +442,33 @@ export default function ImportStudentsPage() {
                       {results.filter((r) => r.status === "created" && r.emailed).length} of {counts.created ?? 0} emailed.
                     </span>
                   ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {results.some(
+              (r) => r.email && !r.placeholderEmail && r.status !== "error" && r.status !== "review",
+            ) ? (
+              <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                <p className="font-semibold">Already imported these students and still need to send their logins?</p>
+                <p className="mt-1">
+                  Use this if the results page was closed before the logins went out. It sets a{" "}
+                  <strong>new</strong> temporary password for every <strong>office-imported</strong> student in this
+                  file and emails them their login. Students who signed up themselves are skipped.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => void resendLoginsFromFile()}
+                    disabled={resendState === "sending"}
+                    className="rounded-full bg-sky-600 px-5 py-2 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
+                  >
+                    {resendState === "sending"
+                      ? "Sending…"
+                      : resendState === "done"
+                        ? "Send again"
+                        : "Email logins to imported students in this file"}
+                  </button>
+                  {resendSummary ? <span className="text-xs text-sky-800">{resendSummary}</span> : null}
                 </div>
               </div>
             ) : null}
