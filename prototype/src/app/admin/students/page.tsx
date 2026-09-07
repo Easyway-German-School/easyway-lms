@@ -1138,6 +1138,17 @@ function StudentsRoster() {
         </div>
 
         <div className="flex flex-wrap items-end justify-end gap-2">
+              {/* Pulls the roster again with the filters as they stand — for
+                  after an import, a bulk edit, or another admin's change in a
+                  second tab. */}
+              <button
+                type="button"
+                onClick={() => { void loadStudents(); void loadBranches(); }}
+                disabled={loading}
+                className="rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--foreground)] disabled:opacity-50"
+              >
+                {loading ? "Refreshing…" : "Refresh"}
+              </button>
               {/* One at a time here; a whole cohort at once through the
                   importer, which is the launch-day case. */}
               <Link

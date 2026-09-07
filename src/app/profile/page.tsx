@@ -8,6 +8,7 @@ import { studentAccessQueryKey } from "@/lib/useStudentAccess";
 import Link from "next/link";
 import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
+import BranchSetupCard from "@/components/BranchSetupCard";
 import { useGamification } from "@/lib/useGamification";
 import { uploadImage, validateImageFile } from "@/lib/upload";
 import type { Badge, BadgeIcon } from "@/lib/gamification";
@@ -233,6 +234,9 @@ export default function ProfilePage() {
   const [passwordError, setPasswordError] = useState("");
   const [formState, setFormState] = useState(EMPTY_FORM);
   const [terms, setTerms] = useState<TermsStatus | null>(null);
+  /** Null branch — the account came in on a sheet with the column blank. */
+  const [needsBranch, setNeedsBranch] = useState(false);
+  const [branchSetupAutoOpen, setBranchSetupAutoOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { game } = useGamification();
   const queryClient = useQueryClient();
@@ -266,6 +270,14 @@ export default function ProfilePage() {
   useEffect(() => {
     setPhotoBroken(false);
   }, [profile?.photoUrl]);
+
+  // Becca's "set your branch" nudge links here with ?setup=branch — open the
+  // card straight away so the student lands on the thing they were asked to do.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("setup") === "branch") setBranchSetupAutoOpen(true);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -307,6 +319,9 @@ export default function ProfilePage() {
         };
 
         setProfile(loaded);
+        // `student.branch` is the resolved relation — absent means the FK is
+        // null, whatever stale name string `admission.branch` may still hold.
+        setNeedsBranch(!student?.branch);
         setFormState({
           fullName: loaded.fullName,
           gender: loaded.gender === "—" ? "" : loaded.gender,
@@ -654,6 +669,17 @@ export default function ProfilePage() {
                 <p className={`mt-5 text-sm ${error ? "text-red-300" : "text-emerald-300"}`}>{error || message}</p>
               )}
             </div>
+
+            {needsBranch ? (
+              <BranchSetupCard
+                autoOpen={branchSetupAutoOpen}
+                onPlaced={() => {
+                  // A branch drives the timetable, roster and shell nav — a
+                  // full reload is the honest way to pick all of that up.
+                  window.location.assign("/profile");
+                }}
+              />
+            ) : null}
 
             {/* ---------- Tabs ---------- */}
             <div className="mt-8 flex gap-1 rounded-full cinematic-card p-1.5">

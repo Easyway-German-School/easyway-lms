@@ -199,7 +199,11 @@ function StudentsRoster() {
   const [totalCount, setTotalCount] = useState(0);
   const [lecturers, setLecturers] = useState<Array<{ id: string; user: { name?: string | null; email: string } }>>([]);
 
-  const [showStudentForm, setShowStudentForm] = useState(false);
+  // Seeded from the URL like the filters above — lets a link from elsewhere
+  // (the Travel Package roster's "Add a student" button) land here with the
+  // manual-add form already open and the right pathway picked, instead of
+  // making the office re-select it every time.
+  const [showStudentForm, setShowStudentForm] = useState(params.get("addStudent") === "1");
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -213,7 +217,9 @@ function StudentsRoster() {
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
   const [newDeliveryMode, setNewDeliveryMode] = useState("physical");
   const [newBatch, setNewBatch] = useState("");
-  const [newPathway, setNewPathway] = useState(packageOptions[0]);
+  const [newPathway, setNewPathway] = useState(
+    addStudentPathwayOptions.includes(params.get("pathway") ?? "") ? (params.get("pathway") as string) : packageOptions[0],
+  );
   const [newAmountPaid, setNewAmountPaid] = useState("");
   // Where the student lives — collected on signup into the admission blob, but
   // never asked for on this manual-add form, so an office-added student (and
@@ -934,14 +940,17 @@ function StudentsRoster() {
           </div>
         )}
 
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Admin</p>
-            <h1 className="text-3xl font-bold">Students</h1>
-            <p className="mt-2 text-sm text-[var(--muted)]">Filter, edit, and manage student enrollment records.</p>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
-            <div className="grid gap-4 sm:grid-cols-4">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Admin</p>
+          <h1 className="text-3xl font-bold">Students</h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">Filter, edit, and manage student enrollment records.</p>
+        </div>
+
+        {/* One filter per cell, each cell at least wide enough for its label
+            and longest option — the row reflows to fewer columns as the main
+            column narrows (sidebar expanded, smaller screen) rather than
+            squeezing the text. */}
+        <div className="filter-grid">
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
                 <label htmlFor="search" className="block text-sm font-semibold text-[var(--muted)]">Search</label>
                 <input
@@ -1126,8 +1135,20 @@ function StudentsRoster() {
                   <option value="failed">Failed</option>
                 </select>
               </div>
-            </div>
-            <div className="flex items-end justify-end gap-2">
+        </div>
+
+        <div className="flex flex-wrap items-end justify-end gap-2">
+              {/* Pulls the roster again with the filters as they stand — for
+                  after an import, a bulk edit, or another admin's change in a
+                  second tab. */}
+              <button
+                type="button"
+                onClick={() => { void loadStudents(); void loadBranches(); }}
+                disabled={loading}
+                className="rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--foreground)] disabled:opacity-50"
+              >
+                {loading ? "Refreshing…" : "Refresh"}
+              </button>
               {/* One at a time here; a whole cohort at once through the
                   importer, which is the launch-day case. */}
               <Link
@@ -1163,8 +1184,6 @@ function StudentsRoster() {
                   Reset roster
                 </button>
               ) : null}
-            </div>
-          </div>
         </div>
 
         {showResetModal ? (
