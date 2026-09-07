@@ -149,6 +149,14 @@ export type Filters = {
   startedClasses?: boolean;
   registeredWithinDays?: number;
   /**
+   * Registered on or after / on or before this calendar day (YYYY-MM-DD, school
+   * time). Either bound can stand alone. Pass the same date for both to mean
+   * "registered on exactly that day" — `registeredTo` is treated as the END of
+   * its day, so `from=to=2026-09-04` covers all of the 4th.
+   */
+  registeredFrom?: string;
+  registeredTo?: string;
+  /**
    * Filter on how reachable the email is. `"problem"` is the union of
    * placeholder + invalid + missing — "everyone whose email we can't use".
    */
@@ -170,6 +178,12 @@ export function readFilters(args: Record<string, unknown>): Filters {
 
   const paymentState = str("paymentState")?.toLowerCase();
   const emailQuality = str("emailQuality")?.toLowerCase();
+  // Accept only a plain calendar day; anything else is dropped rather than
+  // guessed at, so a malformed date never silently widens the query.
+  const isoDay = (key: string) => {
+    const v = str(key);
+    return v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
+  };
 
   return {
     branch: str("branch"),
@@ -188,6 +202,8 @@ export function readFilters(args: Record<string, unknown>): Filters {
     notSeenForDays: num("notSeenForDays"),
     startedClasses: bool("startedClasses"),
     registeredWithinDays: num("registeredWithinDays"),
+    registeredFrom: isoDay("registeredFrom"),
+    registeredTo: isoDay("registeredTo"),
     emailQuality:
       emailQuality === "ok" ||
       emailQuality === "placeholder" ||
@@ -229,8 +245,20 @@ function whereFor(filters: Filters, branchIdByName: Map<string, string>) {
   if (filters.startedClasses === true) where.classesStartedAt = { not: null };
   if (filters.startedClasses === false) where.classesStartedAt = null;
   if (filters.batch) where.admission = { path: ["batch"], equals: filters.batch };
-  if (filters.registeredWithinDays) {
-    where.createdAt = { gte: new Date(Date.now() - filters.registeredWithinDays * DAY) };
+  {
+    // `registeredWithinDays` (rolling) and `registeredFrom`/`registeredTo`
+    // (calendar) all constrain the same column, so they are merged rather than
+    // each clobbering `where.createdAt`. An explicit `registeredFrom` wins the
+    // lower bound over the rolling window. `registeredTo` is the END of its day.
+    const createdAt: { gte?: Date; lt?: Date } = {};
+    if (filters.registeredWithinDays) {
+      createdAt.gte = new Date(Date.now() - filters.registeredWithinDays * DAY);
+    }
+    if (filters.registeredFrom) createdAt.gte = new Date(`${filters.registeredFrom}T00:00:00Z`);
+    if (filters.registeredTo) {
+      createdAt.lt = new Date(new Date(`${filters.registeredTo}T00:00:00Z`).getTime() + DAY);
+    }
+    if (createdAt.gte || createdAt.lt) where.createdAt = createdAt;
   }
   if (filters.search) {
     where.OR = [
@@ -438,6 +466,15 @@ export const FILTER_PROPERTIES = {
   },
   startedClasses: { type: "boolean", description: "Whether they have confirmed their first class." },
   registeredWithinDays: { type: "number", description: "Only students who registered in the last N days." },
+  registeredFrom: {
+    type: "string",
+    description:
+      "Only students registered ON OR AFTER this calendar day, YYYY-MM-DD. Use with registeredTo for a range; use the SAME date for both to mean 'registered on exactly that day' (e.g. registeredFrom and registeredTo both '2026-09-04').",
+  },
+  registeredTo: {
+    type: "string",
+    description: "Only students registered ON OR BEFORE this calendar day, YYYY-MM-DD (the whole day is included).",
+  },
   emailQuality: {
     type: "string",
     enum: ["problem", "placeholder", "invalid", "missing", "ok"],
@@ -2685,6 +2722,11 @@ export function describeFilters(filters: Filters): string {
   if (filters.startedClasses === false) parts.push("not started classes");
   if (filters.startedClasses === true) parts.push("started classes");
   if (filters.registeredWithinDays) parts.push(`registered in last ${filters.registeredWithinDays} days`);
+  if (filters.registeredFrom && filters.registeredFrom === filters.registeredTo) {
+    parts.push(`registered ${filters.registeredFrom}`);
+  } else if (filters.registeredFrom || filters.registeredTo) {
+    parts.push(`registered ${filters.registeredFrom ?? "…"} to ${filters.registeredTo ?? "…"}`);
+  }
   if (filters.emailQuality === "problem") parts.push("wrong / template email");
   else if (filters.emailQuality) parts.push(`${filters.emailQuality} email`);
   if (filters.missingPhone) parts.push("no phone on file");
