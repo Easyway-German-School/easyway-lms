@@ -328,6 +328,124 @@ export async function replyToTicket(input: {
   return ticket;
 }
 
+/**
+ * Recompute the ticket's summary state from whatever messages are left.
+ *
+ * Called after a staff message is edited or removed. The two unread flags,
+ * `status` and `lastMessageAt` are all denormalised off "who spoke last and
+ * has the other side seen it" — delete the message that set them and they are
+ * simply wrong until something recomputes them. This is that something.
+ *
+ * `unreadForAdmin` is never raised here: the only caller is an admin or tutor
+ * acting on the thread they are looking at, so there is nothing for them to be
+ * told about.
+ */
+async function refreshTicketState(ticketId: string): Promise<void> {
+  const [ticket, messages] = await Promise.all([
+    prisma.supportTicket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, userId: true, createdAt: true, status: true, topic: true },
+    }),
+    prisma.supportTicketMessage.findMany({
+      where: { ticketId },
+      orderBy: { createdAt: "asc" },
+      select: { authorRole: true, createdAt: true },
+    }),
+  ]);
+  if (!ticket) return;
+
+  const last = messages[messages.length - 1];
+  // No messages left, or the student had the last word → the office owes a
+  // reply and the student has nothing new to read. A staff message still last
+  // → leave the student's unread flag alone (there may be an answer they have
+  // not opened) and keep it "waiting on the student".
+  const officeOwesReply = !last || last.authorRole === "student";
+
+  await prisma.supportTicket.update({
+    where: { id: ticket.id },
+    data: {
+      lastMessageAt: last?.createdAt ?? ticket.createdAt,
+      ...(ticket.status === "resolved"
+        ? {}
+        : { status: officeOwesReply ? "open" : "pending" }),
+      ...(officeOwesReply ? { unreadForUser: false } : {}),
+    },
+  });
+
+  if (officeOwesReply) {
+    // Un-ring the bell: any "the office replied" notification still sitting
+    // unread on this thread is now about a message that no longer exists.
+    // Read ones are left — the student already saw them, and scrubbing bell
+    // history they have opened is its own kind of gaslighting.
+    await prisma.notification
+      .deleteMany({
+        where: {
+          userId: ticket.userId,
+          kind: { in: [KIND.supportReply, KIND.lecturerMessage] },
+          link: { contains: `help=${ticket.id}` },
+          readAt: null,
+        },
+      })
+      .catch((error) => {
+        console.warn("refreshTicketState: could not clear stale notifications", error);
+      });
+  }
+}
+
+/**
+ * Correct a message the office already sent — a wrong phone number, a name
+ * typo in an enquiry reply. Staff only, and only staff-authored lines: a
+ * student's own words are never editable from this side.
+ *
+ * Returns the ticket id on success, null if the message is not on this ticket,
+ * was written by the student, or does not exist.
+ */
+export async function editTicketMessage(input: {
+  ticketId: string;
+  messageId: string;
+  body: string;
+}): Promise<string | null> {
+  const body = input.body.trim().slice(0, MAX_BODY);
+  if (!body) return null;
+
+  const message = await prisma.supportTicketMessage.findUnique({
+    where: { id: input.messageId },
+    select: { id: true, ticketId: true, authorRole: true },
+  });
+  if (!message || message.ticketId !== input.ticketId) return null;
+  if (message.authorRole === "student") return null;
+
+  await prisma.supportTicketMessage.update({
+    where: { id: message.id },
+    data: { body, editedAt: new Date() },
+  });
+  return input.ticketId;
+}
+
+/**
+ * Take back a message the office sent by mistake. A real delete, not a soft
+ * one — an enquiry answer that should never have gone out reads, afterwards,
+ * as though it never did: gone from the thread on both sides, and the "office
+ * replied" popup and bell that announced it are cleared with it.
+ *
+ * Staff-authored lines only, same as edit. Returns the ticket id on success.
+ */
+export async function deleteTicketMessage(input: {
+  ticketId: string;
+  messageId: string;
+}): Promise<string | null> {
+  const message = await prisma.supportTicketMessage.findUnique({
+    where: { id: input.messageId },
+    select: { id: true, ticketId: true, authorRole: true },
+  });
+  if (!message || message.ticketId !== input.ticketId) return null;
+  if (message.authorRole === "student") return null;
+
+  await prisma.supportTicketMessage.delete({ where: { id: message.id } });
+  await refreshTicketState(input.ticketId);
+  return input.ticketId;
+}
+
 /** How many tickets are waiting on the office. Drives the sidebar ping. */
 export async function openTicketCount(): Promise<number> {
   return prisma.supportTicket.count({ where: { status: { in: ["open"] } } });

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { adminCan, capabilitiesForUser } from "@/lib/admin-roles";
-import { replyToTicket } from "@/lib/support";
+import { deleteTicketMessage, editTicketMessage, replyToTicket } from "@/lib/support";
 
 export const dynamic = "force-dynamic";
 
@@ -110,6 +110,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         authorName: message.author?.name ?? null,
         mine: message.authorId === session.user.id,
         createdAt: message.createdAt,
+        edited: message.editedAt != null,
       })),
     });
   } catch (error) {
@@ -166,6 +167,38 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         where: { id: ticket.id },
         data: { assignedToId: session.user.id },
       });
+      return NextResponse.json({ ok: true });
+    }
+
+    /**
+     * EDIT / DELETE a message the OFFICE already sent.
+     *
+     * Staff only, and the library refuses a message the student wrote — this
+     * side never rewrites the other side's words. A delete is a real delete,
+     * and refreshTicketState() then clears the popup and bell that announced
+     * it, so an enquiry answer sent by mistake leaves nothing behind.
+     */
+    if (action === "edit" || action === "delete") {
+      if (!isStaff) return NextResponse.json({ error: "Not your request" }, { status: 403 });
+
+      const messageId = String(body.messageId ?? "");
+      if (!messageId) return NextResponse.json({ error: "Which message?" }, { status: 400 });
+
+      const result =
+        action === "edit"
+          ? await editTicketMessage({
+              ticketId: ticket.id,
+              messageId,
+              body: String(body.body ?? ""),
+            })
+          : await deleteTicketMessage({ ticketId: ticket.id, messageId });
+
+      if (!result) {
+        return NextResponse.json(
+          { error: action === "edit" ? "Could not edit that message" : "Could not remove that message" },
+          { status: 400 },
+        );
+      }
       return NextResponse.json({ ok: true });
     }
 

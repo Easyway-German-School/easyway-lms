@@ -4243,6 +4243,16 @@ model SupportTicketMessage {
 
   createdAt DateTime @default(now())
 
+  /**
+   * Set when a staff author corrects a message they already sent — a wrong
+   * phone number, a name typo in an enquiry reply. Null means untouched since
+   * it was written. The student's own messages are never editable, so this is
+   * only ever stamped on an office / tutor line. A deleted message leaves no
+   * row at all (hard delete), on purpose: an enquiry answer sent by mistake
+   * should read as though it never happened.
+   */
+  editedAt DateTime?
+
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
