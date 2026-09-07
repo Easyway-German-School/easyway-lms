@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { isTravelPackagePathway } from "@/lib/payment";
 
 function pathwayOutcome(pathway: string) {
   if (pathway === "Language training") {
@@ -115,6 +116,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
+  /**
+   * Travel Package is admin-onboarded only — a flat ₦980,000 relocation track
+   * the office puts a walk-in on by hand. A student editing their own profile
+   * must not be able to put themselves ON it (they'd owe ₦980k), and — the bug
+   * that bit us — must not knock themselves OFF it by saving the form with the
+   * pathway select on its default, which would leave the ₦980k ledger charge
+   * with a per-level fee beside it and every screen reading "overpaid". Either
+   * way, a Travel Package student's pathway is frozen here.
+   */
+  const effectivePathway = isTravelPackagePathway(student.pathway)
+    ? student.pathway
+    : isTravelPackagePathway(selectedPathway)
+      ? student.pathway
+      : selectedPathway;
+
   if (email && email !== student.user.email) {
     if (await isEmailTaken(email, student.user.id)) {
       return NextResponse.json({ error: "Email is already in use" }, { status: 409 });
@@ -130,10 +146,10 @@ export async function POST(request: NextRequest) {
     where: { userId: session.user.id as string },
     data: {
       level: currentLevel,
-      pathway: selectedPathway,
-      outcome: pathwayOutcome(selectedPathway),
-      examReadiness: pathwayReadiness(selectedPathway),
-      nextLive: `Live coaching session for ${selectedPathway} scheduled soon`,
+      pathway: effectivePathway,
+      outcome: pathwayOutcome(effectivePathway),
+      examReadiness: pathwayReadiness(effectivePathway),
+      nextLive: `Live coaching session for ${effectivePathway} scheduled soon`,
       admission: {
         ...currentAdmission,
         phone: phone || currentAdmission.phone,

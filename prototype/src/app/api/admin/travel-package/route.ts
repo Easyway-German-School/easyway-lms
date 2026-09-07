@@ -56,14 +56,17 @@ export async function GET() {
 }
 
 /**
- * Put one student's Travel Package standing straight — the office button.
+ * Put Travel Package standing straight — the office button.
  *
- *   { studentId }                    move the student onto the pathway (if they
- *                                    are not already) AND collapse their tuition
- *                                    ledger to the one flat ₦980,000 charge.
+ *   { studentId }   move that student onto the pathway (if they are not already)
+ *                   AND collapse their tuition ledger to the one flat ₦980,000
+ *                   charge.
+ *   { all: true }   sweep every student already on the pathway and reconcile the
+ *                   ones whose ledger is out of step — the one-click "fix
+ *                   everyone caught in the loop" pass.
  *
  * Idempotent: running it on an already-correct student is a no-op. It never
- * touches money that came in — only the debit side. When the fix moves the
+ * touches money that came in — only the debit side. When the fix moves a
  * student from "paid in full" to "balance owing", they get a warm heads-up on
  * their portal (see travel-package-notice.ts); nothing else is shown to them.
  *
@@ -76,6 +79,42 @@ export async function PATCH(request: Request) {
   if (!gate.ok) return gate.response;
 
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+
+  // ---- Bulk: reconcile every out-of-step student on the pathway ------------
+  if (body.all === true) {
+    const onPathway = await prisma.student.findMany({
+      where: { pathway: TRAVEL_PACKAGE_PATHWAY },
+      select: { id: true },
+    });
+    let reconciled = 0;
+    let notified = 0;
+    const errors: string[] = [];
+    for (const { id } of onPathway) {
+      try {
+        const r = await reconcileTravelPackageStudent({ studentId: id, setPathway: true });
+        if (r && (r.pathwaySet || r.chargeFixed || r.chargesRetired > 0)) {
+          reconciled += 1;
+          try {
+            await travelPackagePartPaymentNotice(r);
+            if (r.wasFullPaidBefore && !r.fullPaidAfter) notified += 1;
+          } catch (noticeError) {
+            console.error("Travel Package bulk notice failed", { id, noticeError });
+          }
+        }
+      } catch (error) {
+        errors.push(id);
+        console.error("Travel Package bulk reconcile failed", { id, error });
+      }
+    }
+    return NextResponse.json({
+      ok: true,
+      scanned: onPathway.length,
+      reconciled,
+      notified,
+      failed: errors.length,
+    });
+  }
+
   const studentId = typeof body.studentId === "string" ? body.studentId.trim() : "";
   if (!studentId) {
     return NextResponse.json({ error: "studentId is required" }, { status: 400 });
