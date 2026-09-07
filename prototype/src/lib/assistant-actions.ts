@@ -238,6 +238,8 @@ const COHORT_FILTERS = {
   notSeenForDays: FILTER_PROPERTIES.notSeenForDays,
   startedClasses: FILTER_PROPERTIES.startedClasses,
   registeredWithinDays: FILTER_PROPERTIES.registeredWithinDays,
+  registeredFrom: FILTER_PROPERTIES.registeredFrom,
+  registeredTo: FILTER_PROPERTIES.registeredTo,
 } as const;
 
 export const ASSISTANT_ACTIONS: AssistantAction[] = [
