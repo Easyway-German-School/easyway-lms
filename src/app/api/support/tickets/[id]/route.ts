@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { adminCan, capabilitiesForUser } from "@/lib/admin-roles";
-import { deleteTicketMessage, editTicketMessage, replyToTicket } from "@/lib/support";
+import {
+  deleteTicketMessage,
+  editTicketMessage,
+  replyToTicket,
+  sanitizeTicketAttachments,
+} from "@/lib/support";
 
 export const dynamic = "force-dynamic";
 
@@ -111,6 +116,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         mine: message.authorId === session.user.id,
         createdAt: message.createdAt,
         edited: message.editedAt != null,
+        attachments: sanitizeTicketAttachments(message.attachments),
       })),
     });
   } catch (error) {
@@ -203,7 +209,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     const message = String(body.body ?? "").trim();
-    if (!message) return NextResponse.json({ error: "Write something first" }, { status: 400 });
+    const attachments = sanitizeTicketAttachments(body.attachments);
+    if (!message && attachments.length === 0) {
+      return NextResponse.json({ error: "Write something, or attach an image" }, { status: 400 });
+    }
 
     // Belt and braces on top of `allowed`: an admin without the capability
     // cannot reach here, and `adminCan` re-states the rule at the write.
@@ -224,6 +233,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       authorName: session.user.name ?? null,
       body: message,
       fromStaff: isStaff,
+      attachments,
     });
 
     return NextResponse.json({ ok: true });

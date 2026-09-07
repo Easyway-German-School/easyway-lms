@@ -8,6 +8,8 @@ import { useRouter } from "next/navigation";
 import LecturerShell from "@/components/LecturerShell";
 import { ArrowLeftIcon, InboxIcon, MailIcon, SendIcon } from "@/components/icons";
 import BrandLoader from "@/components/BrandLoader";
+import { AttachmentPicker, MessageAttachments } from "@/components/support/TicketAttachments";
+import type { TicketAttachment } from "@/lib/support-copy";
 
 type InboxTicket = {
   id: string;
@@ -27,6 +29,7 @@ type ThreadMessage = {
   authorName: string | null;
   mine: boolean;
   createdAt: string;
+  attachments?: TicketAttachment[];
 };
 
 type SentMessage = {
@@ -74,6 +77,7 @@ export default function LecturerMessagesPage() {
   const [activeSubject, setActiveSubject] = useState("");
   const [thread, setThread] = useState<ThreadMessage[]>([]);
   const [reply, setReply] = useState("");
+  const [replyFiles, setReplyFiles] = useState<TicketAttachment[]>([]);
   const [threadBusy, setThreadBusy] = useState(false);
 
   const loadInbox = useCallback(async () => {
@@ -107,16 +111,17 @@ export default function LecturerMessagesPage() {
   }, []);
 
   async function sendReply() {
-    if (!reply.trim() || !activeTicket) return;
+    if ((!reply.trim() && replyFiles.length === 0) || !activeTicket) return;
     setThreadBusy(true);
     try {
       const res = await fetch(`/api/support/tickets/${activeTicket}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: reply }),
+        body: JSON.stringify({ body: reply, attachments: replyFiles }),
       });
       if (res.ok) {
         setReply("");
+        setReplyFiles([]);
         await openThread(activeTicket, activeSubject);
         await loadInbox();
       }
@@ -364,20 +369,27 @@ export default function LecturerMessagesPage() {
                       <span className="px-1 text-[10px] font-medium text-[var(--muted)]">
                         {entry.mine ? "You" : entry.authorName ?? "Student"}
                       </span>
-                      <div
-                        className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
-                          entry.mine
-                            ? "bg-[var(--accent)] text-white"
-                            : "bg-[var(--background)] text-[var(--foreground)]"
-                        }`}
-                      >
-                        {entry.body}
-                      </div>
+                      {entry.body ? (
+                        <div
+                          className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
+                            entry.mine
+                              ? "bg-[var(--accent)] text-white"
+                              : "bg-[var(--background)] text-[var(--foreground)]"
+                          }`}
+                        >
+                          {entry.body}
+                        </div>
+                      ) : null}
+                      <MessageAttachments
+                        attachments={entry.attachments}
+                        align={entry.mine ? "end" : "start"}
+                      />
                     </div>
                   ))}
                 </div>
 
                 <div className="mt-3 flex items-end gap-2">
+                  <AttachmentPicker value={replyFiles} onChange={setReplyFiles} disabled={threadBusy} compact />
                   <textarea
                     value={reply}
                     onChange={(event) => setReply(event.target.value.slice(0, 4000))}
@@ -387,7 +399,7 @@ export default function LecturerMessagesPage() {
                   />
                   <button
                     onClick={sendReply}
-                    disabled={threadBusy || !reply.trim()}
+                    disabled={threadBusy || (!reply.trim() && replyFiles.length === 0)}
                     aria-label="Send reply"
                     className="shrink-0 rounded-xl bg-[var(--accent)] p-2.5 text-white transition hover:brightness-110 disabled:opacity-40"
                   >
