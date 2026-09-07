@@ -204,9 +204,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
   }
 
-  const existingUser = await prisma.user.findUnique({ where: { email } });
+  // `User` is a global (non-tenant) model, so this lookup already sees every
+  // account in the whole system — an email taken by a self-signup, a lecturer,
+  // or a student another admin just added is caught here. The message says what
+  // to do about it instead of leaving the office to guess.
+  const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true } });
   if (existingUser) {
-    return NextResponse.json({ error: "Email already registered" }, { status: 400 });
+    return NextResponse.json(
+      {
+        error:
+          "That email already has an account. Search the student list for it — the person may already be on the portal, or another admin just added them.",
+      },
+      { status: 409 },
+    );
   }
 
   let branchRow: { tenantId: string | null; name: string; mode: string | null } | null = null;
@@ -349,13 +359,28 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
+    // A unique-constraint hit here is almost always the email. The pre-check
+    // above catches the common case, but a second admin adding the same person
+    // in the same second still races past it — say so plainly rather than
+    // leaking Prisma's "Unique constraint failed on the fields: (`email`)".
+    const code = (error as { code?: string })?.code;
+    const message = error instanceof Error ? error.message : "";
+    if (code === "P2002" || /Unique constraint failed/i.test(message)) {
+      return NextResponse.json(
+        {
+          error:
+            "That email already has an account. Search the student list for it — the person may already be on the portal, or another admin just added them.",
+        },
+        { status: 409 },
+      );
+    }
     // Log it — "Unable to create student" told the office nothing, and the
     // detail below is only in the JSON body, which the form does not show.
     console.error("Manual add-student failed", error);
     return NextResponse.json(
       {
         error: "Unable to create student",
-        detail: error instanceof Error ? error.message : "Unknown",
+        detail: message || "Unknown",
       },
       { status: 500 },
     );
