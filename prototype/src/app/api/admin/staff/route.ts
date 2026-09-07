@@ -149,6 +149,7 @@ export async function GET() {
 /** Plain English for the office; the capability tokens mean nothing to them. */
 const CAPABILITY_LABELS: Record<Capability, string> = {
   students: "Students - enrol, edit, move, graduate",
+  contact: "Student contact details - phone and email in the assistant's cohort export",
   attendance: "Attendance registers",
   classes: "Class coordination - timetables, sittings, postponements",
   exams: "Exams and exam registrations",
