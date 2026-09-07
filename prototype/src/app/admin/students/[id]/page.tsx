@@ -83,6 +83,9 @@ type Dossier = {
     accountCreatedAt: string | null;
     welcomeTourSeenAt: string | null;
     lastJourneySeenAt: string | null;
+    loginIsTemporary: boolean;
+    loginUpgradedByStudentAt: string | null;
+    loginUpgradedFrom: string | null;
   };
   origin: { source: string; status: string; enquiredAt: string; notes: string | null } | null;
   money: {
@@ -946,6 +949,23 @@ export default function StudentDossierPage() {
                 {identity.email}
                 {identity.phone ? ` · ${identity.phone}` : ""}
               </p>
+              {account.loginUpgradedByStudentAt ? (
+                <p className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-400/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
+                  Login set by student
+                  <span className="font-normal text-emerald-200/70">
+                    {new Date(account.loginUpgradedByStudentAt).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                    {account.loginUpgradedFrom ? ` · was ${account.loginUpgradedFrom}` : ""}
+                  </span>
+                </p>
+              ) : account.loginIsTemporary ? (
+                <p className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-2.5 py-1 text-[11px] font-semibold text-amber-200">
+                  Temporary login — student prompted to set their own
+                </p>
+              ) : null}
               <div className="mt-4 flex flex-wrap gap-2">
                 {[
                   identity.level,
