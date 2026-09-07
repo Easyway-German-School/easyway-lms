@@ -55,6 +55,13 @@ export type SegmentInput = {
    * legacy row (there is no data yet to call them "returning" from).
    */
   enrolmentCount?: number;
+  /**
+   * True when the account was onboarded off-form (office-added / imported) and
+   * still has gaps in the "important parts" of the sign-up form — see
+   * `assessProfileBackfill` in lib/profile-backfill.ts. Lets the office filter
+   * the roster to exactly the students Becca is chasing details from.
+   */
+  profileDetailsMissing?: boolean;
 };
 
 export type DeriveSegmentsContext = {
@@ -86,6 +93,8 @@ export function deriveSegments(student: SegmentInput, ctx: DeriveSegmentsContext
   if (student.status === "prospective") segments.push("prospective");
 
   if (student.heldBackAt) segments.push("held-back");
+
+  if (student.profileDetailsMissing) segments.push("profile-incomplete");
 
   if (
     !student.classesStartedAt &&
@@ -120,6 +129,7 @@ export const SEGMENT_LABELS: Record<string, string> = {
   withdrawn: "Withdrawn",
   prospective: "Prospective",
   "held-back": "Held back",
+  "profile-incomplete": "Profile details incomplete",
   "not-started": "Not started",
   "behind-on-fees": "Behind on fees",
   "paid-in-full": "Paid in full",

@@ -9,6 +9,7 @@ import ImpersonationBanner from "@/components/ImpersonationBanner";
 import OfflineBanner from "@/components/OfflineBanner";
 import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import OfficeReplyMoment from "@/components/moment/OfficeReplyMoment";
+import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
@@ -492,6 +493,14 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         stacks on the tour or a celebration. See OfficeReplyMoment.
       */}
       <OfficeReplyMoment />
+
+      {/*
+        Becca recreating the important parts of the sign-up form for a student
+        the office onboarded by hand. Low priority in the queue and entirely
+        optional — the /profile card and a weekly nudge carry it too. See
+        components/moment/ProfileDetailsMoment.tsx.
+      */}
+      <ProfileDetailsMoment />
 
       {/*
         Message popups, mounted once per shell so they follow the reader onto
