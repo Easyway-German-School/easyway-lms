@@ -89,6 +89,8 @@ export const KIND = {
   profilePhotoMissing: "profile.photo_missing",
   /** A student has no branch set — Becca asks them to place themselves, at most once a week. See src/lib/branch-nudge.ts. */
   profileBranchMissing: "profile.branch_missing",
+  /** An off-form student (office-added / imported) still has admission gaps — Becca asks for the important few, at most once a week. See src/lib/profile-details-nudge.ts. */
+  profileDetailsMissing: "profile.details_missing",
   general: "general",
 } as const;
 

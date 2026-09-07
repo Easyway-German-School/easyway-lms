@@ -8,6 +8,7 @@ import {
 } from "@/lib/finance/receivables";
 import { computeChurnRisk, churnRiskPreset, RECENT_WINDOW_DAYS, type ChurnRisk } from "@/lib/student-risk";
 import { deriveSegments } from "@/lib/student-segments";
+import { assessProfileBackfill } from "@/lib/profile-backfill";
 
 /**
  * ONE QUERY, TWO CALLERS.
@@ -239,6 +240,11 @@ export function scoreAndFilterRoster(
         classesStartedAt: student.classesStartedAt,
         createdAt: student.createdAt,
         enrolmentCount: student._count.enrolments,
+        profileDetailsMissing: assessProfileBackfill(
+          student.admission as Record<string, unknown> | null,
+          student.profile,
+          now,
+        ).due,
       },
       { now, finance, risk },
     );

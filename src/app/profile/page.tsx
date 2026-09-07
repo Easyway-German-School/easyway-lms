@@ -9,6 +9,7 @@ import Link from "next/link";
 import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import BranchSetupCard from "@/components/BranchSetupCard";
+import { ProfileDetailsCard } from "@/components/ProfileDetailsPrompt";
 import { useGamification } from "@/lib/useGamification";
 import { uploadImage, validateImageFile } from "@/lib/upload";
 import type { Badge, BadgeIcon } from "@/lib/gamification";
@@ -237,6 +238,8 @@ export default function ProfilePage() {
   /** Null branch — the account came in on a sheet with the column blank. */
   const [needsBranch, setNeedsBranch] = useState(false);
   const [branchSetupAutoOpen, setBranchSetupAutoOpen] = useState(false);
+  /** ?setup=details — Becca's "finish your profile" nudge links here. */
+  const [detailsAutoOpen, setDetailsAutoOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { game } = useGamification();
   const queryClient = useQueryClient();
@@ -277,6 +280,7 @@ export default function ProfilePage() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("setup") === "branch") setBranchSetupAutoOpen(true);
+    if (params.get("setup") === "details") setDetailsAutoOpen(true);
   }, []);
 
   useEffect(() => {
@@ -680,6 +684,11 @@ export default function ProfilePage() {
                 }}
               />
             ) : null}
+
+            {/* Becca recreating the important parts of the sign-up form, for a
+                student the office onboarded by hand. Renders itself only when
+                the account is genuinely off-form and still has gaps. */}
+            <ProfileDetailsCard autoOpen={detailsAutoOpen} />
 
             {/* ---------- Tabs ---------- */}
             <div className="mt-8 flex gap-1 rounded-full cinematic-card p-1.5">

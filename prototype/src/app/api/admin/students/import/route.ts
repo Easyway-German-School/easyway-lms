@@ -465,7 +465,15 @@ export async function POST(request: NextRequest) {
                 // The batch month is what the timetable generator and the
                 // promotion engine both read, so a mid-course student is
                 // useless without it.
-                admission: { batch: batch || undefined, phone: phone || undefined, importedAt: new Date().toISOString() },
+                // `onboardedVia` is the invisible mark that switches on Becca's
+                // "finish your profile" prompt — an imported student never saw
+                // the long sign-up form. See src/lib/profile-backfill.ts.
+                admission: {
+                  batch: batch || undefined,
+                  phone: phone || undefined,
+                  importedAt: new Date().toISOString(),
+                  onboardedVia: "import",
+                },
                 // The typed twin of the admission blob above — see
                 // lib/student-profile.ts.
                 profile: { create: normalizeProfileInput(profileRow) },

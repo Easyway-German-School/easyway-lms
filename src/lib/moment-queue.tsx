@@ -111,6 +111,7 @@ export type MomentId =
   | "journey"
   | "poster"
   | "game-turn"
+  | "profile-details"
   | "install-offline-notes";
 
 type Kind = "toast" | "modal";
@@ -236,6 +237,22 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Your turn is waiting",
     dockBlurb: "Your class is writing a story and it's your turn to add a line.",
+  },
+  /**
+   * "Becca needs a few sign-up details." Only ever due for a student the
+   * office onboarded by hand, whose admission record still has gaps. It is a
+   * chore we are asking of them, not news or a gift, and it is entirely
+   * optional — the /profile card and a weekly nudge carry it regardless — so
+   * it sits low and the two-modal cap will usually send it to the dock. Above
+   * the poster and the install advert because it is at least a real request
+   * with an answer the school needs; below the game turn because a classmate
+   * is actually waiting on that one.
+   */
+  "profile-details": {
+    priority: 38,
+    kind: "modal",
+    dockLabel: "Finish your profile",
+    dockBlurb: "A few sign-up details the office didn't get to ask you.",
   },
   /**
    * "Install the app to keep your notes offline." A soft upsell shown only to

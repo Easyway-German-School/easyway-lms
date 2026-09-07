@@ -229,6 +229,20 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * Students the office onboarded by hand (added or imported) still miss the
+   * "important parts" of the sign-up form — WhatsApp, date of birth, next of
+   * kin, and so on. Becca asks for them once a week; self-gated per ISO week,
+   * and a student drops out the moment they finish or snooze it. See
+   * src/lib/profile-details-nudge.ts.
+   */
+  results.push(
+    await run("profile-details-nudge", async () => {
+      const { nudgeStudentsWithProfileGaps } = await import("@/lib/profile-details-nudge");
+      return nudgeStudentsWithProfileGaps();
+    }),
+  );
+
+  /**
    * Ask, once a day, whether the backups are still happening.
    *
    * Deliberately runs here rather than as its own schedule. This tick is the

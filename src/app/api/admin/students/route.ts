@@ -376,17 +376,18 @@ export async function POST(request: Request) {
             classType,
             sessionSlot,
             deliveryMode,
-            admission:
-              phone || batch || city || stateRegion || country || photoUrl
-                ? {
-                    ...(phone ? { phone } : {}),
-                    ...(batch ? { batch } : {}),
-                    ...(city ? { city } : {}),
-                    ...(stateRegion ? { state: stateRegion } : {}),
-                    ...(country ? { country } : {}),
-                    ...(photoUrl ? { photoUrl } : {}),
-                  }
-                : undefined,
+            admission: {
+              // `onboardedVia` is the invisible mark that switches on Becca's
+              // "finish your profile" prompt — an office-added student never
+              // saw the long sign-up form. See src/lib/profile-backfill.ts.
+              onboardedVia: "manual-add",
+              ...(phone ? { phone } : {}),
+              ...(batch ? { batch } : {}),
+              ...(city ? { city } : {}),
+              ...(stateRegion ? { state: stateRegion } : {}),
+              ...(country ? { country } : {}),
+              ...(photoUrl ? { photoUrl } : {}),
+            },
             // The typed twin of the admission blob above — see
             // lib/student-profile.ts. Reads the same request body (with the
             // already-sanitized `photoUrl`, not the raw one), so anything this
