@@ -7,6 +7,7 @@ import { useSession } from "next-auth/react";
 import BrandLoader from "@/components/BrandLoader";
 import PaymentSuccessToastClient from "@/components/PaymentSuccessToastClient";
 import TuitionNudge from "@/components/TuitionNudge";
+import ExamCampaignBanner from "@/components/ExamCampaignBanner";
 import PrivateUpgradeNudge from "@/components/PrivateUpgradeNudge";
 import LiveClassBanner from "@/components/live/LiveClassBanner";
 import LevelAdvance from "@/components/LevelAdvance";
@@ -694,6 +695,10 @@ function DashboardContent() {
               before anything else, and it disappears entirely once settled. */}
           <PrivateScheduleSetup classType={resolvedStudent?.classType} />
           <TuitionNudge className="mb-6" />
+          {/* The pinned ÖSD exam-campaign strip. Renders nothing unless the
+              campaign is running and this student has not marked themselves
+              registered. See components/ExamCampaignBanner.tsx. */}
+          <ExamCampaignBanner variant="banner" className="mb-6" />
           {/* Same slot the balance band just vacated — a group student stops
               seeing TuitionNudge the moment they finish paying, and this is
               what a FULLY PAID group student sees there instead. See

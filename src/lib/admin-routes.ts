@@ -49,6 +49,7 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
 
   { prefix: "/admin/exams", capability: "exams" },
   { prefix: "/admin/exam-centre", capability: "exams" },
+  { prefix: "/admin/exam-campaign", capability: "exams" },
   { prefix: "/admin/exam-registrations", capability: "exams" },
   { prefix: "/admin/marking", capability: "exams" },
   { prefix: "/admin/gradebook", capability: "exams" },

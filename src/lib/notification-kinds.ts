@@ -71,6 +71,14 @@ export const KIND = {
   /** The office approved, rejected, or paid out a refund request. */
   refundDecided: "refund.decided",
   announcement: "announcement",
+  /**
+   * The exam-registration campaign nudge (currently ÖSD October 2026) — the
+   * 3×/week "register now" reminder to students who have not marked themselves
+   * registered. Namespaced under `announcement.` on purpose: the dashboard
+   * Announcements card and the bell both key off `startsWith("announcement")`,
+   * so it surfaces there with no extra routing. See src/lib/exam-campaign-reminders.ts.
+   */
+  examCampaign: "announcement.exam",
   /** Somebody started a game in the room's chat — see /api/community/messages. */
   gameInvite: "game.invite",
   /** A class recording uploaded but the bucket won't serve it back — admins need to know before a student does. */

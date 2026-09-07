@@ -21,6 +21,10 @@ export const TUITION_FREE_ROUTES = [
   // The tuition checkout itself — locking this would make the paywall a
   // dead end, since every "Pay tuition" call to action lands here.
   "/programs",
+  // The exam-campaign details page (ÖSD October 2026). The daily popup shows
+  // to every student regardless of tuition state, so its "Find out more"
+  // target has to open for them too.
+  "/exams/osd",
 ] as const;
 
 export function isTuitionFreeRoute(pathname: string): boolean {
@@ -56,7 +60,7 @@ export function hasProfilePhoto(admission: unknown): boolean {
  * `/payments` stay open so a student is never cut off from seeing what they
  * are told or from paying what they owe just because of a missing photo.
  */
-export const PHOTO_FREE_ROUTES = ["/profile", "/notifications", "/payments"] as const;
+export const PHOTO_FREE_ROUTES = ["/profile", "/notifications", "/payments", "/exams/osd"] as const;
 
 export function isPhotoGatedRoute(pathname: string): boolean {
   return !PHOTO_FREE_ROUTES.some(

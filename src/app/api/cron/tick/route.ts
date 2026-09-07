@@ -124,6 +124,21 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * The exam-registration campaign nudge (currently ÖSD October 2026): a
+   * "register now" bell row + push to every student who has not marked
+   * themselves registered, on the campaign's reminder weekdays (default Mon /
+   * Wed / Fri). Self-gated — idempotent per student per day via the dedupeKey,
+   * and only for tenants that have saved the campaign screen. See
+   * src/lib/exam-campaign-reminders.ts.
+   */
+  results.push(
+    await run("exam-campaign-reminders", async () => {
+      const { sendDueExamCampaignReminders } = await import("@/lib/exam-campaign-reminders");
+      return sendDueExamCampaignReminders();
+    }),
+  );
+
+  /**
    * The class-wide reminder for a mock / pretest sitting, three days out. Fires
    * on a single calendar day so one tick a day is one reminder. See
    * src/lib/pretest-reminders.ts.
