@@ -1,0 +1,322 @@
+"use client";
+
+export const dynamic = "force-dynamic";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import AdminShell from "@/components/AdminShell";
+import { RosterIcon } from "@/components/icons";
+
+/**
+ * The cohort console.
+ *
+ * The roster, grouped by branch → level → batch month, so the office can see
+ * the shape of an intake at a glance — and, more to the point, see the
+ * students who have no batch at all, or the wrong one. Those sit outside every
+ * cohort the timetable, the promotion engine and the "message the September
+ * intake" send can address. Tick them, pick a month, move them in.
+ *
+ * The only write is `admission.batch`. It does not enrol, promote, or bill —
+ * those stay one-student-at-a-time on /admin/students.
+ */
+
+const NO_BATCH = "(no batch)";
+
+type Group = {
+  branch: string;
+  level: string;
+  batch: string;
+  count: number;
+  started: number;
+  ids: string[];
+};
+
+type StudentInfo = {
+  name: string;
+  email: string;
+  studentCode: string | null;
+  status: string;
+  level: string;
+  branchName: string | null;
+  batch: string | null;
+  startedClasses: boolean;
+};
+
+type CohortData = {
+  groups: Group[];
+  students: Record<string, StudentInfo>;
+  total: number;
+  truncated: boolean;
+  noBatch: number;
+  currentIntake: { month: string; year: number };
+  months: string[];
+};
+
+const groupKey = (g: Group) => `${g.branch}||${g.level}||${g.batch}`;
+
+export default function CohortsPage() {
+  const [data, setData] = useState<CohortData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [targetMonth, setTargetMonth] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/cohorts", { cache: "no-store" });
+      if (res.ok) {
+        const next: CohortData = await res.json();
+        setData(next);
+        setTargetMonth((prev) => prev || next.currentIntake.month);
+      } else {
+        setMsg("Could not load cohorts.");
+      }
+    } catch {
+      setMsg("Could not load cohorts.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const byBranch = useMemo(() => {
+    const map = new Map<string, Group[]>();
+    for (const g of data?.groups ?? []) {
+      const list = map.get(g.branch) ?? [];
+      list.push(g);
+      map.set(g.branch, list);
+    }
+    return [...map.entries()];
+  }, [data]);
+
+  const toggleExpanded = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleStudent = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const setGroupSelected = (ids: string[], on: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  };
+
+  const apply = async () => {
+    if (selected.size === 0 || !targetMonth) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/admin/cohorts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentIds: [...selected], batch: targetMonth }),
+      });
+      const out = await res.json();
+      if (res.ok) {
+        setMsg(
+          `Moved ${out.updated} student${out.updated === 1 ? "" : "s"} into the ${out.batch} intake` +
+            (out.skipped ? ` (${out.skipped} skipped — not on your roster)` : "") +
+            ".",
+        );
+        setSelected(new Set());
+        await load();
+      } else {
+        setMsg(out.error || "Could not move those students.");
+      }
+    } catch {
+      setMsg("Could not move those students.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AdminShell>
+      <div className="mx-auto max-w-5xl space-y-6 p-6">
+        <div className="space-y-2">
+          <div className="flex items-center gap-3">
+            <RosterIcon className="h-8 w-8 text-[var(--accent)]" />
+            <h1 className="text-3xl font-bold text-[var(--foreground)]">Cohorts</h1>
+          </div>
+          <p className="text-[var(--muted)]">
+            The roster by branch, level and batch month. Fix the students who landed outside
+            a cohort, then message an intake from{" "}
+            <Link href="/admin/assistant" className="text-[var(--accent)] underline">
+              the assistant
+            </Link>
+            .
+          </p>
+          {data && (
+            <p className="text-sm text-[var(--muted)]">
+              Current intake: <strong className="text-[var(--foreground)]">{data.currentIntake.month} {data.currentIntake.year}</strong>{" "}
+              — <Link href="/admin/settings" className="text-[var(--accent)] underline">change</Link>
+              {data.truncated && " · showing the most recent 4,000 students"}
+            </p>
+          )}
+        </div>
+
+        {msg && (
+          <div className="rounded-lg bg-[var(--surface)] px-4 py-3 text-sm font-medium text-[var(--foreground)] shadow-sm">
+            {msg}
+          </div>
+        )}
+
+        {loading && <p className="text-[var(--muted)]">Loading…</p>}
+
+        {data && !loading && (
+          <>
+            {data.noBatch > 0 && (
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                <strong>{data.noBatch}</strong> student{data.noBatch === 1 ? " has" : "s have"} no
+                batch month. They are outside every cohort — no timetable end date, and no
+                cohort message reaches them. Open the{" "}
+                <span className="font-semibold">No branch → … → {NO_BATCH}</span> rows below,
+                select them, and move them into an intake.
+              </div>
+            )}
+
+            {byBranch.map(([branch, groups]) => (
+              <div
+                key={branch}
+                className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-sm"
+              >
+                <div className="border-b border-[var(--border)] bg-[var(--background)] px-5 py-3 text-sm font-bold uppercase tracking-wide text-[var(--muted)]">
+                  {branch}
+                </div>
+                <div className="divide-y divide-[var(--border)]">
+                  {groups.map((g) => {
+                    const key = groupKey(g);
+                    const isOpen = expanded.has(key);
+                    const noBatch = g.batch === NO_BATCH;
+                    const allSelected = g.ids.every((id) => selected.has(id));
+                    return (
+                      <div key={key} className={noBatch ? "bg-amber-50/60" : undefined}>
+                        <button
+                          onClick={() => toggleExpanded(key)}
+                          className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-[var(--background)]"
+                        >
+                          <span className="flex items-center gap-2 font-medium text-[var(--foreground)]">
+                            <span className="text-[var(--muted)]">{isOpen ? "▾" : "▸"}</span>
+                            {g.level}
+                            <span className={noBatch ? "font-semibold text-amber-700" : "text-[var(--muted)]"}>
+                              · {g.batch}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-sm text-[var(--muted)]">
+                            {g.count} student{g.count === 1 ? "" : "s"} · {g.started} started
+                          </span>
+                        </button>
+
+                        {isOpen && (
+                          <div className="bg-[var(--background)] px-5 py-3">
+                            <button
+                              onClick={() => setGroupSelected(g.ids, !allSelected)}
+                              className="mb-2 text-xs font-semibold text-[var(--accent)] underline"
+                            >
+                              {allSelected ? "Clear all in this group" : `Select all ${g.count}`}
+                            </button>
+                            <ul className="space-y-1">
+                              {g.ids.map((id) => {
+                                const s = data.students[id];
+                                if (!s) return null;
+                                return (
+                                  <li key={id}>
+                                    <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-[var(--surface)]">
+                                      <input
+                                        type="checkbox"
+                                        checked={selected.has(id)}
+                                        onChange={() => toggleStudent(id)}
+                                        className="h-4 w-4 rounded border-[var(--border)] accent-[var(--accent)]"
+                                      />
+                                      <span
+                                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                          s.startedClasses ? "bg-emerald-500" : "bg-[var(--border)]"
+                                        }`}
+                                        title={s.startedClasses ? "Has started classes" : "Not started"}
+                                      />
+                                      <span className="text-sm text-[var(--foreground)]">{s.name}</span>
+                                      {s.studentCode && (
+                                        <span className="text-xs text-[var(--muted)]">{s.studentCode}</span>
+                                      )}
+                                      {s.status !== "active" && (
+                                        <span className="text-xs uppercase text-[var(--muted)]">{s.status}</span>
+                                      )}
+                                    </label>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+
+      {selected.size > 0 && data && (
+        <div className="sticky bottom-0 z-10 border-t border-[var(--border)] bg-[var(--surface)] px-6 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.25)]">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
+            <span className="text-sm font-semibold text-[var(--foreground)]">
+              {selected.size} selected
+              <button
+                onClick={() => setSelected(new Set())}
+                className="ml-3 text-xs font-medium text-[var(--muted)] underline"
+              >
+                clear
+              </button>
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-[var(--muted)]">Move to</span>
+              <select
+                value={targetMonth}
+                onChange={(e) => setTargetMonth(e.target.value)}
+                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
+              >
+                {data.months.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={apply}
+                disabled={busy}
+                className="rounded-lg bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+              >
+                {busy ? "Moving…" : "Apply"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </AdminShell>
+  );
+}
