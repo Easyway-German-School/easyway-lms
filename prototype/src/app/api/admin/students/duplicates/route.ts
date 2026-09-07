@@ -195,6 +195,10 @@ export async function POST(request: Request) {
     if (!keeper.user || !absorb.user) {
       return NextResponse.json({ error: "One of those students has no login to merge." }, { status: 409 });
     }
+    // Narrowed locals — the null check above does not survive into the
+    // $transaction closure or the writeAudit call below.
+    const keeperUser = keeper.user;
+    const absorbUser = absorb.user;
 
     // Re-check the pairing server-side: same normalised name AND same phone.
     const kIn = toInput(keeper);
@@ -299,7 +303,7 @@ export async function POST(request: Request) {
         {
           studentId: absorb.id,
           studentCode: absorb.studentCode ?? null,
-          email: absorb.user.email,
+          email: absorbUser.email,
           at: nowIso,
         },
       ];
@@ -336,7 +340,7 @@ export async function POST(request: Request) {
         },
       });
       await tx.student.delete({ where: { id: absorb.id } });
-      await tx.user.delete({ where: { id: absorb.user.id } });
+      await tx.user.delete({ where: { id: absorbUser.id } });
 
       return {
         payments: payments.count,
@@ -355,8 +359,8 @@ export async function POST(request: Request) {
       affectedCount: 1,
       severity: "notice",
       summary:
-        `Merged duplicate ${absorb.user.name ?? "student"} (${absorb.user.email}) into ` +
-        `${keeper.user.name ?? "student"} (${keeper.user.email}) — ` +
+        `Merged duplicate ${absorbUser.name ?? "student"} (${absorbUser.email}) into ` +
+        `${keeperUser.name ?? "student"} (${keeperUser.email}) — ` +
         `${moved.payments} payment(s), ${moved.chargesMoved} charge(s), ${moved.guardiansMoved} guardian(s) moved`,
       after: { keeperId: keeper.id, absorbId: absorb.id, moved },
     });
