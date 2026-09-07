@@ -231,6 +231,7 @@ const COHORT_FILTERS = {
   status: FILTER_PROPERTIES.status,
   classType: FILTER_PROPERTIES.classType,
   deliveryMode: FILTER_PROPERTIES.deliveryMode,
+  sessionSlot: FILTER_PROPERTIES.sessionSlot,
   goal: FILTER_PROPERTIES.goal,
   batch: FILTER_PROPERTIES.batch,
   paymentState: FILTER_PROPERTIES.paymentState,

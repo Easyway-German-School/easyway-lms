@@ -139,6 +139,8 @@ export type Filters = {
   status?: string;
   classType?: string;
   deliveryMode?: string;
+  /** Sitting: morning / afternoon / evening / weekend. Matched case-insensitively. */
+  sessionSlot?: string;
   goal?: string;
   batch?: string;
   search?: string;
@@ -175,6 +177,7 @@ export function readFilters(args: Record<string, unknown>): Filters {
     status: str("status")?.toLowerCase(),
     classType: str("classType")?.toLowerCase(),
     deliveryMode: str("deliveryMode")?.toLowerCase(),
+    sessionSlot: str("sessionSlot")?.toLowerCase(),
     goal: str("goal")?.toLowerCase(),
     batch: str("batch"),
     search: str("search"),
@@ -220,6 +223,8 @@ function whereFor(filters: Filters, branchIdByName: Map<string, string>) {
   if (filters.status) where.status = filters.status;
   if (filters.classType) where.classType = filters.classType;
   if (filters.deliveryMode) where.deliveryMode = filters.deliveryMode;
+  // Case-insensitive: older imports wrote "MORNING", the newer path writes "morning".
+  if (filters.sessionSlot) where.sessionSlot = { equals: filters.sessionSlot, mode: "insensitive" };
   if (filters.goal) where.germanyGoal = filters.goal;
   if (filters.startedClasses === true) where.classesStartedAt = { not: null };
   if (filters.startedClasses === false) where.classesStartedAt = null;
@@ -408,6 +413,12 @@ export const FILTER_PROPERTIES = {
   status: { type: "string", enum: ["active", "inactive", "graduated", "withdrawn"], description: "Enrolment status." },
   classType: { type: "string", enum: ["group", "private"] },
   deliveryMode: { type: "string", enum: ["physical", "hybrid", "online"] },
+  sessionSlot: {
+    type: "string",
+    enum: ["morning", "afternoon", "evening", "weekend"],
+    description:
+      "The sitting a student attends. 'the A1 morning class' with no branch = level A1 + sessionSlot morning across every branch.",
+  },
   goal: {
     type: "string",
     enum: ["study", "ausbildung", "work", "care", "family", "aupair", "settle", "explore", "custom"],
@@ -2666,6 +2677,7 @@ export function describeFilters(filters: Filters): string {
   if (filters.status) parts.push(filters.status);
   if (filters.classType) parts.push(filters.classType);
   if (filters.deliveryMode) parts.push(filters.deliveryMode);
+  if (filters.sessionSlot) parts.push(`${filters.sessionSlot} sitting`);
   if (filters.goal) parts.push(goalFor(filters.goal).label);
   if (filters.batch) parts.push(filters.batch);
   if (filters.paymentState) parts.push(`${filters.paymentState} tuition`);
