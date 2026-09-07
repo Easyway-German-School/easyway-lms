@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { KIND, notify, type NotifyTarget } from "@/lib/notify";
+import { KIND, notify, resolveRecipients, type NotifyTarget } from "@/lib/notify";
 
 /**
  * The office's own announcement desk.
@@ -116,8 +116,14 @@ export async function POST(request: NextRequest) {
     : "students";
   const alsoEmail = body.alsoEmail === true;
   const alsoPush = body.alsoPush !== false;
+  /**
+   * Resolve who this WOULD reach and return them without sending — so the
+   * office can see the filtered audience before committing. A notification to a
+   * few hundred people cannot be recalled, so the form previews first.
+   */
+  const preview = body.preview === true;
 
-  if (!title || !message) {
+  if (!preview && (!title || !message)) {
     return NextResponse.json({ error: "Title and message are required" }, { status: 400 });
   }
 
@@ -167,6 +173,26 @@ export async function POST(request: NextRequest) {
     // intake — so "A1 physical morning September class starts tomorrow" reaches
     // exactly that class and nobody else.
     target = { students: { branchId, level, sessionSlot, deliveryMode, batch } };
+  }
+
+  if (preview) {
+    try {
+      const userIds = await resolveRecipients(target);
+      const people = userIds.length
+        ? await prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { name: true, email: true },
+            orderBy: { name: "asc" },
+            take: 30,
+          })
+        : [];
+      return NextResponse.json({
+        count: userIds.length,
+        sample: people.map((p) => ({ name: p.name, email: p.email })),
+      });
+    } catch {
+      return NextResponse.json({ error: "Could not work out the audience" }, { status: 500 });
+    }
   }
 
   try {

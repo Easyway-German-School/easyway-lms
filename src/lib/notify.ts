@@ -173,8 +173,14 @@ export type NotifyResult = {
   queuedSms: number;
 };
 
-/** Resolve a target down to the user ids it actually reaches. */
-async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
+/**
+ * Resolve a target down to the user ids it actually reaches.
+ *
+ * Exported so a caller can PREVIEW an audience — show the office exactly who a
+ * filtered send would land on — using the same resolution the send itself runs,
+ * with no second copy of the filter logic to drift out of step.
+ */
+export async function resolveRecipients(to: NotifyTarget): Promise<string[]> {
   if ("userIds" in to) {
     return [...new Set(to.userIds.filter(Boolean))];
   }
