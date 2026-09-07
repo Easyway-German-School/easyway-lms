@@ -17,7 +17,7 @@ type ImportResult = {
   batch: string | null;
   sessionSlot: string;
   amountPaid: number;
-  status: "ready" | "created" | "skipped" | "error";
+  status: "ready" | "created" | "skipped" | "error" | "updated" | "review";
   note: string;
   /** "portharcourt → Port Harcourt" — what the importer read differently. */
   corrections?: string[];
@@ -110,6 +110,11 @@ const STATUS_STYLES: Record<ImportResult["status"], string> = {
   created: "bg-emerald-500/10 text-emerald-700",
   skipped: "bg-[var(--surface-alt)]0/10 text-[var(--muted)]",
   error: "bg-rose-500/10 text-rose-700",
+  // Existing account, new money recorded against it — a returning student who
+  // paid again. Amber: something happened, but nothing was overwritten.
+  updated: "bg-amber-500/10 text-amber-700",
+  // Needs a human before anything is written (duplicate row, shared phone).
+  review: "bg-violet-500/10 text-violet-700",
 };
 
 export default function ImportStudentsPage() {
@@ -201,6 +206,11 @@ export default function ImportStudentsPage() {
   }
 
   const readyCount = results.filter((r) => r.status === "ready").length;
+  // "updated" rows (existing account, payment to record) also need the real
+  // run to click through — a file of nothing but returning students would
+  // otherwise leave the Import button dead with their payments unrecorded.
+  const updatedCount = results.filter((r) => r.status === "updated").length;
+  const actionableCount = readyCount + updatedCount;
 
   return (
     <AdminShell>
@@ -309,10 +319,14 @@ export default function ImportStudentsPage() {
             </button>
             <button
               onClick={() => run(false)}
-              disabled={busy || !previewed || imported || readyCount === 0}
+              disabled={busy || !previewed || imported || actionableCount === 0}
               className="rounded-lg bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
             >
-              {imported ? "Imported" : `Import ${readyCount} student${readyCount === 1 ? "" : "s"}`}
+              {imported
+                ? "Imported"
+                : updatedCount > 0
+                  ? `Import ${readyCount}, record payment for ${updatedCount}`
+                  : `Import ${readyCount} student${readyCount === 1 ? "" : "s"}`}
             </button>
             {/* Nothing is written until the office has seen the preview. */}
             {!previewed && rows.length > 0 ? (

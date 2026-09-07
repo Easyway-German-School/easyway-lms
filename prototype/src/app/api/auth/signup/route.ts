@@ -458,7 +458,11 @@ export async function POST(request: NextRequest) {
 
     if (existingUser) {
       return NextResponse.json(
-        { error: "Email already registered" },
+        {
+          error:
+            "An account already exists for this email address. Please sign in instead — your enrolment and any payments are safe.",
+          code: "email_exists",
+        },
         { status: 409, headers: buildCorsHeaders(request) }
       );
     }
