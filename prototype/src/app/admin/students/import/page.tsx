@@ -129,7 +129,14 @@ export default function ImportStudentsPage() {
   // Recovery: reset + resend logins for students already imported in a past run
   // (the results screen that held their passwords was closed before sending).
   const [resendState, setResendState] = useState<"idle" | "sending" | "done">("idle");
-  const [resendSummary, setResendSummary] = useState("");
+  const [resendResult, setResendResult] = useState<{
+    text: string;
+    notFound: string[];
+    selfReg: string[];
+  } | null>(null);
+  // "One person says they never got theirs" — a targeted re-send, one email
+  // per line, that forces a fresh password only for those addresses.
+  const [retryEmails, setRetryEmails] = useState("");
 
   const rows = useMemo(() => parseCsv(csv), [csv]);
 
@@ -205,46 +212,53 @@ export default function ImportStudentsPage() {
    * error rows. The server itself only touches office-imported accounts, so a
    * student in this file who signed up on their own is left alone.
    */
-  async function resendLoginsFromFile() {
-    const emails = Array.from(
-      new Set(
-        results
-          .filter(
-            (r) => r.email && !r.placeholderEmail && r.status !== "error" && r.status !== "review",
-          )
-          .map((r) => r.email.trim().toLowerCase()),
-      ),
-    );
+  async function resendLoginsFromFile(opts?: { emails?: string[]; force?: boolean }) {
+    const emails =
+      opts?.emails ??
+      Array.from(
+        new Set(
+          results
+            .filter(
+              (r) => r.email && !r.placeholderEmail && r.status !== "error" && r.status !== "review",
+            )
+            .map((r) => r.email.trim().toLowerCase()),
+        ),
+      );
     if (emails.length === 0) return;
     if (
+      !opts?.force &&
       !window.confirm(
         `Set a fresh temporary password for the office-imported students in this file and email each one their login?\n\n` +
-          `${emails.length} row(s) will be checked. Students who signed up themselves are left untouched. ` +
-          `An imported student who has already signed in will need the new password.`,
+          `${emails.length} row(s) will be checked. Students who signed up themselves are left untouched, ` +
+          `and anyone a login was already sent to is left alone — use the box below to force a re-send.`,
       )
     )
       return;
     setResendState("sending");
-    setResendSummary("");
+    setResendResult(null);
     try {
       const res = await fetch("/api/admin/students/send-credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emails }),
+        body: JSON.stringify({ emails, ...(opts?.force ? { force: true } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setResendSummary(data.error || "Could not send.");
+        setResendResult({ text: data.error || "Could not send.", notFound: [], selfReg: [] });
       } else {
-        setResendSummary(
-          `${data.sent ?? 0} emailed` +
-            (data.skipped ? `, ${data.skipped} left alone (self-registered)` : "") +
+        setResendResult({
+          text:
+            `${data.sent ?? 0} emailed` +
+            (data.alreadySent ? `, ${data.alreadySent} already sent earlier` : "") +
+            (data.skipped ? `, ${data.skipped} self-registered (left alone)` : "") +
             (data.notFound ? `, ${data.notFound} not found` : "") +
             ".",
-        );
+          notFound: Array.isArray(data.notFoundEmails) ? data.notFoundEmails : [],
+          selfReg: Array.isArray(data.skippedEmails) ? data.skippedEmails : [],
+        });
       }
     } catch {
-      setResendSummary("Could not send.");
+      setResendResult({ text: "Could not send.", notFound: [], selfReg: [] });
     } finally {
       setResendState("done");
     }
@@ -468,8 +482,68 @@ export default function ImportStudentsPage() {
                         ? "Send again"
                         : "Email logins to imported students in this file"}
                   </button>
-                  {resendSummary ? <span className="text-xs text-sky-800">{resendSummary}</span> : null}
+                  {resendResult ? <span className="text-xs text-sky-800">{resendResult.text}</span> : null}
                 </div>
+
+                {resendResult && resendResult.notFound.length > 0 ? (
+                  <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+                    <p className="font-semibold">
+                      No student account under {resendResult.notFound.length}{" "}
+                      {resendResult.notFound.length === 1 ? "address" : "addresses"} — these people have no login. Add
+                      them from “Add student”, or check the email is right:
+                    </p>
+                    <p className="mt-1 break-words font-mono">{resendResult.notFound.join(", ")}</p>
+                  </div>
+                ) : null}
+
+                {resendResult && resendResult.selfReg.length > 0 ? (
+                  <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] p-3 text-xs text-[var(--muted)]">
+                    <p className="font-semibold">
+                      Signed up themselves — password left as they set it:
+                    </p>
+                    <p className="mt-1 break-words font-mono">{resendResult.selfReg.join(", ")}</p>
+                  </div>
+                ) : null}
+
+                <details className="mt-3 text-xs">
+                  <summary className="cursor-pointer font-semibold text-sky-800">
+                    Someone says theirs never arrived? Re-send to specific people
+                  </summary>
+                  <p className="mt-2 text-sky-900">
+                    One email per line. This forces a <strong>new</strong> password for just these addresses — use it
+                    only when the first email really did not get through.
+                  </p>
+                  <textarea
+                    value={retryEmails}
+                    onChange={(event) => setRetryEmails(event.target.value)}
+                    placeholder={"someone@example.com\nanother@example.com"}
+                    className="mt-2 min-h-[70px] w-full rounded-lg border border-sky-300 bg-white p-2 font-mono text-xs text-[var(--foreground)]"
+                  />
+                  <button
+                    onClick={() => {
+                      const list = Array.from(
+                        new Set(
+                          retryEmails
+                            .split(/[\s,;]+/)
+                            .map((value) => value.trim().toLowerCase())
+                            .filter((value) => value.includes("@")),
+                        ),
+                      );
+                      if (list.length === 0) return;
+                      if (
+                        window.confirm(
+                          `Force a fresh password and re-send the login email to ${list.length} ` +
+                            `${list.length === 1 ? "person" : "people"}? Any password they were already sent stops working.`,
+                        )
+                      )
+                        void resendLoginsFromFile({ emails: list, force: true });
+                    }}
+                    disabled={resendState === "sending"}
+                    className="mt-2 rounded-full border border-sky-600 px-4 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                  >
+                    Reset &amp; re-send to these
+                  </button>
+                </details>
               </div>
             ) : null}
 
