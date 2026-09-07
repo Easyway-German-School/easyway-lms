@@ -10,6 +10,9 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { isTravelPackagePathway } from "@/lib/payment";
+import { reconcileTravelPackageStudent } from "@/lib/travel-package";
+import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 import { normalizeProfileInput, mergeProfile, type StudentProfileInput } from "@/lib/student-profile";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
 import {
@@ -550,6 +553,27 @@ export async function PATCH(request: Request) {
     await prisma.student.update({ where: { id: studentId }, data: updateStudent });
 
     /**
+     * Moving a student ONTO the Travel Package pathway from this form is not
+     * just a label change: Travel Package is a flat ₦980,000 that replaces the
+     * per-level ladder, so their tuition ledger has to carry the one ₦980,000
+     * charge instead of whatever A1/A2 charge signup raised. Without this, a
+     * student the office "converts" here keeps a ~₦150k charge and still reads
+     * as paid-in-full on their own portal. `setPathway: false` — the update
+     * above already wrote it. The student is told separately (see below) when
+     * this changes them from settled to owing.
+     */
+    let travelPackageReconcile: Awaited<ReturnType<typeof reconcileTravelPackageStudent>> = null;
+    const movedToTravelPackage =
+      isTravelPackagePathway(pathway) && !isTravelPackagePathway(student.pathway);
+    if (movedToTravelPackage) {
+      try {
+        travelPackageReconcile = await reconcileTravelPackageStudent({ studentId, setPathway: false });
+      } catch (reconcileError) {
+        console.error("Travel Package reconcile failed on admin edit", { studentId, reconcileError });
+      }
+    }
+
+    /**
      * Enrolment history — see lib/student-enrolment.ts. Two things can end or
      * start a stint here, independently of the "Promotions" flow in
      * promotion.ts, which already handles the normal level-up case:
@@ -645,7 +669,20 @@ export async function PATCH(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true });
+    // Let the student know their standing changed from "paid in full" to a
+    // balance owing — only fires when the conversion actually did that.
+    if (travelPackageReconcile) {
+      try {
+        await travelPackagePartPaymentNotice(travelPackageReconcile);
+      } catch (noticeError) {
+        console.error("Travel Package part-payment notice failed", { studentId, noticeError });
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      ...(travelPackageReconcile ? { travelPackage: travelPackageReconcile } : {}),
+    });
   } catch (error) {
     return NextResponse.json({ error: "Unable to update student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
   }

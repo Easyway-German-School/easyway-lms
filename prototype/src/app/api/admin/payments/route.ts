@@ -8,6 +8,7 @@ import {
   PAYMENT_STATUSES,
   requiredDepositFor,
 } from "@/lib/payment";
+import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -63,6 +64,34 @@ export async function POST(request: Request) {
       },
     });
 
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: {
+        level: true,
+        classType: true,
+        pathway: true,
+        branch: { select: { name: true } },
+        payments: { select: { amount: true, status: true } },
+      },
+    });
+
+    /**
+     * TRAVEL PACKAGE — a flat ₦980,000 that replaces the per-level ladder. If
+     * this student is on that pathway, make sure their ledger carries the one
+     * ₦980,000 charge before we decide anything about "deposit met" or "paid in
+     * full": a student mis-filed on the default pathway (or whose charge was
+     * raised at the A1 price before the pathway was set) would otherwise have a
+     * ₦150k charge here and this very payment would tip them to "settled".
+     * Idempotent and payment-safe — see src/lib/travel-package.ts.
+     */
+    if (isTravelPackagePathway(student?.pathway)) {
+      try {
+        await reconcileTravelPackageStudent({ studentId, setPathway: false });
+      } catch (reconcileError) {
+        console.error("Travel Package reconcile failed after manual payment", { studentId, reconcileError });
+      }
+    }
+
     /**
      * The office can record any amount at any status (cash and bank-transfer
      * desks need that freedom). But a `partial` payment that does not actually
@@ -73,16 +102,6 @@ export async function POST(request: Request) {
      */
     let warning: string | null = null;
     if (status === "partial") {
-      const student = await prisma.student.findUnique({
-        where: { id: studentId },
-        select: {
-          level: true,
-          classType: true,
-          pathway: true,
-          branch: { select: { name: true } },
-          payments: { select: { amount: true, status: true } },
-        },
-      });
       if (student) {
         const received = student.payments
           .filter((p) => isReceivedPayment(p.status))
