@@ -1,3 +1,4 @@
+import bcryptjs from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import type { AdminContext, Capability } from "@/lib/admin-roles";
 import type { ToolSpec } from "@/lib/ollama";
@@ -5,6 +6,8 @@ import { notify, KIND } from "@/lib/notify";
 import { promoteStudents } from "@/lib/promotion";
 import { inviteLeads } from "@/lib/leads";
 import { nextLevelAfter } from "@/lib/levels";
+import { generateTempPassword } from "@/lib/student-password";
+import { normalizeNigerianPhone } from "@/lib/sms";
 import { normalizeSlot } from "@/lib/class-times";
 import { privateOverlaps } from "@/lib/private-classes";
 import { SCHOOL_TIMEZONE, formatWhen, zonedClock, zonedTimeToInstant } from "@/lib/school-time";
@@ -1139,7 +1142,242 @@ export const ASSISTANT_ACTIONS: AssistantAction[] = [
       };
     },
   },
+
+  /* --------------------------------------------------- hand out fresh logins */
+  {
+    name: "reset_student_logins",
+    capability: "students",
+    // Irreversible: the old password is gone the moment this runs. A student
+    // mid-way through using it is locked out until they get the new one.
+    reversible: false,
+    spec: {
+      type: "function",
+      function: {
+        name: "reset_student_logins",
+        description:
+          "Propose giving every student matching the filters a fresh temporary portal password. Use when a group needs their logins handed out — a new intake, a class that never received theirs, people locked out. This does NOT email anyone: on confirm the admin gets a CSV of the new logins plus a ready-to-send message for each student. Nothing changes until the admin confirms.",
+        parameters: {
+          type: "object",
+          properties: {
+            ...COHORT_FILTERS,
+            switchPlaceholderEmailsToPhoneLogin: {
+              type: "boolean",
+              description:
+                "Also rewrite un-typeable importer placeholder logins (noemail…@…placeholder…) to the student's own phone number at student.easywayschoollms.com.ng. Students who have a real email keep it. Default false.",
+            },
+          },
+        },
+      },
+    },
+    async plan(args, admin) {
+      const rewrite = args.switchPlaceholderEmailsToPhoneLogin === true;
+      const { rows, label } = await cohortFor(args, admin);
+      guardCohort(rows, label);
+
+      const students = await loadLoginAccounts(rows.map((row) => row.id));
+
+      let selfRegistered = 0;
+      let placeholderNoPhone = 0;
+      for (const student of students) {
+        const admission = (student.admission ?? null) as Record<string, unknown> | null;
+        if (!admission || !admission.importedAt) selfRegistered += 1;
+        if (rewrite && isPlaceholderLogin(student.user?.email ?? "") && !phoneLoginFor(student)) {
+          placeholderNoPhone += 1;
+        }
+      }
+
+      const warnings = breadthWarnings(rows, args);
+      if (rows.length > 100) {
+        warnings.push(`That is ${rows.length} logins to reset in one go — check the filter is what you meant.`);
+      }
+      if (selfRegistered > 0) {
+        warnings.push(
+          `${selfRegistered} of them signed up themselves and have a password they chose plus a self-service reset — this replaces it.`,
+        );
+      }
+      if (rewrite && placeholderNoPhone > 0) {
+        warnings.push(
+          `${placeholderNoPhone} have a placeholder email and no usable phone number on file — their password is reset but the login stays un-typeable until the office adds a real address.`,
+        );
+      }
+
+      return {
+        payload: { studentIds: rows.map((row) => row.id), rewrite, label },
+        preview: {
+          summary: `Reset the portal login for ${rows.length} student${rows.length === 1 ? "" : "s"} — ${label}`,
+          affected: rows.length,
+          lines: [
+            "Each gets a new temporary password. Their current one stops working the moment you confirm.",
+            rewrite
+              ? "Placeholder email logins become the student's phone number at student.easywayschoollms.com.ng; everyone with a real email keeps it."
+              : "Login email addresses are left exactly as they are — only the password changes.",
+            "On confirm you get a CSV of every new login and a message to send each student. The passwords are shown once and never stored, so download it before you leave the page.",
+          ],
+          warnings,
+          sample: sampleOf(rows, (row) => row.studentCode ?? row.level),
+          reversible: false,
+        },
+      };
+    },
+    async execute(payload) {
+      const studentIds = requireIdList(payload, "studentIds");
+      const rewrite = payload.rewrite === true;
+
+      const students = await loadLoginAccounts(studentIds);
+
+      // Targeted clash check: which of the phone-number logins we might mint are
+      // already somebody else's address.
+      const wanted = new Map<string, string>(); // studentId -> desired new email
+      if (rewrite) {
+        for (const student of students) {
+          if (!isPlaceholderLogin(student.user?.email ?? "")) continue;
+          const phoneLogin = phoneLoginFor(student);
+          if (phoneLogin) wanted.set(student.id, phoneLogin);
+        }
+      }
+      const takenBy = new Map<string, string>();
+      if (wanted.size > 0) {
+        const clashes = await prisma.user.findMany({
+          where: { email: { in: [...new Set(wanted.values())] } },
+          select: { id: true, email: true },
+        });
+        for (const clash of clashes) takenBy.set(clash.email.toLowerCase(), clash.id);
+      }
+
+      const credentials: Array<{
+        name: string;
+        studentCode: string | null;
+        level: string;
+        branch: string | null;
+        loginEmail: string;
+        password: string;
+        message: string;
+      }> = [];
+      const skipped: Array<{ name: string; reason: string }> = [];
+      let reset = 0;
+      let rewritten = 0;
+
+      for (const student of students) {
+        const user = student.user;
+        if (!user) {
+          skipped.push({ name: student.studentCode ?? student.id, reason: "no login account" });
+          continue;
+        }
+
+        const currentEmail = user.email;
+        let loginEmail = currentEmail;
+        const desired = wanted.get(student.id);
+        if (desired) {
+          const owner = takenBy.get(desired.toLowerCase());
+          if (!owner || owner === user.id) {
+            loginEmail = desired;
+          }
+        }
+
+        const password = generateTempPassword();
+        try {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              email: loginEmail,
+              password: await bcryptjs.hash(password, 10),
+              passwordClaimed: true,
+            },
+          });
+          const admission = (student.admission ?? {}) as Record<string, unknown>;
+          await prisma.student.update({
+            where: { id: student.id },
+            data: { admission: { ...admission, loginResetAt: new Date().toISOString() } },
+          });
+
+          reset += 1;
+          if (loginEmail !== currentEmail) rewritten += 1;
+
+          const name = user.name ?? "there";
+          credentials.push({
+            name,
+            studentCode: student.studentCode ?? null,
+            level: student.level,
+            branch: student.branch?.name ?? null,
+            loginEmail,
+            password,
+            message:
+              `Hi ${name}, here is your Easyway German Language School portal login.\n\n` +
+              `Website: easywayschoollms.com.ng\n` +
+              `Email: ${loginEmail}\n` +
+              `Temporary password: ${password}\n\n` +
+              `You'll be asked to set your own password the first time you sign in.`,
+          });
+        } catch (error) {
+          console.error("reset_student_logins failed for", student.id, error);
+          skipped.push({ name: user.name ?? user.email, reason: "could not update this account" });
+        }
+      }
+
+      return {
+        summary:
+          `Reset ${reset} login${reset === 1 ? "" : "s"}` +
+          (rewritten > 0 ? `, ${rewritten} switched to a phone-number login` : "") +
+          (skipped.length > 0 ? `, skipped ${skipped.length}` : "") +
+          ". Download the CSV below to send them out — it will not be shown again.",
+        details: { reset, rewritten, skipped, credentials },
+      };
+    },
+  },
 ];
+
+/* -------------------------------------------------------------------------- */
+/* Login-reset helpers                                                        */
+/* -------------------------------------------------------------------------- */
+
+const LOGIN_EMAIL_DOMAIN = "student.easywayschoollms.com.ng";
+
+type LoginAccount = {
+  id: string;
+  studentCode: string | null;
+  level: string;
+  admission: unknown;
+  branch: { name: string } | null;
+  profile: { phone: string | null; altPhone: string | null; whatsapp: string | null } | null;
+  user: { id: string; name: string | null; email: string } | null;
+};
+
+async function loadLoginAccounts(studentIds: string[]): Promise<LoginAccount[]> {
+  return prisma.student.findMany({
+    where: { id: { in: studentIds } },
+    select: {
+      id: true,
+      studentCode: true,
+      level: true,
+      admission: true,
+      branch: { select: { name: true } },
+      profile: { select: { phone: true, altPhone: true, whatsapp: true } },
+      user: { select: { id: true, name: true, email: true } },
+    },
+  });
+}
+
+/** An importer-minted stand-in address nobody can be asked to type. */
+function isPlaceholderLogin(email: string): boolean {
+  const lower = email.toLowerCase();
+  return lower.includes(".placeholder.") || lower.startsWith("noemail.");
+}
+
+/** `<intl>@student.easywayschoollms.com.ng`, or null if no number resolves. */
+function phoneLoginFor(student: LoginAccount): string | null {
+  const admission = (student.admission ?? null) as Record<string, unknown> | null;
+  const candidates = [
+    student.profile?.phone,
+    student.profile?.whatsapp,
+    student.profile?.altPhone,
+    admission && typeof admission.phone === "string" ? admission.phone : null,
+  ];
+  for (const candidate of candidates) {
+    const intl = normalizeNigerianPhone(typeof candidate === "string" ? candidate : null);
+    if (intl) return `${intl}@${LOGIN_EMAIL_DOMAIN}`;
+  }
+  return null;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Registry                                                                   */

@@ -204,12 +204,26 @@ export async function executePlan(planId: string, admin: AdminContext): Promise<
   try {
     const result = await action.execute(plan.payload as Record<string, unknown>, admin);
 
+    /**
+     * `credentials` never touches the database.
+     *
+     * A login-reset action returns the fresh plaintext passwords in its details
+     * so the page can offer a CSV — but this row is a permanent audit record,
+     * and a permanent record of usable passwords is exactly what you do not
+     * want. It is stripped here and survives only in the HTTP response below,
+     * which the browser turns into a one-time download.
+     */
+    const { credentials: _sensitive, ...persistableDetails } = result.details as Record<
+      string,
+      unknown
+    >;
+
     await prisma.adminAction.update({
       where: { id: plan.id },
       data: {
         status: "executed",
         executedAt: new Date(),
-        result: { summary: result.summary, ...result.details } as never,
+        result: { summary: result.summary, ...persistableDetails } as never,
       },
     });
 

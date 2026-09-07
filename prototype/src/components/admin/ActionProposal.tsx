@@ -7,8 +7,10 @@ import {
   CheckIcon,
   ClockIcon,
   CrossIcon,
+  DownloadIcon,
   UsersIcon,
 } from "@/components/icons";
+import { buildCsv, csvDateStamp, downloadCsv } from "@/lib/csv";
 
 /**
  * The card that stands between what the assistant suggested and what the school
@@ -68,6 +70,18 @@ const KIND_LABELS: Record<string, string> = {
   promote_students: "Level promotion",
   postpone_class: "Class change",
   invite_leads: "Enrolment invites",
+  reset_student_logins: "Login reset",
+};
+
+/** One row of the CSV a login-reset hands back. Passwords live here and nowhere else. */
+type Credential = {
+  name: string;
+  studentCode: string | null;
+  level: string;
+  branch: string | null;
+  loginEmail: string;
+  password: string;
+  message: string;
 };
 
 function useCountdown(iso: string): { minutes: number; expired: boolean } {
@@ -94,6 +108,7 @@ export default function ActionProposal({
 }) {
   const [state, setState] = useState<"pending" | "running" | "done" | "cancelled">("pending");
   const [result, setResult] = useState("");
+  const [details, setDetails] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
   const { minutes, expired } = useCountdown(proposal.expiresAt);
 
@@ -105,6 +120,7 @@ export default function ActionProposal({
   useEffect(() => {
     setState("pending");
     setResult("");
+    setDetails(null);
     setError("");
   }, [proposal.id]);
 
@@ -131,6 +147,7 @@ export default function ActionProposal({
       }
 
       setResult(data.summary ?? "Done.");
+      setDetails(data.details ?? null);
       setState("done");
       onDone?.(data.summary ?? "Done.");
     } catch {
@@ -149,6 +166,10 @@ export default function ActionProposal({
   }
 
   if (state === "done") {
+    const credentials = Array.isArray(details?.credentials)
+      ? (details!.credentials as Credential[])
+      : [];
+
     return (
       <section className="mt-4 rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
         <p className="flex items-center gap-2 text-sm font-bold text-emerald-800">
@@ -158,6 +179,8 @@ export default function ActionProposal({
         <p className="mt-1.5 pl-7 text-xs text-emerald-700">
           {label} · recorded against your account.
         </p>
+
+        {credentials.length > 0 && <CredentialsHandout credentials={credentials} />}
       </section>
     );
   }
@@ -277,5 +300,80 @@ export default function ActionProposal({
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * The new logins, offered once.
+ *
+ * The passwords are in memory on this page and nowhere else — the server
+ * strips them before the action is recorded (see action-plans.ts). So this is
+ * the only chance to get them out, and it says so. CSV for the office's
+ * records; "copy messages" for pasting straight into WhatsApp.
+ */
+function CredentialsHandout({ credentials }: { credentials: Credential[] }) {
+  const [copied, setCopied] = useState(false);
+
+  const downloadCredentials = () => {
+    const headers = [
+      "Name",
+      "Student code",
+      "Level",
+      "Branch",
+      "Login email",
+      "Temporary password",
+      "Message to send",
+    ];
+    const rows = credentials.map((row) => [
+      row.name,
+      row.studentCode ?? "",
+      row.level,
+      row.branch ?? "",
+      row.loginEmail,
+      row.password,
+      row.message,
+    ]);
+    downloadCsv(`easyway-logins-${csvDateStamp()}.csv`, buildCsv(headers, rows));
+  };
+
+  const copyMessages = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        credentials.map((row) => row.message).join("\n\n———\n\n"),
+      );
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-2xl border border-emerald-300 bg-white/70 p-4">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+        {credentials.length} new login{credentials.length === 1 ? "" : "s"} — shown once
+      </p>
+      <p className="mt-1 text-xs text-emerald-700">
+        The passwords are not stored anywhere. Download or copy them now — they cannot be shown again.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={downloadCredentials}
+          className="flex items-center gap-1.5 rounded-full bg-emerald-600 px-4 py-2 text-xs font-bold text-white transition hover:brightness-110"
+        >
+          <DownloadIcon className="h-3.5 w-3.5" />
+          Download logins CSV
+        </button>
+        <button
+          type="button"
+          onClick={copyMessages}
+          className="flex items-center gap-1.5 rounded-full border border-emerald-400 px-4 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-50"
+        >
+          <CheckIcon className={`h-3.5 w-3.5 ${copied ? "" : "opacity-0"}`} strokeWidth={3} />
+          {copied ? "Copied" : "Copy all messages"}
+        </button>
+      </div>
+    </div>
   );
 }
