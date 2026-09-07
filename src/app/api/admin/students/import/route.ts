@@ -6,7 +6,9 @@ import { assignStudentCode } from "@/lib/student-code";
 import { LEVELS } from "@/lib/levels";
 import { bestMatch, matchBatch, matchDeliveryMode, matchLevel, matchSessionSlot } from "@/lib/fuzzy-match";
 import { generateTempPassword } from "@/lib/student-password";
+import { defaultBatchMonth } from "@/lib/intake-server";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { normalizeProfileInput } from "@/lib/student-profile";
 import { openEnrolment } from "@/lib/student-enrolment";
@@ -113,6 +115,12 @@ export async function POST(request: NextRequest) {
       aliases: /port\s*harcourt/i.test(branch.name) ? ["ph", "phc"] : [],
     }));
 
+    // A row whose sheet had no batch column, or a blank one, falls back to the
+    // school's current intake month (lib/intake.ts) rather than importing with
+    // no batch — which is the exact state the promotion engine and every
+    // cohort send cannot read. Read once here, not per row.
+    const fallbackBatch = await defaultBatchMonth(gate.session.user.tenantId);
+
     // Resolved lazily — most imports have branches for every row and never
     // need this looked up.
     let onlineBranch: { id: string; name: string } | null | undefined;
@@ -124,6 +132,50 @@ export async function POST(request: NextRequest) {
       return onlineBranch;
     }
 
+    /**
+     * Every student already in this tenant, indexed by the last 10 digits of
+     * their phone number. A returning-student form export often carries only a
+     * phone and a new/blank email; without this, a row like that mints a
+     * SECOND account for someone who already has one, and their fee ends up
+     * split across two logins. Family members share a phone here (siblings on
+     * one parent's line), so a hit is flagged for a human — never auto-merged.
+     */
+    const phoneKeyOf = (value: string) => value.replace(/\D/g, "").replace(/^0+/, "").slice(-10);
+    const existingByPhone = new Map<string, { name: string; email: string; level: string }>();
+    {
+      const roster = await prisma.student.findMany({
+        where: gate.session.user.tenantId
+          ? {
+              OR: [
+                { tenantId: gate.session.user.tenantId },
+                { user: { tenantId: gate.session.user.tenantId } },
+                { branch: { tenantId: gate.session.user.tenantId } },
+              ],
+            }
+          : {},
+        select: { level: true, admission: true, user: { select: { email: true, name: true } } },
+      });
+      for (const entry of roster) {
+        const key = phoneKeyOf(String((entry.admission as Record<string, unknown> | null)?.phone ?? ""));
+        if (key.length >= 7 && !existingByPhone.has(key)) {
+          existingByPhone.set(key, {
+            name: entry.user?.name ?? "",
+            email: entry.user?.email ?? "",
+            level: entry.level,
+          });
+        }
+      }
+    }
+
+    /**
+     * Within-file collision guards. A Google Form export routinely carries the
+     * same person twice — they submitted again to fix a typo — and importing
+     * both rows makes two accounts and splits their payment between them. First
+     * occurrence wins; later ones are surfaced, not silently dropped.
+     */
+    const seenEmailRow = new Map<string, number>();
+    const seenPhoneRow = new Map<string, number>();
+
     const results: Array<{
       row: number;
       name: string;
@@ -134,7 +186,7 @@ export async function POST(request: NextRequest) {
       sessionSlot: string;
       deliveryMode: string;
       amountPaid: number;
-      status: "ready" | "created" | "skipped" | "error";
+      status: "ready" | "created" | "skipped" | "error" | "updated" | "review";
       note: string;
       /** "portharcourt → Port Harcourt". Shown in the preview, never hidden. */
       corrections?: string[];
@@ -189,7 +241,7 @@ export async function POST(request: NextRequest) {
 
       const batchInput = str(row, "batch", "start_month", "started");
       const batchMatch = batchInput ? note(matchBatch(batchInput)) : null;
-      const batch = batchMatch?.value ?? batchInput;
+      const batch = batchMatch?.value ?? (batchInput || fallbackBatch);
 
       const slotMatch = note(matchSessionSlot(str(row, "session", "session_slot", "slot", "time")));
       const sessionSlot = slotMatch?.value ?? "morning";
@@ -271,7 +323,37 @@ export async function POST(request: NextRequest) {
         branch = (await resolveOnlineBranch()) ?? undefined;
       }
 
-      const existing = await prisma.user.findUnique({ where: { email }, select: { id: true, tenantId: true } });
+      // Same person, twice in this one file — take the first row, flag the rest.
+      if (!placeholderEmailUsed && email) {
+        const priorRow = seenEmailRow.get(email);
+        if (priorRow) {
+          results.push({
+            ...base,
+            status: "review",
+            note: `Same email as row ${priorRow} in this file — only the first is imported.`,
+          });
+          continue;
+        }
+        seenEmailRow.set(email, index + 1);
+      }
+      const rowPhoneKey = phoneKeyOf(phone);
+      if (rowPhoneKey.length >= 7) {
+        const priorRow = seenPhoneRow.get(rowPhoneKey);
+        if (priorRow) {
+          results.push({
+            ...base,
+            status: "review",
+            note: `Same phone as row ${priorRow} in this file. If it is the same person, delete one row; if they are family sharing a line, import one now and add the other from "Add student".`,
+          });
+          continue;
+        }
+        seenPhoneRow.set(rowPhoneKey, index + 1);
+      }
+
+      const existing = await prisma.user.findUnique({
+        where: { email },
+        select: { id: true, tenantId: true, student: { select: { id: true, level: true } } },
+      });
       if (existing) {
         if (!dryRun && !existing.tenantId && gate.session.user.tenantId) {
           await prisma.user.update({
@@ -279,14 +361,91 @@ export async function POST(request: NextRequest) {
             data: { tenantId: gate.session.user.tenantId },
           });
         }
-        results.push({ ...base, status: "skipped", note: "Already has an account — left untouched" });
+
+        const existingStudentId = existing.student?.id ?? null;
+        // The importer never moves anyone up a level — that is the office's
+        // promotion flow, which checks fees are clear first. But if the row
+        // and the account disagree, say so on the row.
+        const levelNote =
+          existing.student && existing.student.level !== level
+            ? ` Their account is on ${existing.student.level}; this row says ${level} — promote them from the student's page once fees are cleared.`
+            : "";
+
+        /**
+         * A returning student who has PAID AGAIN is what the plain "skip" got
+         * wrong: leave their login, email and history untouched, but their
+         * money still has to land somewhere they can see it. Recorded against
+         * the existing account, and idempotent on (student, amount, "imported")
+         * so re-running the same file never double-counts — this also matches
+         * the payment the new-account branch below writes on a first run.
+         */
+        if (amountPaid > 0 && existingStudentId) {
+          const alreadyRecorded = await prisma.payment.findFirst({
+            where: { studentId: existingStudentId, amount: amountPaid, method: "imported" },
+            select: { id: true },
+          });
+          if (alreadyRecorded) {
+            results.push({
+              ...base,
+              status: "skipped",
+              note: `Already has an account, and a ₦${amountPaid.toLocaleString()} import payment is already on file — nothing to do.${levelNote}`,
+            });
+            continue;
+          }
+          if (!dryRun) {
+            await prisma.payment.create({
+              data: {
+                studentId: existingStudentId,
+                amount: amountPaid,
+                currency: "NGN",
+                status: "completed",
+                method: "imported",
+                description: "Recorded on import — returning student, paid before this run",
+              },
+            });
+            // Keep a Travel Package student's flat-₦980,000 ledger in step with
+            // the payment just recorded. No-op for everyone else.
+            try {
+              await reconcileTravelPackageStudent({ studentId: existingStudentId, setPathway: false });
+            } catch (reconcileError) {
+              console.error("Travel Package reconcile failed on import (existing)", reconcileError);
+            }
+          }
+          results.push({
+            ...base,
+            status: "updated",
+            note: `${dryRun ? "Will record" : "Recorded"} ₦${amountPaid.toLocaleString()} against their existing account. Login, email and history left untouched.${levelNote}`,
+          });
+          continue;
+        }
+
+        results.push({ ...base, status: "skipped", note: `Already has an account — left untouched.${levelNote}` });
+        continue;
+      }
+
+      // No account under this email, but the phone belongs to someone already
+      // enrolled — don't mint a duplicate. Flagged, not created: it may be a
+      // genuine second person (a sibling), which only a human can tell.
+      const phoneOwner = rowPhoneKey.length >= 7 ? existingByPhone.get(rowPhoneKey) : undefined;
+      if (phoneOwner) {
+        results.push({
+          ...base,
+          status: "review",
+          note: `This phone already belongs to ${phoneOwner.name || "an enrolled student"}${
+            phoneOwner.email && !phoneOwner.email.includes(".placeholder.") ? ` (${phoneOwner.email})` : ""
+          }. Not imported, to avoid a duplicate account — if this is a different person, add them from "Add student".`,
+        });
         continue;
       }
 
       if (dryRun) {
-        const timetableNote = batch
-          ? "Will be created and placed on the timetable from their batch month"
-          : "Will be created. Without a batch month their level-end date cannot be worked out";
+        // `batch` always resolves now — a chosen/matched month, or the
+        // school's current intake as the fallback — so the timetable can
+        // always be placed.
+        const timetableNote =
+          batchInput || batchMatch
+            ? "Will be created and placed on the timetable from their batch month"
+            : `Will be created in the ${batch} intake (no batch on the sheet — set the school's current intake, or fix this on /admin/cohorts)`;
         results.push({
           ...base,
           status: "ready",
@@ -367,6 +526,15 @@ export async function POST(request: NextRequest) {
             importCharge = await ensureChargeForLevel({ studentId: student.id, level, origin: "import" });
           } catch (chargeError) {
             console.error("Tuition charge creation failed on import", chargeError);
+          }
+
+          // Travel Package = one flat ₦980,000 charge, not the per-level fee.
+          // Collapse the ledger if this row's pathway put them on it. No-op
+          // otherwise.
+          try {
+            await reconcileTravelPackageStudent({ studentId: student.id, setPathway: false });
+          } catch (reconcileError) {
+            console.error("Travel Package reconcile failed on import (new)", reconcileError);
           }
 
           // Enrolment #1 (as far as this import can tell) — see

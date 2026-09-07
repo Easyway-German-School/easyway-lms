@@ -12,6 +12,7 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
 import { currentTenantId, setTenantScope } from "@/lib/tenant/context";
 import { resolveTenantId } from "@/lib/tenant/resolve";
+import { defaultBatchMonth } from "@/lib/intake-server";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import { TIME_SLOTS } from "@/lib/class-times";
 import { TERMS_CONTEXT, TERMS_VERSION } from "@/lib/terms";
@@ -191,7 +192,15 @@ export async function POST(request: NextRequest) {
     const normalizedLevel = typeof level === "string" ? level.trim().toUpperCase() : "";
     const levelValid = (OFFERED_LEVELS as readonly string[]).includes(normalizedLevel);
     const normalizedPathway = typeof pathway === "string" && pathway.trim() ? pathway : "Language training";
-    const normalizedBatch = typeof batch === "string" && batch.trim() ? batch : "";
+    // A student who never opened the batch dropdown used to land with no batch
+    // at all, which leaves the timetable generator and every "message the
+    // September cohort" send with nothing to match on. Fall back to the
+    // school's current intake month (lib/intake.ts) — bare month name, same as
+    // a chosen value; the year is implied by their registration date.
+    const normalizedBatch =
+      typeof batch === "string" && batch.trim()
+        ? batch.trim()
+        : await defaultBatchMonth(currentTenantId());
     const normalizedClassType = String(classType ?? "").toLowerCase() === "private" ? "private" : "group";
     // Same story as level: this used to fall back to "morning" for any missing
     // or invalid value, so a student who never opened the session dropdown got
@@ -458,7 +467,11 @@ export async function POST(request: NextRequest) {
 
     if (existingUser) {
       return NextResponse.json(
-        { error: "Email already registered" },
+        {
+          error:
+            "An account already exists for this email address. Please sign in instead — your enrolment and any payments are safe.",
+          code: "email_exists",
+        },
         { status: 409, headers: buildCorsHeaders(request) }
       );
     }
