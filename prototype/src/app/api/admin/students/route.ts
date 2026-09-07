@@ -207,11 +207,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
   }
 
-  // `User` is a global (non-tenant) model, so this lookup already sees every
-  // account in the whole system — an email taken by a self-signup, a lecturer,
-  // or a student another admin just added is caught here. The message says what
-  // to do about it instead of leaving the office to guess.
-  const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  // A LIVE account already on this email. `User` is a global (non-tenant)
+  // model, so this sees every account in the system — a self-signup, a
+  // lecturer, a student another admin just added. `deletedAt: null` is
+  // explicit so it means *live* only; a REMOVED student on this email is
+  // handled further down (restore), not blocked here.
+  const existingUser = await prisma.user.findFirst({
+    where: { email, deletedAt: null },
+    select: { id: true },
+  });
   if (existingUser) {
     return NextResponse.json(
       {
@@ -242,6 +246,120 @@ export async function POST(request: Request) {
   const deliveryMode = isOnlineBranch(branchRow) ? "online" : requestedDeliveryMode;
 
   const hashedPassword = await bcryptjs.hash(password, 10);
+
+  /**
+   * REMOVING A STUDENT IS A SOFT DELETE — the `User` row and its unique email
+   * stay, just flagged `deletedAt`. So re-adding that person by email used to
+   * dead-end: the live-account check above cannot see them, `user.create` then
+   * hits the email unique index (which counts deleted rows), and they are not
+   * in the roster to restore by hand either.
+   *
+   * When the email belongs to a removed student, bring that student back and
+   * apply what the form just entered. An un-delete is never the unsafe
+   * direction, it keeps their history rather than forking a second account
+   * onto the same person, and `prisma.*.update` on a soft-deleted row is
+   * audited automatically (see prisma-guard.ts). Delete again if it was a
+   * mistake.
+   */
+  const removed = await prisma.user.findFirst({
+    where: { email, deletedAt: { not: null } },
+    select: {
+      id: true,
+      role: true,
+      adminRole: true,
+      student: { select: { id: true, admission: true, studentCode: true } },
+    },
+  });
+  if (removed) {
+    const isStudentOnly = removed.role === "STUDENT" && removed.adminRole == null;
+    if (!isStudentOnly || !removed.student) {
+      return NextResponse.json(
+        {
+          error:
+            "That email belongs to a removed staff or parent account. Contact support to free it up before reusing it here.",
+        },
+        { status: 409 },
+      );
+    }
+
+    const priorAdmission =
+      removed.student.admission && typeof removed.student.admission === "object"
+        ? (removed.student.admission as Record<string, unknown>)
+        : {};
+
+    await prisma.user.update({
+      where: { id: removed.id },
+      data: { deletedAt: null, name, password: hashedPassword },
+    });
+    await prisma.student.update({
+      where: { id: removed.student.id },
+      data: {
+        deletedAt: null,
+        level,
+        branchId,
+        status,
+        tutorId,
+        pathway,
+        classType,
+        sessionSlot,
+        deliveryMode,
+        admission: {
+          ...priorAdmission,
+          ...(phone ? { phone } : {}),
+          ...(batch ? { batch } : {}),
+          ...(city ? { city } : {}),
+          ...(stateRegion ? { state: stateRegion } : {}),
+          ...(country ? { country } : {}),
+          ...(photoUrl ? { photoUrl } : {}),
+        },
+        profile: {
+          upsert: {
+            create: normalizeProfileInput({ ...body, photoUrl }),
+            update: normalizeProfileInput({ ...body, photoUrl }),
+          },
+        },
+      },
+    });
+
+    let restoredCode = removed.student.studentCode ?? null;
+    if (!restoredCode) {
+      try {
+        restoredCode = await assignStudentCode(removed.student.id, { level, batch, branch: branchRow, classType });
+      } catch (codeError) {
+        console.error("Student code assignment failed on restore", codeError);
+      }
+    }
+    if (amountPaid > 0) {
+      try {
+        await prisma.payment.create({
+          data: {
+            studentId: removed.student.id,
+            amount: amountPaid,
+            currency: "NGN",
+            status: "completed",
+            method: "manual",
+            description: "Recorded on restore — paid before rejoining the portal",
+            ...(gate.session.user.tenantId ? { tenantId: gate.session.user.tenantId } : {}),
+          },
+        });
+      } catch (paymentError) {
+        console.error("Up-front payment record failed on restore", paymentError);
+      }
+    }
+
+    return NextResponse.json(
+      {
+        restored: true,
+        user: { id: removed.id, email, name },
+        classType,
+        deliveryMode,
+        studentCode: restoredCode,
+        password,
+        note: "This email belonged to a student who had been removed. They have been restored and their details updated.",
+      },
+      { status: 200 },
+    );
+  }
 
   try {
     const user = await prisma.user.create({
