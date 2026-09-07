@@ -24,6 +24,21 @@ import { safeJson } from "@/lib/safe-json";
  * letting the fee-bypass hole reopen whenever Paystack has a wobble.
  */
 
+/**
+ * Master switch for the public-signup gate.
+ *
+ * OFF by default. While it is off, `/auth/signup` renders for anyone and the
+ * signup API accepts a registration with no token / ref / invite signature, so
+ * a RETURNING student can get back into the LMS without being pushed through
+ * the marketing-site registration-fee form a second time (which is why the
+ * school kept receiving ₦5,000 instead of tuition). A valid token or paid
+ * Paystack ref is still honoured when present — it prefills the form and, for a
+ * ref, credits the ₦5,000 already paid — it just is not *required*.
+ *
+ * Set `SIGNUP_ACCESS_GATE=on` in the environment to require proof again.
+ */
+export const SIGNUP_ACCESS_GATE_ENABLED = process.env.SIGNUP_ACCESS_GATE === "on";
+
 export type SignupAccessReason =
   | "missing"
   | "not_found"
