@@ -84,6 +84,7 @@ const navItems: NavItem[] = [
 
   { label: 'Students', href: '/admin/students', icon: <UsersIcon />, group: 'Academics' },
   { label: 'Import students', href: '/admin/students/import', icon: <UserPlusIcon />, group: 'Academics' },
+  { label: 'Issue logins', href: '/admin/students/issue-logins', icon: <UserPlusIcon />, group: 'Academics' },
   // The relocation track — its own console because ₦980,000 walk-in
   // students need watching differently from the self-service roster.
   { label: 'Travel Package', href: '/admin/travel-package', icon: <PlaneIcon />, group: 'Academics' },
