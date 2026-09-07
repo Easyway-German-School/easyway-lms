@@ -36,9 +36,11 @@ import {
 import {
   TICKET_STATUS_LABELS,
   TICKET_TOPIC_LABELS,
+  type TicketAttachment,
   type TicketStatus,
   type TicketTopic,
 } from "@/lib/support-copy";
+import { AttachmentPicker, MessageAttachments } from "@/components/support/TicketAttachments";
 
 type Ticket = {
   id: string;
@@ -66,6 +68,7 @@ type ThreadMessage = {
   mine: boolean;
   createdAt: string;
   edited?: boolean;
+  attachments?: TicketAttachment[];
 };
 
 type Thread = {
@@ -119,6 +122,7 @@ function EnquiriesInner() {
   const [selected, setSelected] = useState<string | null>(requested);
   const [thread, setThread] = useState<Thread | null>(null);
   const [reply, setReply] = useState("");
+  const [replyFiles, setReplyFiles] = useState<TicketAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   // An office message being corrected in place. `null` when nothing is open
   // for editing; the id + working text otherwise.
@@ -163,16 +167,19 @@ function EnquiriesInner() {
 
   async function act(action: "reply" | "resolve" | "reopen") {
     if (!selected) return;
-    if (action === "reply" && !reply.trim()) return;
+    if (action === "reply" && !reply.trim() && replyFiles.length === 0) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/support/tickets/${selected}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(action === "reply" ? { body: reply } : { action }),
+        body: JSON.stringify(
+          action === "reply" ? { body: reply, attachments: replyFiles } : { action },
+        ),
       });
       if (res.ok) {
         setReply("");
+        setReplyFiles([]);
         await openThread(selected);
         await load();
       }
@@ -419,7 +426,7 @@ function EnquiriesInner() {
                             </button>
                           </div>
                         </div>
-                      ) : (
+                      ) : message.body ? (
                         <div
                           className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm ${
                             fromOffice ? "bg-[var(--accent)] text-white" : "bg-[var(--surface-alt)] text-[var(--foreground)]"
@@ -427,7 +434,14 @@ function EnquiriesInner() {
                         >
                           {message.body}
                         </div>
-                      )}
+                      ) : null}
+
+                      {!editing ? (
+                        <MessageAttachments
+                          attachments={message.attachments}
+                          align={fromOffice ? "end" : "start"}
+                        />
+                      ) : null}
 
                       {/* Only the office's own lines, and never while one is
                           already open for editing. Hover on desktop, always
@@ -467,10 +481,11 @@ function EnquiriesInner() {
                   placeholder="Answer them…"
                   className="w-full resize-none rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
                 />
+                <AttachmentPicker value={replyFiles} onChange={setReplyFiles} disabled={busy} />
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => act("reply")}
-                    disabled={busy || !reply.trim()}
+                    disabled={busy || (!reply.trim() && replyFiles.length === 0)}
                     className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
                   >
                     <SendIcon className="h-4 w-4" />

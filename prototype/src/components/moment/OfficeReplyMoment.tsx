@@ -28,6 +28,7 @@ type UnreadReply = {
   topic: string;
   from: string;
   preview: string;
+  image?: string | null;
   at: string;
 };
 
@@ -121,6 +122,14 @@ export default function OfficeReplyMoment() {
             <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--foreground-soft)] line-clamp-5">
               {reply.preview}
             </p>
+            {reply.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={reply.image}
+                alt="Attached by the office"
+                className="mt-2 max-h-32 w-auto rounded-lg border border-[var(--border)] object-cover"
+              />
+            ) : null}
           </div>
 
           <div className="mt-5 flex flex-col gap-2">
