@@ -270,25 +270,40 @@ export async function POST(request: Request) {
     });
 
     const student = await prisma.student.findUnique({ where: { userId: user.id }, select: { id: true } });
-    const studentCode = student
-      ? await assignStudentCode(student.id, { level, batch, branch: branchRow, classType })
-      : null;
 
+    // Everything past the account itself is enrichment: a student code, the
+    // up-front payment, the tuition charge, the enrolment row. NONE of it may
+    // 500 the request now that the account exists — a transient DB blip on the
+    // fifth of six round-trips used to throw here and leave the admin staring
+    // at "Unable to create student" beside an account that was, in fact,
+    // created. Each piece self-heals: the code via the `student-code-backfill`
+    // cron, the rest by an admin edit.
+    let studentCode: string | null = null;
     if (student) {
+      try {
+        studentCode = await assignStudentCode(student.id, { level, batch, branch: branchRow, classType });
+      } catch (codeError) {
+        console.error("Student code assignment failed on manual add", codeError);
+      }
+
       // Record the up-front payment, if any was entered — mirrors the importer
       // so a mid-course student is not paywalled out of what they have paid for.
       if (amountPaid > 0) {
-        await prisma.payment.create({
-          data: {
-            studentId: student.id,
-            amount: amountPaid,
-            currency: "NGN",
-            status: "completed",
-            method: "manual",
-            description: "Recorded on manual add — paid before joining the portal",
-            ...(gate.session.user.tenantId ? { tenantId: gate.session.user.tenantId } : {}),
-          },
-        });
+        try {
+          await prisma.payment.create({
+            data: {
+              studentId: student.id,
+              amount: amountPaid,
+              currency: "NGN",
+              status: "completed",
+              method: "manual",
+              description: "Recorded on manual add — paid before joining the portal",
+              ...(gate.session.user.tenantId ? { tenantId: gate.session.user.tenantId } : {}),
+            },
+          });
+        } catch (paymentError) {
+          console.error("Up-front payment record failed on manual add", paymentError);
+        }
       }
 
       // Open the tuition ledger for the level they start in, the same as signup
@@ -334,7 +349,16 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
-    return NextResponse.json({ error: "Unable to create student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
+    // Log it — "Unable to create student" told the office nothing, and the
+    // detail below is only in the JSON body, which the form does not show.
+    console.error("Manual add-student failed", error);
+    return NextResponse.json(
+      {
+        error: "Unable to create student",
+        detail: error instanceof Error ? error.message : "Unknown",
+      },
+      { status: 500 },
+    );
   }
 }
 
