@@ -30,6 +30,16 @@ type TravelPackageStudent = {
   progressPercent: number;
   fullPaid: boolean;
   lockedOut: boolean;
+  /** Ledger still carries a per-level charge instead of the flat ₦980,000. */
+  ledgerOutOfStep: boolean;
+};
+
+type StudentSearchHit = {
+  id: string;
+  name: string;
+  email: string;
+  level: string;
+  pathway: string | null;
 };
 
 function naira(amount: number): string {
@@ -44,6 +54,13 @@ export default function TravelPackagePage() {
   const [error, setError] = useState("");
   const [payModal, setPayModal] = useState<TravelPackageStudent | null>(null);
   const [busy, setBusy] = useState(false);
+  /** id currently being reconciled, so just its row's button spins. */
+  const [reconcilingId, setReconcilingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const [showConvert, setShowConvert] = useState(false);
+  const [convertQuery, setConvertQuery] = useState("");
+  const [convertHits, setConvertHits] = useState<StudentSearchHit[]>([]);
+  const [convertSearching, setConvertSearching] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,6 +109,78 @@ export default function TravelPackagePage() {
     }
   }
 
+  /**
+   * Put one student's Travel Package standing straight — sets the pathway (if
+   * needed) and collapses their tuition ledger to the one flat ₦980,000 charge.
+   * Money already received is untouched. Used both for a row flagged
+   * "ledger out of step" and for a student just pulled in via the search below.
+   */
+  async function reconcile(studentId: string, label: string) {
+    setReconcilingId(studentId);
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch("/api/admin/travel-package", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not reconcile this student");
+      const r = data.reconcile as {
+        pathwaySet: boolean;
+        chargeFixed: boolean;
+        chargesRetired: number;
+        owed: number;
+        wasFullPaidBefore: boolean;
+        fullPaidAfter: boolean;
+      };
+      const parts: string[] = [];
+      if (r.pathwaySet) parts.push("moved onto Travel Package");
+      if (r.chargeFixed) parts.push("charge set to ₦980,000");
+      if (r.chargesRetired > 0) parts.push(`${r.chargesRetired} old level charge${r.chargesRetired > 1 ? "s" : ""} folded away`);
+      if (parts.length === 0) parts.push("already correct — nothing to change");
+      const tail = r.wasFullPaidBefore && !r.fullPaidAfter
+        ? ` Now ${naira(r.owed)} outstanding — the student has been notified it's a part payment.`
+        : ` Now ${naira(r.owed)} outstanding.`;
+      setNotice(`${label}: ${parts.join(", ")}.${tail}`);
+      setConvertHits((hits) => hits.filter((h) => h.id !== studentId));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reconcile this student");
+    } finally {
+      setReconcilingId(null);
+    }
+  }
+
+  async function searchStudents(query: string) {
+    setConvertQuery(query);
+    if (query.trim().length < 2) {
+      setConvertHits([]);
+      return;
+    }
+    setConvertSearching(true);
+    try {
+      const url = new URL("/api/admin/students", window.location.origin);
+      url.searchParams.set("search", query.trim());
+      url.searchParams.set("pageSize", "8");
+      const res = await fetch(url.toString(), { cache: "no-store" });
+      const data = await res.json();
+      const hits: StudentSearchHit[] = (data.students ?? []).map((s: Record<string, unknown>) => ({
+        id: String(s.id),
+        name: String((s.user as { name?: string } | undefined)?.name ?? "Unnamed"),
+        email: String((s.user as { email?: string } | undefined)?.email ?? ""),
+        level: String(s.level ?? ""),
+        pathway: (s.pathway as string | null) ?? null,
+      }));
+      setConvertHits(hits);
+    } catch {
+      setConvertHits([]);
+    } finally {
+      setConvertSearching(false);
+    }
+  }
+
   const totalCollected = students.reduce((sum, s) => sum + s.paid, 0);
   const totalOutstanding = students.reduce((sum, s) => sum + s.owed, 0);
 
@@ -117,12 +206,21 @@ export default function TravelPackagePage() {
                   full fee is in.
                 </p>
               </div>
-              <Link
-                href="/admin/students?addStudent=1&pathway=Travel%20Package"
-                className="inline-flex items-center gap-2 rounded-full bg-[#D4AF37] px-5 py-2.5 text-sm font-bold text-[#1c1508] shadow-lg transition hover:brightness-110"
-              >
-                <PlusIcon className="h-4 w-4" /> Add a student
-              </Link>
+              <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                <Link
+                  href="/admin/students?addStudent=1&pathway=Travel%20Package"
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-[#D4AF37] px-5 py-2.5 text-sm font-bold text-[#1c1508] shadow-lg transition hover:brightness-110"
+                >
+                  <PlusIcon className="h-4 w-4" /> Add a student
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setShowConvert((v) => !v)}
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-white/25 px-5 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10"
+                >
+                  {showConvert ? "Close" : "Move an existing student here"}
+                </button>
+              </div>
             </div>
 
             <div className="relative mt-7 grid gap-3 sm:grid-cols-3">
@@ -149,6 +247,64 @@ export default function TravelPackagePage() {
           </div>
         )}
 
+        {notice && (
+          <div className="mb-4 flex items-start justify-between gap-3 rounded-2xl bg-emerald-500/10 p-4 text-sm font-medium text-emerald-700">
+            <span className="min-w-0">{notice}</span>
+            <button type="button" onClick={() => setNotice("")} className="shrink-0 font-semibold">
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {showConvert && (
+          <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
+            <p className="text-sm font-semibold text-[var(--foreground)]">Move an existing student onto Travel Package</p>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              For a student who was onboarded on the wrong pathway. This sets them to Travel Package and
+              re-prices their tuition ledger to the flat {naira(packagePrice)} — money already received is
+              kept as-is. If that turns a &quot;paid in full&quot; account into a balance owing, the student
+              is told it&apos;s a part payment.
+            </p>
+            <input
+              type="search"
+              value={convertQuery}
+              onChange={(e) => void searchStudents(e.target.value)}
+              placeholder="Search by name or email…"
+              className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+            />
+            {convertSearching && <p className="mt-2 text-xs text-[var(--muted)]">Searching…</p>}
+            {!convertSearching && convertQuery.trim().length >= 2 && convertHits.length === 0 && (
+              <p className="mt-2 text-xs text-[var(--muted)]">No students match.</p>
+            )}
+            {convertHits.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {convertHits.map((h) => (
+                  <div key={h.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-[var(--foreground)]">{h.name}</p>
+                      <p className="truncate text-xs text-[var(--muted)]">
+                        {h.email} · Level {h.level} · {h.pathway ?? "No pathway"}
+                      </p>
+                    </div>
+                    {h.pathway === "Travel Package" ? (
+                      <span className="text-[11px] font-semibold text-emerald-600">Already on Travel Package</span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={reconcilingId === h.id}
+                        onClick={() => void reconcile(h.id, h.name)}
+                        className="rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-50"
+                      >
+                        {reconcilingId === h.id ? "Converting…" : "Convert"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {loading ? (
           <div className="py-12 text-center text-[var(--muted)]">Loading…</div>
         ) : students.length === 0 ? (
@@ -169,25 +325,41 @@ export default function TravelPackagePage() {
                       {s.studentCode ?? "No student ID yet"} · Level {s.level} · {s.branch}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {!s.firstPaymentMet && (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {s.ledgerOutOfStep && (
+                      <span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-amber-600">
+                        Ledger out of step
+                      </span>
+                    )}
+                    {!s.ledgerOutOfStep && !s.firstPaymentMet && (
                       <span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-amber-600">
                         Below {naira(minFirstPayment)} floor
                       </span>
                     )}
-                    {s.fullPaid && (
+                    {!s.ledgerOutOfStep && s.fullPaid && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-emerald-600">
                         <CheckIcon className="h-3 w-3" /> Paid in full
                       </span>
                     )}
-                    {!s.fullPaid && (
+                    {s.ledgerOutOfStep ? (
                       <button
                         type="button"
-                        onClick={() => setPayModal(s)}
-                        className="rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+                        disabled={reconcilingId === s.id}
+                        onClick={() => void reconcile(s.id, s.name)}
+                        className="rounded-full border border-amber-500/50 bg-amber-500/10 px-3.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-500/20 disabled:opacity-50"
                       >
-                        Record payment
+                        {reconcilingId === s.id ? "Reconciling…" : "Reconcile to ₦980,000"}
                       </button>
+                    ) : (
+                      !s.fullPaid && (
+                        <button
+                          type="button"
+                          onClick={() => setPayModal(s)}
+                          className="rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+                        >
+                          Record payment
+                        </button>
+                      )
                     )}
                   </div>
                 </div>
