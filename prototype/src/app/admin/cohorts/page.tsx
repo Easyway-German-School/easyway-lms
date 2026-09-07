@@ -167,6 +167,10 @@ export default function CohortsPage() {
             <Link href="/admin/assistant" className="text-[var(--accent)] underline">
               the assistant
             </Link>
+            . Someone entered twice?{" "}
+            <Link href="/admin/students/duplicates" className="text-[var(--accent)] underline">
+              Merge duplicates
+            </Link>
             .
           </p>
           {data && (

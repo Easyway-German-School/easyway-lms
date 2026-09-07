@@ -1160,6 +1160,15 @@ function StudentsRoster() {
               >
                 Import many
               </Link>
+              {/* The same person entered twice — usually a returning student who
+                  signed up, then got imported again. Fold the spare into the
+                  real one so their fees stop splitting across two logins. */}
+              <Link
+                href="/admin/students/duplicates"
+                className="rounded-lg border border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--foreground)]"
+              >
+                Duplicates
+              </Link>
               {/* Downloads exactly this filtered view — same query the roster
                   just ran, shared through lib/student-roster-query.ts. */}
               <a
