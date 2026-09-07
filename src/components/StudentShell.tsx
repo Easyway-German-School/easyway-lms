@@ -10,6 +10,7 @@ import OfflineBanner from "@/components/OfflineBanner";
 import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import OfficeReplyMoment from "@/components/moment/OfficeReplyMoment";
 import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
+import TravelPackageNotifyNudge from "@/components/moment/TravelPackageNotifyNudge";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
@@ -501,6 +502,16 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         components/moment/ProfileDetailsMoment.tsx.
       */}
       <ProfileDetailsMoment />
+
+      {/*
+        Right after that reply, for the Travel Package / marketing enquirers
+        only: the one notification-permission ask worth spending on people who
+        do not live in the portal yet. Ungated by `hasAccess` for the same
+        reason — these are pre-tuition students — and queue-ranked just under
+        the reply so it follows it rather than fights it. See
+        TravelPackageNotifyNudge.
+      */}
+      <TravelPackageNotifyNudge />
 
       {/*
         Message popups, mounted once per shell so they follow the reader onto

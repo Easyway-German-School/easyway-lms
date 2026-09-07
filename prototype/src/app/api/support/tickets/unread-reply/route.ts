@@ -31,6 +31,7 @@ export async function GET() {
         id: true,
         subject: true,
         topic: true,
+        fromPath: true,
         lastMessageAt: true,
         messages: {
           orderBy: { createdAt: "desc" },
@@ -51,6 +52,12 @@ export async function GET() {
             // it links to has the full thread.
             preview: (ticket.messages[0]?.body ?? "").slice(0, 240),
             at: ticket.lastMessageAt,
+            // True when the enquiry came from the public /programs page — the
+            // Travel Package card and the other marketing enquiries. These are
+            // people who are not living in the portal yet and whose next update
+            // (documents, payment steps, a deadline) is time-sensitive, so this
+            // is the one reply worth spending a notification-permission ask on.
+            fromMarketing: (ticket.fromPath ?? "").startsWith("/programs"),
           }
         : null,
     });

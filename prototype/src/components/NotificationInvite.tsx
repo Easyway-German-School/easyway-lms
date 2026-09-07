@@ -35,8 +35,8 @@ import { useMoment } from "@/lib/moment-queue";
  */
 
 /** Remembered locally: the server has no business tracking who ignored a modal. */
-const SNOOZE_KEY = "ew:notif-invite:snoozed-until";
-const ASK_COUNT_KEY = "ew:notif-invite:asks";
+export const SNOOZE_KEY = "ew:notif-invite:snoozed-until";
+export const ASK_COUNT_KEY = "ew:notif-invite:asks";
 
 /**
  * How many times we are willing to ask, ever.
@@ -47,14 +47,31 @@ const ASK_COUNT_KEY = "ew:notif-invite:asks";
  */
 const MAX_ASKS = 4;
 
-function snoozedUntil(): number {
+export function snoozedUntil(): number {
   if (typeof window === "undefined") return 0;
   return Number(window.localStorage.getItem(SNOOZE_KEY) ?? 0);
 }
 
-function askCount(): number {
+export function askCount(): number {
   if (typeof window === "undefined") return 0;
   return Number(window.localStorage.getItem(ASK_COUNT_KEY) ?? 0);
+}
+
+/**
+ * Record a "not now" / "don't ask again". Shared so every entry point that can
+ * raise the notification ask — the dashboard invite and the Travel Package
+ * nudge — writes the same memory: one snooze silences all of them.
+ */
+export function recordSnooze(days: number) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(SNOOZE_KEY, String(Date.now() + days * 24 * 60 * 60 * 1000));
+  window.localStorage.setItem(ASK_COUNT_KEY, String(askCount() + 1));
+}
+
+/** Record that we asked (they said yes, or the browser prompt fired). */
+export function recordAsk() {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ASK_COUNT_KEY, String(askCount() + 1));
 }
 
 /** True when it is fair to raise this today. */
@@ -89,8 +106,7 @@ export default function NotificationInvite({
   const { open, close } = useMoment("notifications", due);
 
   const snooze = (days: number) => {
-    window.localStorage.setItem(SNOOZE_KEY, String(Date.now() + days * 24 * 60 * 60 * 1000));
-    window.localStorage.setItem(ASK_COUNT_KEY, String(askCount() + 1));
+    recordSnooze(days);
     setDue(false);
     close();
   };
@@ -99,7 +115,7 @@ export default function NotificationInvite({
     // The native prompt fires inside here — after a deliberate tap, which is
     // the only moment a browser will honour the request anyway.
     await enable();
-    window.localStorage.setItem(ASK_COUNT_KEY, String(askCount() + 1));
+    recordAsk();
     setJustEnabled(true);
   };
 
