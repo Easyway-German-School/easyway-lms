@@ -418,7 +418,10 @@ function StudentsRoster() {
 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      setStudentError(data?.error || "Unable to save student.");
+      // Surface the server's `detail` when it sent one — "Unable to create
+      // student" on its own tells the office nothing to act on.
+      const base = data?.error || "Unable to save student.";
+      setStudentError(data?.detail && data.detail !== base ? `${base} — ${data.detail}` : base);
       return;
     }
 
