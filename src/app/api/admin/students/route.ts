@@ -9,7 +9,11 @@ import { setStudentTutor } from "@/lib/tutor-pairing";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
+import { defaultBatchMonth } from "@/lib/intake-server";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
+import { isTravelPackagePathway } from "@/lib/payment";
+import { reconcileTravelPackageStudent } from "@/lib/travel-package";
+import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 import { normalizeProfileInput, mergeProfile, type StudentProfileInput } from "@/lib/student-profile";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
 import {
@@ -177,8 +181,14 @@ export async function POST(request: Request) {
   // Batch month — the timetable generator and the promotion engine both read
   // this off the admission blob, so a student added without it has no
   // level-end date and never auto-promotes. Stored as a bare month name
-  // ("September") to match signup and the roster's Batch filter.
-  const batch = typeof body.batch === "string" ? body.batch.trim() : "";
+  // ("September") to match signup and the roster's Batch filter. When the
+  // office leaves the field blank it falls back to the school's current intake
+  // (lib/intake.ts) rather than landing empty; a mid-course returning student
+  // gets their real month typed in, or fixed later on /admin/cohorts.
+  const batch =
+    typeof body.batch === "string" && body.batch.trim()
+      ? body.batch.trim()
+      : await defaultBatchMonth(gate.session.user.tenantId);
   // Where the student lives — the signup form collects this into the admission
   // blob; the manual-add form now offers it too, chiefly for online students
   // who have no branch to place them.
@@ -204,9 +214,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
   }
 
-  const existingUser = await prisma.user.findUnique({ where: { email } });
+  // `User` is a global model, so this lookup already sees every account in the
+  // system, not just this tenant's — an email taken by a self-signup or a row
+  // another admin just added is caught here. The message says what to do about
+  // it rather than leaving the office to guess.
+  const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true } });
   if (existingUser) {
-    return NextResponse.json({ error: "Email already registered" }, { status: 400 });
+    return NextResponse.json(
+      {
+        error:
+          "That email already has an account. Search the student list for it — the person may already be on the portal, or another admin just added them.",
+      },
+      { status: 409 },
+    );
   }
 
   let branchRow: { tenantId: string | null; name: string; mode: string | null } | null = null;
@@ -316,6 +336,17 @@ export async function POST(request: Request) {
         console.error("Tuition charge creation failed on manual add", chargeError);
       }
 
+      // Travel Package is a flat ₦980,000 that replaces the per-level charge.
+      // `ensureChargeForLevel` already prices it right when the pathway is set —
+      // this is the belt-and-braces pass for the case where that call raced or
+      // failed, so a Travel Package student added with an up-front payment can
+      // never land on the portal reading "paid in full". No-op otherwise.
+      try {
+        await reconcileTravelPackageStudent({ studentId: student.id, setPathway: false });
+      } catch (reconcileError) {
+        console.error("Travel Package reconcile failed on manual add", reconcileError);
+      }
+
       // Enrolment #1 — see lib/student-enrolment.ts. Non-fatal, same as above.
       try {
         await openEnrolment({
@@ -349,13 +380,28 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
+    // A unique-constraint hit here is almost always the email: the pre-check
+    // above is unscoped now, but a second admin adding the same person in the
+    // same second still races it. Say so plainly rather than leaking Prisma's
+    // "Unique constraint failed on the fields: (`email`)".
+    const code = (error as { code?: string })?.code;
+    const message = error instanceof Error ? error.message : "";
+    if (code === "P2002" || /Unique constraint failed/i.test(message)) {
+      return NextResponse.json(
+        {
+          error:
+            "That email already has an account. Search the student list for it — the person may already be on the portal, or another admin just added them.",
+        },
+        { status: 409 },
+      );
+    }
     // Log it — "Unable to create student" told the office nothing, and the
     // detail below is only in the JSON body, which the form does not show.
     console.error("Manual add-student failed", error);
     return NextResponse.json(
       {
         error: "Unable to create student",
-        detail: error instanceof Error ? error.message : "Unknown",
+        detail: message || "Unknown",
       },
       { status: 500 },
     );
@@ -525,6 +571,27 @@ export async function PATCH(request: Request) {
     await prisma.student.update({ where: { id: studentId }, data: updateStudent });
 
     /**
+     * Moving a student ONTO the Travel Package pathway from this form is not
+     * just a label change: Travel Package is a flat ₦980,000 that replaces the
+     * per-level ladder, so their tuition ledger has to carry the one ₦980,000
+     * charge instead of whatever A1/A2 charge signup raised. Without this, a
+     * student the office "converts" here keeps a ~₦150k charge and still reads
+     * as paid-in-full on their own portal. `setPathway: false` — the update
+     * above already wrote it. The student is told separately (see below) when
+     * this changes them from settled to owing.
+     */
+    let travelPackageReconcile: Awaited<ReturnType<typeof reconcileTravelPackageStudent>> = null;
+    const movedToTravelPackage =
+      isTravelPackagePathway(pathway) && !isTravelPackagePathway(student.pathway);
+    if (movedToTravelPackage) {
+      try {
+        travelPackageReconcile = await reconcileTravelPackageStudent({ studentId, setPathway: false });
+      } catch (reconcileError) {
+        console.error("Travel Package reconcile failed on admin edit", { studentId, reconcileError });
+      }
+    }
+
+    /**
      * Enrolment history — see lib/student-enrolment.ts. Two things can end or
      * start a stint here, independently of the "Promotions" flow in
      * promotion.ts, which already handles the normal level-up case:
@@ -620,7 +687,20 @@ export async function PATCH(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true });
+    // Let the student know their standing changed from "paid in full" to a
+    // balance owing — only fires when the conversion actually did that.
+    if (travelPackageReconcile) {
+      try {
+        await travelPackagePartPaymentNotice(travelPackageReconcile);
+      } catch (noticeError) {
+        console.error("Travel Package part-payment notice failed", { studentId, noticeError });
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      ...(travelPackageReconcile ? { travelPackage: travelPackageReconcile } : {}),
+    });
   } catch (error) {
     return NextResponse.json({ error: "Unable to update student", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
   }
