@@ -9,6 +9,7 @@ import ImpersonationBanner from "@/components/ImpersonationBanner";
 import OfflineBanner from "@/components/OfflineBanner";
 import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import OfficeReplyMoment from "@/components/moment/OfficeReplyMoment";
+import LoginUpgradeMoment from "@/components/moment/LoginUpgradeMoment";
 import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
 import TravelPackageNotifyNudge from "@/components/moment/TravelPackageNotifyNudge";
 import PortalUpdates from "@/components/PortalUpdates";
@@ -494,6 +495,16 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         stacks on the tour or a celebration. See OfficeReplyMoment.
       */}
       <OfficeReplyMoment />
+
+      {/*
+        Only fires for a student signed in with a temporary login the office
+        built for them (their phone number at a school subdomain, or an
+        importer placeholder). Not behind `hasAccess` — a student stuck outside
+        the paywall still owns their account and should be able to claim it.
+        Queue-managed, so it waits its turn behind the tour. See
+        LoginUpgradeMoment.
+      */}
+      <LoginUpgradeMoment />
 
       {/*
         Becca recreating the important parts of the sign-up form for a student
