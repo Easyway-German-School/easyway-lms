@@ -136,6 +136,9 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   const [connection, setConnection] = useState("");
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [error, setError] = useState("");
+  // Set when signup is refused because the email already has an account — shown
+  // as a friendly "sign in / reset password" panel, never as an error.
+  const [existingAccount, setExistingAccount] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -387,6 +390,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   const handleSignUp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
+    setExistingAccount(false);
 
     if (!name.trim() || !email.trim() || !password) {
       setError("Name, email and password are required");
@@ -510,7 +514,16 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error((data as { error?: string }).error || "Sign up failed");
+        // The email already has an account. For a returning student this is the
+        // scary moment — "has my money gone?" — so it is NOT a red error, it is
+        // a next step: sign in, or reset the password. See the panel below.
+        const errText = (data as { error?: string; code?: string }).error || "";
+        if (res.status === 409 || (data as { code?: string }).code === "email_exists" || /already (exists|registered)/i.test(errText)) {
+          setExistingAccount(true);
+          setLoading(false);
+          return;
+        }
+        throw new Error(errText || "Sign up failed");
       }
 
       // An online student has no branch office to walk into, so a page telling
@@ -597,6 +610,31 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         */}
         <form ref={formRef} onSubmit={handleSignUp} className="space-y-6 rounded-[32px] bg-white/95 p-4 shadow-[0_30px_80px_-24px_rgba(15,23,42,0.18)] ring-1 ring-slate-200/70 sm:p-8">
           {error ? <div className="rounded-xl bg-rose-500/10 p-4 text-sm text-rose-700">{error}</div> : null}
+          {existingAccount ? (
+            <div className="rounded-xl border border-amber-300/70 bg-amber-50 p-4 text-sm text-amber-900">
+              <p className="font-semibold">You already have an account with this email.</p>
+              <p className="mt-1">
+                Nothing is lost — your enrolment and any payments are safe on that account. Sign in to carry on
+                where you left off, or reset your password if you don&apos;t remember it.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => router.push(`/auth/signin?email=${encodeURIComponent(email.trim())}`)}
+                  className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white transition hover:brightness-110"
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push(`/auth/forgot?email=${encodeURIComponent(email.trim())}`)}
+                  className="rounded-lg border border-amber-600 px-4 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
+                >
+                  Reset my password
+                </button>
+              </div>
+            </div>
+          ) : null}
           {successMessage && showSuccess ? (
             <div className="rounded-3xl border border-emerald-200/80 bg-emerald-500/10 p-5 text-sm text-emerald-900 shadow-lg shadow-emerald-500/10 transition-all duration-200">
               <div className="flex items-start gap-3">
