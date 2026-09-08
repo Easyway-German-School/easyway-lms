@@ -218,3 +218,114 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unable to move those students" }, { status: 500 });
   }
 }
+
+/** "YYYY-MM-DD" → local midday (survives a DST / server-offset slide). */
+function parseCalendarDay(value: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Resolve ONE student from the "can't place" worklist.
+ *
+ * This is the human gate the plan calls for: the classifier can only guess at a
+ * quiet, ambiguous account, so a person confirms it here and the answer is
+ * written to `admission.cohortStatus`, which the classifier then treats as the
+ * truth. A "new" confirmation also drops them into the current intake if they
+ * had no batch; an "ongoing" confirmation with a month fills `classesStartedAt`
+ * (only when it is still blank — an existing start date is someone's real
+ * answer and is left alone).
+ *
+ *   { studentId, status: "new" | "ongoing", startedOn?: "YYYY-MM-DD", batch?: "September" }
+ */
+export async function PATCH(request: Request) {
+  const gate = await requireCapability("students");
+  if (!gate.ok) return gate.response;
+
+  const tenantId = gate.session.user.tenantId ?? null;
+  const body = await request.json().catch(() => ({}));
+
+  const studentId = typeof body.studentId === "string" ? body.studentId.trim() : "";
+  const status = body.status === "new" || body.status === "ongoing" ? body.status : null;
+  const startedOnRaw = typeof body.startedOn === "string" ? body.startedOn : "";
+  const batchRaw = typeof body.batch === "string" ? body.batch.trim() : "";
+
+  if (!studentId) return NextResponse.json({ error: "No student given" }, { status: 400 });
+  if (!status) return NextResponse.json({ error: "Confirm new or ongoing" }, { status: 400 });
+
+  const batchMonthIndex = batchRaw ? monthNameToIndex(batchRaw) : null;
+  if (batchRaw && batchMonthIndex === null) {
+    return NextResponse.json({ error: "Give a real month name" }, { status: 400 });
+  }
+
+  const startedOn = status === "ongoing" && startedOnRaw ? parseCalendarDay(startedOnRaw) : null;
+  if (status === "ongoing" && startedOnRaw && !startedOn) {
+    return NextResponse.json({ error: "That start date could not be read" }, { status: 400 });
+  }
+
+  const where: Record<string, unknown> = { id: studentId, ...tenantWhere(tenantId) };
+  const allowedBranchIds = scopedBranchIds(gate.admin);
+  if (allowedBranchIds) where.branchId = { in: allowedBranchIds };
+
+  try {
+    const student = await prisma.student.findFirst({
+      where,
+      select: { id: true, admission: true, createdAt: true, classesStartedAt: true },
+    });
+    if (!student) return NextResponse.json({ error: "Not on your roster" }, { status: 404 });
+
+    const admission =
+      student.admission && typeof student.admission === "object"
+        ? (student.admission as Record<string, unknown>)
+        : {};
+
+    const now = new Date();
+    const actor = gate.session.user.name || gate.session.user.email || "office";
+
+    const patch: Record<string, unknown> = {
+      ...admission,
+      cohortStatus: status,
+      cohortStatusAt: now.toISOString(),
+      cohortStatusBy: actor,
+    };
+
+    // The month to file them under: what the office typed, else — for a new
+    // student with no batch yet — the current intake.
+    let resolvedBatch: string | null = batchMonthIndex !== null ? MONTH_NAMES[batchMonthIndex] : null;
+    if (!resolvedBatch && status === "new" && !batchFromAdmission(admission)) {
+      resolvedBatch = (await readCurrentIntake(tenantId)).month;
+    }
+    if (resolvedBatch) patch.batch = resolvedBatch;
+
+    const data: Record<string, unknown> = { admission: patch };
+
+    let filledStart: string | null = null;
+    if (status === "ongoing" && startedOn && !student.classesStartedAt) {
+      const clamped =
+        startedOn < student.createdAt ? student.createdAt : startedOn > now ? now : startedOn;
+      data.classesStartedAt = clamped;
+      data.startConfirmedAt = now;
+      data.startConfirmedVia = "admin";
+      data.startPromptSnoozedUntil = null;
+      patch.cohortStatusStartedOn = clamped.toISOString().slice(0, 10);
+      filledStart = clamped.toISOString();
+    } else if (status === "ongoing" && startedOn) {
+      patch.cohortStatusStartedOn = startedOn.toISOString().slice(0, 10);
+    }
+
+    await prisma.student.update({ where: { id: student.id }, data });
+
+    return NextResponse.json({
+      ok: true,
+      studentId: student.id,
+      status,
+      batch: resolvedBatch,
+      classesStartedAt: filledStart,
+    });
+  } catch (error) {
+    console.error("Failed to resolve cohort status:", error);
+    return NextResponse.json({ error: "Unable to save that" }, { status: 500 });
+  }
+}

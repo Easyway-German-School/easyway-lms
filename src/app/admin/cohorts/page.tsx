@@ -36,6 +36,7 @@ type CohortClassification = {
   suggestedStartedAt: string | null;
   suggestedBatch: string | null;
   mismatch: string | null;
+  officeConfirmed: boolean;
 };
 
 type Group = {
@@ -106,6 +107,9 @@ export default function CohortsPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [rowFilter, setRowFilter] = useState<RowFilter>("all");
+  /** Per-student worklist draft: which button is armed, and the "since" month. */
+  const [resolveDraft, setResolveDraft] = useState<Record<string, { status: "new" | "ongoing"; month: string }>>({});
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -209,6 +213,49 @@ export default function CohortsPage() {
       setMsg("Could not move those students.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** Confirm one "can't place" student as new, or ongoing since a given month. */
+  const resolve = async (id: string, status: "new" | "ongoing", month?: string) => {
+    setResolvingId(id);
+    setMsg("");
+    try {
+      const body: Record<string, unknown> = { studentId: id, status };
+      if (status === "ongoing" && month) {
+        // An ongoing student started in the past: the most recent occurrence of
+        // that month, first of the month.
+        const now = new Date();
+        const mi = data?.months.indexOf(month) ?? -1;
+        const year = mi <= now.getMonth() ? now.getFullYear() : now.getFullYear() - 1;
+        body.startedOn = `${year}-${String(mi + 1).padStart(2, "0")}-01`;
+        body.batch = month;
+      }
+      const res = await fetch("/api/admin/cohorts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const out = await res.json();
+      if (res.ok) {
+        setMsg(
+          status === "new"
+            ? `Confirmed new${out.batch ? ` · filed in the ${out.batch} intake` : ""}.`
+            : `Confirmed ongoing${month ? ` since ${month}` : ""}${out.classesStartedAt ? " · start date set" : ""}.`,
+        );
+        setResolveDraft((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        await load();
+      } else {
+        setMsg(out.error || "Could not save that.");
+      }
+    } catch {
+      setMsg("Could not save that.");
+    } finally {
+      setResolvingId(null);
     }
   };
 
@@ -409,8 +456,76 @@ export default function CohortsPage() {
                                             ⚠ {c.mismatch}
                                           </span>
                                         )}
+                                        {c?.officeConfirmed && (
+                                          <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                                            {c.evidence[0]}
+                                          </span>
+                                        )}
                                       </span>
                                     </label>
+
+                                    {c?.status === "unknown" && !c.officeConfirmed && (
+                                      <div className="ml-10 mt-1 flex flex-wrap items-center gap-2 text-xs">
+                                        <span className="text-[var(--muted)]">Can&apos;t place —</span>
+                                        <button
+                                          type="button"
+                                          disabled={resolvingId === id}
+                                          onClick={() => resolve(id, "new")}
+                                          className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-200 disabled:opacity-50"
+                                        >
+                                          New this intake
+                                        </button>
+                                        {resolveDraft[id]?.status === "ongoing" ? (
+                                          <span className="inline-flex flex-wrap items-center gap-1.5">
+                                            <span className="text-[var(--muted)]">ongoing since</span>
+                                            <select
+                                              value={resolveDraft[id]?.month ?? data.currentIntake.month}
+                                              onChange={(e) =>
+                                                setResolveDraft((p) => ({ ...p, [id]: { status: "ongoing", month: e.target.value } }))
+                                              }
+                                              className="rounded border border-[var(--border)] bg-[var(--background)] px-1.5 py-1 text-[var(--foreground)]"
+                                            >
+                                              {data.months.map((m) => (
+                                                <option key={m} value={m}>{m}</option>
+                                              ))}
+                                            </select>
+                                            <button
+                                              type="button"
+                                              disabled={resolvingId === id}
+                                              onClick={() =>
+                                                resolve(id, "ongoing", resolveDraft[id]?.month ?? data.currentIntake.month)
+                                              }
+                                              className="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-300 hover:bg-emerald-200 disabled:opacity-50"
+                                            >
+                                              Confirm
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setResolveDraft((p) => {
+                                                  const n = { ...p };
+                                                  delete n[id];
+                                                  return n;
+                                                })
+                                              }
+                                              className="text-[var(--muted)] underline"
+                                            >
+                                              cancel
+                                            </button>
+                                          </span>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setResolveDraft((p) => ({ ...p, [id]: { status: "ongoing", month: data.currentIntake.month } }))
+                                            }
+                                            className="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-300 hover:bg-emerald-200"
+                                          >
+                                            Ongoing…
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
                                   </li>
                                 );
                               })}
