@@ -12,9 +12,31 @@ import { batchFromAdmission } from "@/lib/batch";
 import {
   classifyCohortStatus,
   type CohortClassification,
+  type CohortSignals,
   type CohortStatus,
 } from "@/lib/cohort-classify";
 import type { CurrentIntake } from "@/lib/intake";
+
+/** Key the /admin/cohorts worklist writes an office decision under. */
+export const COHORT_STATUS_KEY = "cohortStatus";
+
+/**
+ * Pull an office "this is what they are" decision off the admission blob, if a
+ * human has recorded one from the worklist. Shape:
+ *   { cohortStatus: "ongoing", cohortStatusStartedOn: "2026-03-01",
+ *     cohortStatusAt: "2026-09-08T…", cohortStatusBy: "<name>" }
+ */
+export function readCohortOverride(admission: unknown): CohortSignals["officeOverride"] {
+  if (!admission || typeof admission !== "object") return null;
+  const blob = admission as Record<string, unknown>;
+  const status = blob[COHORT_STATUS_KEY];
+  if (status !== "new" && status !== "ongoing" && status !== "returning") return null;
+  return {
+    status,
+    startedOn: typeof blob.cohortStatusStartedOn === "string" ? blob.cohortStatusStartedOn : null,
+    setAt: typeof blob.cohortStatusAt === "string" ? blob.cohortStatusAt : null,
+  };
+}
 
 export type RosterStudent = {
   id: string;
@@ -130,6 +152,7 @@ export async function classifyRoster(
       journeyStartedAt: startedById.get(student.id)?._min.occurredAt ?? null,
       currentIntake,
       now,
+      officeOverride: readCohortOverride(student.admission),
     });
 
     byId[student.id] = classification;

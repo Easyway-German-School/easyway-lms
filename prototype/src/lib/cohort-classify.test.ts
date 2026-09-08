@@ -87,4 +87,40 @@ describe("classifyCohortStatus", () => {
     expect(c.status).toBe("new");
     expect(c.mismatch).toBeNull();
   });
+
+  it("lets an office override beat the signals, and marks it confirmed", () => {
+    const started = new Date(2026, 2, 1);
+    const c = classifyCohortStatus(
+      signals({
+        registeredAt: new Date("2026-02-01"),
+        officeOverride: { status: "ongoing", startedOn: started, setAt: new Date("2026-09-08") },
+      }),
+    );
+    expect(c.status).toBe("ongoing");
+    expect(c.confidence).toBe("high");
+    expect(c.officeConfirmed).toBe(true);
+    expect(c.suggestedStartedAt).toBe(started.toISOString());
+    expect(c.evidence[0]).toMatch(/office/i);
+  });
+
+  it("still flags a contradicting stored batch on an office-confirmed ongoing student", () => {
+    const c = classifyCohortStatus(
+      signals({
+        registeredAt: new Date("2026-05-20"),
+        storedBatch: "September",
+        officeOverride: { status: "ongoing", startedOn: "2026-06-01" },
+      }),
+    );
+    expect(c.status).toBe("ongoing");
+    expect(c.mismatch).toMatch(/before the September batch/i);
+  });
+
+  it("an office 'new' override clears the unclear verdict", () => {
+    const c = classifyCohortStatus(
+      signals({ registeredAt: new Date("2026-02-01"), officeOverride: { status: "new" } }),
+    );
+    expect(c.status).toBe("new");
+    expect(c.officeConfirmed).toBe(true);
+    expect(c.suggestedStartedAt).toBeNull();
+  });
 });

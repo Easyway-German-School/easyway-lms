@@ -70,6 +70,20 @@ export type CohortSignals = {
   /** The school's current intake — a new student registered into this. */
   currentIntake: { month: string; year: number };
   now?: Date;
+
+  /**
+   * An office decision that beats the evidence — set from the /admin/cohorts
+   * worklist when a human confirms what a quiet, ambiguous account actually is.
+   * Stored on `admission.cohortStatus`. Once set, this IS the answer; the
+   * signals above are still read only so the mismatch flag can catch a stored
+   * batch month that contradicts the confirmed start.
+   */
+  officeOverride?: {
+    status: "new" | "ongoing" | "returning";
+    /** The month the office says they started, for an "ongoing" confirmation. */
+    startedOn?: Date | string | null;
+    setAt?: Date | string | null;
+  } | null;
 };
 
 export type CohortClassification = {
@@ -95,6 +109,8 @@ export type CohortClassification = {
    * months ago but looks brand new". The one line the office acts on.
    */
   mismatch: string | null;
+  /** True when a human confirmed this from the worklist, not the signals. */
+  officeConfirmed: boolean;
 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -127,9 +143,47 @@ function absoluteMonth(year: number, monthIndex: number): number {
   return year * 12 + monthIndex;
 }
 
+const OVERRIDE_STATUSES = new Set(["new", "ongoing", "returning"]);
+
 export function classifyCohortStatus(signals: CohortSignals): CohortClassification {
   const now = signals.now ?? new Date();
   const registeredAt = toDate(signals.registeredAt);
+
+  // An office decision beats the evidence. Everything below is skipped — but
+  // the mismatch check still runs, so a stored batch that contradicts the
+  // confirmed start still surfaces.
+  const override = signals.officeOverride;
+  if (override && OVERRIDE_STATUSES.has(override.status)) {
+    const midCourse = override.status === "ongoing" || override.status === "returning";
+    const startedOn = midCourse
+      ? toDate(override.startedOn) ?? toDate(signals.classesStartedAt)
+      : null;
+    const setAt = toDate(override.setAt);
+    const suggestedStartedAt = startedOn ? startedOn.toISOString() : null;
+
+    const suggestedBatch = midCourse
+      ? signals.currentEnrolmentBatchMonth ??
+        (!signals.storedBatch && startedOn ? MONTH_NAMES[startedOn.getMonth()] : null)
+      : null;
+
+    return {
+      status: override.status,
+      confidence: "high",
+      evidence: [`Confirmed by the office${setAt ? ` ${monthLabel(setAt)}` : ""}`],
+      suggestedStartedAt,
+      suggestedBatch,
+      mismatch: detectMismatch({
+        signals,
+        status: override.status,
+        suggestedStartedAt,
+        hasAttendance: toDate(signals.firstAttendanceAt) !== null || signals.attendanceCount > 0,
+        classwork: Math.max(0, signals.classworkCount || 0),
+        now,
+        registeredAt,
+      }),
+      officeConfirmed: true,
+    };
+  }
 
   const firstAttendanceAt = toDate(signals.firstAttendanceAt);
   const classesStartedAt = toDate(signals.classesStartedAt);
@@ -231,7 +285,7 @@ export function classifyCohortStatus(signals: CohortSignals): CohortClassificati
       ? MONTH_NAMES[activityDate.getMonth()]
       : null);
 
-  return { status, confidence, evidence, suggestedStartedAt, suggestedBatch, mismatch };
+  return { status, confidence, evidence, suggestedStartedAt, suggestedBatch, mismatch, officeConfirmed: false };
 }
 
 /** Registered in, or in the month just before, the current intake. */
