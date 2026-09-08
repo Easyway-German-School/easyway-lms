@@ -205,6 +205,27 @@ export const authOptions: AuthOptions = {
          */
         clearRateLimit(`signin:email:${email}`);
 
+        /**
+         * Record the sign-in — staff only, and best-effort.
+         *
+         * This is what the "new sign-in location" alarm compares against (see
+         * src/lib/sign-in-anomaly.ts). The helper writes nothing for students,
+         * swallows its own errors, and is awaited only because a fire-and-forget
+         * write can be cut off when the serverless function freezes on return.
+         */
+        {
+          const headers = req?.headers as Record<string, string | undefined> | undefined;
+          const { recordStaffSignIn } = await import("@/lib/sign-in-audit");
+          await recordStaffSignIn({
+            userId: user.id,
+            email: user.email ?? null,
+            role: storedRole,
+            tenantId: user.tenantId ?? null,
+            ip,
+            userAgent: headers?.["user-agent"] ?? null,
+          });
+        }
+
         return {
           id: user.id,
           email: user.email,

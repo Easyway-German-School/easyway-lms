@@ -37,6 +37,12 @@ async function run(job: string, work: () => Promise<unknown>): Promise<JobResult
     return { job, ok: true, detail: await work() };
   } catch (error) {
     console.error(`Cron job ${job} failed:`, error);
+    try {
+      const { captureError } = await import("@/lib/capture-error");
+      await captureError("cron", error, { job });
+    } catch {
+      // The error sink is best-effort; the job result below is the record that matters.
+    }
     return { job, ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -275,6 +281,19 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * Flag any staff sign-in from an address that account has not used before —
+   * the earliest cheap signal of a stolen admin or tutor password. See
+   * src/lib/sign-in-anomaly.ts. Deduped per account per address, so a genuine
+   * new laptop pages the office once and then never again.
+   */
+  results.push(
+    await run("sign-in-anomaly", async () => {
+      const { flagUnfamiliarStaffSignIns } = await import("@/lib/sign-in-anomaly");
+      return flagUnfamiliarStaffSignIns();
+    }),
+  );
+
+  /**
    * Fold yesterday's usage into the daily rollup and debit each school's
    * balance.
    *
@@ -437,6 +456,37 @@ async function handleGET(request: NextRequest) {
   );
 
   const failed = results.filter((result) => !result.ok);
+
+  /**
+   * The 500 below turns Vercel's cron log red — but nobody watches the cron
+   * log, which is exactly the "a failure nobody sees" gap in docs/SECURITY.md
+   * §8. So a failed job also raises an alert to whoever holds `security`,
+   * deduped per job per day: one broken job is one message a morning, not a
+   * red line in a dashboard no one opens and not fifteen pages an hour.
+   */
+  if (failed.length) {
+    try {
+      const { notify } = await import("@/lib/notify");
+      const today = new Date().toISOString().slice(0, 10);
+      for (const job of failed) {
+        await notify({
+          to: { audience: "admin", capability: "security" },
+          title: `Scheduled job "${job.job}" failed`,
+          message:
+            `The daily automation job "${job.job}" errored on its last run: ${job.error ?? "no message recorded"}. ` +
+            `The other jobs ran. If this keeps happening, whatever that job does — reminders, digests, the backup check — is not happening.`,
+          kind: "cron.job_failed",
+          severity: "warning",
+          link: "/admin/security",
+          dedupeKey: `cron-failed:${job.job}:${today}`,
+          push: false,
+        });
+      }
+    } catch (alertError) {
+      console.error("Could not send cron-failure alert:", alertError);
+    }
+  }
+
   return NextResponse.json(
     { ok: failed.length === 0, ran: results.length, results },
     // A non-200 when something failed is what makes Vercel's cron log show a
