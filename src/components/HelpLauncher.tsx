@@ -146,6 +146,20 @@ export default function HelpLauncher() {
     void openThread(id, "Your question");
   }, [openThread]);
 
+  /**
+   * `easyway:open-help` — anything in the portal can throw this to bring up a
+   * fresh support message. The photo-unlock guide uses it as its one non-photo
+   * way out for a student whose upload keeps failing.
+   */
+  useEffect(() => {
+    const onOpen = () => {
+      setOpen(true);
+      setView("new");
+    };
+    window.addEventListener("easyway:open-help", onOpen);
+    return () => window.removeEventListener("easyway:open-help", onOpen);
+  }, []);
+
   async function submitNew() {
     if (!subject.trim() || (!body.trim() && newFiles.length === 0)) {
       setError("A subject and a description — or a screenshot — and the office can help.");

@@ -111,12 +111,12 @@ export async function GET() {
       await notify({
         to: { userIds: [session.user.id as string] },
         kind: KIND.profilePhotoMissing,
-        severity: "info",
-        title: "Your payment is all sorted — just one more thing",
+        severity: "warning",
+        title: "One step to unlock your portal",
         message:
-          "Becca here — great news, your tuition is confirmed and your classes are ready. The only thing between " +
-          "you and them is a profile photo, which takes about ten seconds (camera or upload both work). Nothing to " +
-          "do with your payment — add one from your profile page and everything opens right back up.",
+          "Becca here — your payment is in and your classes are ready. Your portal stays locked until there is a " +
+          "photo on your profile; that is the only thing holding it. Open your profile page, tap the camera on your " +
+          "photo, and take a selfie or upload one. Everything unlocks the moment it saves.",
         link: "/profile",
         push: true,
         dedupeKey: `photo-lock-hit:${student.id}`,
