@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAttendLive } from "@/lib/access";
+import { isOnlineBranch } from "@/lib/online-branch";
 import { liveSessionForStudent, liveWhere } from "@/lib/live-presence";
 import { cohortRoomName } from "@/lib/live-classroom";
 import { readAssignment, teachingGroups } from "@/lib/lecturer-assignment";
@@ -37,7 +38,10 @@ export async function GET() {
           sessionSlot: true,
           classType: true,
           deliveryMode: true,
-          branch: { select: { name: true } },
+          // So a named student sees their tutor's live class even when their
+          // cohort fields never lined up with it — see liveSessionForStudent.
+          tutorId: true,
+          branch: { select: { name: true, mode: true } },
         },
       }),
       prisma.lecturer.findUnique({
@@ -135,7 +139,14 @@ export async function GET() {
      * The exception is a private student, whose tutor may take the one-to-one
      * over video whatever their branch says.
      */
-    if (!canAttendLive(student.deliveryMode, student.classType)) {
+    if (
+      !canAttendLive(student.deliveryMode, student.classType) &&
+      !isOnlineBranch(student.branch) &&
+      // A student the office named onto a tutor is not a walk-past campus
+      // student — if that tutor runs a live video class, they should see it.
+      // `liveSessionForStudent` below still decides whether there is one.
+      !student.tutorId
+    ) {
       return NextResponse.json({ live: null, role: "student" });
     }
 

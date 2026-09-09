@@ -278,9 +278,24 @@ export async function declineInvite(sessionId: string, studentId: string): Promi
 /**
  * The live session this student may join right now, if there is one.
  *
- * Two ways in, and the order matters. A private student's booked one-to-one
- * outranks anything happening in their cohort room — they are not in that
- * cohort — so invites are checked first.
+ * Three ways in, and the order matters:
+ *
+ *   1. A by-name invite — a private booking, or a tutor who rang this student
+ *      specifically. Outranks everything: a private student is not in any
+ *      cohort room, and a rung student is being asked for by name.
+ *   2. Their cohort room — same branch + level + sitting as a live cohort
+ *      session.
+ *   3. Their NAMED tutor's room — `Student.tutorId` points at the lecturer
+ *      running a live cohort class right now.
+ *
+ * (3) is the one that was missing, and it is the same gap that
+ * `studentWhereForLecturer` closed for rosters: an online student the office
+ * onboards and hands to a tutor often never has a branch/level/sitting that
+ * lines up with how that tutor opened the room (Online / A2 / morning student,
+ * tutor's room opened as Abuja+Online / A2 / afternoon). Without this they can
+ * see the class is "not live" while their tutor is very much teaching it. A
+ * named student belongs to their tutor's class the same way they belong to
+ * that tutor's register — the cohort fields are not the test.
  */
 export async function liveSessionForStudent(student: {
   id: string;
@@ -288,6 +303,8 @@ export async function liveSessionForStudent(student: {
   level: string;
   sessionSlot: string;
   classType: string;
+  /** `Student.tutorId` — the lecturer the office named onto this student, if any. */
+  tutorId?: string | null;
 }): Promise<(LiveSessionRow & { invited: boolean; inviteStatus: string | null }) | null> {
   const now = new Date();
 
@@ -312,7 +329,9 @@ export async function liveSessionForStudent(student: {
   }
 
   // A private student sits no cohort rotation, so the cohort room is not theirs
-  // to walk into even when it is live — that is somebody else's class.
+  // to walk into even when it is live — that is somebody else's class. Their
+  // tutor's room is not theirs either: a one-to-one happens in its own private
+  // room, reached through an invite (handled above), never here.
   if (student.classType === "private") return null;
 
   const cohort = await prisma.liveClassSession.findFirst({
@@ -327,9 +346,29 @@ export async function liveSessionForStudent(student: {
     orderBy: { startedAt: "desc" },
   });
 
-  if (!cohort) return null;
+  if (cohort) {
+    return { ...toRow(cohort, cohort.lecturer?.user?.name ?? null), invited: false, inviteStatus: null };
+  }
 
-  return { ...toRow(cohort, cohort.lecturer?.user?.name ?? null), invited: false, inviteStatus: null };
+  // Named onto a tutor who is live right now. When that tutor runs more than
+  // one class at once (rare), prefer the one at this student's own level, else
+  // the most recently started.
+  if (student.tutorId) {
+    const tutorSessions = await prisma.liveClassSession.findMany({
+      where: { kind: "cohort", lecturerId: student.tutorId, ...liveWhere(now) },
+      include: { lecturer: { select: { user: { select: { name: true } } } } },
+      orderBy: { startedAt: "desc" },
+    });
+    const pick =
+      tutorSessions.find(
+        (s) => (s.level ?? "").toUpperCase() === (student.level ?? "").toUpperCase(),
+      ) ?? tutorSessions[0];
+    if (pick) {
+      return { ...toRow(pick, pick.lecturer?.user?.name ?? null), invited: false, inviteStatus: null };
+    }
+  }
+
+  return null;
 }
 
 /** Look a session up by the code a student typed. Only ever returns a live one. */
@@ -423,6 +462,36 @@ export function announceLiveSession(session: LiveSessionRow, opts: { studentIds?
     title: "Your class is live now",
     message: `${tutor} started ${session.title}. Tap to join.`,
     link,
+    dedupeKey: `live-start:${session.id}`,
+    push: true,
+    emailBody: `${tutor} started ${session.title}.\n\nJoin from the portal, or enter the code ${session.joinCode} at the live class page.`,
+  });
+}
+
+/**
+ * The same "your class is live" push, sent to students the office NAMED onto
+ * this tutor (`Student.tutorId`) rather than to a branch+level+sitting cohort.
+ *
+ * `announceLiveSession`'s cohort broadcast pins to branch AND level AND sitting
+ * for good reason — but that is exactly why it misses an online student whose
+ * cohort fields never lined up with their tutor's room (see
+ * `liveSessionForStudent`). This is the by-name half of the same "class has
+ * started" moment, so it shares the dedupe key: a named student who ALSO
+ * matched the cohort broadcast is not buzzed twice.
+ */
+export function announceLiveToNamedStudents(session: LiveSessionRow, studentIds: string[]): void {
+  const ids = [...new Set(studentIds.filter(Boolean))];
+  if (!ids.length) return;
+
+  const tutor = session.lecturerName ? `${session.lecturerName} has` : "Your tutor has";
+
+  notifyInBackground({
+    to: { studentIds: ids },
+    kind: KIND.classStarting,
+    severity: "warning",
+    title: "Your class is live now",
+    message: `${tutor} started ${session.title}. Tap to join.`,
+    link: `/live?code=${session.joinCode}`,
     dedupeKey: `live-start:${session.id}`,
     push: true,
     emailBody: `${tutor} started ${session.title}.\n\nJoin from the portal, or enter the code ${session.joinCode} at the live class page.`,
