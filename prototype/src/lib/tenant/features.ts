@@ -48,6 +48,15 @@ export type TenantFeatures = {
      *  open to everyone, with no live-class concept, would want this off. */
     onlineCohortRequiresLiveClass: boolean;
   };
+  roster: {
+    /** Whether an online / hybrid student may be assigned MORE than one tutor.
+     *  Off by default: a physical class is one room with one teacher, and most
+     *  schools run that way end to end. A school that splits an online cohort
+     *  across a speaking coach and a grammar tutor turns this on, and the
+     *  add-student screen then offers the extra-tutor picker. See
+     *  src/lib/tutor-pairing.ts and src/app/api/admin/students/route.ts. */
+    sharedStudents: boolean;
+  };
 };
 
 /**
@@ -67,6 +76,9 @@ export const DEFAULT_FEATURES: TenantFeatures = {
   games: {
     onlineCohortRequiresLiveClass: true,
   },
+  roster: {
+    sharedStudents: false,
+  },
 };
 
 /** A fresh, independently-mutable copy — callers merge into this, never into `DEFAULT_FEATURES` itself. */
@@ -77,6 +89,7 @@ export function defaultFeatures(): TenantFeatures {
       goetheReferralUrl: DEFAULT_FEATURES.examCentre.goetheReferralUrl,
     },
     games: { ...DEFAULT_FEATURES.games },
+    roster: { ...DEFAULT_FEATURES.roster },
   };
 }
 
@@ -153,6 +166,20 @@ export function parseFeatures(
         if (strict) return null;
       } else {
         result.games.onlineCohortRequiresLiveClass = raw;
+      }
+    }
+  }
+
+  const roster = value.roster;
+  if (roster !== undefined) {
+    if (!isPlainObject(roster)) {
+      if (strict) return null;
+    } else if ("sharedStudents" in roster) {
+      const raw = roster.sharedStudents;
+      if (typeof raw !== "boolean") {
+        if (strict) return null;
+      } else {
+        result.roster.sharedStudents = raw;
       }
     }
   }

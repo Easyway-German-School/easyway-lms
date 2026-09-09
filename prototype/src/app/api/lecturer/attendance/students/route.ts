@@ -78,6 +78,7 @@ export async function GET(req: NextRequest) {
         studentCode: true,
         admission: true,
         tutorId: true,
+        coTutors: { select: { lecturerId: true } },
         branch: { select: { name: true } },
         user: { select: { name: true, email: true } },
       },

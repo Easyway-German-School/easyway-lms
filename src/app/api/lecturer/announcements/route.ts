@@ -59,6 +59,7 @@ async function reachableStudents(lecturer: AssignmentSource & { id: string }) {
       classType: true,
       admission: true,
       tutorId: true,
+      coTutors: { select: { lecturerId: true } },
       user: { select: { name: true, email: true } },
     },
     orderBy: { user: { name: "asc" } },

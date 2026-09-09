@@ -33,8 +33,61 @@ describe("studentWhereForLecturerScope", () => {
           sessionSlot: "afternoon",
         },
         { tutorId: "lecturer-1", level: "A1", sessionSlot: "afternoon" },
+        // Co-tutors reach the student the same way the primary does, and carry
+        // the same level/sitting narrowing — see studentWhereForLecturer.
+        {
+          coTutors: { some: { lecturerId: "lecturer-1" } },
+          level: "A1",
+          sessionSlot: "afternoon",
+        },
       ],
     });
+  });
+
+  it("includes a co-tutored student even when their cohort fields do not match", () => {
+    const assignment = readAssignment({ branchIds: ["branch-a"], levels: ["A1"] });
+    const where = studentWhereForLecturerScope(assignment, "lecturer-1");
+    expect(where).toMatchObject({
+      OR: [
+        { branchId: { in: ["branch-a"] }, level: { in: ["A1"] } },
+        { tutorId: "lecturer-1" },
+        { coTutors: { some: { lecturerId: "lecturer-1" } } },
+      ],
+    });
+  });
+});
+
+describe("belongsToLecturer with co-tutors", () => {
+  // Two pinned groups, so the in-memory batch check actually excludes rows —
+  // the same fixture the per-group-batch tests use.
+  const twoGroups = readAssignment({
+    branchIds: ["b1"],
+    levels: ["A1", "B2"],
+    sessionSlots: ["afternoon", "morning"],
+    assignmentGroups: [
+      { branchId: "b1", level: "A1", sessionSlot: "afternoon", batch: "September" },
+      { branchId: "b1", level: "B2", sessionSlot: "morning", batch: "August" },
+    ],
+  });
+
+  it("a co-tutored student is IN even when their intake month does not match", () => {
+    const wrongMonthButCoTutor = {
+      coTutors: [{ lecturerId: "lec-1" }],
+      admission: { batch: "January" },
+    };
+    expect(belongsToLecturer(twoGroups, "lec-1", wrongMonthButCoTutor)).toBe(true);
+    expect(
+      belongsToLecturer(twoGroups, "lec-1", { coTutorIds: ["lec-2", "lec-1"], admission: { batch: "January" } }),
+    ).toBe(true);
+  });
+
+  it("a row co-tutored by someone else still falls to the ordinary batch check", () => {
+    expect(
+      belongsToLecturer(twoGroups, "lec-1", {
+        coTutors: [{ lecturerId: "lec-9" }],
+        admission: { batch: "January" },
+      }),
+    ).toBe(false);
   });
 });
 

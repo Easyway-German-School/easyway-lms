@@ -277,6 +277,19 @@ function FeatureToggleList({
           {features.games.onlineCohortRequiresLiveClass && <CheckCircleIcon className="h-3.5 w-3.5" />}
           Online cohort games require a live class
         </button>
+        <button
+          type="button"
+          onClick={() =>
+            onChange({
+              ...features,
+              roster: { ...features.roster, sharedStudents: !features.roster.sharedStudents },
+            })
+          }
+          className={chip(features.roster.sharedStudents)}
+        >
+          {features.roster.sharedStudents && <CheckCircleIcon className="h-3.5 w-3.5" />}
+          Online / hybrid students can have more than one tutor
+        </button>
       </div>
       <p className="text-[11px] leading-4 text-[var(--muted)]">
         ÖSD / telc booking is only worth turning on once this school actually has a confirmed fee and a

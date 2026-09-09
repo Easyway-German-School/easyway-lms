@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import {
   belongsToLecturer,
   describeAssignment,
@@ -68,7 +68,8 @@ export async function GET() {
         include: {
           user: { select: { name: true, email: true, createdAt: true } },
           branch: { select: { name: true } },
-          payments: { select: { amount: true, status: true } },
+          coTutors: { select: { lecturerId: true } },
+          payments: { select: { amount: true, status: true, description: true } },
           attendances: { select: { present: true } },
           _count: { select: { assignmentSubmissions: true, certificates: true } },
         },
@@ -90,12 +91,13 @@ export async function GET() {
             : {};
 
         const totalPaid = student.payments
-          .filter((payment) => payment.status === "completed")
+          .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
           .reduce((sum, payment) => sum + payment.amount, 0);
         const feeLookup = {
           level: student.level,
           branch: student.branch?.name ?? null,
           classType: student.classType,
+          pathway: student.pathway,
         };
         const access = deriveStudentAccess({
           totalPaid,
@@ -123,7 +125,9 @@ export async function GET() {
           // Named onto this tutor by the office rather than matched into the
           // class. Shown as a tag so a tutor is never surprised by a student
           // their class description does not explain.
-          namedByOffice: student.tutorId === lecturer.id,
+          namedByOffice:
+            student.tutorId === lecturer.id ||
+            student.coTutors.some((link) => link.lecturerId === lecturer.id),
           joinedAt: student.user.createdAt.toISOString(),
           phone: typeof admission.phone === "string" ? admission.phone : null,
           city: typeof admission.city === "string" ? admission.city : null,

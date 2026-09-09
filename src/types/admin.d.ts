@@ -4,6 +4,8 @@ export type StudentWithUser = Student & {
   user: User;
   branch?: Branch | null;
   tutor?: Lecturer & { user: User } | null;
+  // Extra tutors on an online / hybrid student — see lib/tutor-pairing.ts.
+  coTutors?: Array<{ lecturerId: string; lecturer: Lecturer & { user: User } }>;
   payments?: Payment[];
   invoices?: Invoice[];
   profile?: StudentProfile | null;

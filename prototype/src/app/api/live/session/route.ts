@@ -61,7 +61,11 @@ export async function GET(request: Request) {
     const [student, lecturer] = await Promise.all([
       prisma.student.findUnique({
         where: { userId: session.user.id },
-        include: { payments: true, branch: { select: { id: true, name: true, mode: true } } },
+        include: {
+          payments: true,
+          branch: { select: { id: true, name: true, mode: true } },
+          coTutors: { select: { lecturerId: true } },
+        },
       }),
       prisma.lecturer.findUnique({
         where: { userId: session.user.id },
@@ -175,11 +179,12 @@ export async function GET(request: Request) {
       if (
         !canAttendLive(student.deliveryMode, student.classType) &&
         !isOnlineBranch(student.branch) &&
-        // Named onto a tutor: the office has explicitly given this student a
-        // tutor, so a live class that tutor is running is theirs to join.
-        // `liveSessionForStudent` below still gates on there actually being one,
-        // and the tuition check further down is untouched.
+        // Named onto a tutor (primary or co-tutor): the office has explicitly
+        // given this student a tutor, so a live class that tutor is running is
+        // theirs to join. `liveSessionForStudent` below still gates on there
+        // actually being one, and the tuition check further down is untouched.
         !student.tutorId &&
+        student.coTutors.length === 0 &&
         !privateClassId
       ) {
         return NextResponse.json(
@@ -292,6 +297,7 @@ export async function GET(request: Request) {
         // So a student the office named onto a tutor can walk into that tutor's
         // live class even when their cohort fields never lined up with it.
         tutorId: student.tutorId,
+        coTutorIds: student.coTutors.map((link) => link.lecturerId),
       });
 
       if (!liveSession) {
@@ -361,7 +367,10 @@ export async function GET(request: Request) {
        */
       if (opened.kind === "cohort" && lecturer) {
         const named = await prisma.student.findMany({
-          where: { tutorId: lecturer.id, deletedAt: null },
+          where: {
+            deletedAt: null,
+            OR: [{ tutorId: lecturer.id }, { coTutors: { some: { lecturerId: lecturer.id } } }],
+          },
           select: { id: true },
         });
         announceLiveToNamedStudents(opened, named.map((s) => s.id));

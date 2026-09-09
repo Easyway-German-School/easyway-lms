@@ -68,6 +68,7 @@ export async function GET() {
         include: {
           user: { select: { name: true, email: true, createdAt: true } },
           branch: { select: { name: true } },
+          coTutors: { select: { lecturerId: true } },
           payments: { select: { amount: true, status: true, description: true } },
           attendances: { select: { present: true } },
           _count: { select: { assignmentSubmissions: true, certificates: true } },
@@ -124,7 +125,9 @@ export async function GET() {
           // Named onto this tutor by the office rather than matched into the
           // class. Shown as a tag so a tutor is never surprised by a student
           // their class description does not explain.
-          namedByOffice: student.tutorId === lecturer.id,
+          namedByOffice:
+            student.tutorId === lecturer.id ||
+            student.coTutors.some((link) => link.lecturerId === lecturer.id),
           joinedAt: student.user.createdAt.toISOString(),
           phone: typeof admission.phone === "string" ? admission.phone : null,
           city: typeof admission.city === "string" ? admission.city : null,

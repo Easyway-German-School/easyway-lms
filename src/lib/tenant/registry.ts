@@ -76,6 +76,9 @@ export const TENANT_OWNED_MODELS = [
   "NotificationPreference",
   "EmailLog",
   "EmailMessage",
+  "SmsMessage",
+  "TutorPayRate",
+  "PayrollPayment",
   "EmailSuppression",
   "PushSubscription",
   "Space",
@@ -192,6 +195,13 @@ export const TENANT_OWNED_MODELS = [
   /** The real parent-child link (Parent.studentId only ever held one). Same
    * reasoning as Parent — it names a real family. */
   "ParentStudent",
+
+  /**
+   * An extra tutor on a student, beyond the primary `Student.tutorId`. Names
+   * one school's student and one school's tutor by id — the same category as
+   * Student itself, and just as clearly nobody else's to read.
+   */
+  "StudentCoTutor",
 
   /**
    * The private-tier 1:1 DM and the tutor's write-up after each session.

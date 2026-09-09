@@ -41,6 +41,7 @@ export async function GET() {
           // So a named student sees their tutor's live class even when their
           // cohort fields never lined up with it — see liveSessionForStudent.
           tutorId: true,
+          coTutors: { select: { lecturerId: true } },
           branch: { select: { name: true, mode: true } },
         },
       }),
@@ -145,12 +146,16 @@ export async function GET() {
       // A student the office named onto a tutor is not a walk-past campus
       // student — if that tutor runs a live video class, they should see it.
       // `liveSessionForStudent` below still decides whether there is one.
-      !student.tutorId
+      !student.tutorId &&
+      student.coTutors.length === 0
     ) {
       return NextResponse.json({ live: null, role: "student" });
     }
 
-    const live = await liveSessionForStudent(student);
+    const live = await liveSessionForStudent({
+      ...student,
+      coTutorIds: student.coTutors.map((link) => link.lecturerId),
+    });
     if (!live) return NextResponse.json({ live: null, role: "student" });
 
     return NextResponse.json({

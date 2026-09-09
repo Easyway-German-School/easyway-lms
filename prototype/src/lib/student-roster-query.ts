@@ -140,6 +140,7 @@ export const ROSTER_INCLUDE = {
   user: true,
   branch: true,
   tutor: { include: { user: true } },
+  coTutors: { include: { lecturer: { include: { user: true } } } },
   profile: true,
   payments: {
     where: { deletedAt: null },
