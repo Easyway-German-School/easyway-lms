@@ -256,7 +256,7 @@ export async function POST(req: NextRequest) {
     if (audience) {
       const recipients = await prisma.student.findMany({
         where: audience as any,
-        select: { id: true, admission: true, tutorId: true },
+        select: { id: true, admission: true, tutorId: true, coTutors: { select: { lecturerId: true } } },
       });
       const studentIds = recipients
         .filter((student) => belongsToLecturer(assignment, lecturerId, student))

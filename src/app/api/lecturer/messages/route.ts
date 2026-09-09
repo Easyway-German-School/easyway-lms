@@ -71,6 +71,7 @@ async function cohortStudents(lecturer: AssignmentSource & { id: string }) {
       id: true,
       admission: true,
       tutorId: true,
+      coTutors: { select: { lecturerId: true } },
       user: { select: { name: true, email: true } },
     },
   });

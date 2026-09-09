@@ -311,6 +311,7 @@ model Tenant {
   /// scripts/add-tenant-columns.mjs; Prisma requires both sides.
   parents          Parent[]
   parentStudents   ParentStudent[]
+  studentCoTutors  StudentCoTutor[]
   termsAcceptances TermsAcceptance[]
   refundRequests   RefundRequest[]
   tuitionCharges   TuitionCharge[]
@@ -475,6 +476,16 @@ model Student {
 
   tutorId String?
   tutor   Lecturer? @relation(fields: [tutorId], references: [id], onDelete: SetNull)
+
+  /**
+   * EXTRA tutors, beyond the primary `tutorId` above. Only ever populated for
+   * online / hybrid students, and only when the platform has turned the
+   * `roster.sharedStudents` feature on for the school — a physical student sits
+   * one room with one teacher, so co-tutors would only confuse their roster.
+   * Each co-tutor gets the same roster / register / gradebook / live-class
+   * reach as the primary. See src/lib/tutor-pairing.ts (setStudentCoTutors).
+   */
+  coTutors StudentCoTutor[]
 
   /**
    * Assignments set for this student by name, rather than to their level.
@@ -986,6 +997,42 @@ model ParentStudent {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([parentId, studentId])
+  @@index([studentId])
+  @@index([tenantId])
+}
+
+/// An EXTRA tutor on a student, beyond the primary `Student.tutorId`.
+///
+/// Online and hybrid students can be taught by more than one tutor — a speaking
+/// coach and a grammar tutor, or a colleague covering a second sitting. The
+/// primary tutor stays on `Student.tutorId` so every existing read keeps
+/// working untouched; this table is purely additive, and a co-tutor is given
+/// the same roster / register / gradebook / live-class reach as the primary
+/// (see src/lib/lecturer-assignment.ts). Populated only while the platform has
+/// `roster.sharedStudents` enabled for the school — see src/lib/tenant/features.ts.
+///
+/// Same shape as ParentStudent: a join row between two tenant-owned entities,
+/// carrying its own nullable tenantId for the isolation extension.
+model StudentCoTutor {
+  id String @id @default(cuid())
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  lecturerId String
+  lecturer   Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+
+  /// Admin User.id who added this co-tutor, for audit.
+  assignedById String?
+
+  createdAt DateTime @default(now())
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, lecturerId])
+  @@index([lecturerId])
   @@index([studentId])
   @@index([tenantId])
 }
@@ -2421,6 +2468,8 @@ model Lecturer {
   enrolments         StudentEnrolment[]
   payRate            TutorPayRate?
   payrollPayments    PayrollPayment[]
+  /// Students shared onto this tutor as an EXTRA teacher. See Student.coTutors.
+  coTutoredStudents  StudentCoTutor[]
   /**
    * Set instead of the row being removed. See src/lib/prisma-guard.ts — the
    * client rewrites delete into an update on every model listed here, and

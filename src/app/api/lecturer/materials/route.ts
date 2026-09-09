@@ -1,11 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
-import { belongsToLecturer, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
+import { assignmentBatches, belongsToLecturer, isAssigned, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
-import { EMBED_FILE_TYPE, parseEmbed } from '@/lib/media-embed';
+import { AUDIO_EMBED_FILE_TYPE, EMBED_FILE_TYPE, parseAudioLink, parseEmbed } from '@/lib/media-embed';
+import { generateForMaterial } from '@/lib/material-ai';
 
 function serialise(material: {
   id: string;
@@ -60,10 +61,50 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Lecturer profile not found' }, { status: 404 });
     }
 
-    const materials = await prisma.material.findMany({
-      where: { lecturerId },
+    /**
+     * Two ways a material reaches this tutor:
+     *   1. They uploaded it (`lecturerId` is theirs), or the office aimed it at
+     *      them by name (same column).
+     *   2. The office aimed it at a cohort — a level, and optionally one
+     *      branch / sitting — that this tutor's assignment covers. Read the
+     *      same way the roster is: an empty list on the assignment side means
+     *      "no restriction", so a tutor with no sitting chosen still sees an
+     *      office upload for any sitting at their level and branch.
+     * Batch lives outside SQL (see matchesBatch) and is applied after.
+     */
+    const lecturer = await prisma.lecturer.findUnique({ where: { id: lecturerId } });
+    const assignment = readAssignment(lecturer);
+
+    const where: Record<string, unknown> = { lecturerId };
+    if (isAssigned(assignment)) {
+      const officeClause: Record<string, unknown> = {
+        uploadedBy: { not: null },
+        lecturerId: null,
+        level: { in: assignment.levels },
+        OR: [{ branchId: null }, { branchId: { in: assignment.branchIds } }],
+      };
+      if (assignment.sessionSlots.length) {
+        officeClause.AND = [
+          { OR: [{ sessionSlot: null }, { sessionSlot: { in: assignment.sessionSlots } }] },
+        ];
+      }
+      where.OR = [{ lecturerId }, officeClause];
+      delete where.lecturerId;
+    }
+
+    const rows = await prisma.material.findMany({
+      where: where as never,
       include: { course: { select: { title: true } } },
       orderBy: { createdAt: 'desc' },
+    });
+
+    const allowedBatches = assignmentBatches(assignment).map((b) => b.toLowerCase());
+    const materials = rows.filter((material) => {
+      // Only office cohort uploads carry a batch to check; a tutor's own
+      // uploads and by-name uploads always pass.
+      if (!material.batch || (material.lecturerId && material.lecturerId === lecturerId)) return true;
+      if (!allowedBatches.length) return true;
+      return allowedBatches.includes(material.batch.toLowerCase());
     });
 
     return NextResponse.json(materials.map(serialise));
@@ -108,19 +149,25 @@ export async function POST(req: NextRequest) {
      */
     const sourceUrl = String(body.sourceUrl ?? '').trim();
     const embed = sourceUrl ? parseEmbed(sourceUrl) : null;
-    if (sourceUrl && !embed) {
+    const audioEmbed = sourceUrl && !embed ? parseAudioLink(sourceUrl) : null;
+    if (sourceUrl && !embed && !audioEmbed) {
       return NextResponse.json(
-        { error: 'That link is not a video we recognise. Paste a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.' },
+        { error: 'That link is not a video or audio we recognise. Paste a YouTube, Vimeo, Loom or Drive video; a SoundCloud or Spotify link; or a direct .mp4 / .mp3 URL.' },
         { status: 400 },
       );
     }
+    const link = embed ?? audioEmbed;
 
-    const fileUrl = embed ? embed.sourceUrl : String(body.fileUrl ?? '').trim();
-    const fileName = embed ? embed.label : String(body.fileName ?? '').trim();
-    const fileType = embed ? EMBED_FILE_TYPE : String(body.fileType ?? '').trim() || 'application/octet-stream';
+    const fileUrl = link ? link.sourceUrl : String(body.fileUrl ?? '').trim();
+    const fileName = link ? link.label : String(body.fileName ?? '').trim();
+    const fileType = embed
+      ? EMBED_FILE_TYPE
+      : audioEmbed
+        ? AUDIO_EMBED_FILE_TYPE
+        : String(body.fileType ?? '').trim() || 'application/octet-stream';
     // A link occupies no storage. Recording it as 0 keeps the tutor's "MB used"
     // honest rather than inventing a size for something we do not host.
-    const fileSize = embed ? 0 : Number(body.fileSize) || 0;
+    const fileSize = link ? 0 : Number(body.fileSize) || 0;
 
     // Video-library metadata. All optional — a plain document upload sends none
     // of it and behaves exactly as it did before.
@@ -209,7 +256,7 @@ export async function POST(req: NextRequest) {
     if (audience) {
       const recipients = await prisma.student.findMany({
         where: audience as any,
-        select: { id: true, admission: true, tutorId: true },
+        select: { id: true, admission: true, tutorId: true, coTutors: { select: { lecturerId: true } } },
       });
       const studentIds = recipients
         .filter((student) => belongsToLecturer(assignment, lecturerId, student))
@@ -232,6 +279,21 @@ export async function POST(req: NextRequest) {
           dedupeKey: `material:${material.id}`,
         }).catch((error) => console.error("Material notification failed", error));
       }
+    }
+
+    /**
+     * Start the AI read now rather than waiting for the 6am cron — a handout
+     * uploaded at 8am for a 10am class should have its quests and notes drafted
+     * in time. `after()` runs it once the response is out; a timeout mid-run
+     * leaves `aiState:"pending"` for the cron queue to finish. Recordings,
+     * videos, audio and pasted links carry no readable text.
+     */
+    if (kind !== 'recording' && kind !== 'audio' && kind !== 'video' && !link) {
+      after(() =>
+        generateForMaterial(material.id, { eager: true }).catch((error) =>
+          console.error('material-ai kick failed', material.id, error),
+        ),
+      );
     }
 
     return NextResponse.json(serialise(material));

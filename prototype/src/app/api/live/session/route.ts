@@ -9,6 +9,7 @@ import { ensureRecordingStarted } from "@/lib/class-recorder";
 import { creditGate } from "@/lib/usage/guard";
 import {
   announceLiveSession,
+  announceLiveToNamedStudents,
   liveSessionByCode,
   liveSessionForStudent,
   mayJoinPrivateRoom,
@@ -60,7 +61,11 @@ export async function GET(request: Request) {
     const [student, lecturer] = await Promise.all([
       prisma.student.findUnique({
         where: { userId: session.user.id },
-        include: { payments: true, branch: { select: { id: true, name: true, mode: true } } },
+        include: {
+          payments: true,
+          branch: { select: { id: true, name: true, mode: true } },
+          coTutors: { select: { lecturerId: true } },
+        },
       }),
       prisma.lecturer.findUnique({
         where: { userId: session.user.id },
@@ -163,7 +168,25 @@ export async function GET(request: Request) {
        * now leans on a VERIFIED privateClassId — the membership check above
        * has already run — rather than on the caller simply claiming one.
        */
-      if (!canAttendLive(student.deliveryMode, student.classType) && !privateClassId) {
+      /**
+       * `isOnlineBranch` is the safety net under `deliveryMode`. A student the
+       * office just onboarded onto the Online branch but whose `deliveryMode`
+       * column did not get set (an import, a half-filled form) would otherwise
+       * be told they are "registered for classes on campus" while sitting in a
+       * branch that has no campus. If the branch itself is online, the live
+       * room is theirs regardless of what the column says.
+       */
+      if (
+        !canAttendLive(student.deliveryMode, student.classType) &&
+        !isOnlineBranch(student.branch) &&
+        // Named onto a tutor (primary or co-tutor): the office has explicitly
+        // given this student a tutor, so a live class that tutor is running is
+        // theirs to join. `liveSessionForStudent` below still gates on there
+        // actually being one, and the tuition check further down is untouched.
+        !student.tutorId &&
+        student.coTutors.length === 0 &&
+        !privateClassId
+      ) {
         return NextResponse.json(
           {
             error: "Not an online class",
@@ -271,6 +294,10 @@ export async function GET(request: Request) {
         level: student.level,
         sessionSlot: student.sessionSlot,
         classType: student.classType,
+        // So a student the office named onto a tutor can walk into that tutor's
+        // live class even when their cohort fields never lined up with it.
+        tutorId: student.tutorId,
+        coTutorIds: student.coTutors.map((link) => link.lecturerId),
       });
 
       if (!liveSession) {
@@ -330,6 +357,24 @@ export async function GET(request: Request) {
         opened,
         opened.kind === "private" ? { studentIds: await studentIdsForPrivateClass(privateClassId!) } : {},
       );
+
+      /**
+       * The cohort broadcast above is pinned to branch+level+sitting, which
+       * misses the students the office NAMED onto this tutor whose cohort
+       * fields never lined up (the online-onboarding case — see
+       * `liveSessionForStudent`). Ring them by name off the same open event, on
+       * the same dedupe key so anyone caught by both is only buzzed once.
+       */
+      if (opened.kind === "cohort" && lecturer) {
+        const named = await prisma.student.findMany({
+          where: {
+            deletedAt: null,
+            OR: [{ tutorId: lecturer.id }, { coTutors: { some: { lecturerId: lecturer.id } } }],
+          },
+          select: { id: true },
+        });
+        announceLiveToNamedStudents(opened, named.map((s) => s.id));
+      }
     } else if (liveSession && student) {
       /**
        * Turning up answers the call, so the tutor's roster stops showing this

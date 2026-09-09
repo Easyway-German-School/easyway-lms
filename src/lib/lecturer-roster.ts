@@ -84,6 +84,7 @@ export async function resolveRoster(userId: string): Promise<Roster> {
       branchId: true,
       admission: true,
       tutorId: true,
+      coTutors: { select: { lecturerId: true } },
       user: { select: { name: true, email: true } },
     },
     orderBy: { createdAt: "asc" },
@@ -102,7 +103,8 @@ export async function resolveRoster(userId: string): Promise<Roster> {
       level: row.level,
       sessionSlot: row.sessionSlot,
       branchId: row.branchId,
-      namedByOffice: row.tutorId === lecturer.id,
+      namedByOffice:
+        row.tutorId === lecturer.id || row.coTutors.some((link) => link.lecturerId === lecturer.id),
     }));
 
   /**
