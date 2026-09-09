@@ -404,6 +404,10 @@ export default function ProfilePage() {
       queryClient.invalidateQueries({ queryKey: studentAccessQueryKey });
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Could not upload that photo");
+      // Lets PhotoUnlockGuide count failed attempts and, after two, promote its
+      // "message the office" way out — so a broken uploader never fully traps a
+      // photo-locked student.
+      window.dispatchEvent(new CustomEvent("easyway:photo-upload-failed"));
     } finally {
       setUploading(false);
     }
@@ -523,8 +527,10 @@ export default function ProfilePage() {
           <div className="mx-auto max-w-6xl">
             <div className="rounded-[36px] border border-[var(--border)] bg-[linear-gradient(160deg,_rgba(2,15,20,0.96),_rgba(6,25,32,0.92))] p-6 shadow-[0_40px_100px_rgba(2,6,23,0.4)] backdrop-blur-2xl sm:p-8">
               <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-end">
-                {/* Avatar with a tier-coloured story ring */}
-                <div className="relative shrink-0">
+                {/* Avatar with a tier-coloured story ring. `data-guide-target`
+                    is what PhotoUnlockGuide spotlights when it walks a
+                    photo-locked student here. */}
+                <div className="relative shrink-0" data-guide-target="photo">
                   <div className="rounded-full p-[3px]" style={{ background: ring }}>
                     <div className="rounded-full border-[3px] border-[#04141a] bg-[#04141a] p-0.5">
                       <div className="relative h-28 w-28 overflow-hidden rounded-full sm:h-32 sm:w-32">

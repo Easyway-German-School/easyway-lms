@@ -27,6 +27,7 @@ import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
 import PhotoLockScreen from "@/components/PhotoLockScreen";
+import PhotoUnlockGuide from "@/components/PhotoUnlockGuide";
 import SignOutButton from "@/components/SignOutButton";
 import { MomentQueueProvider } from "@/lib/moment-queue";
 import { canAttendLive, isLiveOnlyRoute, isPhotoGatedRoute, isTuitionGatedRoute } from "@/lib/access";
@@ -488,6 +489,14 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       */}
 
       <HelpLauncher />
+
+      {/*
+        Becca walks a paid, photo-less student to the camera control that
+        unlocks their portal. A hard render-gate over the plain lock screen,
+        NOT a queued moment — it self-gates on the access query and has no
+        dismiss. See PhotoUnlockGuide.
+      */}
+      <PhotoUnlockGuide />
 
       {/*
         The answer to something they asked. Not behind `hasAccess` for the same

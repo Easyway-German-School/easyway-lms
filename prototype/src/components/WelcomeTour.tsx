@@ -1,9 +1,10 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Mascot from "@/components/Mascot";
 import { CheckIcon } from "@/components/icons";
+import { SpotlightArrow, SpotlightMask, useTargetRect } from "@/components/Spotlight";
 import { useMoment } from "@/lib/moment-queue";
 
 /**
@@ -57,8 +58,6 @@ type Step = {
   /** The word on the stamp this step earns. */
   stamp: string;
 };
-
-type Rect = { top: number; left: number; width: number; height: number };
 
 const PAD = 8;
 const CARD_GAP = 18;
@@ -148,96 +147,6 @@ function buildSteps(profile: Onboarding): Step[] {
       stamp: "Los!",
     },
   ];
-}
-
-/**
- * Where the target sits, in viewport coordinates. Null while unknown.
- *
- * This keeps measuring for a beat rather than measuring once. On a phone the
- * target is a button inside the sidebar drawer, and the drawer takes 300ms to
- * slide in — a single measurement catches it at x = -272, off the left edge,
- * and the spotlight and the arrow are then both drawn off-screen. So it
- * re-measures every frame until the rectangle stops moving, and keeps a slow
- * watch afterwards for anything that shifts the layout later.
- */
-function useTargetRect(selector: string | undefined, step: number): Rect | null {
-  const [rect, setRect] = useState<Rect | null>(null);
-
-  useLayoutEffect(() => {
-    if (!selector) {
-      setRect(null);
-      return;
-    }
-
-    let frame = 0;
-    let elapsed = 0;
-    let stableFor = 0;
-    let last: Rect | null = null;
-
-    const read = (): Rect | null => {
-      const element = document.querySelector(selector);
-      if (!element) return null;
-      const box = element.getBoundingClientRect();
-      if (box.width === 0 && box.height === 0) return null;
-      return { top: box.top, left: box.left, width: box.width, height: box.height };
-    };
-
-    const same = (a: Rect | null, b: Rect | null) =>
-      a !== null &&
-      b !== null &&
-      Math.abs(a.top - b.top) < 0.5 &&
-      Math.abs(a.left - b.left) < 0.5 &&
-      Math.abs(a.width - b.width) < 0.5 &&
-      Math.abs(a.height - b.height) < 0.5;
-
-    let scrolled = false;
-
-    const settle = () => {
-      elapsed += 1;
-      const next = read();
-
-      if (next) {
-        if (!scrolled) {
-          scrolled = true;
-          document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        }
-        if (!same(next, last)) {
-          last = next;
-          stableFor = 0;
-          setRect(next);
-        } else {
-          stableFor += 1;
-        }
-      }
-
-      // Stop once it has held still for ~8 frames, or after about two seconds
-      // — whichever comes first, so a drawer that never settles cannot spin.
-      if (stableFor < 8 && elapsed < 120) {
-        frame = requestAnimationFrame(settle);
-      }
-    };
-
-    frame = requestAnimationFrame(settle);
-
-    const remeasure = () => {
-      const next = read();
-      if (next && !same(next, last)) {
-        last = next;
-        setRect(next);
-      }
-    };
-
-    window.addEventListener("resize", remeasure);
-    window.addEventListener("scroll", remeasure, true);
-
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("resize", remeasure);
-      window.removeEventListener("scroll", remeasure, true);
-    };
-  }, [selector, step]);
-
-  return rect;
 }
 
 export default function WelcomeTour() {
@@ -560,83 +469,18 @@ export default function WelcomeTour() {
           aria-label="Welcome to your student portal"
           className="fixed inset-0 z-[130]"
         >
-          {/* The dimmer, with a hole cut in it. An SVG mask rather than four
-              divs around the target, so the corners can be rounded and the
-              hole can animate from one element to the next. */}
-          <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden>
-            <defs>
-              <mask id="tour-spotlight">
-                <rect width="100%" height="100%" fill="white" />
-                {hole && (
-                  // The hole is moved by translating a <g>, not by animating
-                  // x/y on the <rect>. Framer maps x and y to a transform on
-                  // some SVG elements and to attributes on others; on the rect
-                  // it set neither, and the hole stayed at the origin.
-                  <motion.g
-                    initial={false}
-                    animate={{ x: hole.left, y: hole.top }}
-                    transition={
-                      reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 30 }
-                    }
-                  >
-                    <rect width={hole.width} height={hole.height} rx={16} fill="black" />
-                  </motion.g>
-                )}
-              </mask>
-            </defs>
-            <rect width="100%" height="100%" fill="rgb(2 6 23 / 0.82)" mask="url(#tour-spotlight)" />
-          </svg>
+          {/* Dimmer + hole + ring. zIndex 0 so the guide and card, later in the
+              DOM, stay above it. See components/Spotlight.tsx. */}
+          <SpotlightMask hole={hole} zIndex={0} />
 
-          {/* A ring around the spotlight, so the hole reads as deliberate. */}
+          {/* The arrow from the guide's hand to the spotlight. */}
           {hole && (
-            <motion.div
-              initial={false}
-              animate={{ top: hole.top, left: hole.left, width: hole.width, height: hole.height }}
-              transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 30 }}
-              className="pointer-events-none absolute rounded-2xl ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-transparent"
-            >
-              {!reduceMotion && (
-                <motion.span
-                  className="absolute inset-0 rounded-2xl ring-2 ring-[var(--accent)]"
-                  animate={{ opacity: [0.7, 0], scale: [1, 1.35] }}
-                  transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
-                />
-              )}
-            </motion.div>
-          )}
-
-          {/* The arrow from the guide's hand to the spotlight. Quadratic, with
-              the control point pushed perpendicular to the line, so it bows
-              rather than cutting straight across the artwork. */}
-          {hole && (
-            <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden>
-              <defs>
-                <marker id="tour-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
-                  <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)" />
-                </marker>
-              </defs>
-              <motion.path
-                key={step.id}
-                d={(() => {
-                  const midX = (handX + targetX) / 2;
-                  const midY = (handY + targetY) / 2;
-                  const dx = targetX - handX;
-                  const dy = targetY - handY;
-                  const length = Math.hypot(dx, dy) || 1;
-                  const bow = Math.min(60, length * 0.22);
-                  return `M ${handX} ${handY} Q ${midX - (dy / length) * bow} ${midY + (dx / length) * bow} ${targetX - (dx / length) * 26} ${targetY - (dy / length) * 26}`;
-                })()}
-                fill="none"
-                stroke="var(--accent)"
-                strokeWidth={3}
-                strokeLinecap="round"
-                strokeDasharray="7 7"
-                markerEnd="url(#tour-arrowhead)"
-                initial={reduceMotion ? { pathLength: 1 } : { pathLength: 0, opacity: 0 }}
-                animate={{ pathLength: 1, opacity: 1 }}
-                transition={{ duration: reduceMotion ? 0 : 0.5, delay: reduceMotion ? 0 : 0.25 }}
-              />
-            </svg>
+            <SpotlightArrow
+              from={{ x: handX, y: handY }}
+              to={{ x: targetX, y: targetY }}
+              zIndex={0}
+              redrawKey={step.id}
+            />
           )}
 
           {/* The guide, when there is anywhere to stand. See `guideVisible`. */}
@@ -645,7 +489,7 @@ export default function WelcomeTour() {
               initial={false}
               animate={{ left: guideLeft, top: guideTop }}
               transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 180, damping: 22 }}
-              className="pointer-events-none absolute"
+              className="pointer-events-none absolute z-10"
               style={{ width: guideSize, height: guideSize }}
             >
               <Mascot
@@ -679,7 +523,7 @@ export default function WelcomeTour() {
             initial={false}
             animate={{ left: cardLeft, top: cardTop }}
             transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 200, damping: 26 }}
-            className="absolute flex flex-col overflow-hidden rounded-[26px] bg-[var(--surface)] shadow-2xl"
+            className="absolute z-20 flex flex-col overflow-hidden rounded-[26px] bg-[var(--surface)] shadow-2xl"
             // The cap is the whole mobile fix. Without it a long step simply
             // grows past the bottom of a phone, taking its buttons with it.
             style={{ width: cardWidth, maxHeight: isMobile ? mobileCardCap : undefined }}
