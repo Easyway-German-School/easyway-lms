@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { keyFromUrl } from "@/lib/storage";
 
 function pathwayOutcome(pathway: string) {
   if (pathway === "Language training") {
@@ -99,7 +100,15 @@ export async function POST(request: NextRequest) {
   // Only accept paths this app served. A student editing their own profile
   // could otherwise point their avatar at any URL on the internet, which would
   // then be rendered for tutors and admins looking at their record.
-  if (photoUrl && !photoUrl.startsWith("/uploads/")) {
+  //
+  // `keyFromUrl` returns non-null only for a URL this app handed back from an
+  // upload: `/uploads/<key>` on a laptop with no bucket, `/api/files/<key>`
+  // when files are proxied out of the private bucket (production), and the
+  // `STORAGE_PUBLIC_BASE_URL` / endpoint prefixes if a public bucket is set.
+  // The old check only allowed `/uploads/`, so in production — where the
+  // uploader returns `/api/files/...` — every profile photo save 400'd and the
+  // student could never set a photo after signup.
+  if (photoUrl && !keyFromUrl(photoUrl)) {
     return NextResponse.json(
       { error: "Profile photos must be uploaded, not linked." },
       { status: 400 },
