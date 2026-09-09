@@ -4,7 +4,9 @@ import { requireCapability } from "@/lib/admin-roles";
 import {
   isValidPaymentStatus,
   isReceivedPayment,
+  isRegistrationFeePayment,
   isTravelPackagePathway,
+  isTuitionPayment,
   PAYMENT_STATUSES,
   requiredDepositFor,
 } from "@/lib/payment";
@@ -71,7 +73,10 @@ export async function POST(request: Request) {
         classType: true,
         pathway: true,
         branch: { select: { name: true } },
-        payments: { select: { amount: true, status: true } },
+        user: { select: { name: true, email: true } },
+        // `description` is needed to tell a tuition payment from the ₦5,000
+        // registration fee, which the paywall does not count.
+        payments: { select: { amount: true, status: true, description: true } },
       },
     });
 
@@ -91,39 +96,47 @@ export async function POST(request: Request) {
     }
 
     /**
+     * Did this payment just open the student's classes?
+     *
      * The office can record any amount at any status (cash and bank-transfer
-     * desks need that freedom). But a `partial` payment that does not actually
-     * reach the 60% deposit will NOT unlock the student's classes — the paywall
-     * gates on the cumulative received total, not on the status label — so a
-     * non-blocking warning is returned when that is the case, to catch an
-     * under-deposit being mistaken for an unlock.
+     * desks need that freedom), but the paywall gates on the cumulative
+     * RECEIVED TUITION total reaching the 60% deposit — not on the status
+     * label, and NOT counting the ₦5,000 registration fee (see
+     * `isTuitionPayment` / `deriveStudentAccess`). So for a hand-entered
+     * tuition payment we say plainly whether the student is now unlocked, or —
+     * if it is still short — that it is not, with the figures. A registration
+     * fee recorded here says nothing (it was never going to unlock anything).
      */
     let warning: string | null = null;
-    if (status === "partial") {
-      if (student) {
-        const received = student.payments
-          .filter((p) => isReceivedPayment(p.status))
-          .reduce((sum, p) => sum + p.amount, 0);
-        const deposit = requiredDepositFor({
-          level: student.level,
-          branch: student.branch?.name ?? null,
-          classType: student.classType,
-          pathway: student.pathway,
-        });
-        if (received < deposit) {
-          // Travel Package's floor is a flat minimum first payment, not a 60%
-          // deposit — the wording has to match what's actually being asked for.
-          const requirement = isTravelPackagePathway(student.pathway)
-            ? `below the ₦${deposit.toLocaleString("en-NG")} minimum first payment for the Travel Package`
-            : `below the 60% deposit (₦${deposit.toLocaleString("en-NG")})`;
-          warning = `Recorded, but this is ${requirement}. The student's classes will NOT unlock until the received total reaches it — currently ₦${received.toLocaleString(
-            "en-NG",
-          )}.`;
-        }
+    let notice: string | null = null;
+    if (student && isReceivedPayment(status) && !isRegistrationFeePayment(description)) {
+      const receivedTuition = student.payments
+        .filter((p) => isTuitionPayment({ status: p.status, description: p.description }))
+        .reduce((sum, p) => sum + p.amount, 0);
+      const deposit = requiredDepositFor({
+        level: student.level,
+        branch: student.branch?.name ?? null,
+        classType: student.classType,
+        pathway: student.pathway,
+      });
+      const who = student.user?.name || student.user?.email || "This student";
+      const money = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
+      const gateLabel = isTravelPackagePathway(student.pathway)
+        ? `${money(deposit)} minimum first payment for the Travel Package`
+        : `60% tuition deposit (${money(deposit)})`;
+      if (deposit > 0 && receivedTuition >= deposit) {
+        notice =
+          `Recorded. ${who} has met the ${gateLabel} — received tuition is now ${money(receivedTuition)}, ` +
+          `so their classes are unlocked. If their portal still shows a lock it is the missing-photo step, ` +
+          `which only they can clear from their profile.`;
+      } else {
+        warning =
+          `Recorded, but received tuition is ${money(receivedTuition)} — still below the ${gateLabel}. ` +
+          `${who}'s classes will NOT unlock until it reaches that.`;
       }
     }
 
-    return NextResponse.json({ payment, warning }, { status: 201 });
+    return NextResponse.json({ payment, warning, notice }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: "Unable to create payment", detail: error instanceof Error ? error.message : "Unknown" }, { status: 500 });
   }

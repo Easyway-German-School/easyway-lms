@@ -18,6 +18,16 @@ function naira(amount: number) {
   return `₦${Math.round(amount).toLocaleString("en-NG")}`;
 }
 
+/**
+ * The ₦5,000 registration fee is mirrored in as a `completed` Payment whose
+ * description starts "Registration fee" (see src/lib/payment.ts). It settles
+ * nothing toward tuition and never unlocks class access, so this screen must
+ * not dress it up as a fully-paid account.
+ */
+function isRegistrationFeeRow(description?: string | null) {
+  return String(description ?? "").startsWith("Registration fee");
+}
+
 type PaymentRecord = {
   id: string;
   studentId?: string;
@@ -50,6 +60,9 @@ function PaymentsLedger() {
   const [status, setStatus] = useState("pending");
   const [formError, setFormError] = useState("");
   const [formNotice, setFormNotice] = useState("");
+  // A `notice` back from the API is good news ("classes are now unlocked"); a
+  // `warning` is amber ("still below the deposit"). Drives the banner colour.
+  const [noticeGood, setNoticeGood] = useState(false);
   const [formBusy, setFormBusy] = useState(false);
   // Correcting a hand-entered payment after the fact — a typo'd amount, the
   // wrong status, the wrong method. Gateway rows are not editable here.
@@ -173,15 +186,25 @@ function PaymentsLedger() {
     }
   }
 
-  function openPaymentForm(student: StudentOption) {
+  function openPaymentForm(
+    student: StudentOption,
+    prefill?: { amount?: number; description?: string; status?: string; method?: string },
+  ) {
     setStudents((current) => current.some((item) => item.id === student.id) ? current : [student, ...current]);
     setStudentId(student.id);
+    if (prefill?.amount !== undefined) setAmount(prefill.amount);
+    if (prefill?.description !== undefined) setDescription(prefill.description);
+    if (prefill?.status !== undefined) setStatus(prefill.status);
+    if (prefill?.method !== undefined) setMethod(prefill.method);
+    setFormError("");
+    setFormNotice("");
     setShowForm(true);
   }
 
   async function handleCreatePayment() {
     setFormError("");
     setFormNotice("");
+    setNoticeGood(false);
 
     if (!studentId || amount <= 0 || !method.trim()) {
       setFormError("Student, amount, and payment method are required.");
@@ -208,7 +231,13 @@ function PaymentsLedger() {
       if (!res.ok) {
         throw new Error(data.error || "Unable to create payment");
       }
-      if (data.warning) setFormNotice(String(data.warning));
+      if (data.notice) {
+        setFormNotice(String(data.notice));
+        setNoticeGood(true);
+      } else if (data.warning) {
+        setFormNotice(String(data.warning));
+        setNoticeGood(false);
+      }
 
       setStudentId("");
       setAmount(0);
@@ -245,9 +274,15 @@ function PaymentsLedger() {
         </div>
 
         {formNotice ? (
-          <div className="flex items-start justify-between gap-4 rounded-2xl border border-amber-400/40 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          <div
+            className={`flex items-start justify-between gap-4 rounded-2xl border px-4 py-3 text-sm ${
+              noticeGood
+                ? "border-emerald-400/40 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+                : "border-amber-400/40 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+            }`}
+          >
             <p>{formNotice}</p>
-            <button type="button" onClick={() => setFormNotice("")} className="shrink-0 font-semibold">
+            <button type="button" onClick={() => { setFormNotice(""); setNoticeGood(false); }} className="shrink-0 font-semibold">
               Dismiss
             </button>
           </div>
@@ -448,18 +483,45 @@ function PaymentsLedger() {
                       <td className="px-4 py-3 font-semibold">{naira(payment.amount)}</td>
                       <td className="px-4 py-3 capitalize">{payment.method}</td>
                       <td className="px-4 py-3">
-                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                          payment.status === "completed" ? "bg-green-100 text-green-700" :
-                          payment.status === "partial" ? "bg-amber-100 text-amber-700" :
-                          payment.status === "pending" ? "bg-yellow-100 text-yellow-700" :
-                          payment.status === "failed" ? "bg-red-100 text-red-700" : "bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
-                        }`}>
-                          {payment.status === "partial" ? "part-payment" : payment.status}
-                        </span>
+                        {isRegistrationFeeRow(payment.description) && payment.status === "completed" ? (
+                          <span
+                            className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-700"
+                            title="Registration fee received. This does NOT unlock class access — that needs the 60% tuition deposit."
+                          >
+                            registration paid
+                          </span>
+                        ) : (
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                            payment.status === "completed" ? "bg-green-100 text-green-700" :
+                            payment.status === "partial" ? "bg-amber-100 text-amber-700" :
+                            payment.status === "pending" ? "bg-yellow-100 text-yellow-700" :
+                            payment.status === "failed" ? "bg-red-100 text-red-700" : "bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
+                          }`}>
+                            {payment.status === "partial" ? "part-payment" : payment.status}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3">{payment.description ?? "—"}</td>
                       <td className="px-4 py-3">{new Date(payment.createdAt).toLocaleDateString()}</td>
                       <td className="px-4 py-3 flex flex-wrap gap-2">
+                        {/* A registration-fee row otherwise offers only "Fail".
+                            This is the way in to recording the tuition the
+                            student paid at the desk or by transfer — status
+                            completed, which unlocks their portal once the
+                            received total clears the 60% deposit. */}
+                        {isRegistrationFeeRow(payment.description) && payment.studentId ? (
+                          <button
+                            className="rounded-lg border border-[var(--accent)] text-[var(--accent)] px-2 py-1 text-xs font-semibold"
+                            onClick={() =>
+                              openPaymentForm(
+                                { id: payment.studentId!, user: payment.student.user },
+                                { description: "Tuition payment", status: "completed", method: "bank_transfer" },
+                              )
+                            }
+                          >
+                            Record tuition payment
+                          </button>
+                        ) : null}
                         {payment.status === "not_paid" && payment.studentId ? (
                           <button
                             className="rounded-lg border border-[var(--accent)] text-[var(--accent)] px-2 py-1 text-xs"
