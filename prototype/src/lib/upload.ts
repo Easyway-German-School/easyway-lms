@@ -54,12 +54,12 @@ async function convertHeicIfNeeded(file: File): Promise<File> {
   }
 }
 
-async function readAsBase64(file: File): Promise<string> {
+async function readAsBase64(blob: Blob): Promise<string> {
   const reader = new FileReader();
   const result = await new Promise<string | ArrayBuffer | null>((resolve, reject) => {
     reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
 
   if (!result || typeof result !== "string") {
@@ -71,6 +71,30 @@ async function readAsBase64(file: File): Promise<string> {
 export async function uploadFile(rawFile: File, folder: UploadFolder = "files"): Promise<UploadedFile> {
   const file = await convertHeicIfNeeded(rawFile);
   const contentType = file.type || "application/octet-stream";
+
+  // Snapshot the bytes into memory NOW, before the presign round-trip below.
+  //
+  // A `File` is a live handle to something the OS still owns, and phones revoke
+  // it out from under us: iOS when Safari is backgrounded or the photo is still
+  // syncing from iCloud, Android when the picker app is killed and its
+  // `content://` URI is dropped. That revocation almost always lands during the
+  // network hop for the presign — so the read that follows throws
+  // `NotReadableError` and the upload dies at the very end of the wait, which
+  // is the one moment it must not. A `Blob` we already hold cannot be revoked.
+  //
+  // Capped so a large materials or class-recording upload isn't buffered whole;
+  // those go from a laptop and don't hit the mobile handle-revocation race.
+  let body: Blob = file;
+  if (file.size <= 25 * 1024 * 1024) {
+    try {
+      body = new Blob([await file.arrayBuffer()], { type: contentType });
+    } catch {
+      throw new DOMException(
+        "Your device released that photo before it could be read. Please select it again.",
+        "NotReadableError",
+      );
+    }
+  }
 
   const presign = await fetch("/api/media/presign", {
     method: "POST",
@@ -102,7 +126,7 @@ export async function uploadFile(rawFile: File, folder: UploadFolder = "files"):
         filename: file.name,
         contentType,
         folder,
-        data: await readAsBase64(file),
+        data: await readAsBase64(body),
       }),
     });
 
@@ -127,7 +151,7 @@ export async function uploadFile(rawFile: File, folder: UploadFolder = "files"):
         // Must match the Content-Type that was signed, or the bucket rejects the
         // signature — a mismatch here is the classic cause of a 403 on upload.
         headers: { "Content-Type": contentType },
-        body: file,
+        body,
       });
 
       if (!put.ok) {
