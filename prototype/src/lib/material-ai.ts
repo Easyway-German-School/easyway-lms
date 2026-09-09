@@ -199,8 +199,11 @@ export function coerceStudyNote(raw: unknown): StudyNote | undefined {
  */
 export async function generateForMaterial(
   materialId: string,
-  opts: { eager?: boolean } = {},
+  opts: { eager?: boolean; reasons?: string[] } = {},
 ): Promise<MaterialInsight | null> {
+  // Collect a one-line reason on any non-success, so a "Generate notes now"
+  // press that produces nothing can say WHY instead of looping in silence.
+  const note = (why: string) => opts.reasons?.push(why);
   const material = await prisma.material.findUnique({
     where: { id: materialId },
     select: {
@@ -237,8 +240,10 @@ export async function generateForMaterial(
 
   // Recordings, videos and audio carry no readable text. A `link/*` material
   // is a pointer to a file we never held (a Drive-folder import — see
-  // drive-import.ts), so there are no bytes to extract either. Marked `none`
-  // rather than `failed`: nothing went wrong, there is simply nothing to read.
+  // drive-import.ts), so there are no bytes to extract either. Marked
+  // `skipped` — a TERMINAL state the queue does not re-select. It used to be
+  // `none`, which is the schema default for "never attempted", so the queue
+  // picked these up on every single run forever and the backlog never shrank.
   if (
     material.kind === "recording" ||
     material.kind === "audio" ||
@@ -246,7 +251,8 @@ export async function generateForMaterial(
     (material.fileType || "").startsWith("audio") ||
     (material.fileType || "").startsWith("link/")
   ) {
-    await prisma.material.update({ where: { id: material.id }, data: { aiState: "none" } });
+    await prisma.material.update({ where: { id: material.id }, data: { aiState: "skipped" } });
+    note(`“${material.title}”: ${material.kind}/${material.fileType || "?"} — no text to read`);
     return null;
   }
 
@@ -265,7 +271,12 @@ export async function generateForMaterial(
     const text = await extractText(buffer, material.fileName, material.fileType);
 
     if (text.trim().length < MIN_USEFUL_CHARS) {
-      await prisma.material.update({ where: { id: material.id }, data: { aiState: "none" } });
+      // Terminal, not `none` — see the note on the media branch above.
+      await prisma.material.update({ where: { id: material.id }, data: { aiState: "skipped" } });
+      note(
+        `“${material.title}”: only ${text.trim().length} readable characters` +
+          ((material.fileType || "").includes("pdf") ? " — likely a scan with no text layer" : ""),
+      );
       return null;
     }
 
@@ -292,6 +303,7 @@ export async function generateForMaterial(
         where: { id: material.id },
         data: { aiState: failState, aiUpdatedAt: new Date() },
       });
+      note(`“${material.title}”: the model returned nothing usable (check GROQ_API_KEY / model id)`);
       tellTutor();
       return null;
     }
@@ -335,11 +347,13 @@ export async function generateForMaterial(
 
     return insight;
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     console.error("[material-ai] failed for", material.id, error, opts.eager ? "(eager, will retry on the queue)" : "");
     await prisma.material.update({
       where: { id: material.id },
       data: { aiState: failState, aiUpdatedAt: new Date() },
     });
+    note(`“${material.title}”: ${message}`);
     tellTutor();
     return null;
   }
@@ -353,7 +367,10 @@ export async function generateForMaterial(
  * PDFs at once would take the memory the site needs to serve pages — which on
  * a 7GB box is not hypothetical.
  */
-export async function processMaterialQueue(limit = 3): Promise<{
+export async function processMaterialQueue(
+  limit = 3,
+  reasons?: string[],
+): Promise<{
   attempted: number;
   ready: number;
   skipped: number;
@@ -364,6 +381,10 @@ export async function processMaterialQueue(limit = 3): Promise<{
 
   const pending = await prisma.material.findMany({
     where: {
+      // `none` = never attempted (schema default), `pending` = mid-flight.
+      // `skipped` is deliberately NOT here — it is the terminal state for a
+      // material with no readable text, and re-selecting it was why the
+      // backlog count never went down.
       OR: [
         { aiState: { in: ["none", "pending"] } },
         { aiState: "failed", aiUpdatedAt: { lt: new Date(Date.now() - RETRY_FAILED_AFTER_MS) } },
@@ -382,7 +403,7 @@ export async function processMaterialQueue(limit = 3): Promise<{
   let skipped = 0;
 
   for (const material of pending) {
-    const insight = await generateForMaterial(material.id);
+    const insight = await generateForMaterial(material.id, { reasons });
     if (insight) ready += 1;
     else skipped += 1;
   }

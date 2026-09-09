@@ -88,6 +88,26 @@ export async function GET() {
     where: { status: { not: "completed" }, startedAt: { gte: since } },
   });
 
+  // The document side (uploaded handouts → "Ready-made notes"), by state.
+  const docRows = await prisma.material.groupBy({
+    by: ["aiState"],
+    where: {
+      kind: { notIn: ["recording", "audio", "video"] },
+      createdAt: { gte: since },
+    },
+    _count: { _all: true },
+  });
+  const docsByState: Record<string, number> = {};
+  for (const row of docRows) docsByState[row.aiState] = row._count._all;
+  const docsAwaitingReview = await prisma.material.count({
+    where: {
+      kind: { notIn: ["recording", "audio", "video"] },
+      createdAt: { gte: since },
+      aiState: "ready",
+      questsReviewedAt: null,
+    },
+  });
+
   return NextResponse.json({
     windowDays: WINDOW_DAYS,
     transcriptionConfigured: Boolean(process.env.GROQ_API_KEY),
@@ -109,6 +129,14 @@ export async function GET() {
     noSpeech: byStatus.none ?? 0,
     byStatus,
     failures,
+    documents: {
+      byState: docsByState,
+      ready: docsByState.ready ?? 0,
+      pending: (docsByState.none ?? 0) + (docsByState.pending ?? 0),
+      failed: docsByState.failed ?? 0,
+      skipped: docsByState.skipped ?? 0,
+      awaitingTutorReview: docsAwaitingReview,
+    },
   });
 }
 
@@ -137,24 +165,38 @@ export async function POST() {
     import("@/lib/material-ai"),
   ]);
 
+  const roundFailures: string[] = [];
+
   // Documents first — cheaper and faster than ASR, so a press that times out
   // mid-recording still got the written-up handouts done.
-  const materials = await processMaterialQueue(12).catch((error) => ({
-    attempted: 0,
-    ready: 0,
-    skipped: 0,
-    error: error instanceof Error ? error.message : String(error),
-  }));
+  const materials = await processMaterialQueue(12, roundFailures).catch((error) => {
+    roundFailures.push(`document queue threw: ${error instanceof Error ? error.message : String(error)}`);
+    return { attempted: 0, ready: 0, skipped: 0 };
+  });
 
   // 4 recordings, not more: each can be a full-GB stream + extract + ASR +
   // summary, and even at 300s a bigger batch risks the wall. Press again for
   // the rest — `remaining` says whether to.
-  const recordings = await processTranscriptionQueue(4).catch((error) => ({
-    attempted: 0,
-    created: 0,
-    failed: 0,
-    error: error instanceof Error ? error.message : String(error),
-  }));
+  const recordingsBefore = new Set(
+    (
+      await prisma.classTranscript.findMany({
+        where: { status: { in: ["failed", "skipped_too_large", "none"] } },
+        select: { classRecordingId: true },
+      })
+    ).map((t) => t.classRecordingId),
+  );
+  const recordings = await processTranscriptionQueue(4).catch((error) => {
+    roundFailures.push(`recording queue threw: ${error instanceof Error ? error.message : String(error)}`);
+    return { attempted: 0, created: 0, failed: 0 };
+  });
+  // Pull the specific error off any recording that failed THIS round.
+  for (const row of await prisma.classTranscript.findMany({
+    where: { status: { in: ["failed", "skipped_too_large", "none"] } },
+    select: { classRecordingId: true, error: true, status: true, classRecording: { select: { material: { select: { title: true } } } } },
+  })) {
+    if (recordingsBefore.has(row.classRecordingId)) continue;
+    roundFailures.push(`“${row.classRecording?.material?.title ?? "class"}” (${row.status}): ${row.error ?? "no detail"}`);
+  }
 
   // How many are still waiting, so the UI knows whether to offer another run.
   const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
@@ -180,9 +222,19 @@ export async function POST() {
     }),
   ]);
 
+  // "Did this round change anything" — the drain loop stops when two rounds in
+  // a row move nothing, rather than spinning against a stuck backlog.
+  const roundProcessed =
+    (materials.ready ?? 0) +
+    (materials.skipped ?? 0) +
+    (recordings.created ?? 0) +
+    (recordings.failed ?? 0);
+
   return NextResponse.json({
     materials,
     recordings,
+    roundProcessed,
+    roundFailures: [...new Set(roundFailures)].slice(0, 12),
     remaining: recordingsRemaining + materialsRemaining,
     recordingsRemaining,
     materialsRemaining,

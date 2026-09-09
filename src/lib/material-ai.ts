@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/ai-cache";
 import { extractText } from "@/lib/extract-text";
-import { getFile } from "@/lib/storage";
+import { getFile, keyFromUrl } from "@/lib/storage";
 import { callModel, activeModelName } from "@/lib/ai";
 import { parseModelJson } from "@/lib/safe-json";
 import { notifyInBackground, KIND } from "@/lib/notify";
+import { tutorUserIdsForMaterial } from "@/lib/material-audience";
 
 /**
  * Turning what a tutor uploaded into something a student will actually open.
@@ -189,53 +190,93 @@ export function coerceStudyNote(raw: unknown): StudyNote | undefined {
  * Returns null when there is nothing to work with — a video, an image, a
  * near-empty PDF — which is a normal outcome, not a failure. The material is
  * marked so the queue stops reconsidering it every run.
+ *
+ * `eager` is set by the fire-on-upload kick (see the upload routes). That
+ * attempt is optimistic — the file may still be settling in the bucket, a
+ * model may be briefly unreachable — so on failure it must NOT alarm the tutor
+ * and must NOT mark the row `failed` (which is terminal). It resets to `none`
+ * and lets the scheduled queue have the authoritative go.
  */
-export async function generateForMaterial(materialId: string): Promise<MaterialInsight | null> {
+export async function generateForMaterial(
+  materialId: string,
+  opts: { eager?: boolean; reasons?: string[] } = {},
+): Promise<MaterialInsight | null> {
+  // Collect a one-line reason on any non-success, so a "Generate notes now"
+  // press that produces nothing can say WHY instead of looping in silence.
+  const note = (why: string) => opts.reasons?.push(why);
   const material = await prisma.material.findUnique({
     where: { id: materialId },
     select: {
       id: true, title: true, filePath: true, fileName: true,
       fileType: true, level: true, kind: true, uploadedBy: true,
+      branchId: true, sessionSlot: true, batch: true,
+      visibleToStudents: true, lecturerId: true,
       course: { select: { level: true } },
       lecturer: { select: { userId: true } },
     },
   });
   if (!material) return null;
 
-  // When notes can't be written, tell the tutor who uploaded it — not the
-  // students. Their side stays quiet and just shows "still being prepared".
+  // When notes genuinely can't be written, tell the tutor who uploaded it —
+  // not the students, whose side just shows "still being prepared". Suppressed
+  // entirely on the eager upload kick: a first-try hiccup is not news.
   const tellTutor = () => {
+    if (opts.eager) return;
     const userId = material.lecturer?.userId ?? material.uploadedBy ?? null;
     if (!userId) return;
     notifyInBackground({
       to: { userIds: [userId] },
       kind: KIND.studyNotesFailed,
       severity: "warning",
-      title: "Becca couldn't write up notes for a material",
-      message: `“${material.title}” didn't produce a study note. Open it in the lesson builder to try again.`,
-      link: `/lecturer/materials/${material.id}`,
+      title: "A material couldn't be summarised automatically",
+      message: `We couldn't build study notes for “${material.title}”. It still works as a download — you can add notes by hand from Materials.`,
+      link: "/lecturer/materials",
       dedupeKey: `study-notes-failed:${material.id}`,
     });
   };
 
-  // Recordings and videos carry no readable text. Marked `none` rather than
-  // `failed`: nothing went wrong, there is simply nothing to read.
-  if (material.kind === "recording" || (material.fileType || "").startsWith("video")) {
-    await prisma.material.update({ where: { id: material.id }, data: { aiState: "none" } });
+  /** Where a failed attempt leaves `aiState`: terminal for the queue, retryable for the eager kick. */
+  const failState = opts.eager ? "none" : "failed";
+
+  // Recordings, videos and audio carry no readable text. A `link/*` material
+  // is a pointer to a file we never held (a Drive-folder import — see
+  // drive-import.ts), so there are no bytes to extract either. Marked
+  // `skipped` — a TERMINAL state the queue does not re-select. It used to be
+  // `none`, which is the schema default for "never attempted", so the queue
+  // picked these up on every single run forever and the backlog never shrank.
+  if (
+    material.kind === "recording" ||
+    material.kind === "audio" ||
+    (material.fileType || "").startsWith("video") ||
+    (material.fileType || "").startsWith("audio") ||
+    (material.fileType || "").startsWith("link/")
+  ) {
+    await prisma.material.update({ where: { id: material.id }, data: { aiState: "skipped" } });
+    note(`“${material.title}”: ${material.kind}/${material.fileType || "?"} — no text to read`);
     return null;
   }
 
   await prisma.material.update({ where: { id: material.id }, data: { aiState: "pending" } });
 
   try {
-    const file = await getFile(material.filePath);
+    // `filePath` is the URL handed to the browser (`/api/files/<key>`,
+    // `/uploads/<key>`, or a full bucket URL). `getFile` wants the bare key —
+    // every other caller passes one. Resolving it here is what was making
+    // real uploads fail with "file not found in storage".
+    const key = keyFromUrl(material.filePath) ?? material.filePath.replace(/^\/+/, "");
+    const file = await getFile(key);
     if (!file) throw new Error("file not found in storage");
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const text = await extractText(buffer, material.fileName, material.fileType);
 
     if (text.trim().length < MIN_USEFUL_CHARS) {
-      await prisma.material.update({ where: { id: material.id }, data: { aiState: "none" } });
+      // Terminal, not `none` — see the note on the media branch above.
+      await prisma.material.update({ where: { id: material.id }, data: { aiState: "skipped" } });
+      note(
+        `“${material.title}”: only ${text.trim().length} readable characters` +
+          ((material.fileType || "").includes("pdf") ? " — likely a scan with no text layer" : ""),
+      );
       return null;
     }
 
@@ -260,8 +301,9 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
     if (!insight) {
       await prisma.material.update({
         where: { id: material.id },
-        data: { aiState: "failed", aiUpdatedAt: new Date() },
+        data: { aiState: failState, aiUpdatedAt: new Date() },
       });
+      note(`“${material.title}”: the model returned nothing usable (check GROQ_API_KEY / model id)`);
       tellTutor();
       return null;
     }
@@ -278,13 +320,40 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
       },
     });
 
+    /**
+     * Nudge the tutor(s) that there is something to sign off.
+     *
+     * Nothing the model wrote reaches a student until a tutor approves the
+     * quests (`questsReviewedAt`, which also gates the notes). Without this the
+     * tutor had to happen to open the material and notice the panel — and for
+     * an office cohort upload there is no single owner watching for it at all,
+     * so the generated quests would simply never go live. Goes to the assigned
+     * tutor(s) for the cohort, resolved the same way the roster is.
+     */
+    if (insight.quests.length > 0 || insight.notes) {
+      const tutorIds = await tutorUserIdsForMaterial(material);
+      if (tutorIds.length) {
+        notifyInBackground({
+          to: { userIds: tutorIds },
+          kind: KIND.questsToReview,
+          severity: "info",
+          title: "Quests ready to review",
+          message: `Becca drafted quests and study notes for “${material.title}”. Open Materials to check them — students see them once you sign off.`,
+          link: "/lecturer/materials",
+          dedupeKey: `quests-review:${material.id}`,
+        });
+      }
+    }
+
     return insight;
   } catch (error) {
-    console.error("[material-ai] failed for", material.id, error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[material-ai] failed for", material.id, error, opts.eager ? "(eager, will retry on the queue)" : "");
     await prisma.material.update({
       where: { id: material.id },
-      data: { aiState: "failed", aiUpdatedAt: new Date() },
+      data: { aiState: failState, aiUpdatedAt: new Date() },
     });
+    note(`“${material.title}”: ${message}`);
     tellTutor();
     return null;
   }
@@ -298,15 +367,29 @@ export async function generateForMaterial(materialId: string): Promise<MaterialI
  * PDFs at once would take the memory the site needs to serve pages — which on
  * a 7GB box is not hypothetical.
  */
-export async function processMaterialQueue(limit = 3): Promise<{
+export async function processMaterialQueue(
+  limit = 3,
+  reasons?: string[],
+): Promise<{
   attempted: number;
   ready: number;
   skipped: number;
 }> {
+  // A `failed` material is retried, but not on every run — a model that was
+  // briefly down or returned junk deserves another go; hammering it does not.
+  const RETRY_FAILED_AFTER_MS = 12 * 60 * 60 * 1000;
+
   const pending = await prisma.material.findMany({
     where: {
-      aiState: { in: ["none", "pending"] },
-      kind: { not: "recording" },
+      // `none` = never attempted (schema default), `pending` = mid-flight.
+      // `skipped` is deliberately NOT here — it is the terminal state for a
+      // material with no readable text, and re-selecting it was why the
+      // backlog count never went down.
+      OR: [
+        { aiState: { in: ["none", "pending"] } },
+        { aiState: "failed", aiUpdatedAt: { lt: new Date(Date.now() - RETRY_FAILED_AFTER_MS) } },
+      ],
+      kind: { notIn: ["recording", "audio", "video"] },
       // Only ones uploaded recently: back-filling the entire library on the
       // first run would be hours of generation nobody asked for.
       createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
@@ -320,7 +403,7 @@ export async function processMaterialQueue(limit = 3): Promise<{
   let skipped = 0;
 
   for (const material of pending) {
-    const insight = await generateForMaterial(material.id);
+    const insight = await generateForMaterial(material.id, { reasons });
     if (insight) ready += 1;
     else skipped += 1;
   }

@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * A compact read-out of the class-notes / transcript pipeline, so "there is
- * nothing in My Notes" has a visible cause. Sits on the Live classes page
- * because that is where the office goes to check on live teaching, which is
- * what feeds it. Read-only; hides itself if the read fails.
+ * nothing in My Notes" has a visible cause — plus a "Drain the backlog" button
+ * that keeps running the two queues until they are empty (or clearly stuck),
+ * the same idea as the email queue's post-response drain. Sits on the Live
+ * classes page. Read-only otherwise; hides itself if the read fails.
  */
 
 type Health = {
@@ -30,6 +31,23 @@ type Health = {
     error: string | null;
     when: string;
   }>;
+  documents?: {
+    ready: number;
+    pending: number;
+    failed: number;
+    skipped: number;
+    awaitingTutorReview: number;
+  };
+};
+
+type DrainRound = {
+  materials: { attempted: number; ready: number; skipped: number };
+  recordings: { attempted: number; created: number; failed: number };
+  roundProcessed: number;
+  roundFailures: string[];
+  remaining: number;
+  recordingsRemaining: number;
+  materialsRemaining: number;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -38,12 +56,22 @@ const STATUS_LABEL: Record<string, string> = {
   none: "No speech",
 };
 
+/** Hard stops so the loop can never spin forever. */
+const MAX_ROUNDS = 40;
+const STALL_ROUNDS = 2;
+
 export default function ClassNotesHealth() {
   const [health, setHealth] = useState<Health | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [runResult, setRunResult] = useState<string | null>(null);
+
+  const [draining, setDraining] = useState(false);
+  const [remaining, setRemaining] = useState<number | null>(null);
+  const [recapsMade, setRecapsMade] = useState(0);
+  const [docsMade, setDocsMade] = useState(0);
+  const [drainNote, setDrainNote] = useState<string | null>(null);
+  const [drainFailures, setDrainFailures] = useState<string[]>([]);
+  const stopRef = useRef(false);
 
   const load = async () => {
     try {
@@ -62,30 +90,71 @@ export default function ClassNotesHealth() {
     })();
     return () => {
       cancelled = true;
+      stopRef.current = true;
     };
   }, []);
 
-  const runNow = async () => {
-    setRunning(true);
-    setRunResult(null);
-    try {
-      const res = await fetch("/api/admin/class-notes-health", { method: "POST" });
-      if (!res.ok) throw new Error("run failed");
-      const r = await res.json();
-      const recaps = Number(r?.recordings?.created ?? 0);
-      const docs = Number(r?.materials?.ready ?? 0);
-      const remaining = Number(r?.remaining ?? 0);
-      setRunResult(
-        `${recaps} class recap${recaps === 1 ? "" : "s"} published${recaps ? " — students notified" : ""}; ` +
-          `${docs} document${docs === 1 ? "" : "s"} written up${docs ? " — waiting on tutor sign-off" : ""}.` +
-          (remaining > 0 ? ` ${remaining} still queued — run again.` : " Backlog clear."),
-      );
-      await load();
-    } catch {
-      setRunResult("Could not run the generation. Try again in a minute.");
-    } finally {
-      setRunning(false);
+  const drain = async () => {
+    setDraining(true);
+    setDrainNote(null);
+    setDrainFailures([]);
+    setRecapsMade(0);
+    setDocsMade(0);
+    stopRef.current = false;
+
+    let recaps = 0;
+    let docs = 0;
+    let stalls = 0;
+    const seenFailures = new Set<string>();
+
+    for (let round = 0; round < MAX_ROUNDS; round += 1) {
+      if (stopRef.current) {
+        setDrainNote("Stopped.");
+        break;
+      }
+      let r: DrainRound;
+      try {
+        const res = await fetch("/api/admin/class-notes-health", { method: "POST" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        r = (await res.json()) as DrainRound;
+      } catch (e) {
+        setDrainNote(`Stopped — the run failed (${e instanceof Error ? e.message : "unknown"}). Try again in a minute.`);
+        break;
+      }
+
+      recaps += r.recordings?.created ?? 0;
+      docs += r.materials?.ready ?? 0;
+      setRecapsMade(recaps);
+      setDocsMade(docs);
+      setRemaining(r.remaining);
+
+      for (const f of r.roundFailures ?? []) {
+        if (!seenFailures.has(f)) {
+          seenFailures.add(f);
+          setDrainFailures((cur) => [...cur, f]);
+        }
+      }
+
+      if (r.remaining <= 0) {
+        setDrainNote("Backlog clear.");
+        break;
+      }
+      // Nothing moved this round — count it; two in a row means we are stuck
+      // on things that cannot be processed, so stop rather than hammer.
+      stalls = r.roundProcessed > 0 ? 0 : stalls + 1;
+      if (stalls >= STALL_ROUNDS) {
+        setDrainNote(
+          `Stopped with ${r.remaining} left — the last ${STALL_ROUNDS} passes produced nothing. See the reasons below.`,
+        );
+        break;
+      }
+      if (round === MAX_ROUNDS - 1) {
+        setDrainNote(`Paused after ${MAX_ROUNDS} passes with ${r.remaining} left — press again to keep going.`);
+      }
     }
+
+    setDraining(false);
+    await load();
   };
 
   if (failed || !health) return null;
@@ -96,6 +165,8 @@ export default function ClassNotesHealth() {
     { label: "Failed", value: health.failed + health.skippedTooLarge, tone: "text-rose-600" },
     { label: "No speech", value: health.noSpeech, tone: "text-[var(--muted)]" },
   ];
+
+  const d = health.documents;
 
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
@@ -126,25 +197,51 @@ export default function ClassNotesHealth() {
               {open ? "Hide" : `Show ${health.failures.length} problem${health.failures.length === 1 ? "" : "s"}`}
             </button>
           ) : null}
+          {draining ? (
+            <button
+              onClick={() => {
+                stopRef.current = true;
+              }}
+              className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
+            >
+              Stop
+            </button>
+          ) : null}
           <button
-            onClick={runNow}
-            disabled={running || !health.transcriptionConfigured}
+            onClick={drain}
+            disabled={draining || !health.transcriptionConfigured}
             title={
               !health.transcriptionConfigured
                 ? "Transcription is off — set GROQ_API_KEY first"
-                : "Generate notes now instead of waiting for the nightly run"
+                : "Keep running the queues until the backlog is empty"
             }
             className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
           >
-            {running ? "Generating…" : "Generate notes now"}
+            {draining
+              ? `Draining… ${remaining ?? "?"} left`
+              : "Drain the backlog"}
           </button>
         </div>
       </div>
 
-      {runResult ? (
-        <p className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--foreground)]">
-          {runResult}
-        </p>
+      {draining || drainNote ? (
+        <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--foreground)]">
+          <p>
+            {recapsMade} class recap{recapsMade === 1 ? "" : "s"} published
+            {recapsMade ? " (students notified)" : ""}; {docsMade} document{docsMade === 1 ? "" : "s"} written up
+            {docsMade ? " (awaiting tutor sign-off)" : ""}.
+            {drainNote ? <span className="font-semibold"> {drainNote}</span> : draining ? " Working…" : null}
+          </p>
+          {drainFailures.length > 0 ? (
+            <ul className="mt-2 space-y-1">
+              {drainFailures.slice(0, 12).map((f, i) => (
+                <li key={i} className="break-words text-[var(--muted)]">
+                  • {f}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -155,6 +252,21 @@ export default function ClassNotesHealth() {
           </div>
         ))}
       </div>
+
+      {d ? (
+        <p className="mt-2 text-xs text-[var(--muted)]">
+          Documents: <span className="font-semibold text-emerald-600">{d.ready}</span> written up
+          {d.awaitingTutorReview > 0 ? (
+            <>
+              , <span className="font-semibold text-amber-600">{d.awaitingTutorReview}</span> awaiting a tutor’s sign-off
+            </>
+          ) : null}
+          {d.pending > 0 ? <>, {d.pending} queued</> : null}
+          {d.failed > 0 ? <>, <span className="text-rose-600">{d.failed} failed</span></> : null}
+          {d.skipped > 0 ? <>, {d.skipped} with no readable text</> : null}
+          .
+        </p>
+      ) : null}
 
       {health.eligibleRecordings === 0 ? (
         <p className="mt-3 rounded-xl bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--muted)]">
