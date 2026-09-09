@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireCapability } from "@/lib/admin-roles";
+import { requireCapability, requireAnyCapability } from "@/lib/admin-roles";
 import {
   isValidPaymentStatus,
   isReceivedPayment,
@@ -30,7 +30,15 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const gate = await requireCapability("payments");
+  /**
+   * `payments` OR `enrolment`. The fee book desk records payments here; so does
+   * a Customer Care agent clearing one student's way into class. Only this
+   * verb is shared — GET/PATCH/DELETE below stay `payments`-only, so an
+   * `enrolment` holder can add a payment a student made but cannot browse the
+   * ledger, edit an amount, or void a row. The response carries only the row
+   * just created and that one student's unlock status.
+   */
+  const gate = await requireAnyCapability(["payments", "enrolment"]);
   if (!gate.ok) return gate.response;
 
   const body = await request.json().catch(() => ({}));

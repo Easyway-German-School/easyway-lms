@@ -34,6 +34,19 @@ const ACCOUNTS = [
     blurb: "Front desk. No money, no staffing, no bulk email.",
   },
   {
+    email: "support@easyway.test",
+    name: "Demo Customer Care",
+    password: "SupportPass123!",
+    adminRole: "support",
+    // The preset covers students, enrolment, attendance, classes, exams,
+    // materials, community and events. Left as null so this account shows the
+    // preset itself — in particular that the sidebar has no Payments, Finance,
+    // Reports, Staff or Settings entry, and that the student file offers
+    // "Record a payment" with no amounts or history beside it.
+    adminCapabilities: null,
+    blurb: "Help desk. Records payments to unlock classes, but no fee book, reports or setup.",
+  },
+  {
     email: "datacomms@easyway.test",
     name: "Demo Data & Comms",
     password: "DataCommsPass123!",

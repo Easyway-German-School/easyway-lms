@@ -15,7 +15,7 @@ import { beginAuditScope } from "@/lib/audit-context";
  * matching how the office is actually staffed rather than per-endpoint.
  */
 
-export const ADMIN_ROLES = ["super", "secretary", "accountant", "data_comm"] as const;
+export const ADMIN_ROLES = ["super", "secretary", "accountant", "data_comm", "support"] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
@@ -23,10 +23,24 @@ export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
   secretary: "Secretary",
   accountant: "Accountant",
   data_comm: "Data & Communications Manager",
+  support: "Customer Care",
 };
 
 export const CAPABILITIES = [
   "students",     // enrol, edit, move, graduate
+  /**
+   * enrolment — clearing a named student's path into class, from that
+   * student's own file. Record a payment they made in cash or by transfer,
+   * and see whether *that student's* classes are now open.
+   *
+   * This is deliberately NOT `payments`. It carries no fee book, no collected
+   * totals, no other student's balance, no receivables — nothing that answers
+   * "how is the school doing". It answers one question about one student who
+   * is on the phone: are they in, and if not, record what they paid so they
+   * are. Customer Care holds it; the front desk (`secretary`) does too,
+   * because taking a walk-in's cash has always been their job.
+   */
+  "enrolment",
   "attendance",
   "classes",      // timetables, sittings, postponements — coordinating classes
   "exams",        // exams and exam registrations
@@ -73,8 +87,48 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   // Front desk: the student lifecycle and the paperwork around it. No access
   // to money, staffing or bulk communications. `events` because the front desk
   // is who books the staff meeting and the open day; `work_drive` is left
-  // hand-granted for now (see docs/WORK_DRIVE.md open questions).
-  secretary: ["students", "attendance", "classes", "exams", "materials", "branches", "events"],
+  // hand-granted for now (see docs/WORK_DRIVE.md open questions). `enrolment`
+  // because a walk-in paying cash at the desk, and that payment opening their
+  // classes, has always been this job — it is not the fee book (see the note
+  // on the capability above).
+  secretary: ["students", "enrolment", "attendance", "classes", "exams", "materials", "branches", "events"],
+
+  /**
+   * Customer Care — the desk a student reaches when something is wrong.
+   *
+   * Everything here follows from "a student contacted us and needs help":
+   *   students    their file, the help desk / enquiries, leads, guardians,
+   *               certificates, journey, promotions, cohorts, onboarding a
+   *               walk-in or an imported student by hand
+   *   enrolment   record the transfer they say they sent, and tell them
+   *               plainly whether their classes are now open
+   *   attendance  "I was marked absent" — check the register, fix a mistake
+   *   classes     "my class moved / was cancelled" — read the timetable and
+   *               who is live now
+   *   exams       "my exam registration / result isn't showing"
+   *   materials   "I can't open my materials" — check what is actually published
+   *   community   a report about the group chat is a support ticket
+   *   events      students ask about the open day and the calendar
+   *
+   * What it does NOT carry is everything that is somebody else's job rather
+   * than something hidden: `payments` / `payroll` / `reports` (the money and
+   * how the school is doing), `branches` / `staff` / `integrations` /
+   * `security` (setting the school up), `emails` (a bulk send is a comms
+   * decision with a blast radius — hand-grant it to a specific person if they
+   * genuinely run campaigns). The sidebar simply does not show these; there is
+   * no locked door to notice, because a support console was never going to
+   * have a fee book in it.
+   */
+  support: [
+    "students",
+    "enrolment",
+    "attendance",
+    "classes",
+    "exams",
+    "materials",
+    "community",
+    "events",
+  ],
 
   /**
    * The fee book and what explains it. Narrow on purpose.
@@ -312,6 +366,53 @@ export async function requireCapability(
       ok: false,
       response: NextResponse.json(
         { error: `Your admin role does not cover ${capability}` },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return { ok: true, admin, session };
+}
+
+/**
+ * Like `requireCapability`, but passes when the admin holds ANY ONE of several
+ * capabilities. For a route that two different desks legitimately reach by
+ * different doors — e.g. recording a payment, which the fee book (`payments`)
+ * and a Customer Care agent clearing one student's way in (`enrolment`) both
+ * need to do. The route itself still decides what to *show* each of them.
+ */
+export async function requireAnyCapability(
+  capabilities: readonly Capability[],
+): Promise<{ ok: true; admin: AdminContext; session: Session } | { ok: false; response: Response }> {
+  beginRequestScope();
+  beginAuditScope();
+
+  const { requireAuthSession } = await import("@/lib/auth");
+  const { NextResponse } = await import("next/server");
+
+  const session = await requireAuthSession();
+  if (!session) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+
+  const admin = await resolveAdmin(session.user.id);
+  await nameAuditActor(admin);
+
+  if (!admin) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Admin access required" }, { status: 403 }),
+    };
+  }
+
+  if (!capabilities.some((capability) => admin.can(capability))) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: `Your admin role does not cover ${capabilities.join(" or ")}` },
         { status: 403 },
       ),
     };
