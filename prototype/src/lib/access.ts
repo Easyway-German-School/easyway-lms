@@ -208,6 +208,7 @@ export function deriveStudentAccess({
   classType,
   level,
   charges,
+  flatDeposit = false,
   classesStartedAt,
   enrolledAt,
   paymentGraceUntil,
@@ -223,6 +224,15 @@ export function deriveStudentAccess({
   level?: string | null;
   /** The student's TuitionCharge rows. When present, the ledger drives the gate. */
   charges?: LedgerChargeInput[] | null;
+  /**
+   * `requiredDeposit` is a FLAT FLOOR, not 60% of the fee — use it verbatim as
+   * the deposit gate even when the ledger is driving, instead of recomputing
+   * `charge.net * DEPOSIT_RATE`. Set for the Travel Package pathway, whose
+   * ₦200,000 minimum first payment is a fixed figure (see requiredDepositFor in
+   * src/lib/payment.ts); without this a reconciled ₦980,000 Travel Package
+   * charge would gate at 60% = ₦588,000 and contradict the product.
+   */
+  flatDeposit?: boolean;
   /** Confirmed first day of classes — the clock the lock runs on. */
   classesStartedAt?: unknown;
   /** Enrolment date — fallback anchor when the first day was never confirmed. */
@@ -250,8 +260,13 @@ export function deriveStudentAccess({
   // Has the student cleared the 60% deposit on the level they are IN right now?
   //   ledger: their current-level charge has its deposit portion allocated
   //   no ledger: the raw sum of payments reaches the current-level deposit
+  // `flatDeposit` (Travel Package) pins the gate to the flat `deposit` figure
+  // rather than 60% of the charge — capped at the charge so it can never
+  // exceed the whole fee.
   const currentLevelDeposit = currentLine
-    ? Math.round(currentLine.net * DEPOSIT_RATE)
+    ? flatDeposit
+      ? Math.min(currentLine.net, deposit)
+      : Math.round(currentLine.net * DEPOSIT_RATE)
     : deposit;
   const depositPaid = ledger
     ? currentLine

@@ -9,7 +9,15 @@ import {
   canAttendLive,
   deriveStudentAccess,
 } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import {
+  isReceivedPayment,
+  isRegistrationFeePayment,
+  isTravelPackagePathway,
+  requiredDepositFor,
+  tuitionFeeFor,
+} from "@/lib/payment";
+import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
+import { isOnlineBranch } from "@/lib/online-branch";
 import { profileFor } from "@/lib/learner-intelligence";
 import { hourLabel } from "@/lib/learner-signals";
 
@@ -72,7 +80,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       // dossier route, which reads it from the same place.
       admission: true,
       examReadiness: true,
-      branch: { select: { name: true } },
+      // `mode` as well as `name`: an online-branch student whose deliveryMode
+      // column was never set is still "online" for the live-tab rule below.
+      branch: { select: { name: true, mode: true } },
       tutor: { select: { user: { select: { name: true } } } },
       user: {
         select: {
@@ -83,7 +93,19 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
           createdAt: true,
         },
       },
-      payments: { select: { amount: true, status: true } },
+      // The clock the part-payment balance lock runs on, and the admin grace
+      // date that holds it back — both feed deriveStudentAccess below.
+      classesStartedAt: true,
+      createdAt: true,
+      paymentGraceUntil: true,
+      // The per-level tuition ledger: the same rows /api/student/access reads,
+      // so the mirror resolves the deposit gate and balance lock to the exact
+      // figure the student's own shell does.
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+      },
+      payments: { select: { amount: true, status: true, description: true } },
     },
   });
   if (!student) return NextResponse.json({ error: "No such student" }, { status: 404 });
@@ -95,17 +117,36 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const admissionPhoto = typeof admission?.photoUrl === "string" ? admission.photoUrl : null;
 
   /* ---- What the portal is currently doing to them --------------------- */
+  // The SAME received-payment test the student's own portal uses
+  // (src/lib/payment.ts): "completed" or "partial", minus the ₦5,000
+  // registration fee. This line read `status === "success"` — a value
+  // Payment.status never takes (it is pending | partial | completed | failed)
+  // — so it counted ₦0 for EVERY student and the mirror showed everyone's
+  // portal as deposit-locked no matter what they had actually paid.
   const totalPaid = student.payments
-    .filter((payment) => payment.status === "success")
+    .filter((p) => isReceivedPayment(p.status) && !isRegistrationFeePayment(p.description))
     .reduce((sum, payment) => sum + payment.amount, 0);
   const fees = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
   const tuitionFee = tuitionFeeFor(fees);
+  const deliveryMode = isOnlineBranch(student.branch) ? "online" : student.deliveryMode;
+  // Feed deriveStudentAccess everything /api/student/access feeds it — the
+  // per-level ledger, the start-of-classes clock, admin grace, and an on-track
+  // payment plan — so the mirror resolves the padlock to the same answer the
+  // student's shell does rather than a thinner re-derivation that drifts.
+  const planStatus = await planStatusForStudent(student.id);
   const access = deriveStudentAccess({
     totalPaid,
     tuitionFee,
     requiredDeposit: requiredDepositFor(fees),
-    deliveryMode: student.deliveryMode,
+    deliveryMode,
     classType: student.classType,
+    level: student.level,
+    charges: student.tuitionCharges,
+    flatDeposit: isTravelPackagePathway(student.pathway),
+    classesStartedAt: student.classesStartedAt,
+    enrolledAt: student.createdAt,
+    paymentGraceUntil: student.paymentGraceUntil,
+    paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
   });
 
   /**
@@ -114,7 +155,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
    * Reimplementing the rule here is how the two drift apart and an admin ends
    * up reassuring somebody that a page is open when it is not.
    */
-  const live = canAttendLive(student.deliveryMode, student.classType);
+  const live = canAttendLive(deliveryMode, student.classType);
   const tabs = [
     { path: "/dashboard", label: "Dashboard" },
     { path: "/classes", label: "Classes" },

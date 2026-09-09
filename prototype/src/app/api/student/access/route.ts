@@ -5,7 +5,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess, hasProfilePhoto } from "@/lib/access";
 import { isOnlineBranch } from "@/lib/online-branch";
-import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter, isTravelPackagePathway } from "@/lib/payment";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { notify, KIND } from "@/lib/notify";
 
@@ -90,6 +90,9 @@ export async function GET() {
     classType: student.classType,
     level: student.level,
     charges: student.tuitionCharges,
+    // Travel Package's ₦200,000 minimum first payment is a flat floor, not 60%
+    // of the ₦980,000 package — pin the deposit gate to it.
+    flatDeposit: isTravelPackagePathway(student.pathway),
     classesStartedAt: student.classesStartedAt,
     enrolledAt: student.createdAt,
     paymentGraceUntil: student.paymentGraceUntil,
