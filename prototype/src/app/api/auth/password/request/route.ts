@@ -53,7 +53,40 @@ export async function POST(request: NextRequest) {
     // No account. Say nothing different.
     if (!issued) return accepted;
 
-    const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "").replace(/\/$/, "");
+    /**
+     * The link's host, and why this list is what it is.
+     *
+     * This used to read `NEXT_PUBLIC_APP_URL || APP_URL` — and `APP_URL` is set
+     * nowhere in this project, while `NEXT_PUBLIC_APP_URL` is not in
+     * `.env.example` and was not set on the deploy. So `base` came out `""`, the
+     * link came out `/auth/reset?token=…` with no scheme or host, and the reset
+     * email arrived carrying a dead link. Every other mail builder in the
+     * codebase already falls back to `NEXTAUTH_URL` (which any working NextAuth
+     * deploy must set); this one now matches them.
+     */
+    const base = (
+      process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.NEXTAUTH_URL ||
+      process.env.APP_URL ||
+      ""
+    )
+      .trim()
+      .replace(/\/$/, "");
+
+    if (!base) {
+      /**
+       * No host to build an absolute link from. Sending the mail anyway would
+       * put a broken link in front of somebody already locked out — worse than
+       * nothing, because it looks like the feature and teaches them it fails.
+       * Log loudly instead so the missing config is visible, and give the
+       * caller the same neutral answer as always.
+       */
+      console.error(
+        "Password reset: neither NEXT_PUBLIC_APP_URL nor NEXTAUTH_URL is set, so the reset link would have no host. Not sending. Set one of these on the deployment.",
+      );
+      return accepted;
+    }
+
     const link = `${base}/auth/reset?token=${encodeURIComponent(issued.token)}`;
     const template = passwordResetEmailTemplate(issued.name, link);
 
