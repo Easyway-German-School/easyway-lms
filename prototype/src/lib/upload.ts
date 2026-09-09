@@ -54,6 +54,67 @@ async function convertHeicIfNeeded(file: File): Promise<File> {
   }
 }
 
+/**
+ * Shrink a camera photo in the browser BEFORE it is uploaded.
+ *
+ * A modern phone camera writes an 8–15 MB JPEG (or HEIC). Sending that whole
+ * file over a Nigerian mobile connection is a 20–40 second upload — long enough
+ * that the OS reclaims the `File` handle mid-transfer (see `uploadFile`), the
+ * student switches apps, or the tab is backgrounded, and the upload fails at
+ * the end of the wait. An avatar is displayed at ~130 px; 1600 px on the long
+ * edge at JPEG 0.82 is indistinguishable and lands in well under a second.
+ *
+ * Rules that keep this from ever making an upload WORSE:
+ *  - Only touches raster photos. SVG and GIF are passed straight through.
+ *  - EXIF orientation is honoured (`imageOrientation: "from-image"`), so a
+ *    portrait selfie is not saved on its side.
+ *  - The re-encoded blob is used ONLY if it is actually smaller.
+ *  - ANY failure — a browser without `createImageBitmap`, a decode error, a
+ *    null `toBlob` — returns the original file untouched. Compression is an
+ *    optimisation, never a gate.
+ */
+async function downscaleImage(file: File, maxDim = 1600, quality = 0.82): Promise<File> {
+  const type = file.type.toLowerCase();
+  const isRaster =
+    type === "image/jpeg" || type === "image/png" || type === "image/webp" || type === "image/heic" || type === "image/heif";
+  if (!isRaster) return file;
+  // Nothing to gain on a file that is already small and web-sized.
+  if (file.size <= 512 * 1024) return file;
+  if (typeof createImageBitmap !== "function" || typeof document === "undefined") return file;
+
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const longest = Math.max(bitmap.width, bitmap.height);
+    const scale = Math.min(1, maxDim / longest);
+    // Already within bounds AND not a heavy PNG worth transcoding — leave it.
+    if (scale === 1 && file.size <= 1.5 * 1024 * 1024) {
+      bitmap.close?.();
+      return file;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bitmap.close?.();
+      return file;
+    }
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/jpeg", quality),
+    );
+    if (!blob || blob.size >= file.size) return file;
+
+    const name = file.name.replace(/\.(jpe?g|png|webp|heic|heif)$/i, "") + ".jpg";
+    return new File([blob], name, { type: "image/jpeg", lastModified: Date.now() });
+  } catch {
+    return file;
+  }
+}
+
 async function readAsBase64(blob: Blob): Promise<string> {
   const reader = new FileReader();
   const result = await new Promise<string | ArrayBuffer | null>((resolve, reject) => {
@@ -69,7 +130,10 @@ async function readAsBase64(blob: Blob): Promise<string> {
 }
 
 export async function uploadFile(rawFile: File, folder: UploadFolder = "files"): Promise<UploadedFile> {
-  const file = await convertHeicIfNeeded(rawFile);
+  const converted = await convertHeicIfNeeded(rawFile);
+  // Photos (avatars) are downscaled in the browser first — see `downscaleImage`.
+  // Materials and documents are left exactly as the office picked them.
+  const file = folder === "photos" ? await downscaleImage(converted) : converted;
   const contentType = file.type || "application/octet-stream";
 
   // Snapshot the bytes into memory NOW, before the presign round-trip below.
@@ -199,9 +263,19 @@ export function uploadErrorMessage(error: unknown, fallback = "Upload failed"): 
   return error instanceof Error ? error.message : fallback;
 }
 
-/** Guard shared by every avatar picker in the app. */
-export function validateImageFile(file: File, maxBytes = 5 * 1024 * 1024): string | null {
-  if (!file.type.startsWith("image/")) return "Please choose an image file.";
+/**
+ * Guard shared by every avatar picker in the app.
+ *
+ * The ceiling is 16MB, not 5MB: a modern phone camera writes 8–15MB files and
+ * `downscaleImage` (in `uploadFile`) shrinks a photo to a few hundred KB before
+ * it is sent, so rejecting the raw pick would turn away photos that upload
+ * perfectly well. A blank `file.type` with a `.heic`/`.heif` name is allowed
+ * through — Android and some Safari builds report no MIME type for HEIC, and
+ * `convertHeicIfNeeded` handles it downstream.
+ */
+export function validateImageFile(file: File, maxBytes = 16 * 1024 * 1024): string | null {
+  const looksHeic = !file.type && /\.(heic|heif)$/i.test(file.name);
+  if (!file.type.startsWith("image/") && !looksHeic) return "Please choose an image file.";
   if (file.size > maxBytes) return `Images must be under ${Math.round(maxBytes / 1024 / 1024)}MB.`;
   return null;
 }
