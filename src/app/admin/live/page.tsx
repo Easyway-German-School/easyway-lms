@@ -5,7 +5,8 @@ export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import BrandLoader from "@/components/BrandLoader";
-import { PulseIcon, VideoIcon, ChevronRightIcon } from "@/components/icons";
+import AdminObserver from "@/components/live/AdminObserver";
+import { PulseIcon, VideoIcon, ChevronRightIcon, EyeIcon } from "@/components/icons";
 
 /**
  * WHO IS LIVE RIGHT NOW — the school's own version of the dashboard LiveKit
@@ -37,6 +38,7 @@ type SessionSummary = {
   joined: number;
   declined: number;
   participantCount: number | null;
+  observers: number;
 };
 
 type Participant = {
@@ -73,6 +75,7 @@ export default function AdminLivePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [observing, setObserving] = useState<{ roomName: string; title: string } | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [participantsError, setParticipantsError] = useState("");
   const [participantsBusy, setParticipantsBusy] = useState(false);
@@ -143,7 +146,8 @@ export default function AdminLivePage() {
             </h1>
             <p className="mt-2 text-[var(--muted)]">
               Every class in session right now, across every branch — who's teaching it, how long it's been running,
-              and who's actually connected.
+              and who's actually connected. Open one to watch it silently: the tutor and students are not told, and
+              you are not in their participant list.
             </p>
           </div>
         </div>
@@ -184,10 +188,32 @@ export default function AdminLivePage() {
                       {session.lecturerName ?? "No tutor on record"} · live {elapsed(session.startedAt)}
                       {session.kind === "cohort" ? ` · ${session.joined}/${session.invited} joined` : ""}
                       {session.declined > 0 ? ` · ${session.declined} declined` : ""}
+                      {session.observers > 0
+                        ? ` · ${session.observers} watching silently`
+                        : ""}
                     </p>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-3">
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setObserving({ roomName: session.roomName, title: session.title });
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.stopPropagation();
+                          event.preventDefault();
+                          setObserving({ roomName: session.roomName, title: session.title });
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--foreground)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                    >
+                      <EyeIcon className="h-3.5 w-3.5" />
+                      Watch silently
+                    </span>
                     <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]">
                       {session.participantCount === null
                         ? "Unknown"
@@ -244,6 +270,14 @@ export default function AdminLivePage() {
           )}
         </div>
       </div>
+
+      {observing ? (
+        <AdminObserver
+          roomName={observing.roomName}
+          title={observing.title}
+          onClose={() => setObserving(null)}
+        />
+      ) : null}
     </AdminShell>
   );
 }
