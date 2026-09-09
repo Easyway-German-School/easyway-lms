@@ -16,11 +16,27 @@ import { RosterIcon } from "@/components/icons";
  * cohort the timetable, the promotion engine and the "message the September
  * intake" send can address. Tick them, pick a month, move them in.
  *
+ * Each student also carries a READ-ONLY reading of whether they are starting a
+ * batch or already mid-course (see lib/cohort-classify.ts) and an amber flag
+ * when their stored batch month disagrees with the evidence. Nothing here acts
+ * on that automatically — it is a worklist for a human.
+ *
  * The only write is `admission.batch`. It does not enrol, promote, or bill —
  * those stay one-student-at-a-time on /admin/students.
  */
 
 const NO_BATCH = "(no batch)";
+
+type CohortStatus = "new" | "ongoing" | "returning" | "unknown";
+
+type CohortClassification = {
+  status: CohortStatus;
+  confidence: "high" | "medium" | "low";
+  evidence: string[];
+  suggestedStartedAt: string | null;
+  suggestedBatch: string | null;
+  mismatch: string | null;
+};
 
 type Group = {
   branch: string;
@@ -50,9 +66,36 @@ type CohortData = {
   noBatch: number;
   currentIntake: { month: string; year: number };
   months: string[];
+  classifications: Record<string, CohortClassification>;
+  classTally: Record<CohortStatus, number> & { mismatches: number };
 };
 
+type RowFilter = "all" | "mismatch" | "unknown";
+
 const groupKey = (g: Group) => `${g.branch}||${g.level}||${g.batch}`;
+
+const STATUS_META: Record<CohortStatus, { label: string; className: string; hint: string }> = {
+  new: {
+    label: "New",
+    className: "bg-slate-100 text-slate-700 ring-slate-300",
+    hint: "Fresh account this intake, nothing done yet — the current-intake default fits.",
+  },
+  ongoing: {
+    label: "Ongoing",
+    className: "bg-emerald-100 text-emerald-800 ring-emerald-300",
+    hint: "Mid-course: has attended, been marked, or has classwork behind them.",
+  },
+  returning: {
+    label: "Returning",
+    className: "bg-indigo-100 text-indigo-800 ring-indigo-300",
+    hint: "Ongoing and has finished at least one level with us before — continuing, not starting.",
+  },
+  unknown: {
+    label: "Unclear",
+    className: "bg-amber-100 text-amber-900 ring-amber-300",
+    hint: "No signal either way. Could be a pre-attendance ongoing student or a no-show — needs a human.",
+  },
+};
 
 export default function CohortsPage() {
   const [data, setData] = useState<CohortData | null>(null);
@@ -62,6 +105,7 @@ export default function CohortsPage() {
   const [targetMonth, setTargetMonth] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [rowFilter, setRowFilter] = useState<RowFilter>("all");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,15 +129,30 @@ export default function CohortsPage() {
     load();
   }, [load]);
 
+  const classifications = data?.classifications ?? {};
+
+  const rowVisible = useCallback(
+    (id: string) => {
+      if (rowFilter === "all") return true;
+      const c = classifications[id];
+      if (!c) return false;
+      if (rowFilter === "mismatch") return Boolean(c.mismatch);
+      return c.status === "unknown";
+    },
+    [rowFilter, classifications],
+  );
+
   const byBranch = useMemo(() => {
     const map = new Map<string, Group[]>();
     for (const g of data?.groups ?? []) {
+      // When a filter is on, drop groups with nothing left to show.
+      if (rowFilter !== "all" && !g.ids.some((id) => rowVisible(id))) continue;
       const list = map.get(g.branch) ?? [];
       list.push(g);
       map.set(g.branch, list);
     }
     return [...map.entries()];
-  }, [data]);
+  }, [data, rowFilter, rowVisible]);
 
   const toggleExpanded = (key: string) => {
     setExpanded((prev) => {
@@ -153,6 +212,8 @@ export default function CohortsPage() {
     }
   };
 
+  const tally = data?.classTally;
+
   return (
     <AdminShell>
       <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -167,10 +228,6 @@ export default function CohortsPage() {
             <Link href="/admin/assistant" className="text-[var(--accent)] underline">
               the assistant
             </Link>
-            . Someone entered twice?{" "}
-            <Link href="/admin/students/duplicates" className="text-[var(--accent)] underline">
-              Merge duplicates
-            </Link>
             .
           </p>
           {data && (
@@ -181,6 +238,51 @@ export default function CohortsPage() {
             </p>
           )}
         </div>
+
+        {tally && (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            {(["new", "ongoing", "returning", "unknown"] as CohortStatus[]).map((s) => (
+              <span
+                key={s}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-medium ring-1 ring-inset ${STATUS_META[s].className}`}
+                title={STATUS_META[s].hint}
+              >
+                {tally[s]} {STATUS_META[s].label.toLowerCase()}
+              </span>
+            ))}
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-800 ring-1 ring-inset ring-amber-300"
+              title="Stored batch month disagrees with the evidence — a worklist, not an auto-fix."
+            >
+              ⚠ {tally.mismatches} in the wrong cohort
+            </span>
+          </div>
+        )}
+
+        {data && (tally?.mismatches || tally?.unknown) ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-[var(--muted)]">Show</span>
+            {(
+              [
+                ["all", "Everyone"],
+                ["mismatch", `Wrong cohort (${tally?.mismatches ?? 0})`],
+                ["unknown", `Can't place (${tally?.unknown ?? 0})`],
+              ] as [RowFilter, string][]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setRowFilter(value)}
+                className={`rounded-full px-3 py-1 font-medium ring-1 ring-inset transition ${
+                  rowFilter === value
+                    ? "bg-[var(--accent)] text-white ring-[var(--accent)]"
+                    : "bg-[var(--surface)] text-[var(--muted)] ring-[var(--border)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {msg && (
           <div className="rounded-lg bg-[var(--surface)] px-4 py-3 text-sm font-medium text-[var(--foreground)] shadow-sm">
@@ -202,6 +304,10 @@ export default function CohortsPage() {
               </div>
             )}
 
+            {byBranch.length === 0 && rowFilter !== "all" && (
+              <p className="text-sm text-[var(--muted)]">Nothing matches that filter.</p>
+            )}
+
             {byBranch.map(([branch, groups]) => (
               <div
                 key={branch}
@@ -213,9 +319,12 @@ export default function CohortsPage() {
                 <div className="divide-y divide-[var(--border)]">
                   {groups.map((g) => {
                     const key = groupKey(g);
+                    const visibleIds = rowFilter === "all" ? g.ids : g.ids.filter(rowVisible);
+                    if (visibleIds.length === 0) return null;
                     const isOpen = expanded.has(key);
                     const noBatch = g.batch === NO_BATCH;
-                    const allSelected = g.ids.every((id) => selected.has(id));
+                    const allSelected = visibleIds.every((id) => selected.has(id));
+                    const groupMismatches = g.ids.filter((id) => classifications[id]?.mismatch).length;
                     return (
                       <div key={key} className={noBatch ? "bg-amber-50/60" : undefined}>
                         <button
@@ -228,46 +337,79 @@ export default function CohortsPage() {
                             <span className={noBatch ? "font-semibold text-amber-700" : "text-[var(--muted)]"}>
                               · {g.batch}
                             </span>
+                            {groupMismatches > 0 && (
+                              <span
+                                className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"
+                                title={`${groupMismatches} student${groupMismatches === 1 ? "" : "s"} whose stored batch disagrees with the evidence`}
+                              >
+                                ⚠ {groupMismatches}
+                              </span>
+                            )}
                           </span>
                           <span className="shrink-0 text-sm text-[var(--muted)]">
-                            {g.count} student{g.count === 1 ? "" : "s"} · {g.started} started
+                            {rowFilter === "all"
+                              ? `${g.count} student${g.count === 1 ? "" : "s"} · ${g.started} started`
+                              : `${visibleIds.length} of ${g.count} shown`}
                           </span>
                         </button>
 
                         {isOpen && (
                           <div className="bg-[var(--background)] px-5 py-3">
                             <button
-                              onClick={() => setGroupSelected(g.ids, !allSelected)}
+                              onClick={() => setGroupSelected(visibleIds, !allSelected)}
                               className="mb-2 text-xs font-semibold text-[var(--accent)] underline"
                             >
-                              {allSelected ? "Clear all in this group" : `Select all ${g.count}`}
+                              {allSelected ? "Clear all shown" : `Select all ${visibleIds.length} shown`}
                             </button>
                             <ul className="space-y-1">
-                              {g.ids.map((id) => {
+                              {visibleIds.map((id) => {
                                 const s = data.students[id];
                                 if (!s) return null;
+                                const c = classifications[id];
                                 return (
                                   <li key={id}>
-                                    <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-[var(--surface)]">
+                                    <label className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-1.5 hover:bg-[var(--surface)]">
                                       <input
                                         type="checkbox"
                                         checked={selected.has(id)}
                                         onChange={() => toggleStudent(id)}
-                                        className="h-4 w-4 rounded border-[var(--border)] accent-[var(--accent)]"
+                                        className="mt-1 h-4 w-4 rounded border-[var(--border)] accent-[var(--accent)]"
                                       />
                                       <span
-                                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                        className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
                                           s.startedClasses ? "bg-emerald-500" : "bg-[var(--border)]"
                                         }`}
-                                        title={s.startedClasses ? "Has started classes" : "Not started"}
+                                        title={s.startedClasses ? "Has a start date on file" : "No start date"}
                                       />
-                                      <span className="text-sm text-[var(--foreground)]">{s.name}</span>
-                                      {s.studentCode && (
-                                        <span className="text-xs text-[var(--muted)]">{s.studentCode}</span>
-                                      )}
-                                      {s.status !== "active" && (
-                                        <span className="text-xs uppercase text-[var(--muted)]">{s.status}</span>
-                                      )}
+                                      <span className="min-w-0 flex-1">
+                                        <span className="flex flex-wrap items-center gap-2">
+                                          <span className="text-sm text-[var(--foreground)]">{s.name}</span>
+                                          {s.studentCode && (
+                                            <span className="text-xs text-[var(--muted)]">{s.studentCode}</span>
+                                          )}
+                                          {c && (
+                                            <span
+                                              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${STATUS_META[c.status].className} ${
+                                                c.confidence === "low" ? "opacity-70" : ""
+                                              }`}
+                                              title={`${STATUS_META[c.status].hint}${
+                                                c.evidence.length ? `\n\n• ${c.evidence.join("\n• ")}` : ""
+                                              }`}
+                                            >
+                                              {STATUS_META[c.status].label}
+                                              {c.confidence !== "high" ? " ?" : ""}
+                                            </span>
+                                          )}
+                                          {s.status !== "active" && (
+                                            <span className="text-xs uppercase text-[var(--muted)]">{s.status}</span>
+                                          )}
+                                        </span>
+                                        {c?.mismatch && (
+                                          <span className="mt-0.5 block text-xs text-amber-700">
+                                            ⚠ {c.mismatch}
+                                          </span>
+                                        )}
+                                      </span>
                                     </label>
                                   </li>
                                 );
