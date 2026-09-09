@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter, isTravelPackagePathway } from "@/lib/payment";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 
 /**
@@ -59,6 +59,7 @@ export async function studentHasPortalAccess(studentId: string): Promise<boolean
     requiredDeposit: requiredDepositFor(feeLookup),
     level: student.level,
     charges: student.tuitionCharges,
+    flatDeposit: isTravelPackagePathway(student.pathway),
     classesStartedAt: student.classesStartedAt,
     enrolledAt: student.createdAt,
     paymentGraceUntil: student.paymentGraceUntil,
