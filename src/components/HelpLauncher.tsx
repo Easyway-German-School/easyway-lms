@@ -106,8 +106,58 @@ export default function HelpLauncher() {
   useEffect(() => {
     loadTickets();
     const timer = window.setInterval(loadTickets, POLL_MS);
-    return () => window.clearInterval(timer);
+    // Coming back to the tab is the moment a stale badge is most obvious —
+    // refresh straight away rather than on the next 90-second tick.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadTickets();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [loadTickets]);
+
+  /**
+   * While a conversation is open, poll it — an office reply should appear in
+   * the thread the student is already looking at, not only after they close it
+   * and open it again. Faster than the list poll (this is one small request),
+   * paused when the panel is shut or the tab is hidden, and it never touches
+   * the reply box.
+   */
+  useEffect(() => {
+    if (!open || view !== "thread" || !threadId) return;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const tick = async () => {
+      if (cancelled) return;
+      if (document.visibilityState === "visible") {
+        try {
+          const res = await fetch(`/api/support/tickets/${threadId}`, { cache: "no-store" });
+          if (res.ok && !cancelled) {
+            const data = await res.json();
+            const fresh: ThreadMessage[] = data.messages ?? [];
+            setMessages((current) =>
+              current.length === fresh.length &&
+              current[current.length - 1]?.id === fresh[fresh.length - 1]?.id
+                ? current
+                : fresh,
+            );
+          }
+        } catch {
+          /* A missed poll is a blip; the next one is 15s away. */
+        }
+      }
+      if (!cancelled) timer = window.setTimeout(tick, 15_000);
+    };
+
+    timer = window.setTimeout(tick, 15_000);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [open, view, threadId]);
 
 
   const openThread = useCallback(async (id: string, subjectLine: string) => {

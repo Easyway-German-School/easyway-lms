@@ -165,6 +165,52 @@ function EnquiriesInner() {
     if (requested) void openThread(requested);
   }, [requested, openThread]);
 
+  /**
+   * Live refresh, so the office does not have to reopen anything to see a new
+   * message. The open conversation is polled on a short clock (one small
+   * request); the queue and its counts on a slower one, every third pass. It
+   * reschedules after each round rather than stacking on an interval, pauses
+   * on a hidden tab, and never touches the reply box or an in-place edit.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    let ticks = 0;
+
+    const refreshOpenThread = async () => {
+      if (!selected) return;
+      try {
+        const res = await fetch(`/api/support/tickets/${selected}`, { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const fresh = (await res.json()) as Thread;
+        setThread((current) =>
+          current && current.id === fresh.id
+            ? { ...current, status: fresh.status, messages: fresh.messages }
+            : current,
+        );
+        setTickets((current) => current.map((t) => (t.id === selected ? { ...t, unread: false } : t)));
+      } catch {
+        /* A missed poll is a blip. */
+      }
+    };
+
+    const tick = async () => {
+      if (cancelled) return;
+      if (document.visibilityState === "visible") {
+        await refreshOpenThread();
+        if (ticks % 3 === 0) await load();
+        ticks += 1;
+      }
+      if (!cancelled) timer = window.setTimeout(tick, 10_000);
+    };
+
+    timer = window.setTimeout(tick, 10_000);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [selected, load]);
+
   async function act(action: "reply" | "resolve" | "reopen") {
     if (!selected) return;
     if (action === "reply" && !reply.trim() && replyFiles.length === 0) return;
