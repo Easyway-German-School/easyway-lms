@@ -41,23 +41,51 @@ export default function ClassNotesHealth() {
   const [health, setHealth] = useState<Health | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const res = await fetch("/api/admin/class-notes-health", { cache: "no-store" });
+      if (!res.ok) throw new Error("read failed");
+      setHealth((await res.json()) as Health);
+    } catch {
+      setFailed(true);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch("/api/admin/class-notes-health", { cache: "no-store" });
-        if (!res.ok) throw new Error("read failed");
-        const data = (await res.json()) as Health;
-        if (!cancelled) setHealth(data);
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
+      if (!cancelled) await load();
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const runNow = async () => {
+    setRunning(true);
+    setRunResult(null);
+    try {
+      const res = await fetch("/api/admin/class-notes-health", { method: "POST" });
+      if (!res.ok) throw new Error("run failed");
+      const r = await res.json();
+      const recaps = Number(r?.recordings?.created ?? 0);
+      const docs = Number(r?.materials?.ready ?? 0);
+      const remaining = Number(r?.remaining ?? 0);
+      setRunResult(
+        `${recaps} class recap${recaps === 1 ? "" : "s"} published${recaps ? " — students notified" : ""}; ` +
+          `${docs} document${docs === 1 ? "" : "s"} written up${docs ? " — waiting on tutor sign-off" : ""}.` +
+          (remaining > 0 ? ` ${remaining} still queued — run again.` : " Backlog clear."),
+      );
+      await load();
+    } catch {
+      setRunResult("Could not run the generation. Try again in a minute.");
+    } finally {
+      setRunning(false);
+    }
+  };
 
   if (failed || !health) return null;
 
@@ -82,15 +110,35 @@ export default function ClassNotesHealth() {
             ) : null}
           </p>
         </div>
-        {health.failures.length > 0 ? (
+        <div className="flex items-center gap-2">
+          {health.failures.length > 0 ? (
+            <button
+              onClick={() => setOpen((v) => !v)}
+              className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
+            >
+              {open ? "Hide" : `Show ${health.failures.length} problem${health.failures.length === 1 ? "" : "s"}`}
+            </button>
+          ) : null}
           <button
-            onClick={() => setOpen((v) => !v)}
-            className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
+            onClick={runNow}
+            disabled={running || !health.transcriptionConfigured}
+            title={
+              !health.transcriptionConfigured
+                ? "Transcription is off — set GROQ_API_KEY first"
+                : "Generate notes now instead of waiting for the nightly run"
+            }
+            className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
           >
-            {open ? "Hide" : `Show ${health.failures.length} problem${health.failures.length === 1 ? "" : "s"}`}
+            {running ? "Generating…" : "Generate notes now"}
           </button>
-        ) : null}
+        </div>
       </div>
+
+      {runResult ? (
+        <p className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--foreground)]">
+          {runResult}
+        </p>
+      ) : null}
 
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {chips.map((chip) => (

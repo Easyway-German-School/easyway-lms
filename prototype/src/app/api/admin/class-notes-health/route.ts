@@ -3,6 +3,9 @@ import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
+// An ASR call over a full recording is the slowest thing the app does; give
+// the POST room to clear a few of them in one press.
+export const maxDuration = 60;
 
 /**
  * "Why is there nothing in My Notes?" — answered for the office.
@@ -101,5 +104,75 @@ export async function GET() {
     noSpeech: byStatus.none ?? 0,
     byStatus,
     failures,
+  });
+}
+
+/**
+ * POST — run the notes generation NOW, instead of waiting for the 06:00 cron.
+ *
+ * The cron tick clears a deliberately small number per day (2 recordings, 3
+ * documents) because each one is a real ASR + LLM call on the box that also
+ * serves the site. That is fine for keeping up day-to-day, but the first time
+ * the office turns this on there is a backlog, and "wait until tomorrow" is
+ * not an answer. This does a larger batch in one press; call it again while
+ * `remaining` is non-zero.
+ *
+ * Same two queues the cron runs, unchanged — `generateTranscriptForRecording`
+ * still fires the "class notes are ready" notification to the cohort as each
+ * recap lands, and `processMaterialQueue` still routes a written-up document
+ * to its tutor for sign-off (students are notified when the tutor approves,
+ * `KIND.studyNotesReady`). Nothing here bypasses that review gate.
+ */
+export async function POST() {
+  const gate = await requireCapability("classes");
+  if (!gate.ok) return gate.response;
+
+  const [{ processTranscriptionQueue }, { processMaterialQueue }] = await Promise.all([
+    import("@/lib/class-transcription"),
+    import("@/lib/material-ai"),
+  ]);
+
+  // Documents first — cheaper and faster than ASR, so a press that times out
+  // mid-recording still got the written-up handouts done.
+  const materials = await processMaterialQueue(12).catch((error) => ({
+    attempted: 0,
+    ready: 0,
+    skipped: 0,
+    error: error instanceof Error ? error.message : String(error),
+  }));
+
+  const recordings = await processTranscriptionQueue(6).catch((error) => ({
+    attempted: 0,
+    created: 0,
+    failed: 0,
+    error: error instanceof Error ? error.message : String(error),
+  }));
+
+  // How many are still waiting, so the UI knows whether to offer another run.
+  const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const [recordingsRemaining, materialsRemaining] = await Promise.all([
+    prisma.classRecording.count({
+      where: {
+        status: "completed",
+        materialId: { not: null },
+        startedAt: { gte: since },
+        OR: [{ transcript: null }, { transcript: { status: "failed" } }],
+      },
+    }),
+    prisma.material.count({
+      where: {
+        kind: { notIn: ["recording", "audio", "video"] },
+        createdAt: { gte: since },
+        aiState: { in: ["none", "pending"] },
+      },
+    }),
+  ]);
+
+  return NextResponse.json({
+    materials,
+    recordings,
+    remaining: recordingsRemaining + materialsRemaining,
+    recordingsRemaining,
+    materialsRemaining,
   });
 }
