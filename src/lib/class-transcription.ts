@@ -293,9 +293,15 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
      * bucket (local dev) or ffmpeg-over-http is unavailable.
      */
     let asrInput: { buffer: Buffer; filename: string } | null = null;
-    const url = await signedGetUrl(objectKey, 3600).catch(() => null);
+    let streamFailure = "no signed URL available for the recording";
+    const url = await signedGetUrl(objectKey, 3600).catch((e) => {
+      streamFailure = `signedGetUrl threw: ${e instanceof Error ? e.message : String(e)}`;
+      return null;
+    });
     if (url) {
-      asrInput = await extractAudioForAsrFromUrl(url);
+      const streamed = await extractAudioForAsrFromUrl(url);
+      if ("buffer" in streamed) asrInput = streamed;
+      else streamFailure = streamed.error;
     }
 
     if (!asrInput) {
@@ -313,7 +319,8 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
           where: { classRecordingId },
           data: {
             status: "skipped_too_large",
-            error: `Streaming audio extraction was unavailable and the ${Number(lengthHeader)}-byte file is over the ${MAX_FETCH_BYTES}-byte in-memory ceiling`,
+            // The stream-extraction failure is the actionable part — say it.
+            error: `Streaming audio extraction failed (${streamFailure}); the ${Number(lengthHeader)}-byte file is too large to fall back to the in-memory path`,
           },
         });
         return "skipped";

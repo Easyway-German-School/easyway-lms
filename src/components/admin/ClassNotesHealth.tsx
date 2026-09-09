@@ -13,6 +13,7 @@ type Health = {
   windowDays: number;
   transcriptionConfigured: boolean;
   whisperModel: string;
+  ffmpeg?: { ok: boolean; detail: string };
   eligibleRecordings: number;
   incompleteRecordings: number;
   ready: number;
@@ -109,6 +110,12 @@ export default function ClassNotesHealth() {
               </span>
             ) : null}
           </p>
+          {health.ffmpeg && !health.ffmpeg.ok ? (
+            <p className="mt-1 text-xs text-rose-600">
+              Audio extraction can’t run here — large class recordings will fail until this is fixed.
+              <span className="ml-1 font-mono text-[10px] text-[var(--muted)]">{health.ffmpeg.detail}</span>
+            </p>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           {health.failures.length > 0 ? (

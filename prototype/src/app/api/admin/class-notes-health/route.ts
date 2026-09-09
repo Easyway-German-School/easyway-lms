@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
+import { ffmpegHealth } from "@/lib/audio-extract";
 
 export const dynamic = "force-dynamic";
 // An ASR call over a full recording is the slowest thing the app does; give
@@ -90,6 +91,9 @@ export async function GET() {
     windowDays: WINDOW_DAYS,
     transcriptionConfigured: Boolean(process.env.GROQ_API_KEY),
     whisperModel: process.env.GROQ_WHISPER_MODEL || "whisper-large-v3-turbo",
+    // Does ffmpeg actually run in this environment — the thing large-recording
+    // transcription depends on.
+    ffmpeg: await ffmpegHealth(),
     eligibleRecordings: eligible.length,
     incompleteRecordings,
     ready: byStatus.ready ?? 0,
