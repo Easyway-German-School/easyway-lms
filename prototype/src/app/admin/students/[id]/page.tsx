@@ -52,7 +52,7 @@ import { SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
 
 type Dossier = {
   generatedAt: string;
-  viewer: { adminRole: string; canSeeMoney: boolean };
+  viewer: { adminRole: string; canSeeMoney: boolean; canRecordPayment: boolean };
   identity: {
     id: string;
     studentCode: string | null;
@@ -468,6 +468,21 @@ export default function StudentDossierPage() {
   const [balanceBusy, setBalanceBusy] = useState<"grace" | "reminder" | null>(null);
   const [balanceMsg, setBalanceMsg] = useState<string | null>(null);
 
+  // "Record a payment this student made" — cash / transfer taken at the desk or
+  // over the phone. Open to a viewer with `payments` (the fee book) OR
+  // `enrolment` (Customer Care, who sees no amounts but can still clear a
+  // student's way into class). The server replies with that one student's
+  // unlock status, which is all this panel shows.
+  const [payOpen, setPayOpen] = useState(false);
+  const [payForm, setPayForm] = useState({
+    amount: "",
+    method: "bank_transfer",
+    kind: "tuition" as "tuition" | "registration",
+    note: "",
+  });
+  const [payBusy, setPayBusy] = useState(false);
+  const [payMsg, setPayMsg] = useState<{ tone: "ok" | "warn" | "bad"; text: string } | null>(null);
+
   /**
    * Editing is deliberately behind its own modal rather than inline fields —
    * this file is read from during a live phone call, and a value that changes
@@ -687,6 +702,59 @@ export default function StudentDossierPage() {
       setBalanceBusy(null);
     }
   }, [id, load]);
+
+  const recordPayment = useCallback(async () => {
+    if (!id) return;
+    const amount = Math.round(Number(payForm.amount));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPayMsg({ tone: "bad", text: "Enter the amount received, in whole naira." });
+      return;
+    }
+    setPayBusy(true);
+    setPayMsg(null);
+    try {
+      const response = await fetch("/api/admin/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: id,
+          amount,
+          currency: "ngn",
+          method: payForm.method,
+          status: "completed",
+          // "Registration fee" is the prefix lib/payment.ts keys on to keep
+          // this row out of the tuition total — so a registration payment says
+          // nothing about unlocking, exactly as intended.
+          description:
+            payForm.kind === "registration"
+              ? `Registration fee${payForm.note.trim() ? ` — ${payForm.note.trim()}` : ""}`
+              : payForm.note.trim() || "Tuition payment (recorded by office)",
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Could not record that payment");
+      // The route says plainly whether this opened their classes, or by how
+      // much it fell short — it never returns another student's figures or any
+      // school total, so this is safe to show whatever the viewer's role.
+      setPayMsg(
+        json.notice
+          ? { tone: "ok", text: json.notice }
+          : json.warning
+            ? { tone: "warn", text: json.warning }
+            : { tone: "ok", text: "Payment recorded." },
+      );
+      setPayForm({ amount: "", method: "bank_transfer", kind: "tuition", note: "" });
+      setPayOpen(false);
+      void load(false);
+    } catch (payErr) {
+      setPayMsg({
+        tone: "bad",
+        text: payErr instanceof Error ? payErr.message : "Could not record that payment",
+      });
+    } finally {
+      setPayBusy(false);
+    }
+  }, [id, payForm, load]);
 
   const resetPassword = useCallback(async () => {
     if (!id) return;
@@ -1091,18 +1159,35 @@ export default function StudentDossierPage() {
           {/* ---- Money --------------------------------------------------- */}
           <Card
             title="Payments"
-            hint={data.viewer.canSeeMoney ? `${money.payments?.length ?? 0} transactions` : "Restricted"}
+            hint={
+              data.viewer.canSeeMoney
+                ? `${money.payments?.length ?? 0} transactions`
+                : data.viewer.canRecordPayment
+                  ? "Record a payment"
+                  : "Restricted"
+            }
           >
             {!data.viewer.canSeeMoney ? (
               <div className="flex items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/40 p-4 text-sm text-[var(--muted)]">
                 <span className="text-[var(--muted)]">
                   <ShieldIcon />
                 </span>
-                <p>
-                  Amounts are visible only to an admin with the payments capability. You can still see that this student
-                  is <strong>{PAYWALL_LABEL[money.paywall].toLowerCase()}</strong>, which is what decides whether their
-                  portal is locked.
-                </p>
+                {data.viewer.canRecordPayment ? (
+                  <p>
+                    This student is{" "}
+                    <strong>{PAYWALL_LABEL[money.paywall].toLowerCase()}</strong>
+                    {money.lockedOut ? " and their portal is locked" : ""}. Record a payment they have
+                    made below and, once the tuition deposit is met, their classes open. The running
+                    totals and payment history live with the fee book.
+                  </p>
+                ) : (
+                  <p>
+                    Amounts are visible only to an admin with the payments capability. You can still
+                    see that this student is{" "}
+                    <strong>{PAYWALL_LABEL[money.paywall].toLowerCase()}</strong>, which is what
+                    decides whether their portal is locked.
+                  </p>
+                )}
               </div>
             ) : (
               <>
@@ -1151,6 +1236,124 @@ export default function StudentDossierPage() {
                   ))}
                 </div>
               </>
+            )}
+
+            {data.viewer.canRecordPayment && (
+              <div className="mt-4 border-t border-[var(--border)] pt-4">
+                {!payOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPayOpen(true);
+                      setPayMsg(null);
+                    }}
+                    className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+                  >
+                    Record a payment
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-[var(--muted)]">
+                      A payment made in cash or by bank transfer. This records it against{" "}
+                      {identity.name.split(" ")[0]}; a tuition payment opens their classes once the
+                      deposit is met.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="block text-xs font-semibold text-[var(--muted)]">
+                        Amount received (₦)
+                        <input
+                          inputMode="numeric"
+                          value={payForm.amount}
+                          onChange={(event) =>
+                            setPayForm((form) => ({
+                              ...form,
+                              amount: event.target.value.replace(/[^0-9]/g, ""),
+                            }))
+                          }
+                          placeholder="e.g. 90000"
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        />
+                      </label>
+                      <label className="block text-xs font-semibold text-[var(--muted)]">
+                        Method
+                        <select
+                          value={payForm.method}
+                          onChange={(event) =>
+                            setPayForm((form) => ({ ...form, method: event.target.value }))
+                          }
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        >
+                          <option value="bank_transfer">Bank transfer</option>
+                          <option value="cash">Cash</option>
+                          <option value="pos">POS / card</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </label>
+                      <label className="block text-xs font-semibold text-[var(--muted)]">
+                        For
+                        <select
+                          value={payForm.kind}
+                          onChange={(event) =>
+                            setPayForm((form) => ({
+                              ...form,
+                              kind: event.target.value === "registration" ? "registration" : "tuition",
+                            }))
+                          }
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        >
+                          <option value="tuition">Tuition</option>
+                          <option value="registration">Registration fee</option>
+                        </select>
+                      </label>
+                      <label className="block text-xs font-semibold text-[var(--muted)]">
+                        Note (optional)
+                        <input
+                          value={payForm.note}
+                          onChange={(event) =>
+                            setPayForm((form) => ({ ...form, note: event.target.value }))
+                          }
+                          placeholder="Teller ref, who paid…"
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        />
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={payBusy}
+                        onClick={() => void recordPayment()}
+                        className="rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        {payBusy ? "Recording…" : "Record payment"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPayOpen(false);
+                          setPayMsg(null);
+                        }}
+                        className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--muted)]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {payMsg && (
+                  <p
+                    className={`mt-3 rounded-xl px-3 py-2 text-sm ${
+                      payMsg.tone === "ok"
+                        ? "bg-emerald-500/10 text-emerald-800"
+                        : payMsg.tone === "warn"
+                          ? "bg-amber-500/10 text-amber-800"
+                          : "bg-red-500/10 text-red-700"
+                    }`}
+                  >
+                    {payMsg.text}
+                  </p>
+                )}
+              </div>
             )}
           </Card>
 

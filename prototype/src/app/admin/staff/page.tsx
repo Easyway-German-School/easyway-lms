@@ -61,6 +61,10 @@ const ROLE_SUMMARY: Record<string, string> = {
   // Was "Payments, community, …", which had been wrong since payments was
   // pulled back to the people whose job is the money.
   data_comm: "Community, emails, reports and integrations. No money.",
+  // The help desk. Everything about looking after a student who got in touch —
+  // their file, enquiries, attendance and class questions — plus recording a
+  // payment they made so their classes open. No fee book, no reports, no setup.
+  support: "Student help desk: student files, enquiries, attendance, and recording a payment to unlock classes. No fee book.",
 };
 
 export default function AdminStaffPage() {

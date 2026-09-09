@@ -364,7 +364,16 @@ not asked for a code. That is a judgement call about where the risk actually
 sits: making the whole office set up an authenticator app on day one is how a
 security control gets resented and then worked around.
 
-To widen it, edit `shouldRequireMfa()` in `src/lib/mfa.ts`.
+The **`enrolment`** capability — held by **Customer Care** and the front desk,
+and used to record a student's cash/transfer payment so their classes open — is
+deliberately **not** on this list. It writes a `Payment` row for one named
+student and reads back only that student's own unlock state; it cannot open the
+fee book, edit or void a payment, or see any school total (those verbs stay on
+`payments`). The blast radius does not justify making a phone-support agent set
+up an authenticator, which is the same reasoning applied to the register above.
+
+To widen it, edit `shouldRequireMfa()` in `src/lib/mfa.ts` /
+`SUPER_ONLY_CAPABILITIES` in `src/lib/admin-roles.ts`.
 
 ### 10.3 Environment variables
 
