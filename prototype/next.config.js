@@ -16,6 +16,35 @@ const nextConfig = {
    */
   outputFileTracingRoot: __dirname,
 
+  /**
+   * Force the serverless functions that need them to carry two things Next's
+   * dependency tracer never picks up on its own, because neither is reached by
+   * a plain `require()`:
+   *
+   *   - `ffmpeg-static`'s binary — a real executable referenced only as a
+   *     string path. Without this the class-notes pipeline reports
+   *     "ffmpeg binary is missing at /var/task/.next/server/.../ffmpeg" and
+   *     every recording transcription falls back and fails.
+   *   - `pdfjs-dist`'s worker and standard fonts — loaded by computed path at
+   *     runtime. Without them `extractText` returns "" for every PDF, so a
+   *     tutor's handout summarises to nothing ("0 readable characters").
+   *
+   * Globs are relative to `outputFileTracingRoot` above.
+   */
+  outputFileTracingIncludes: {
+    '/api/admin/class-notes-health': [
+      './node_modules/ffmpeg-static/**/*',
+      './node_modules/pdfjs-dist/**/*',
+    ],
+    '/api/cron/tick': [
+      './node_modules/ffmpeg-static/**/*',
+      './node_modules/pdfjs-dist/**/*',
+    ],
+    '/api/lecturer/materials': ['./node_modules/pdfjs-dist/**/*'],
+    '/api/admin/materials': ['./node_modules/pdfjs-dist/**/*'],
+    '/api/ai/upload-content': ['./node_modules/pdfjs-dist/**/*'],
+  },
+
   experimental: {
     // Trades a little rebuild speed for a much smaller webpack heap. Worth it:
     // dev was dying on allocation, not waiting on the CPU.
