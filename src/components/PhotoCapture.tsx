@@ -50,12 +50,20 @@ function dataUrlToFile(dataUrl: string, filename: string): File | null {
 export default function PhotoCapture({
   onChange,
   disabled = false,
+  cameraOnly = false,
 }: {
   /** Fires with the chosen photo, or null when it is cleared. */
   onChange: (file: File | null) => void;
   disabled?: boolean;
+  /**
+   * Live camera only — no "upload a file" half. Used on /profile, where a
+   * student setting their own record photo must not be able to pick a stranger's
+   * face or a random image off their phone. Opens straight into the camera and
+   * never falls back to the file picker.
+   */
+  cameraOnly?: boolean;
 }) {
-  const [mode, setMode] = useState<Mode>("choose");
+  const [mode, setMode] = useState<Mode>(cameraOnly ? "camera" : "choose");
   const [preview, setPreview] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("");
   const [error, setError] = useState("");
@@ -101,8 +109,8 @@ export default function PhotoCapture({
       return;
     }
     accept(file, shot, false);
-    setMode("choose");
-  }, [accept]);
+    setMode(cameraOnly ? "camera" : "choose");
+  }, [accept, cameraOnly]);
 
   // The countdown. A photo that fires the instant you tap the button catches
   // everyone mid-reach for the button.
@@ -171,7 +179,10 @@ export default function PhotoCapture({
               </button>
               <button
                 type="button"
-                onClick={clear}
+                onClick={() => {
+                  clear();
+                  if (cameraOnly) openCamera();
+                }}
                 disabled={disabled}
                 className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-xs font-bold text-[var(--muted)] transition hover:text-[var(--foreground)] disabled:opacity-50"
               >
@@ -200,12 +211,15 @@ export default function PhotoCapture({
             onUserMediaError={(mediaError) => {
               setCameraReady(false);
               const name = typeof mediaError === "string" ? mediaError : mediaError?.name;
+              const fallback = cameraOnly
+                ? "Use a device with a camera, or ask the office to add your photo."
+                : "Upload a photo instead.";
               setError(
                 name === "NotAllowedError"
-                  ? "Camera permission was blocked. Allow it in your browser's address bar, or upload a photo instead."
+                  ? `Camera permission was blocked. Allow it in your browser's address bar. ${fallback}`
                   : name === "NotFoundError"
-                    ? "No camera was found on this device. Upload a photo instead."
-                    : "The camera could not be opened. Upload a photo instead.",
+                    ? `No camera was found on this device. ${fallback}`
+                    : `The camera could not be opened. ${fallback}`,
               );
             }}
             className="h-full w-full object-cover"
@@ -276,22 +290,49 @@ export default function PhotoCapture({
             <CameraIcon className="h-4 w-4" />
             {countdown !== null ? "Hold still…" : "Take photo"}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCountdown(null);
-              setMode("choose");
-            }}
-            className="rounded-full border border-[var(--border)] px-5 py-3 text-sm font-bold text-[var(--muted)] transition hover:text-[var(--foreground)]"
-          >
-            Cancel
-          </button>
+          {!cameraOnly ? (
+            <button
+              type="button"
+              onClick={() => {
+                setCountdown(null);
+                setMode("choose");
+              }}
+              className="rounded-full border border-[var(--border)] px-5 py-3 text-sm font-bold text-[var(--muted)] transition hover:text-[var(--foreground)]"
+            >
+              Cancel
+            </button>
+          ) : null}
         </div>
       </div>
     );
   }
 
   // ---- Nothing chosen yet -------------------------------------------------
+  // Camera-only: there is no "choose" step. If the camera view was dismissed
+  // (an error, say), offer the one way back in rather than the file picker.
+  if (cameraOnly) {
+    return (
+      <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-alt)] p-5 text-center">
+        {error ? (
+          <p className="mb-3 rounded-2xl bg-[var(--danger-soft)] px-4 py-3 text-xs font-semibold text-[var(--danger)]">
+            {error}
+          </p>
+        ) : null}
+        <button
+          type="button"
+          onClick={openCamera}
+          disabled={disabled}
+          className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:brightness-110 disabled:opacity-50"
+        >
+          <CameraIcon className="h-4 w-4" /> Open camera
+        </button>
+        <p className="mt-3 text-xs text-[var(--muted)]">
+          Your record photo is taken with the camera — face the light and look straight in.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-alt)] p-5">
       <div className="grid gap-3 sm:grid-cols-2">

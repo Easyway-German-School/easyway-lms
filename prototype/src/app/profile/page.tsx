@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { studentAccessQueryKey } from "@/lib/useStudentAccess";
 
@@ -9,6 +9,7 @@ import Link from "next/link";
 import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import BranchSetupCard from "@/components/BranchSetupCard";
+import PhotoCapture from "@/components/PhotoCapture";
 import { useGamification } from "@/lib/useGamification";
 import { uploadImage, validateImageFile } from "@/lib/upload";
 import type { Badge, BadgeIcon } from "@/lib/gamification";
@@ -237,7 +238,9 @@ export default function ProfilePage() {
   /** Null branch — the account came in on a sheet with the column blank. */
   const [needsBranch, setNeedsBranch] = useState(false);
   const [branchSetupAutoOpen, setBranchSetupAutoOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // The record photo is taken with the live camera only — never a file the
+  // student picks — so nobody can set a stranger's face or a random image.
+  const [showCamera, setShowCamera] = useState(false);
   const { game } = useGamification();
   const queryClient = useQueryClient();
 
@@ -361,14 +364,14 @@ export default function ProfilePage() {
   }, []);
 
   /**
-   * Avatars save on their own rather than waiting for the edit form, because a
-   * student who picks a photo and then closes the sheet would reasonably expect
-   * the photo to have stuck.
+   * The photo saves on its own the moment it is taken, rather than waiting for
+   * the edit form — a student who takes a photo and then closes the sheet would
+   * reasonably expect it to have stuck. `file` comes straight from
+   * <PhotoCapture>, which hands over a real JPEG File built from the camera
+   * frame; there is no file-picker path here on purpose.
    */
-  async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
+  async function handlePhotoFile(file: File) {
+    setShowCamera(false);
 
     const invalid = validateImageFile(file);
     if (invalid) {
@@ -560,12 +563,14 @@ export default function ProfilePage() {
                     </div>
                   </div>
 
-                  {/* Camera button. `capture` makes phones offer the camera directly. */}
+                  {/* Opens the live camera. The record photo can only be taken
+                      here — there is no file picker — so it is always a real
+                      selfie, not a picture chosen off the phone. */}
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => setShowCamera(true)}
                     disabled={uploading}
-                    aria-label="Change profile photo"
+                    aria-label="Take a new profile photo"
                     className="absolute -bottom-1 -right-1 flex h-10 w-10 items-center justify-center rounded-full border-[3px] border-[#04141a] bg-[var(--accent)] text-white shadow-lg transition hover:brightness-110 disabled:opacity-60"
                   >
                     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -573,14 +578,6 @@ export default function ProfilePage() {
                       <circle cx="12" cy="13" r="4" />
                     </svg>
                   </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="user"
-                    onChange={handleAvatarChange}
-                    className="hidden"
-                  />
 
                   {game && (
                     <div className="absolute -left-2 bottom-1 rounded-full border-[3px] border-[#04141a] bg-[var(--surface)] px-2.5 py-1 text-[10px] font-black text-[var(--foreground)]">
@@ -915,13 +912,13 @@ export default function ProfilePage() {
                 <div>
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => setShowCamera(true)}
                     disabled={uploading}
                     className="rounded-full btn-glow px-4 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-60"
                   >
-                    {uploading ? "Uploading…" : "Change photo"}
+                    {uploading ? "Uploading…" : "Take a new photo"}
                   </button>
-                  <p className="mt-1.5 text-xs text-[var(--muted)]">JPG or PNG, up to 5MB.</p>
+                  <p className="mt-1.5 text-xs text-[var(--muted)]">Opens your camera — the record photo is taken live, not uploaded.</p>
                 </div>
               </div>
 
@@ -1027,6 +1024,52 @@ export default function ProfilePage() {
                   Cancel
                 </button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ---------- Live camera sheet ---------- */}
+      <AnimatePresence>
+        {showCamera && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] grid place-items-center bg-black/70 p-4 backdrop-blur-sm"
+            onClick={() => setShowCamera(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 20, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.98 }}
+              onClick={(event) => event.stopPropagation()}
+              className="w-full max-w-md rounded-3xl border border-[var(--border)] bg-[var(--background)] p-5"
+            >
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-[var(--foreground)]">Take your photo</h2>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    This is your record photo — the one on the register, in class and on your certificate.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCamera(false)}
+                  className="rounded-full p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
+                  aria-label="Close"
+                >
+                  <CrossIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              <PhotoCapture
+                cameraOnly
+                disabled={uploading}
+                onChange={(file) => {
+                  if (file) void handlePhotoFile(file);
+                }}
+              />
             </motion.div>
           </motion.div>
         )}

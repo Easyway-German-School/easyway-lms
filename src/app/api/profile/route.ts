@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { keyFromUrl } from "@/lib/storage";
 
 function pathwayOutcome(pathway: string) {
   if (pathway === "Language training") {
@@ -96,12 +97,17 @@ export async function POST(request: NextRequest) {
   const currentLevel = normalizeString(body.currentLevel) || "A1";
   const photoUrl = normalizeString(body.photoUrl);
 
-  // Only accept paths this app served. A student editing their own profile
-  // could otherwise point their avatar at any URL on the internet, which would
-  // then be rendered for tutors and admins looking at their record.
-  if (photoUrl && !photoUrl.startsWith("/uploads/")) {
+  // Only accept URLs this app's own storage produced — a local /uploads/ path,
+  // an /api/files/ key, or the configured bucket's own origin. keyFromUrl()
+  // returns null for anything else, which is exactly the "not one of ours"
+  // test: a student editing their profile could otherwise point their avatar
+  // at any URL on the internet. It also fixes the bug this replaces — in
+  // production uploadImage() hands back "/api/files/<key>", which the old
+  // startsWith("/uploads/") check rejected, so every avatar save 400'd with
+  // "must be uploaded, not linked".
+  if (photoUrl && !keyFromUrl(photoUrl)) {
     return NextResponse.json(
-      { error: "Profile photos must be uploaded, not linked." },
+      { error: "Profile photos must be uploaded through EasyWay, not linked." },
       { status: 400 },
     );
   }
