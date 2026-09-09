@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess, hasProfilePhoto } from "@/lib/access";
+import { isOnlineBranch } from "@/lib/online-branch";
 import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { notify, KIND } from "@/lib/notify";
@@ -29,12 +30,15 @@ export async function GET() {
       id: true,
       level: true,
       classType: true,
+      pathway: true,
       // Drives which pages exist for this student at all — the live classroom
       // is meaningless to somebody who attends on campus.
       deliveryMode: true,
       // The fee depends on the branch as well as the level — leaving it out
       // would compute an Abuja student's gate at the cheaper Lagos price.
-      branch: { select: { name: true } },
+      // `mode` also lets an online-branch student whose `deliveryMode` column
+      // never got set still be treated as online below.
+      branch: { select: { name: true, mode: true } },
       // The clock the part-payment lock runs on: 30 days after the confirmed
       // first day of classes (falling back to enrolment), unless an admin has
       // granted grace.
@@ -65,7 +69,7 @@ export async function GET() {
   }
 
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
-  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
 
   // An on-track tuition payment plan holds the balance lock back, like grace.
   const planStatus = await planStatusForStudent(student.id);
@@ -74,7 +78,12 @@ export async function GET() {
     totalPaid,
     tuitionFee: tuitionFeeFor(feeLookup),
     requiredDeposit: requiredDepositFor(feeLookup),
-    deliveryMode: student.deliveryMode,
+    // Fall back to the branch: an online-branch student whose `deliveryMode`
+    // column was never set (an import, a half-filled add-student form) would
+    // otherwise be classed "physical" here, which hides the Live class entry
+    // from the sidebar AND walls the /live page even though the server is
+    // happy to admit them. The branch having no campus is the tell.
+    deliveryMode: isOnlineBranch(student.branch) ? "online" : student.deliveryMode,
     // Was selected above for the fee lookup and then dropped, so the portal
     // could not tell a private student from a group one — and hid the live
     // classroom from private students the server was happy to admit.

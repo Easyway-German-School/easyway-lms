@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { KIND, notify } from "@/lib/notify";
+import { liveWhere } from "@/lib/live-presence";
 
 /**
  * Putting a named student on a named tutor.
@@ -89,6 +90,36 @@ export async function setStudentTutor(input: {
       link: "/lecturer/students",
       push: true,
     }).catch((error) => console.error("Tutor pairing notification failed", error));
+
+    /**
+     * ASSIGNED MID-LESSON.
+     *
+     * If this tutor has a live class going right now, the student who was just
+     * handed to them should be able to walk straight in — not find out at the
+     * next sitting. `liveSessionForStudent` will now let them join (it reads
+     * `tutorId`), but nothing would have TOLD them, because the "class started"
+     * push already went out before this student existed on the roster. Same
+     * dedupe key as that push, so a student who somehow got both is buzzed once.
+     */
+    if (student.classType !== "private") {
+      const liveNow = await prisma.liveClassSession.findFirst({
+        where: { kind: "cohort", lecturerId: lecturer.id, ...liveWhere() },
+        orderBy: { startedAt: "desc" },
+        select: { id: true, title: true, joinCode: true },
+      });
+      if (liveNow) {
+        await notify({
+          to: { studentIds: [studentId] },
+          kind: KIND.classStarting,
+          severity: "warning",
+          title: "Your new tutor is teaching right now",
+          message: `${tutorName} has a live class on — ${liveNow.title}. Tap to join.`,
+          link: `/live?code=${liveNow.joinCode}`,
+          dedupeKey: `live-start:${liveNow.id}`,
+          push: true,
+        }).catch((error) => console.error("Live-now nudge on tutor pairing failed", error));
+      }
+    }
   } else if (student.tutorId) {
     const previous = await prisma.lecturer.findUnique({
       where: { id: student.tutorId },

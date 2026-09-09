@@ -180,11 +180,23 @@ export async function POST(request: Request) {
                   // Prisma's generated filter type does not accept a bare
                   // `null` for an exact match on a nullable column here even
                   // though it is valid at runtime.
+                  //
+                  // Two ways to belong to this room, matching
+                  // `liveSessionForStudent`: the cohort (branch+level+sitting),
+                  // OR named onto this session's tutor. Without the second
+                  // clause a tutor could not ring the very online student the
+                  // office just handed them, because that student's cohort
+                  // fields never lined up with the room.
                   where: {
                     id: { in: requested },
-                    branchId: owned.branchId,
-                    level: owned.level,
-                    sessionSlot: owned.sessionSlot,
+                    OR: [
+                      {
+                        branchId: owned.branchId,
+                        level: owned.level,
+                        sessionSlot: owned.sessionSlot,
+                      },
+                      owned.lecturer?.id ? { tutorId: owned.lecturer.id } : { id: "__none__" },
+                    ],
                   } as any,
                   select: { id: true },
                 })
