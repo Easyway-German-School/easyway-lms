@@ -21,6 +21,7 @@ import { SIGNUP_ACCESS_GATE_ENABLED, validateSignupAccess, verifyInviteSig } fro
 import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
 import { normalizeProfileInput } from "@/lib/student-profile";
 import { openEnrolment } from "@/lib/student-enrolment";
+import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
 
 /**
  * Whether there is a Branch table to select from.
@@ -461,11 +462,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existingUser = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-    });
-
-    if (existingUser) {
+    // Three cases, not two. A live account blocks the signup with "please sign
+    // in". A soft-deleted one — a student the office removed who is now coming
+    // back — is NOT a block: the guard leaves that row (and its email) in the
+    // table (see lib/deleted-account.ts), so a plain `user.create` would trip
+    // the email unique index. Revive the tombstone and update it into the new
+    // signup instead.
+    const emailState = await lookupEmailAccount(normalizedEmail);
+    if (emailState.kind === "live") {
       return NextResponse.json(
         {
           error:
@@ -475,42 +479,67 @@ export async function POST(request: NextRequest) {
         { status: 409, headers: buildCorsHeaders(request) }
       );
     }
+    const revivedUserId = emailState.kind === "deleted" ? emailState.userId : null;
+    if (revivedUserId) {
+      await reviveDeletedAccount(revivedUserId);
+    }
 
     const hashedPassword = await bcryptjs.hash(normalizedPassword, 10);
+
+    const studentFields = {
+      level: normalizedLevel,
+      pathway: normalizedPathway,
+      sessionSlot: normalizedSessionSlot,
+      classType: normalizedClassType,
+      deliveryMode: normalizedDeliveryMode,
+      outcome: "C1 readiness + German work placement support",
+      branchId: hasBranchTable ? normalizedBranchId : null,
+      // store admission payload as JSON
+      admission: normalizedAdmission,
+      // The typed twin of the admission blob — see lib/student-profile.ts.
+      // `normalizedAdmission` already carries every field under the same key
+      // names the parser's aliases expect, so this is a straight reread.
+      profile: normalizeProfileInput(normalizedAdmission),
+    };
 
     let user;
 
     try {
-      user = await prisma.user.create({
-        data: {
-          email: normalizedEmail,
-          name: normalizedName,
-          password: hashedPassword,
-          role: normalizedRole,
-          // `User` is a global model, so nothing stamps this for us — see the
-          // note on the same line in the admin tutor route. Without it a
-          // student signs up successfully and then holds a session with no
-          // tenant, which locks them out of their own portal.
-          tenantId: currentTenantId(),
-          student: {
-            create: ({
-              level: normalizedLevel,
-              pathway: normalizedPathway,
-              sessionSlot: normalizedSessionSlot,
-              classType: normalizedClassType,
-              deliveryMode: normalizedDeliveryMode,
-              outcome: "C1 readiness + German work placement support",
-              branchId: hasBranchTable ? normalizedBranchId : null,
-              // store admission payload as JSON
-              admission: normalizedAdmission,
-              // The typed twin of the admission blob — see lib/student-profile.ts.
-              // `normalizedAdmission` already carries every field under the same
-              // key names the parser's aliases expect, so this is a straight reread.
-              profile: { create: normalizeProfileInput(normalizedAdmission) },
-            } as any),
-          },
-        },
-      });
+      const userFields = {
+        email: normalizedEmail,
+        name: normalizedName,
+        password: hashedPassword,
+        role: normalizedRole,
+        // `User` is a global model, so nothing stamps this for us — see the
+        // note on the same line in the admin tutor route. Without it a
+        // student signs up successfully and then holds a session with no
+        // tenant, which locks them out of their own portal.
+        tenantId: currentTenantId(),
+      };
+      user = revivedUserId
+        ? await prisma.user.update({
+            where: { id: revivedUserId },
+            data: {
+              ...userFields,
+              student: {
+                upsert: {
+                  create: ({ ...studentFields, profile: { create: studentFields.profile } } as any),
+                  update: ({
+                    ...studentFields,
+                    profile: { upsert: { create: studentFields.profile, update: studentFields.profile } },
+                  } as any),
+                },
+              },
+            },
+          })
+        : await prisma.user.create({
+            data: {
+              ...userFields,
+              student: {
+                create: ({ ...studentFields, profile: { create: studentFields.profile } } as any),
+              },
+            },
+          });
     } catch (prismaError: any) {
       if (prismaError?.code === "P2002" && prismaError?.meta?.target?.includes("email")) {
         return NextResponse.json(

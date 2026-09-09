@@ -15,6 +15,7 @@ import { isTravelPackagePathway } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 import { normalizeProfileInput, mergeProfile, type StudentProfileInput } from "@/lib/student-profile";
+import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
 import {
   buildRosterWhereClause,
@@ -218,8 +219,14 @@ export async function POST(request: Request) {
   // system, not just this tenant's — an email taken by a self-signup or a row
   // another admin just added is caught here. The message says what to do about
   // it rather than leaving the office to guess.
-  const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-  if (existingUser) {
+  //
+  // A student the office DELETED is the third case, and the one that used to
+  // trap re-adding the same person: the guard soft-deletes the User and its
+  // email stays in the unique index. `lookupEmailAccount` sees that tombstone;
+  // when it is a former student we revive the row below and update it into the
+  // new details instead of creating a second one (see lib/deleted-account.ts).
+  const emailState = await lookupEmailAccount(email);
+  if (emailState.kind === "live") {
     return NextResponse.json(
       {
         error:
@@ -227,6 +234,10 @@ export async function POST(request: Request) {
       },
       { status: 409 },
     );
+  }
+  const revivedUserId = emailState.kind === "deleted" ? emailState.userId : null;
+  if (revivedUserId) {
+    await reviveDeletedAccount(revivedUserId);
   }
 
   let branchRow: { tenantId: string | null; name: string; mode: string | null } | null = null;
@@ -250,44 +261,70 @@ export async function POST(request: Request) {
 
   const hashedPassword = await bcryptjs.hash(password, 10);
 
+  const admissionBlob =
+    phone || batch || city || stateRegion || country || photoUrl
+      ? {
+          ...(phone ? { phone } : {}),
+          ...(batch ? { batch } : {}),
+          ...(city ? { city } : {}),
+          ...(stateRegion ? { state: stateRegion } : {}),
+          ...(country ? { country } : {}),
+          ...(photoUrl ? { photoUrl } : {}),
+        }
+      : undefined;
+  // The typed twin of the admission blob — see lib/student-profile.ts. Reads
+  // the same request body (with the already-sanitized `photoUrl`), so anything
+  // this form collects lands in both places at once.
+  const profileInput = normalizeProfileInput({ ...body, photoUrl });
+  const studentFields = {
+    level,
+    branchId,
+    status,
+    tutorId,
+    pathway,
+    classType,
+    sessionSlot,
+    deliveryMode,
+    admission: admissionBlob,
+  };
+
   try {
-    const user = await prisma.user.create({
-      data: {
-        email,
-        name,
-        password: hashedPassword,
-        role: "STUDENT",
-        tenantId: gate.session.user.tenantId,
-        student: {
-          create: {
-            level,
-            branchId,
-            status,
-            tutorId,
-            pathway,
-            classType,
-            sessionSlot,
-            deliveryMode,
-            admission:
-              phone || batch || city || stateRegion || country || photoUrl
-                ? {
-                    ...(phone ? { phone } : {}),
-                    ...(batch ? { batch } : {}),
-                    ...(city ? { city } : {}),
-                    ...(stateRegion ? { state: stateRegion } : {}),
-                    ...(country ? { country } : {}),
-                    ...(photoUrl ? { photoUrl } : {}),
-                  }
-                : undefined,
-            // The typed twin of the admission blob above — see
-            // lib/student-profile.ts. Reads the same request body (with the
-            // already-sanitized `photoUrl`, not the raw one), so anything this
-            // form collects lands in both places at once.
-            profile: { create: normalizeProfileInput({ ...body, photoUrl }) },
+    // Revived tombstone (see the pre-check above): the row is live again but
+    // still carries the deleted student's old details, so update it into the
+    // new ones rather than creating a second User against the same email. A
+    // fresh add takes the create path unchanged.
+    const user = revivedUserId
+      ? await prisma.user.update({
+          where: { id: revivedUserId },
+          data: {
+            email,
+            name,
+            password: hashedPassword,
+            role: "STUDENT",
+            tenantId: gate.session.user.tenantId,
+            student: {
+              upsert: {
+                create: { ...studentFields, profile: { create: profileInput } },
+                update: {
+                  ...studentFields,
+                  profile: { upsert: { create: profileInput, update: profileInput } },
+                },
+              },
+            },
           },
-        },
-      },
-    });
+        })
+      : await prisma.user.create({
+          data: {
+            email,
+            name,
+            password: hashedPassword,
+            role: "STUDENT",
+            tenantId: gate.session.user.tenantId,
+            student: {
+              create: { ...studentFields, profile: { create: profileInput } },
+            },
+          },
+        });
 
     const student = await prisma.student.findUnique({ where: { userId: user.id }, select: { id: true } });
 
@@ -471,9 +508,23 @@ export async function PATCH(request: Request) {
     }
 
     if (email && email !== student.user.email) {
-      const existing = await prisma.user.findUnique({ where: { email } });
-      if (existing) {
+      // Catches a live account AND a soft-deleted tombstone still holding the
+      // address (see lib/deleted-account.ts) — the plain `findUnique` would
+      // miss the latter and then the update below would hit the email unique
+      // index. Reclaiming a deleted account is the add form's job, not an
+      // edit's, so here we just say why the change cannot go through.
+      const target = await lookupEmailAccount(email);
+      if (target.kind === "live") {
         return NextResponse.json({ error: "Email already registered" }, { status: 400 });
+      }
+      if (target.kind === "deleted") {
+        return NextResponse.json(
+          {
+            error:
+              "That email belongs to a deleted student. Re-add them from the Add student form instead — it will bring their account back.",
+          },
+          { status: 400 },
+        );
       }
     }
 
