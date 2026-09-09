@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { cohortRoomName, roomDisplayName } from "@/lib/live-classroom";
+import { canAttendLive } from "@/lib/access";
+import { isOnlineBranch } from "@/lib/online-branch";
 
 /**
  * Whether a class is happening RIGHT NOW, and who has been told.
@@ -304,6 +306,16 @@ export async function liveSessionForStudent(student: {
   level: string;
   sessionSlot: string;
   classType: string;
+  /**
+   * How the student attends. A `hybrid` or `online` student is not tied to one
+   * sitting of the day — any live cohort room for their branch and level is a
+   * class they can join, whichever slot it runs in. A `physical` student keeps
+   * the exact-slot match: they attend one specific sitting, in a building.
+   */
+  deliveryMode?: string | null;
+  /** Branch row — so an Online-branch student whose `deliveryMode` column was
+   *  never set is still treated as attending over video. */
+  branch?: { name?: string | null; mode?: string | null } | null;
   /** `Student.tutorId` — the lecturer the office named onto this student, if any. */
   tutorId?: string | null;
   /** `Student.coTutors` lecturer ids — extra tutors on an online / hybrid
@@ -338,17 +350,30 @@ export async function liveSessionForStudent(student: {
   // room, reached through an invite (handled above), never here.
   if (student.classType === "private") return null;
 
-  const cohort = await prisma.liveClassSession.findFirst({
+  // A student who attends over video may walk into ANY live sitting of their
+  // branch and level — morning, afternoon or evening. A campus student is held
+  // to their own slot: the morning cohort's room is a different class from the
+  // evening one, and they sit one of them in person.
+  const attendsOverVideo =
+    canAttendLive(student.deliveryMode, student.classType) ||
+    isOnlineBranch(student.branch ?? null);
+
+  const liveCohorts = await prisma.liveClassSession.findMany({
     where: {
       kind: "cohort",
       branchId: student.branchId,
       level: student.level,
-      sessionSlot: student.sessionSlot,
+      ...(attendsOverVideo ? {} : { sessionSlot: student.sessionSlot }),
       ...liveWhere(now),
     },
     include: { lecturer: { select: { user: { select: { name: true } } } } },
     orderBy: { startedAt: "desc" },
   });
+
+  // Prefer the student's own sitting when more than one is live at once;
+  // otherwise the most recently started.
+  const cohort =
+    liveCohorts.find((room) => room.sessionSlot === student.sessionSlot) ?? liveCohorts[0] ?? null;
 
   if (cohort) {
     return { ...toRow(cohort, cohort.lecturer?.user?.name ?? null), invited: false, inviteStatus: null };

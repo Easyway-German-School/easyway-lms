@@ -295,6 +295,10 @@ export async function GET(request: Request) {
         level: student.level,
         sessionSlot: student.sessionSlot,
         classType: student.classType,
+        // A hybrid/online student may join any live sitting of their level,
+        // not only their pinned slot — see liveSessionForStudent.
+        deliveryMode: student.deliveryMode,
+        branch: student.branch,
         // So a student the office named onto a tutor can walk into that tutor's
         // live class even when their cohort fields never lined up with it.
         tutorId: student.tutorId,
