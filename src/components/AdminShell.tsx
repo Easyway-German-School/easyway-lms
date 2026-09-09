@@ -191,6 +191,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const [adminRoleLabel, setAdminRoleLabel] = useState<string | null>(null);
   /** Help requests nobody in the office has opened yet. Drives the ping. */
   const [unreadEnquiries, setUnreadEnquiries] = useState(0);
+  /** Unread community messages across every room in the school. */
+  const [unreadCommunity, setUnreadCommunity] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,6 +236,37 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     poll();
     const timer = window.setInterval(poll, 120_000);
     return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+
+  /**
+   * The community badge, same idea as the ping above. `/api/community/unread`
+   * is deliberately light — one bucketed count, no rows — and it resolves the
+   * admin scope to every room in the school, so this number is "unread anywhere
+   * in the community". The `easyway:unread-changed` event lets the floating
+   * launcher (or opening a room) drop the badge without waiting for the tick.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/community/unread', { cache: 'no-store' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        setUnreadCommunity(Number(data.total) || 0);
+      } catch {
+        /* A missing badge is not worth the noise. */
+      }
+    };
+
+    poll();
+    const timer = window.setInterval(poll, 120_000);
+    window.addEventListener('easyway:unread-changed', poll);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('easyway:unread-changed', poll);
+    };
   }, []);
 
   const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings'];
@@ -383,9 +416,14 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 <div className="space-y-1">
                   {groupItems.map((item) => {
                     const active = pathname === item.href || pathname.startsWith(item.href + '/');
-                    // One badge in the whole sidebar, and it is on the one
-                    // entry where a number means "somebody is waiting".
-                    const badge = item.href === '/admin/enquiries' ? unreadEnquiries : 0;
+                    // Badges sit on the entries where a number means "somebody
+                    // is waiting": a help request, or unread class-group chat.
+                    const badge =
+                      item.href === '/admin/enquiries'
+                        ? unreadEnquiries
+                        : item.href === '/admin/community'
+                          ? unreadCommunity
+                          : 0;
                     return (
                       <button
                         key={item.href}

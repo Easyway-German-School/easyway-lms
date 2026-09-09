@@ -104,6 +104,34 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
   // dismiss.
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  /**
+   * Unread community messages across the rooms this tutor's assignment covers,
+   * on the sidebar's Community entry. Same light endpoint the student launcher
+   * uses; `easyway:unread-changed` lets opening a room clear it early.
+   */
+  const [unreadCommunity, setUnreadCommunity] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/community/unread', { cache: 'no-store' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        setUnreadCommunity(Number(data.total) || 0);
+      } catch {
+        /* A missing badge is not worth the noise. */
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 120_000);
+    window.addEventListener('easyway:unread-changed', poll);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('easyway:unread-changed', poll);
+    };
+  }, []);
+
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
@@ -223,13 +251,26 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
         } w-[17rem] ${collapsed ? 'lg:w-20' : 'lg:w-72'}`}
       >
         <div className="border-b border-[var(--border)] p-4">
-          <div className="flex items-center justify-between gap-3">
-            {collapsed && (
-              <Link href="/lecturer/dashboard" aria-label="Go to dashboard" className="hidden lg:block">
-                <BrandLogo variant="mark" className="h-10 w-10" />
+          {/* Collapsed rail (desktop only): the brand mark stacked over a
+              full-width expand control, both centred so nothing is crammed
+              against the edge of the 80px rail. */}
+          {collapsed && (
+            <div className="hidden flex-col items-center gap-3 lg:flex">
+              <Link href="/lecturer/dashboard" aria-label="Go to dashboard">
+                <BrandLogo variant="mark" className="h-9 w-9" />
               </Link>
-            )}
-            <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
+              <button
+                onClick={() => setCollapsed(false)}
+                aria-label="Expand sidebar"
+                className="flex w-full items-center justify-center rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)]"
+              >
+                <ChevronRightIcon />
+              </button>
+            </div>
+          )}
+
+          <div className={`flex items-center justify-between gap-3 ${collapsed ? 'lg:hidden' : ''}`}>
+            <div className="min-w-0">
               <Link href="/lecturer/dashboard" aria-label="Go to dashboard">
                 <BrandLogo variant="wordmark" className="h-9" />
               </Link>
@@ -239,10 +280,10 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
             </div>
             <button
               onClick={() => setCollapsed(!collapsed)}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label="Collapse sidebar"
               className="hidden rounded-xl p-2 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--accent)] lg:block"
             >
-              {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+              <ChevronLeftIcon />
             </button>
             <button
               onClick={() => setDrawerOpen(false)}
@@ -258,19 +299,33 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
           <div className="space-y-1">
             {navItems.filter(visibleToThisTutor).map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + '/');
+              const communityBadge =
+                item.href === '/community' && !active ? unreadCommunity : 0;
               return (
                 <button
                   key={item.href}
                   onClick={() => router.push(item.href)}
                   title={collapsed ? item.label : ''}
                   className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition-all duration-200 ${
+                    collapsed ? 'lg:justify-center lg:gap-0 lg:px-0' : ''
+                  } ${
                     active
                       ? 'bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_8px_24px_rgba(10,124,255,0.12)]'
                       : 'text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]'
                   }`}
                 >
-                  <span className={`flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'}`}>{item.icon}</span>
-                  {!collapsed && <span className="font-medium">{item.label}</span>}
+                  <span className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'}`}>
+                    {item.icon}
+                    {collapsed && communityBadge > 0 && (
+                      <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--surface-alt)]" />
+                    )}
+                  </span>
+                  {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
+                  {!collapsed && communityBadge > 0 && (
+                    <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-bold text-white">
+                      {communityBadge > 99 ? '99+' : communityBadge}
+                    </span>
+                  )}
                 </button>
               );
             })}

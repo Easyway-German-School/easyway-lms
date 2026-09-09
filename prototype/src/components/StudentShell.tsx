@@ -137,6 +137,34 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   const { access, hasAccess } = useStudentAccess();
 
   /**
+   * Unread class-group chat, on the sidebar's Community entry — the same number
+   * the floating launcher shows, read from the same light endpoint. Both listen
+   * for `easyway:unread-changed` so opening a room clears them together.
+   */
+  const [unreadCommunity, setUnreadCommunity] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/community/unread", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        setUnreadCommunity(Number(data.total) || 0);
+      } catch {
+        /* Silent — a missing badge is not worth a console line. */
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 120_000);
+    window.addEventListener("easyway:unread-changed", poll);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("easyway:unread-changed", poll);
+    };
+  }, []);
+
+  /**
    * The live classroom belongs to students who attend over video.
    *
    * A campus student who taps "Live class" finds an empty room and concludes
@@ -331,6 +359,8 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
               // true right now and stops being true. It gets a pulse; nothing
               // else does, which is what keeps the pulse meaning something.
               const isLiveNow = Boolean(live) && item.href === "/live";
+              const communityBadge =
+                item.href === "/community" && !active ? unreadCommunity : 0;
               return (
                 <button
                   key={item.href}
@@ -364,8 +394,16 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
                         <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-[var(--surface)]" />
                       </span>
                     )}
+                    {collapsed && communityBadge > 0 && !isLiveNow && (
+                      <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--surface-alt)]" />
+                    )}
                   </span>
                   {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
+                  {!collapsed && communityBadge > 0 && !isLiveNow && (
+                    <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-bold text-white">
+                      {communityBadge > 99 ? "99+" : communityBadge}
+                    </span>
+                  )}
                   {!collapsed && isLiveNow && (
                     <span className="shrink-0 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-600">
                       Live

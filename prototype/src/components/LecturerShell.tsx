@@ -104,6 +104,34 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
   // dismiss.
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  /**
+   * Unread community messages across the rooms this tutor's assignment covers,
+   * on the sidebar's Community entry. Same light endpoint the student launcher
+   * uses; `easyway:unread-changed` lets opening a room clear it early.
+   */
+  const [unreadCommunity, setUnreadCommunity] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/community/unread', { cache: 'no-store' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        setUnreadCommunity(Number(data.total) || 0);
+      } catch {
+        /* A missing badge is not worth the noise. */
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 120_000);
+    window.addEventListener('easyway:unread-changed', poll);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('easyway:unread-changed', poll);
+    };
+  }, []);
+
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
@@ -271,6 +299,8 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
           <div className="space-y-1">
             {navItems.filter(visibleToThisTutor).map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + '/');
+              const communityBadge =
+                item.href === '/community' && !active ? unreadCommunity : 0;
               return (
                 <button
                   key={item.href}
@@ -284,8 +314,18 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
                       : 'text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]'
                   }`}
                 >
-                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'}`}>{item.icon}</span>
-                  {!collapsed && <span className="font-medium">{item.label}</span>}
+                  <span className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'}`}>
+                    {item.icon}
+                    {collapsed && communityBadge > 0 && (
+                      <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--surface-alt)]" />
+                    )}
+                  </span>
+                  {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
+                  {!collapsed && communityBadge > 0 && (
+                    <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-bold text-white">
+                      {communityBadge > 99 ? '99+' : communityBadge}
+                    </span>
+                  )}
                 </button>
               );
             })}
