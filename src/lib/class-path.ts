@@ -47,6 +47,13 @@ export type SchedulePayload = {
   joinedAt?: string | null;
   /** What the register actually says, keyed by YYYY-MM-DD. */
   attendance?: Array<{ date: string; present: boolean }>;
+  /**
+   * Other weekday sittings of this SAME level, present only for a hybrid or
+   * online student — who may join any of them live (see `liveSessionForStudent`).
+   * Deliberately NOT merged into `months`: the day-by-day node builder there
+   * assumes one class per day and would triple-count. Rendered as a plain list.
+   */
+  alsoJoinable?: Array<{ slot: string; sessions: Session[] }>;
 };
 
 /**

@@ -10,6 +10,7 @@ import { creditGate } from "@/lib/usage/guard";
 import {
   announceLiveSession,
   announceLiveToNamedStudents,
+  announceLiveToVideoStudents,
   liveSessionByCode,
   liveSessionForStudent,
   mayJoinPrivateRoom,
@@ -383,6 +384,14 @@ export async function GET(request: Request) {
         // same way it gets no popup. See lib/live-eligibility.ts.
         const reachable = await studentsWhoCanEnterLiveClass(named.map((s) => s.id));
         announceLiveToNamedStudents(opened, reachable);
+
+        // And the hybrid / online students of this branch and level who sit a
+        // DIFFERENT slot — they can join any live room for their level, so this
+        // is their class too. Own-slot students and the payment/photo-locked
+        // are excluded inside; the dedupe key is shared so nobody is double-rung.
+        void announceLiveToVideoStudents(opened).catch((err) =>
+          console.error("announceLiveToVideoStudents failed", err),
+        );
       }
     } else if (liveSession && student) {
       /**

@@ -1,6 +1,6 @@
 import type { Student } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getMergedSchedule } from "@/lib/class-sessions";
+import { getMergedSchedule, type MergedSession } from "@/lib/class-sessions";
 import { getPrivateSchedule } from "@/lib/private-classes";
 import { nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
 
@@ -80,6 +80,35 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
     select: { date: true, present: true, status: true },
   });
 
+  /**
+   * A hybrid or online student attends over video and may join ANY sitting of
+   * their level, whichever time it runs (see `liveSessionForStudent`). Their
+   * own sitting is the calendar above; the other weekday sittings ride along
+   * as a separate list so they can see what else is on and plan to drop in.
+   * Not merged into `months` — the node builder counts one class per day.
+   */
+  let alsoJoinable: Array<{ slot: string; sessions: MergedSession[] }> | undefined;
+  const attendsOverVideo = student.deliveryMode === "hybrid" || student.deliveryMode === "online";
+  if (!viewingNext && attendsOverVideo) {
+    const own = (student.sessionSlot ?? "morning").toLowerCase();
+    const otherSlots = (["morning", "afternoon", "evening"] as const).filter((s) => s !== own);
+    const built = await Promise.all(
+      otherSlots.map((s) =>
+        getMergedSchedule({
+          branchId: student.branchId,
+          level,
+          batch,
+          registeredAt: student.createdAt,
+          sessionSlot: s,
+          now: new Date(),
+          months: sessionDurationMonths(s),
+        }).then((r) => ({ slot: s, sessions: r.months.flatMap((m) => m.sessions) })),
+      ),
+    );
+    const withClasses = built.filter((b) => b.sessions.length > 0);
+    if (withClasses.length) alsoJoinable = withClasses;
+  }
+
   return {
     ...schedule,
     currentLevel: student.level,
@@ -92,5 +121,6 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
       date: record.date.toISOString().slice(0, 10),
       present: record.present || record.status === "present" || record.status === "late",
     })),
+    ...(alsoJoinable ? { alsoJoinable } : {}),
   };
 }

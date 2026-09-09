@@ -293,6 +293,51 @@ export default function SmartCalendarClient() {
       <p className="text-center text-xs text-[var(--muted)]">
         Times are always visible · each class topic unlocks on the day it runs
       </p>
+
+      {/* ---- Other sittings a hybrid/online student can drop into ---------- */}
+      {!data.viewingNextLevel && (data.alsoJoinable?.length ?? 0) > 0 && (
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--accent)]">
+            Also open to you
+          </p>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            You attend online, so you can join any sitting of {data.currentLevel ?? data.level} live —
+            not just your own. Here is what else is on.
+          </p>
+          <div className="mt-4 space-y-4">
+            {data.alsoJoinable!.map((track) => {
+              const upcoming = track.sessions
+                .filter((s) => daysBetween(new Date(s.date), new Date()) >= 0 && s.status !== "cancelled")
+                .slice(0, 6);
+              if (upcoming.length === 0) return null;
+              return (
+                <div key={track.slot}>
+                  <p className="text-xs font-bold capitalize text-[var(--foreground)]">
+                    {track.slot} sitting
+                  </p>
+                  <ul className="mt-2 space-y-1.5">
+                    {upcoming.map((s, i) => {
+                      const unlocked = daysBetween(new Date(s.date), new Date()) === 0;
+                      return (
+                        <li key={`${track.slot}-${s.date}-${i}`} className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                          <span className="font-medium text-[var(--foreground)]">{longDate(new Date(s.date))}</span>
+                          <span className="text-[var(--muted)]">
+                            {s.startTime}–{s.endTime}
+                            {s.zoneLabel ? ` ${s.zoneLabel}` : ""}
+                          </span>
+                          <span className="text-[var(--muted)]">
+                            · {unlocked ? (s.topic ?? s.title) : s.title}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

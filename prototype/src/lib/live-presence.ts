@@ -3,6 +3,7 @@ import { notifyInBackground, KIND } from "@/lib/notify";
 import { cohortRoomName, roomDisplayName } from "@/lib/live-classroom";
 import { canAttendLive } from "@/lib/access";
 import { isOnlineBranch } from "@/lib/online-branch";
+import { studentsWhoCanEnterLiveClass } from "@/lib/live-eligibility";
 
 /**
  * Whether a class is happening RIGHT NOW, and who has been told.
@@ -528,6 +529,55 @@ export function announceLiveToNamedStudents(session: LiveSessionRow, studentIds:
     push: true,
     emailBody: `${tutor} started ${session.title}.\n\nJoin from the portal, or enter the code ${session.joinCode} at the live class page.`,
   });
+}
+
+/**
+ * The "your class is live" push for HYBRID and ONLINE students of the same
+ * branch and level who sit a DIFFERENT slot.
+ *
+ * `announceLiveSession` pins its cohort broadcast to branch + level + sitting,
+ * on the sound reasoning that telling the evening group the morning class
+ * started is how a school teaches everyone to ignore the bell. But a hybrid or
+ * online student is not tied to a sitting — `liveSessionForStudent` lets them
+ * walk into any live room for their branch and level — so a class in another
+ * slot genuinely IS their class, and the slot-pinned broadcast is the one
+ * thing standing between them and knowing it started.
+ *
+ * This is the by-video half of the same moment. It:
+ *  - excludes the session's own slot (the slot-pinned broadcast has that),
+ *  - runs every candidate through `studentsWhoCanEnterLiveClass`, so a student
+ *    behind the payment or photo lock gets no push (same rule as the popup),
+ *  - shares the `live-start:<id>` dedupe key, so a student somehow caught by
+ *    both fan-outs is still only buzzed once.
+ *
+ * Fire-and-forget like its siblings: awaited only far enough to resolve the
+ * recipient list, then handed to `notifyInBackground`.
+ */
+export async function announceLiveToVideoStudents(session: LiveSessionRow): Promise<void> {
+  if (session.kind !== "cohort" || !session.branchId || !session.level || !session.sessionSlot) return;
+
+  const candidates = await prisma.student.findMany({
+    where: {
+      deletedAt: null,
+      branchId: session.branchId,
+      level: session.level,
+      classType: { not: "private" },
+      // Their own sitting is already covered by the slot-pinned broadcast.
+      NOT: { sessionSlot: session.sessionSlot },
+      // Attends over video: the delivery mode says so, or the branch itself is
+      // online (the mode column is not always set on imported / half-filled
+      // records — same safety net used everywhere else).
+      OR: [
+        { deliveryMode: { in: ["hybrid", "online"] } },
+        { branch: { is: { mode: "online" } } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (!candidates.length) return;
+
+  const reachable = await studentsWhoCanEnterLiveClass(candidates.map((s) => s.id));
+  if (reachable.length) announceLiveToNamedStudents(session, reachable);
 }
 
 /** Ring named students again. Separate key per round, so a second ring really rings. */
