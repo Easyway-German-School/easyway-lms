@@ -19,6 +19,7 @@
 
 import { useRef, useState } from "react";
 import { CrossCircleIcon, ImageIcon } from "@/components/icons";
+import { useLightbox } from "@/components/ImageLightbox";
 import { uploadErrorMessage, uploadFile, validateImageFile } from "@/lib/upload";
 import { MAX_ATTACHMENTS, type TicketAttachment } from "@/lib/support-copy";
 
@@ -138,27 +139,34 @@ export function MessageAttachments({
   attachments: TicketAttachment[] | undefined | null;
   align?: "start" | "end";
 }) {
+  const { open } = useLightbox();
   if (!attachments || attachments.length === 0) return null;
+  // Every image on this one message opens as a set, so the viewer's arrows
+  // page between the screenshots the sender attached together.
+  const gallery = attachments.map((att) => ({ src: att.url, alt: att.name, downloadName: att.name }));
   return (
     <div
       className={`mt-1.5 flex flex-wrap gap-1.5 ${align === "end" ? "justify-end" : "justify-start"}`}
     >
       {attachments.map((att, index) => (
-        <a
+        <button
           key={`${att.url}-${index}`}
-          href={att.url}
-          target="_blank"
-          rel="noreferrer"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            open(gallery, index);
+          }}
           className="block overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-alt)]"
+          aria-label={`View ${att.name}`}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={att.url}
             alt={att.name}
             loading="lazy"
-            className="max-h-52 w-auto max-w-[13rem] object-cover"
+            className="max-h-52 w-auto max-w-[13rem] cursor-zoom-in object-cover"
           />
-        </a>
+        </button>
       ))}
     </div>
   );
