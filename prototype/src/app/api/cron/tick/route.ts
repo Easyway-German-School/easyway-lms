@@ -26,9 +26,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { withUnscoped } from "@/lib/tenant/context";
 
 export const dynamic = "force-dynamic";
-// The reconcile and retention passes talk to LiveKit and to the bucket, which
-// on a bad day is slower than the 10s default.
-export const maxDuration = 60;
+// The reconcile and retention passes talk to LiveKit and to the bucket, and
+// the transcription pass streams a full class recording through ffmpeg — on a
+// bad day none of that fits in 60s. 300s is the Pro plan's ceiling.
+export const maxDuration = 300;
 
 type JobResult = { job: string; ok: boolean; detail?: unknown; error?: string };
 

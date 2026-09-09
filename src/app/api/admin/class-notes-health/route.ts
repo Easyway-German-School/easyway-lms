@@ -4,9 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { ffmpegHealth } from "@/lib/audio-extract";
 
 export const dynamic = "force-dynamic";
-// An ASR call over a full recording is the slowest thing the app does; give
-// the POST room to clear a few of them in one press.
-export const maxDuration = 60;
+// Streaming a large recording out of the bucket, extracting its audio, then an
+// ASR + summary call each — the slowest thing the app does. 300s is the Pro
+// plan's ceiling and this needs most of it when a class ran to a full GB.
+export const maxDuration = 300;
 
 /**
  * "Why is there nothing in My Notes?" — answered for the office.
@@ -145,7 +146,10 @@ export async function POST() {
     error: error instanceof Error ? error.message : String(error),
   }));
 
-  const recordings = await processTranscriptionQueue(6).catch((error) => ({
+  // 4 recordings, not more: each can be a full-GB stream + extract + ASR +
+  // summary, and even at 300s a bigger batch risks the wall. Press again for
+  // the rest — `remaining` says whether to.
+  const recordings = await processTranscriptionQueue(4).catch((error) => ({
     attempted: 0,
     created: 0,
     failed: 0,
