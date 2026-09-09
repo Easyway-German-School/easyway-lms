@@ -28,6 +28,7 @@ import {
 } from "@/lib/live-classroom";
 import { lecturerCan } from "@/lib/lecturer-features";
 import { assignmentHasGroup, parseGroupKey, readAssignment } from "@/lib/lecturer-assignment";
+import { studentsWhoCanEnterLiveClass } from "@/lib/live-eligibility";
 
 export const dynamic = "force-dynamic";
 
@@ -373,7 +374,11 @@ export async function GET(request: Request) {
           },
           select: { id: true },
         });
-        announceLiveToNamedStudents(opened, named.map((s) => s.id));
+        // Only the ones who could actually answer it — a locked portal (unpaid
+        // deposit, or no profile photo) gets no "your class is live" push, the
+        // same way it gets no popup. See lib/live-eligibility.ts.
+        const reachable = await studentsWhoCanEnterLiveClass(named.map((s) => s.id));
+        announceLiveToNamedStudents(opened, reachable);
       }
     } else if (liveSession && student) {
       /**

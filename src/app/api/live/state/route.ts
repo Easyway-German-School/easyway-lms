@@ -3,7 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAttendLive } from "@/lib/access";
 import { isOnlineBranch } from "@/lib/online-branch";
-import { studentHasPortalAccess } from "@/lib/student-access";
+import { studentCanEnterLiveClass } from "@/lib/live-eligibility";
 import { liveSessionForStudent, liveWhere } from "@/lib/live-presence";
 import { cohortRoomName } from "@/lib/live-classroom";
 import { readAssignment, teachingGroups } from "@/lib/lecturer-assignment";
@@ -162,15 +162,15 @@ export async function GET() {
     /**
      * A LOCKED PORTAL DOES NOT GET THE "YOUR CLASS IS LIVE" POPUP.
      *
-     * A student who has not cleared their deposit (or has fallen behind on the
-     * balance past the grace window) cannot join — `/api/live/session` refuses
-     * them with the paywall — so telling them a class has started is a tease
-     * they can only answer with "pay now". The office's line: once a payment is
-     * confirmed, manually or otherwise, the class shows up; before that it does
-     * not. Same gate as the join route, and only run once we know there is
-     * actually a class to hide, so an ordinary "nothing live" poll is untouched.
+     * Either lock counts: a student who has not cleared their deposit (or is
+     * overdue on the balance past grace), OR one who is paid up but has no
+     * profile photo yet. Both hit a lock screen the moment they tap through, so
+     * a "your class is live" popup is a tease, not a nudge. Once the office
+     * confirms the payment — or the student adds a photo — the class shows up.
+     * Only run once we know there is actually a class to hide, so an ordinary
+     * "nothing live" poll is as cheap as before.
      */
-    if (!(await studentHasPortalAccess(student.id))) {
+    if (!(await studentCanEnterLiveClass(student.id))) {
       return NextResponse.json({ live: null, role: "student" });
     }
 

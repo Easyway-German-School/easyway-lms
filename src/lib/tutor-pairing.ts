@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { KIND, notify } from "@/lib/notify";
 import { liveWhere } from "@/lib/live-presence";
+import { studentCanEnterLiveClass } from "@/lib/live-eligibility";
 
 /**
  * Putting a named student on a named tutor.
@@ -101,7 +102,7 @@ export async function setStudentTutor(input: {
      * push already went out before this student existed on the roster. Same
      * dedupe key as that push, so a student who somehow got both is buzzed once.
      */
-    if (student.classType !== "private") {
+    if (student.classType !== "private" && (await studentCanEnterLiveClass(studentId))) {
       const liveNow = await prisma.liveClassSession.findFirst({
         where: { kind: "cohort", lecturerId: lecturer.id, ...liveWhere() },
         orderBy: { startedAt: "desc" },
