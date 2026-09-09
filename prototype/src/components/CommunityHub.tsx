@@ -31,6 +31,7 @@ import {
   SendIcon,
   TrashIcon,
 } from "@/components/icons";
+import { ZoomableImage } from "@/components/ImageLightbox";
 
 /**
  * THE COHORT'S GROUP CHAT.
@@ -1476,10 +1477,10 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                               />
                             </div>
                           ) : (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
+                            <ZoomableImage
                               src={message.attachment.url}
                               alt={message.attachment.name ?? "Attachment"}
+                              downloadName={message.attachment.name ?? undefined}
                               className="mt-2 max-h-64 rounded-xl object-cover"
                             />
                           )

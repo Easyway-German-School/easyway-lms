@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AdminShell from "@/components/AdminShell";
+import { ZoomableImage } from "@/components/ImageLightbox";
 
 /**
  * Moderation view for the community.
@@ -261,8 +262,11 @@ export default function AdminCommunityPage() {
                   </p>
 
                   {message.attachmentUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={message.attachmentUrl} alt="" className="mt-2 max-h-40 rounded-xl object-cover" />
+                    <ZoomableImage
+                      src={message.attachmentUrl}
+                      alt=""
+                      className="mt-2 max-h-40 rounded-xl object-cover"
+                    />
                   ) : null}
 
                   <div className="mt-3 flex flex-wrap items-center gap-3">

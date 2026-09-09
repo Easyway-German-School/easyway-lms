@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BookOpenIcon,
   CameraIcon,
   CommunityIcon,
   DeviceIcon,
@@ -28,6 +29,7 @@ import {
   ReactionLayer,
 } from "./ClassroomInteractions";
 import { FloorLight, HandFlag, SpeakingWave } from "./SpeakingIndicators";
+import LiveMaterialsPanel from "./LiveMaterialsPanel";
 import { useAudioLevels, type AudioLevelStore } from "./useAudioLevels";
 import { useRouter } from "next/navigation";
 
@@ -516,7 +518,7 @@ export default function LiveKitClassroom({
   /** Which tile the travelling green light is parked on. */
   const [lightIdentity, setLightIdentity] = useState<string | null>(null);
   const [immersive, setImmersive] = useState(false);
-  const [panel, setPanel] = useState<"hands" | "chat" | "switch" | null>(null);
+  const [panel, setPanel] = useState<"hands" | "chat" | "switch" | "materials" | null>(null);
   /**
    * A quiz the tutor has unlocked for this cohort, or null.
    *
@@ -1564,11 +1566,15 @@ export default function LiveKitClassroom({
           </div>
 
           {panel ? (
-            <aside className="flex max-h-[26rem] min-h-0 w-full shrink-0 flex-col rounded-2xl bg-slate-900/90 p-3 lg:max-h-none lg:w-80">
+            <aside
+              className={`flex max-h-[26rem] min-h-0 w-full shrink-0 flex-col rounded-2xl bg-slate-900/90 p-3 lg:max-h-none ${
+                panel === "materials" ? "lg:w-96" : "lg:w-80"
+              }`}
+            >
               <div className="mb-2 flex items-center gap-1 rounded-xl bg-white/5 p-1">
                 <button
                   onClick={() => setPanel("hands")}
-                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
                     panel === "hands" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
                   }`}
                 >
@@ -1576,15 +1582,23 @@ export default function LiveKitClassroom({
                 </button>
                 <button
                   onClick={() => setPanel("chat")}
-                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
                     panel === "chat" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
                   }`}
                 >
                   Chat
                 </button>
                 <button
+                  onClick={() => setPanel("materials")}
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
+                    panel === "materials" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Materials
+                </button>
+                <button
                   onClick={() => setPanel("switch")}
-                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
                     panel === "switch" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
                   }`}
                 >
@@ -1599,7 +1613,9 @@ export default function LiveKitClassroom({
                 </button>
               </div>
 
-              {panel === "hands" ? (
+              {panel === "materials" ? (
+                <LiveMaterialsPanel role={role} />
+              ) : panel === "hands" ? (
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
                   {role === "tutor" ? <ModeSwitch mode={interactions.mode} onChange={interactions.setMode} /> : null}
                   <HandQueue
@@ -1689,6 +1705,17 @@ export default function LiveKitClassroom({
               {interactions.unreadChat}
             </span>
           ) : null}
+        </button>
+
+        <button
+          onClick={() => setPanel(panel === "materials" ? null : "materials")}
+          title="Open your course materials beside the class — only you see what you open."
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+            panel === "materials" ? "bg-white/20 text-white" : "bg-white/10 text-white hover:bg-white/20"
+          }`}
+        >
+          <BookOpenIcon className="h-4 w-4" />
+          Materials
         </button>
 
         <button

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { SessionProvider } from "next-auth/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrandingProvider } from "@/components/BrandingProvider";
+import { LightboxProvider } from "@/components/ImageLightbox";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -22,7 +23,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
       <QueryClientProvider client={queryClient}>
-        <BrandingProvider>{children}</BrandingProvider>
+        <BrandingProvider>
+          <LightboxProvider>{children}</LightboxProvider>
+        </BrandingProvider>
       </QueryClientProvider>
     </SessionProvider>
   );
