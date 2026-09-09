@@ -156,7 +156,11 @@ export async function POST() {
         status: "completed",
         materialId: { not: null },
         startedAt: { gte: since },
-        OR: [{ transcript: null }, { transcript: { status: "failed" } }],
+        OR: [
+          { transcript: null },
+          { transcript: { status: "failed" } },
+          { transcript: { status: "skipped_too_large" } },
+        ],
       },
     }),
     prisma.material.count({

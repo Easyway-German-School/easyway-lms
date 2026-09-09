@@ -222,6 +222,25 @@ export function publicUrlFor(key: string, storage = objectStorage()): string {
 }
 
 /**
+ * A short-lived, query-signed GET URL for a stored object.
+ *
+ * For a tool that reads by URL rather than through this app — ffmpeg pulling
+ * only the audio track out of a multi-GB class recording, for one — so the
+ * file never has to be streamed through a serverless function or held in its
+ * memory. Returns null when there is no bucket (local disk, nothing to sign).
+ */
+export async function signedGetUrl(key: string, expiresInSeconds = 3600): Promise<string | null> {
+  const storage = storageForKey(key);
+  if (!storage) return null;
+  const aws = await signer(storage);
+  const url = new URL(objectUrl(key, storage));
+  // Clamp: at least a minute to be usable, at most a week (S3's SigV4 ceiling).
+  url.searchParams.set("X-Amz-Expires", String(Math.max(60, Math.min(expiresInSeconds, 604_800))));
+  const signed = await aws.sign(url.toString(), { method: "GET", aws: { signQuery: true } });
+  return signed.url;
+}
+
+/**
  * Recover the object key from a URL we previously handed out, so deletes can
  * find the file again. Returns null for anything that did not come from us.
  */

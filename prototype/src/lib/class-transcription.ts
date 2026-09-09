@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { getFile } from "@/lib/storage";
+import { getFile, signedGetUrl } from "@/lib/storage";
 import { transcribeAudio, type TranscriptSegment } from "@/lib/transcription";
-import { extractAudioForAsr } from "@/lib/audio-extract";
+import { extractAudioForAsr, extractAudioForAsrFromUrl } from "@/lib/audio-extract";
 import { callModel, activeModelName } from "@/lib/ai";
 import { cached } from "@/lib/ai-cache";
 import { parseModelJson } from "@/lib/safe-json";
@@ -261,10 +261,12 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
   const isPrivate = Boolean(recording.privateClassId);
   // "failed" is retryable — most failures seen in practice are a dropped
   // connection reading the file back from the bucket, not an authoritative
-  // "this can never work" answer. Only a status that already represents a
-  // real outcome (ready, or a considered decision like skipped_too_large/none)
-  // is left alone.
-  const RETRYABLE = new Set(["pending", "failed"]);
+  // "this can never work" answer. `skipped_too_large` is retryable now too:
+  // it used to mean "this file is bigger than we can pull into memory and it
+  // always will be", but the pipeline below no longer pulls the video into
+  // memory at all — ffmpeg streams the audio track straight from the bucket —
+  // so a row parked at that status before this change deserves another go.
+  const RETRYABLE = new Set(["pending", "failed", "skipped_too_large"]);
   if (recording.transcript && !RETRYABLE.has(recording.transcript.status)) return "already";
 
   await prisma.classTranscript.upsert({
@@ -274,31 +276,55 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
   });
 
   try {
-    const file = await getFile(recording.objectKey);
-    if (!file) throw new Error("recording file not found in storage");
+    const objectKey = recording.objectKey;
+    const filename = objectKey.split("/").pop() || "class.mp4";
 
-    const lengthHeader = file.headers.get("content-length");
-    if (lengthHeader && Number(lengthHeader) > MAX_FETCH_BYTES) {
-      await prisma.classTranscript.update({
-        where: { classRecordingId },
-        data: { status: "skipped_too_large", error: `File is ${Number(lengthHeader)} bytes, over this pipeline's ${MAX_FETCH_BYTES}-byte safety ceiling` },
-      });
-      return "skipped";
+    /**
+     * FIRST CHOICE: let ffmpeg stream the audio track straight out of the
+     * bucket.
+     *
+     * A class recording is a full video — `videoBitrate: 3000` in
+     * lib/recording.ts, which is a gigabyte-plus for a morning class — and the
+     * ASR call only needs ~14MB/hour of speech. Handing ffmpeg a presigned URL
+     * means it range-requests the container, keeps the audio, discards every
+     * video frame, and the video is NEVER held in this function's memory or on
+     * /tmp. So the file being 1GB (the "Too large" failures on prod) stops
+     * mattering. Falls through to the in-memory path below if there is no
+     * bucket (local dev) or ffmpeg-over-http is unavailable.
+     */
+    let asrInput: { buffer: Buffer; filename: string } | null = null;
+    const url = await signedGetUrl(objectKey, 3600).catch(() => null);
+    if (url) {
+      asrInput = await extractAudioForAsrFromUrl(url);
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const filename = recording.objectKey.split("/").pop() || "class.mp4";
+    if (!asrInput) {
+      // FALLBACK: fetch the whole file and work on it in memory. Only safe for
+      // a file a serverless function can actually hold, so the size ceiling
+      // still guards THIS path — but it is no longer the front door, so a big
+      // recording only lands here if streaming extraction was not possible at
+      // all (no ffmpeg, no bucket), which is the genuinely unrecoverable case.
+      const file = await getFile(objectKey);
+      if (!file) throw new Error("recording file not found in storage");
 
-    // Send the ASR call the audio track only, re-encoded down to speech
-    // bitrate — see audio-extract.ts for why this is the difference between
-    // "fits under Groq's request-size limit" and "413s on a 5-minute clip".
-    // Falls back to the original file untouched if extraction fails for any
-    // reason (ffmpeg missing, a corrupt input) — that is the exact behaviour
-    // this pipeline already had before, not a new failure mode.
-    const extracted = await extractAudioForAsr(buffer, filename);
-    const asr = extracted
-      ? await transcribeAudio(extracted.buffer, extracted.filename)
-      : await transcribeAudio(buffer, filename);
+      const lengthHeader = file.headers.get("content-length");
+      if (lengthHeader && Number(lengthHeader) > MAX_FETCH_BYTES) {
+        await prisma.classTranscript.update({
+          where: { classRecordingId },
+          data: {
+            status: "skipped_too_large",
+            error: `Streaming audio extraction was unavailable and the ${Number(lengthHeader)}-byte file is over the ${MAX_FETCH_BYTES}-byte in-memory ceiling`,
+          },
+        });
+        return "skipped";
+      }
+
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const extracted = await extractAudioForAsr(buffer, filename);
+      asrInput = extracted ?? { buffer, filename };
+    }
+
+    const asr = await transcribeAudio(asrInput.buffer, asrInput.filename);
     if (!asr) {
       await prisma.classTranscript.update({
         where: { classRecordingId },
@@ -413,10 +439,14 @@ export async function processTranscriptionQueue(limit = 2): Promise<{ attempted:
     where: {
       status: "completed",
       materialId: { not: null },
-      // No transcript yet, OR one that failed — see the RETRYABLE note in
-      // generateTranscriptForRecording for why a failure gets another go
-      // instead of being left for good the first time a fetch drops mid-stream.
-      OR: [{ transcript: null }, { transcript: { status: "failed" } }],
+      // No transcript yet, OR one that failed, OR one parked at
+      // `skipped_too_large` before streaming extraction existed — see the
+      // RETRYABLE note in generateTranscriptForRecording.
+      OR: [
+        { transcript: null },
+        { transcript: { status: "failed" } },
+        { transcript: { status: "skipped_too_large" } },
+      ],
       startedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
     },
     orderBy: { startedAt: "desc" },

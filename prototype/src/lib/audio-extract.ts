@@ -60,3 +60,51 @@ export async function extractAudioForAsr(
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+/**
+ * The same strip-to-speech pass, but ffmpeg reads the source straight from a
+ * URL (a presigned bucket link) instead of a local file.
+ *
+ * This is what makes a multi-GB class video transcribable on a serverless
+ * function at all: ffmpeg range-requests the container, keeps the audio track,
+ * throws away every video frame, and seeks to the `moov` atom over HTTP as
+ * needed — so the video is never pulled into this process's memory or written
+ * to /tmp. Output is the identical ~14MB/hour Opus `extractAudioForAsr`
+ * produces. Returns null on any failure so the caller can fall back to the
+ * in-memory path (which only works for a file small enough to hold).
+ */
+export async function extractAudioForAsrFromUrl(
+  url: string,
+): Promise<{ buffer: Buffer; filename: string } | null> {
+  if (!ffmpegPath) return null;
+
+  const dir = await mkdtemp(path.join(tmpdir(), "easyway-asr-url-"));
+  const outPath = path.join(dir, "out.ogg");
+
+  try {
+    await run(
+      ffmpegPath,
+      [
+        "-y",
+        "-nostdin",
+        // Survive a CDN hiccup mid-download rather than failing the whole run.
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "30",
+        "-i", url,
+        "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libopus", "-b:a", "32k",
+        outPath,
+      ],
+      { timeout: 12 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 },
+    );
+
+    const buffer = await readFile(outPath);
+    if (buffer.length === 0) return null;
+    return { buffer, filename: "audio.ogg" };
+  } catch (error) {
+    console.error("[audio-extract] URL extraction failed:", error);
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
