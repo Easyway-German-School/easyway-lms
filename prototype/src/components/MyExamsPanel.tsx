@@ -3,6 +3,7 @@ import { CalendarIcon, ExternalLinkIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useState } from "react";
 import ExamBodyComingSoon from "@/components/ExamBodyComingSoon";
+import InternationalPayOption from "@/components/InternationalPayOption";
 import { examCountdown, examWhen } from "@/lib/exam-schedule";
 
 /**
@@ -289,6 +290,11 @@ export default function MyExamsPanel() {
                           >
                             {payingId === e.registrationId ? "Opening checkout…" : `Pay ₦${e.fee.toLocaleString()}`}
                           </button>
+                          {/* Opt-in international-card path; the button above is Paystack. */}
+                          <InternationalPayOption
+                            payload={{ kind: "exam_fee", registrationId: e.registrationId }}
+                            className="mt-2"
+                          />
                         </div>
                       )}
                       {(e.paymentStatus === "paid" || e.paymentStatus === "waived") && (

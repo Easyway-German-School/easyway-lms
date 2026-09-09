@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { verifyPaystackTransaction } from "@/lib/paystack-verify";
+import { verifyFlutterwaveTransaction } from "@/lib/flutterwave";
 import LoadingExperience from "@/components/LoadingExperience";
 import PaystackAutoRedirectClient from "@/components/PaystackAutoRedirectClient";
 import PaystackClearPendingClient from "@/components/PaystackClearPendingClient";
@@ -42,6 +43,9 @@ type EnrollmentSuccessPageProps = {
     trxref?: string;
     status?: string;
     source?: string;
+    /** Flutterwave appends these on its redirect. */
+    tx_ref?: string;
+    transaction_id?: string;
   }>;
 };
 
@@ -50,6 +54,15 @@ const PENDING_STATUSES = new Set(["pending", "ongoing", "processing", "queued"])
 
 export default async function EnrollmentSuccessPage({ searchParams }: EnrollmentSuccessPageProps) {
   const params = await searchParams;
+
+  // ---- Flutterwave (international card) -----------------------------------
+  // Reached with `?source=flutterwave&transaction_id=…`. The webhook is the
+  // real recorder — this screen confirms for the student and, on the happy
+  // path, persists too so the dashboard is ready the instant they land.
+  if (params?.source === "flutterwave" || params?.transaction_id) {
+    return <FlutterwaveOutcome transactionId={params?.transaction_id || ""} txRef={params?.tx_ref || ""} />;
+  }
+
   // Paystack appends BOTH `trxref` and `reference`; take whichever arrived.
   const reference = params?.reference || params?.trxref || "";
 
@@ -180,6 +193,98 @@ export default async function EnrollmentSuccessPage({ searchParams }: Enrollment
       <div className="mt-4">
         <PaystackManualVerifyClient reference={reference} />
       </div>
+      <Actions primary={{ href: "/payments", label: "See my payments" }} secondary={{ href: "/programs", label: "Back to tuition" }} />
+    </Shell>
+  );
+}
+
+/**
+ * Flutterwave's return screen. Fewer states than the Paystack one: Flutterwave
+ * has no "pending" hosted-checkout status to speak of, and the webhook is the
+ * authoritative recorder, so this is confirm / not-confirmed / could-not-check
+ * plus the "paid but not recorded" split the Paystack path also makes.
+ */
+async function FlutterwaveOutcome({ transactionId, txRef }: { transactionId: string; txRef: string }) {
+  if (!transactionId) {
+    return (
+      <Shell>
+        <Outcome
+          tone="warn"
+          icon={<LockIcon className="h-7 w-7" />}
+          title="No payment reference"
+          body="There is no transaction id in the link you followed. If you have just paid with an international card, open your payments page — anything received is listed there once it clears."
+        />
+        <Actions primary={{ href: "/payments", label: "See my payments" }} secondary={{ href: "/programs", label: "Back to tuition" }} />
+      </Shell>
+    );
+  }
+
+  const result = await verifyFlutterwaveTransaction(transactionId);
+  const transaction = result.data;
+  const status = String(transaction?.status || "");
+  const paid = status.toLowerCase() === "successful";
+  const amount = typeof transaction?.amount === "number" ? transaction.amount : null;
+  const currency = String(transaction?.currency || "NGN");
+  const reference = transaction?.tx_ref || txRef;
+
+  if (result.success && !result.persistFailed && paid) {
+    return (
+      <Shell>
+        <Outcome
+          tone="good"
+          icon={<CheckCircleIcon className="h-7 w-7" />}
+          title="Payment confirmed"
+          body="Your international card payment went through and your classes are unlocked. Taking you to your dashboard now…"
+        />
+        <Reference reference={reference} amount={amount} currency={currency} status={status} />
+        <Actions
+          primary={{ href: "/dashboard?paymentRefresh=1", label: "Go to my dashboard" }}
+          secondary={{ href: "/payments", label: "See my payments" }}
+        />
+        <PaystackSuccessRedirect />
+      </Shell>
+    );
+  }
+
+  if (result.persistFailed) {
+    return (
+      <Shell>
+        <Outcome
+          tone="warn"
+          icon={<CheckCircleIcon className="h-7 w-7" />}
+          title="Payment received — your account is still catching up"
+          body="Flutterwave has confirmed your payment. We could not finish updating your account automatically, so your classes may not be open yet. Nothing is lost and you will not be charged again — it usually clears within a few minutes."
+        />
+        <Reference reference={reference} amount={amount} currency={currency} status={status} />
+        <Actions primary={{ href: "/payments", label: "See my payments" }} secondary={{ href: "/dashboard", label: "Go to dashboard" }} />
+      </Shell>
+    );
+  }
+
+  if (result.success) {
+    return (
+      <Shell>
+        <Outcome
+          tone="bad"
+          icon={<CrossIcon className="h-7 w-7" strokeWidth={2.4} />}
+          title="This payment did not go through"
+          body="Flutterwave reports this transaction as unsuccessful. Nothing has been charged to your card. You can start the checkout again whenever you are ready."
+        />
+        <Reference reference={reference} amount={amount} currency={currency} status={status || "unknown"} />
+        <Actions primary={{ href: "/programs", label: "Try payment again" }} secondary={{ href: "/payments", label: "See my payments" }} />
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell>
+      <Outcome
+        tone="warn"
+        icon={<LockIcon className="h-7 w-7" />}
+        title="We could not check this payment"
+        body={`${result.error || "Flutterwave did not respond."} If money left your account, it is safe — nothing here cancels a payment, and the confirmation usually lands within a few minutes.`}
+      />
+      <Reference reference={reference} amount={amount} currency={currency} status={status || "unknown"} />
       <Actions primary={{ href: "/payments", label: "See my payments" }} secondary={{ href: "/programs", label: "Back to tuition" }} />
     </Shell>
   );

@@ -18,13 +18,16 @@ import BrandLogo from "@/components/BrandLogo";
 function PaidContent() {
   const params = useSearchParams();
   const reference = params.get("reference") ?? params.get("trxref") ?? "";
+  // Flutterwave (international card) returns a numeric transaction id instead.
+  const flwTransactionId = params.get("transaction_id") ?? "";
+  const isFlutterwave = params.get("source") === "flutterwave" || Boolean(flwTransactionId);
 
   const [state, setState] = useState<"checking" | "paid" | "failed">("checking");
   const [amount, setAmount] = useState<number | null>(null);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if (!reference) {
+    if (!reference && !flwTransactionId) {
       setState("failed");
       setMessage("No payment reference was provided.");
       return;
@@ -32,9 +35,10 @@ function PaidContent() {
 
     (async () => {
       try {
-        const res = await fetch(`/api/exam-centre/pay?reference=${encodeURIComponent(reference)}`, {
-          cache: "no-store",
-        });
+        const url = isFlutterwave
+          ? `/api/flutterwave/verify?transaction_id=${encodeURIComponent(flwTransactionId)}`
+          : `/api/exam-centre/pay?reference=${encodeURIComponent(reference)}`;
+        const res = await fetch(url, { cache: "no-store" });
         const data = await res.json();
         if (res.ok && data.paid) {
           setAmount(data.amount ?? null);
@@ -48,7 +52,7 @@ function PaidContent() {
         setMessage("We could not reach the payment service.");
       }
     })();
-  }, [reference]);
+  }, [reference, flwTransactionId, isFlutterwave]);
 
   return (
     <div className="mx-auto max-w-md px-6 py-20">

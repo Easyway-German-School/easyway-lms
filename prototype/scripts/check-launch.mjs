@@ -104,6 +104,25 @@ for (const key of ["VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY"]) {
 }
 if (isSet("VAPID_PUBLIC_KEY") && isSet("VAPID_PRIVATE_KEY")) pass("VAPID keys", "push is configured");
 
+// Payments. Paystack is the primary gateway; Flutterwave is the opt-in
+// international-card path and is all-or-nothing — a partial set means the
+// "Pay with an international card" button 503s.
+if (!isSet("PAYSTACK_SECRET_KEY")) fail("PAYSTACK_SECRET_KEY", "unset — no payments can be taken");
+else pass("PAYSTACK_SECRET_KEY", env.PAYSTACK_SECRET_KEY.startsWith("sk_live") ? "live" : "TEST key");
+
+const flwKeys = ["FLW_SECRET_KEY", "FLW_PUBLIC_KEY", "FLW_SECRET_HASH"];
+const flwSet = flwKeys.filter(isSet);
+if (flwSet.length === 0) {
+  warn("Flutterwave", "no FLW_* keys — the international-card option stays hidden/disabled (Paystack unaffected)");
+} else if (flwSet.length < flwKeys.length) {
+  fail("Flutterwave", `only ${flwSet.join(", ")} set — need all of ${flwKeys.join(", ")} or none`);
+} else {
+  pass("Flutterwave", env.FLW_SECRET_KEY.includes("TEST") ? "TEST keys" : "live keys");
+  if (!isSet("NEXTAUTH_URL") || /localhost/.test(env.NEXTAUTH_URL || "")) {
+    warn("Flutterwave redirect", "NEXTAUTH_URL must be the real domain — it is the checkout redirect target");
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 
 if (!target) {

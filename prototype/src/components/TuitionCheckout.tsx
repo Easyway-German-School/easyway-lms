@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
 
 import { safeJson } from "@/lib/safe-json";
+import InternationalPayOption from "@/components/InternationalPayOption";
 import type { FullPaymentOffer, Perk } from "@/lib/pay-in-full";
 
 /**
@@ -208,6 +209,12 @@ export default function TuitionCheckout({ pathwayName }: { pathwayName: string }
           <p className={`mt-4 text-center text-xs font-semibold uppercase tracking-[0.18em] ${offer.windowOpen ? "text-[#e8cf8f]" : "text-[var(--muted)]"}`}>
             {options.windowNote}
           </p>
+
+          {/* Opt-in international-card path. Paystack above stays the default. */}
+          <InternationalPayOption
+            payload={{ pathwayName, pathwayId: pathwayName, paymentStage: "full" }}
+            className="mt-4 text-center"
+          />
         </div>
 
         {/* Real peer behaviour, or nothing at all. */}

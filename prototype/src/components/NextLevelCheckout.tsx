@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { safeJson } from "@/lib/safe-json";
+import InternationalPayOption from "@/components/InternationalPayOption";
 import { naira, type LevelAdvanceOffer } from "@/lib/level-advance";
 
 /**
@@ -166,6 +167,9 @@ export default function NextLevelCheckout() {
         {checkoutError ? (
           <p className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800">{checkoutError}</p>
         ) : null}
+
+        {/* Opt-in international-card path. Paystack above stays the default. */}
+        <InternationalPayOption payload={{ paymentStage: "full", forNextLevel: true }} />
       </div>
     </div>
   );

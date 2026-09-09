@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { SparklesIcon, ArrowRightIcon, StarIcon, CheckCircleIcon } from "@/components/icons";
+import InternationalPayOption from "@/components/InternationalPayOption";
 import { PRIVATE_CLASS_UPGRADE_PRICE } from "@/lib/payment";
 
 /**
@@ -168,6 +169,13 @@ export default function PremiumPrivateClasses({ student }: { student: StudentInf
           </div>
 
           {message ? <p className="mt-4 text-sm text-rose-300">{message}</p> : null}
+
+          {/* Opt-in international-card path. Paystack ("Go private") stays default. */}
+          <InternationalPayOption
+            payload={{ type: "private_class_upgrade" }}
+            hint="Paying from outside Nigeria?"
+            className="mt-4"
+          />
         </div>
       </div>
     </div>
