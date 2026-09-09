@@ -10,7 +10,7 @@ import BulkStudentAdd from "@/components/BulkStudentAdd";
 import { goalFor } from "@/lib/germany-goals";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { isOnlineBranchName } from "@/lib/online-branch";
-import { CalendarIcon } from "@/components/icons";
+import { CalendarIcon, CameraIcon } from "@/components/icons";
 import { packageOptions, countries } from "@/app/auth/signup/options";
 import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload";
 import { DERIVED_SEGMENT_IDS, SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
@@ -233,13 +233,15 @@ function StudentsRoster() {
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState("");
   const [studentError, setStudentError] = useState("");
-  /** Shown once, right after a manual add, so the admin has something to copy. */
-  const [savedCredentials, setSavedCredentials] = useState<{
-    name: string;
-    email: string;
-    password: string;
-    studentCode?: string | null;
-  } | null>(null);
+  /**
+   * Logins minted by the manual add form this session, in the order added.
+   * "Save & add another" appends a row; a plain "Save student" starts the list
+   * fresh with just the one. Shown once so the admin can copy or email them —
+   * never re-fetched.
+   */
+  const [savedCredentials, setSavedCredentials] = useState<
+    Array<{ name: string; email: string; password: string; studentCode?: string | null }>
+  >([]);
   /** Whether the "send their login by email?" prompt has been answered yet, for the credentials just created. */
   const [sendCredsState, setSendCredsState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   /** Which row's tutor select is mid-save, so it can be disabled while it is. */
@@ -359,10 +361,11 @@ function StudentsRoster() {
     void loadStudents();
   }, [loadStudents]);
 
-  async function handleSaveStudent() {
+  async function handleSaveStudent(addAnother = false) {
     setStudentError("");
-    setSavedCredentials(null);
     setSendCredsState("idle");
+    // A plain save starts the minted-logins list fresh; "add another" appends.
+    if (!addAnother) setSavedCredentials([]);
     if (!newName.trim() || !newEmail.trim()) {
       setStudentError("Name and email are required.");
       return;
@@ -427,19 +430,34 @@ function StudentsRoster() {
 
     if (wasNewStudent) {
       const data = await res.json().catch(() => ({}));
-      setSavedCredentials({
+      const minted = {
         name: newName.trim(),
         email: newEmail.trim().toLowerCase(),
         password: typeof data?.password === "string" ? data.password : newPassword.trim(),
         studentCode: data?.studentCode ?? null,
-      });
+      };
+      setSavedCredentials((prev) => [...prev, minted]);
     }
 
     setEditingStudentId(null);
+    // Per-student identity fields always clear.
     setNewName("");
     setNewEmail("");
     setNewPhone("");
     setNewPassword("");
+    setNewAmountPaid("");
+    setNewPhotoUrl("");
+    setPhotoUploading(false);
+    setPhotoUploadError("");
+
+    if (addAnother) {
+      // Keep the cohort context — level, branch, tutor, status, delivery,
+      // batch, pathway and location — so a row of classmates is just name and
+      // email each time. The form stays open, focused for the next entry.
+      await loadStudents();
+      return;
+    }
+
     setNewLevel("A1");
     setNewBranchId("");
     setNewTutorId("");
@@ -447,7 +465,6 @@ function StudentsRoster() {
     setNewDeliveryMode("physical");
     setNewBatch("");
     setNewPathway(packageOptions[0]);
-    setNewAmountPaid("");
     resetExtraStudentFields();
     setShowStudentForm(false);
     await loadStudents();
@@ -455,16 +472,19 @@ function StudentsRoster() {
 
   /** The "send it now?" action behind the credentials banner — single-add's version of the bulk tools' prompt. */
   async function sendSavedCredentials() {
-    if (!savedCredentials) return;
+    if (savedCredentials.length === 0) return;
     setSendCredsState("sending");
     try {
       const res = await fetch("/api/admin/students/send-credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ students: [savedCredentials] }),
+        body: JSON.stringify({ students: savedCredentials }),
       });
       const data = await res.json().catch(() => ({}));
-      const ok = res.ok && data?.results?.[0]?.emailed;
+      const ok =
+        res.ok &&
+        Array.isArray(data?.results) &&
+        data.results.some((r: { emailed?: boolean }) => r?.emailed);
       setSendCredsState(ok ? "sent" : "error");
     } catch {
       setSendCredsState("error");
@@ -602,7 +622,7 @@ function StudentsRoster() {
     // was created. Adjustments go through the student's own finance screen.
     setNewAmountPaid("");
     setStudentError("");
-    setSavedCredentials(null);
+    setSavedCredentials([]);
     setShowStudentForm(true);
   }
 
@@ -624,7 +644,7 @@ function StudentsRoster() {
     setNewAmountPaid("");
     resetExtraStudentFields();
     setStudentError("");
-    setSavedCredentials(null);
+    setSavedCredentials([]);
     setShowStudentForm(false);
   }
 
@@ -1232,19 +1252,17 @@ function StudentsRoster() {
             looking at this page, not hunting for an importer in the sidebar. */}
         <BulkStudentAdd branches={branches} onImported={loadStudents} />
 
-        {savedCredentials ? (
+        {savedCredentials.length > 0 ? (
           <div className="space-y-3 rounded-3xl border border-emerald-300 bg-emerald-50 px-6 py-4 text-sm text-emerald-800">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p>
-                <strong>{savedCredentials.name}</strong> was added
-                {savedCredentials.studentCode ? ` — ${savedCredentials.studentCode}` : ""}. Login — email:{" "}
-                <span className="font-mono">{savedCredentials.email}</span>, password:{" "}
-                <span className="font-mono">{savedCredentials.password}</span>
+              <p className="font-semibold">
+                {savedCredentials.length} student{savedCredentials.length === 1 ? "" : "s"} added. Copy the
+                logins now — they are not shown again.
               </p>
               <button
                 type="button"
                 onClick={() => {
-                  setSavedCredentials(null);
+                  setSavedCredentials([]);
                   setSendCredsState("idle");
                 }}
                 className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-semibold text-emerald-800"
@@ -1252,11 +1270,23 @@ function StudentsRoster() {
                 Dismiss
               </button>
             </div>
+            <ul className="space-y-1">
+              {savedCredentials.map((cred) => (
+                <li key={cred.email}>
+                  <strong>{cred.name}</strong>
+                  {cred.studentCode ? ` — ${cred.studentCode}` : ""} · email:{" "}
+                  <span className="font-mono">{cred.email}</span> · password:{" "}
+                  <span className="font-mono">{cred.password}</span>
+                </li>
+              ))}
+            </ul>
             {/* The credentials stay on screen either way — this is only about
-                whether the student also gets them by email right now. */}
+                whether the students also get them by email right now. */}
             <div className="flex flex-wrap items-center gap-3 border-t border-emerald-200 pt-3">
               {sendCredsState === "sent" ? (
-                <p className="font-semibold">Their login details have been emailed to them.</p>
+                <p className="font-semibold">
+                  Login details emailed{savedCredentials.length === 1 ? "" : " to everyone in the list"}.
+                </p>
               ) : sendCredsState === "error" ? (
                 <>
                   <p className="font-semibold text-amber-700">Could not send that email — try again, or hand the login over directly.</p>
@@ -1270,7 +1300,13 @@ function StudentsRoster() {
                 </>
               ) : (
                 <>
-                  <p>Send {savedCredentials.name.split(" ")[0]} their login details by email now?</p>
+                  <p>
+                    Email{" "}
+                    {savedCredentials.length === 1
+                      ? savedCredentials[0].name.split(" ")[0]
+                      : `${savedCredentials.length} students`}{" "}
+                    their login details by email now?
+                  </p>
                   <button
                     type="button"
                     disabled={sendCredsState === "sending"}
@@ -1574,11 +1610,21 @@ function StudentsRoster() {
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
                 type="button"
-                onClick={handleSaveStudent}
+                onClick={() => void handleSaveStudent(false)}
                 className="rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white"
               >
                 {editingStudentId ? "Update student" : "Save student"}
               </button>
+              {!editingStudentId ? (
+                <button
+                  type="button"
+                  onClick={() => void handleSaveStudent(true)}
+                  className="rounded-lg border border-[var(--accent)] px-4 py-3 text-sm font-semibold text-[var(--accent)]"
+                  title="Save this student and keep the form open — level, branch, session, batch and pathway stay set for the next one"
+                >
+                  Save &amp; add another
+                </button>
+              ) : null}
               {editingStudentId ? (
                 <button
                   type="button"
@@ -1679,6 +1725,19 @@ function StudentsRoster() {
                   const isPrivateMember = student.classType === "private";
                   const isWeekender = student.sessionSlot === "weekend";
                   const money = (student as unknown as { _finance?: StudentFinanceRow })._finance;
+                  // No photo on file → the student's portal is walled off from
+                  // every class page (see lib/access.ts isPhotoGatedRoute / the
+                  // PhotoLockScreen). Same field and gating as the weekly Becca
+                  // nudge, which only chases active students, so match that here.
+                  const hasNoPhoto =
+                    (student.status ?? "active") === "active" &&
+                    !(
+                      student.admission &&
+                      typeof student.admission === "object" &&
+                      !Array.isArray(student.admission) &&
+                      typeof (student.admission as Record<string, unknown>).photoUrl === "string" &&
+                      String((student.admission as Record<string, unknown>).photoUrl).trim().length > 0
+                    );
                   return (
                   <tr
                     key={student.id}
@@ -1718,6 +1777,15 @@ function StudentsRoster() {
                         >
                           <CalendarIcon className="h-3 w-3" />
                           Weekend
+                        </span>
+                      ) : null}
+                      {hasNoPhoto ? (
+                        <span
+                          title="No profile photo on file — this student's portal is locked to their profile, notifications and payments only. Every class page shows an &quot;add your photo&quot; wall until one is uploaded. Becca nudges them once a week automatically; the office can set one from this student's Edit form."
+                          className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700"
+                        >
+                          <CameraIcon className="h-3 w-3" />
+                          No photo · portal locked
                         </span>
                       ) : null}
                       {highlighted && money && (
