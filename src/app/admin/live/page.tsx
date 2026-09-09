@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 import BrandLoader from "@/components/BrandLoader";
 import AdminObserver from "@/components/live/AdminObserver";
+import ClassNotesHealth from "@/components/admin/ClassNotesHealth";
 import { PulseIcon, VideoIcon, ChevronRightIcon, EyeIcon } from "@/components/icons";
 
 /**
@@ -156,6 +157,8 @@ export default function AdminLivePage() {
           {error ? (
             <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>
           ) : null}
+
+          <ClassNotesHealth />
 
           {sessions.length === 0 ? (
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center">
