@@ -241,6 +241,11 @@ export function spaceWhereForAssignment(assignment: LecturerAssignment): Record<
  * reading side ever looked at it: the column set a tutor who could not see
  * them. This is the join that makes it mean something.
  *
+ * `StudentCoTutor` is the THIRD route, and reads exactly like the second: an
+ * online or hybrid student shared onto this tutor as an extra teacher (see
+ * src/lib/tutor-pairing.ts) is on their roster for every purpose the primary
+ * pairing is — register, gradebook, live class.
+ *
  * A named student is IN, whatever the assignment says. The office naming
  * somebody is a deliberate act and outranks a pattern match — a rule that let
  * the branch filter overrule it would silently drop precisely the students who
@@ -251,7 +256,9 @@ export function studentWhereForLecturer(
   lecturerId?: string | null,
 ): Record<string, unknown> | null {
   const cohort = studentWhereForAssignment(assignment);
-  const named = lecturerId ? { tutorId: lecturerId } : null;
+  const named = lecturerId
+    ? { OR: [{ tutorId: lecturerId }, { coTutors: { some: { lecturerId } } }] }
+    : null;
 
   if (cohort && named) return { OR: [cohort, named] };
   return cohort ?? named;
@@ -276,13 +283,30 @@ export function studentWhereForLecturerScope(
   const sessionSlot = options?.sessionSlot ? String(options.sessionSlot).trim().toLowerCase() : null;
   const branchId = options?.branchId ? String(options.branchId) : null;
 
-  const named: Record<string, unknown> = lecturerId ? { tutorId: lecturerId } : {};
-  if (level) named.level = level;
-  if (sessionSlot) named.sessionSlot = sessionSlot;
-  if (branchId) named.branchId = branchId;
+  // The level / sitting / branch narrowing that applies to a named student,
+  // whichever route named them.
+  const namedFilters: Record<string, unknown> = {};
+  if (level) namedFilters.level = level;
+  if (sessionSlot) namedFilters.sessionSlot = sessionSlot;
+  if (branchId) namedFilters.branchId = branchId;
+
+  // A student is "named" onto this tutor if they are the primary tutor OR a
+  // co-tutor — the same two routes as studentWhereForLecturer, each carrying
+  // the narrowing above.
+  const namedClauses: Record<string, unknown>[] = lecturerId
+    ? [
+        { ...namedFilters, tutorId: lecturerId },
+        { ...namedFilters, coTutors: { some: { lecturerId } } },
+      ]
+    : Object.keys(namedFilters).length
+      ? [namedFilters]
+      : [];
 
   const cohortWhere = studentWhereForAssignment(assignment);
-  if (!cohortWhere) return Object.keys(named).length ? named : null;
+  if (!cohortWhere) {
+    if (!namedClauses.length) return null;
+    return namedClauses.length === 1 ? namedClauses[0] : { OR: namedClauses };
+  }
 
   const narrowed: Record<string, unknown> = { ...cohortWhere };
 
@@ -325,8 +349,8 @@ export function studentWhereForLecturerScope(
     }
   }
 
-  if (Object.keys(named).length) {
-    return { OR: [narrowed, named] };
+  if (namedClauses.length) {
+    return { OR: [narrowed, ...namedClauses] };
   }
 
   return narrowed;
@@ -386,6 +410,13 @@ export function belongsToLecturer(
   lecturerId: string | null | undefined,
   student: {
     tutorId?: string | null;
+    /** Extra tutors on this student (`Student.coTutors`) — a co-tutor is on the
+     *  roster for every purpose the primary is. Pass either the raw relation
+     *  (`coTutors: { select: { lecturerId: true } }`) or a flat id list;
+     *  callers must select one of them for a shared student to survive the
+     *  in-memory batch check below. */
+    coTutors?: { lecturerId: string }[] | null;
+    coTutorIds?: string[] | null;
     admission?: unknown;
     branchId?: string | null;
     level?: string | null;
@@ -393,6 +424,13 @@ export function belongsToLecturer(
   },
 ): boolean {
   if (lecturerId && student.tutorId && student.tutorId === lecturerId) return true;
+  if (
+    lecturerId &&
+    (student.coTutorIds?.includes(lecturerId) ||
+      student.coTutors?.some((link) => link.lecturerId === lecturerId))
+  ) {
+    return true;
+  }
 
   const pinnedGroups = assignment.groups.filter((group) => Boolean(group.batch));
   const hasGroupKeys = student.level != null && student.sessionSlot != null;

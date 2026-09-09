@@ -183,10 +183,11 @@ export async function POST(request: Request) {
                   //
                   // Two ways to belong to this room, matching
                   // `liveSessionForStudent`: the cohort (branch+level+sitting),
-                  // OR named onto this session's tutor. Without the second
-                  // clause a tutor could not ring the very online student the
-                  // office just handed them, because that student's cohort
-                  // fields never lined up with the room.
+                  // OR named onto this session's tutor — as the primary tutor
+                  // or a co-tutor. Without the second clause a tutor could not
+                  // ring the very online student the office just handed them,
+                  // because that student's cohort fields never lined up with
+                  // the room.
                   where: {
                     id: { in: requested },
                     OR: [
@@ -195,7 +196,12 @@ export async function POST(request: Request) {
                         level: owned.level,
                         sessionSlot: owned.sessionSlot,
                       },
-                      owned.lecturer?.id ? { tutorId: owned.lecturer.id } : { id: "__none__" },
+                      owned.lecturer?.id
+                        ? { tutorId: owned.lecturer.id }
+                        : { id: "__none__" },
+                      owned.lecturer?.id
+                        ? { coTutors: { some: { lecturerId: owned.lecturer.id } } }
+                        : { id: "__none__" },
                     ],
                   } as any,
                   select: { id: true },

@@ -198,6 +198,9 @@ function StudentsRoster() {
   const [loading, setLoading] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
   const [lecturers, setLecturers] = useState<Array<{ id: string; user: { name?: string | null; email: string } }>>([]);
+  // Whether this school may put more than one tutor on an online / hybrid
+  // student. Echoed by the roster GET; drives the "Additional tutors" picker.
+  const [sharedStudentsEnabled, setSharedStudentsEnabled] = useState(false);
 
   // Seeded from the URL like the filters above — lets a link from elsewhere
   // (the Travel Package roster's "Add a student" button) land here with the
@@ -212,6 +215,9 @@ function StudentsRoster() {
   const [newLevel, setNewLevel] = useState("A1");
   const [newBranchId, setNewBranchId] = useState<string>("");
   const [newTutorId, setNewTutorId] = useState<string>("");
+  // Extra tutors beyond the primary — online / hybrid students only, and only
+  // when `sharedStudentsEnabled`. Never includes `newTutorId`.
+  const [newCoTutorIds, setNewCoTutorIds] = useState<string[]>([]);
   const [newStatus, setNewStatus] = useState("active");
   const [newClassType, setNewClassType] = useState("group");
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
@@ -305,6 +311,7 @@ function StudentsRoster() {
       setFocusMeta(data.focus ?? null);
       setMatchedIds(Array.isArray(data.matchedIds) ? new Set<string>(data.matchedIds) : null);
       setCanSeeMoney(data.canSeeMoney !== false);
+      setSharedStudentsEnabled(data.sharedStudentsEnabled === true);
       setAdminRole(typeof data.adminRole === "string" ? data.adminRole : "");
     }
     setLoading(false);
@@ -372,6 +379,7 @@ function StudentsRoster() {
     }
 
     const isOnlineSelection = isOnlineBranchName(branches.find((branch) => branch.id === newBranchId)?.name);
+    const effectiveDelivery = isOnlineSelection ? "online" : newDeliveryMode;
     const payload = {
       name: newName.trim(),
       email: newEmail.trim().toLowerCase(),
@@ -382,7 +390,7 @@ function StudentsRoster() {
       status: newStatus,
       classType: newClassType,
       sessionSlot: newSessionSlot,
-      deliveryMode: isOnlineSelection ? "online" : newDeliveryMode,
+      deliveryMode: effectiveDelivery,
       pathway: newPathway,
       batch: newBatch,
       city: newCity.trim(),
@@ -390,6 +398,13 @@ function StudentsRoster() {
       country: newCountry.trim(),
       photoUrl: newPhotoUrl || undefined,
     } as Record<string, unknown>;
+
+    // Extra tutors only go on the wire when the school can actually use them
+    // and the student is online / hybrid — otherwise the API rejects the key.
+    // Sent even when empty (on an edit) so co-tutors can be removed.
+    if (sharedStudentsEnabled && (effectiveDelivery === "online" || effectiveDelivery === "hybrid")) {
+      payload.coTutorIds = newCoTutorIds.filter((id) => id && id !== (newTutorId || null));
+    }
 
     let res: Response;
     const wasNewStudent = !editingStudentId;
@@ -461,6 +476,7 @@ function StudentsRoster() {
     setNewLevel("A1");
     setNewBranchId("");
     setNewTutorId("");
+    setNewCoTutorIds([]);
     setNewStatus("active");
     setNewDeliveryMode("physical");
     setNewBatch("");
@@ -601,6 +617,7 @@ function StudentsRoster() {
     setNewLevel(student.level || "A1");
     setNewBranchId(student.branch?.id || "");
     setNewTutorId(student.tutor?.id || "");
+    setNewCoTutorIds((student.coTutors ?? []).map((link) => link.lecturerId));
     setNewStatus(student.status || "active");
     setNewClassType(student.classType || "group");
     setNewSessionSlot(student.sessionSlot || "morning");
@@ -635,6 +652,7 @@ function StudentsRoster() {
     setNewLevel("A1");
     setNewBranchId("");
     setNewTutorId("");
+    setNewCoTutorIds([]);
     setNewStatus("active");
     setNewClassType("group");
     setNewSessionSlot("morning");
@@ -1446,6 +1464,52 @@ function StudentsRoster() {
                   their class assignment says. Leave it empty and the student is found by branch, level and sitting.
                 </span>
               </label>
+              {/* Extra tutors — only offered when the platform has enabled
+                  student sharing for this school AND this student attends
+                  online or hybrid. A campus student sits one room with one
+                  teacher, so the picker would only muddle their roster. */}
+              {sharedStudentsEnabled &&
+                (isOnlineBranchName(branches.find((branch) => branch.id === newBranchId)?.name) ||
+                  newDeliveryMode === "hybrid" ||
+                  newDeliveryMode === "online") && (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Additional tutors</span>
+                  <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--background)] p-2">
+                    {lecturers.filter((lecturer) => lecturer.id !== newTutorId).length === 0 ? (
+                      <p className="px-1 py-1.5 text-xs text-[var(--muted)]">No other tutors to add.</p>
+                    ) : (
+                      lecturers
+                        .filter((lecturer) => lecturer.id !== newTutorId)
+                        .map((lecturer) => {
+                          const checked = newCoTutorIds.includes(lecturer.id);
+                          return (
+                            <label
+                              key={lecturer.id}
+                              className="flex items-center gap-2 rounded-lg px-1 py-1 text-sm hover:bg-[var(--muted-bg)]"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) =>
+                                  setNewCoTutorIds((current) =>
+                                    event.target.checked
+                                      ? [...current, lecturer.id]
+                                      : current.filter((id) => id !== lecturer.id),
+                                  )
+                                }
+                              />
+                              <span>{lecturer.user.name || lecturer.user.email}</span>
+                            </label>
+                          );
+                        })
+                    )}
+                  </div>
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Each tutor ticked here gets the same reach as the main tutor — roster, register, gradebook and
+                    live class. Online and hybrid students only.
+                  </span>
+                </label>
+              )}
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Status</span>
                 <select
@@ -1919,6 +1983,13 @@ function StudentsRoster() {
                           </option>
                         ))}
                       </select>
+                      {student.coTutors && student.coTutors.length > 0 && (
+                        <p className="mt-1 w-44 text-[11px] leading-4 text-[var(--muted)]">
+                          + {student.coTutors
+                            .map((link) => link.lecturer.user?.name || link.lecturer.user?.email)
+                            .join(", ")}
+                        </p>
+                      )}
                     </td>
                     <td className="px-6 py-4">{student.status || "active"}</td>
                     {/* The cohort, not the status of whichever transaction

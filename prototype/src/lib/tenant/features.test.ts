@@ -32,6 +32,18 @@ describe("parseFeatures", () => {
     const result = parseFeatures({ games: { onlineCohortRequiresLiveClass: false } });
     expect(result.games.onlineCohortRequiresLiveClass).toBe(false);
     expect(result.examCentre).toEqual(DEFAULT_FEATURES.examCentre);
+    expect(result.roster).toEqual(DEFAULT_FEATURES.roster);
+  });
+
+  it("reads the shared-students roster flag, defaulting it off", () => {
+    expect(parseFeatures(null).roster.sharedStudents).toBe(false);
+    expect(parseFeatures({ roster: { sharedStudents: true } }).roster.sharedStudents).toBe(true);
+    expect(parseFeatures({ roster: { sharedStudents: true } }).games).toEqual(DEFAULT_FEATURES.games);
+  });
+
+  it("strict mode rejects a non-boolean shared-students flag", () => {
+    expect(parseFeatures({ roster: { sharedStudents: "yes" } }, { strict: true })).toBeNull();
+    expect(parseFeatures({ roster: { sharedStudents: true } }, { strict: true })).not.toBeNull();
   });
 
   it("merges one exam body without flipping the other", () => {

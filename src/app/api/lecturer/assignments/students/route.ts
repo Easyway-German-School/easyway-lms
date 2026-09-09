@@ -69,6 +69,7 @@ export async function GET(req: NextRequest) {
       sessionSlot: true,
       level: true,
       tutorId: true,
+      coTutors: { select: { lecturerId: true } },
       user: { select: { name: true } },
       branch: { select: { name: true } },
     },

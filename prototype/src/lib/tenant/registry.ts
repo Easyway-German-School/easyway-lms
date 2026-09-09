@@ -190,6 +190,13 @@ export const TENANT_OWNED_MODELS = [
   "ParentStudent",
 
   /**
+   * An extra tutor on a student, beyond the primary `Student.tutorId`. Names
+   * one school's student and one school's tutor by id — the same category as
+   * Student itself, and just as clearly nobody else's to read.
+   */
+  "StudentCoTutor",
+
+  /**
    * The private-tier 1:1 DM and the tutor's write-up after each session.
    * Both name one school's student and one school's tutor by id and quote
    * what was actually said or taught — the same category of leak as

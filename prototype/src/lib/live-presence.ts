@@ -285,7 +285,8 @@ export async function declineInvite(sessionId: string, studentId: string): Promi
  *      cohort room, and a rung student is being asked for by name.
  *   2. Their cohort room — same branch + level + sitting as a live cohort
  *      session.
- *   3. Their NAMED tutor's room — `Student.tutorId` points at the lecturer
+ *   3. Their NAMED tutor's room — `Student.tutorId`, OR any of their co-tutors
+ *      (`Student.coTutors`, online / hybrid only), points at the lecturer
  *      running a live cohort class right now.
  *
  * (3) is the one that was missing, and it is the same gap that
@@ -305,6 +306,9 @@ export async function liveSessionForStudent(student: {
   classType: string;
   /** `Student.tutorId` — the lecturer the office named onto this student, if any. */
   tutorId?: string | null;
+  /** `Student.coTutors` lecturer ids — extra tutors on an online / hybrid
+   *  student, each with the same claim on the room as the primary tutor. */
+  coTutorIds?: string[] | null;
 }): Promise<(LiveSessionRow & { invited: boolean; inviteStatus: string | null }) | null> {
   const now = new Date();
 
@@ -350,12 +354,15 @@ export async function liveSessionForStudent(student: {
     return { ...toRow(cohort, cohort.lecturer?.user?.name ?? null), invited: false, inviteStatus: null };
   }
 
-  // Named onto a tutor who is live right now. When that tutor runs more than
-  // one class at once (rare), prefer the one at this student's own level, else
-  // the most recently started.
-  if (student.tutorId) {
+  // Named onto a tutor who is live right now — the primary, or any co-tutor.
+  // When more than one is live at once (rare), prefer a session at this
+  // student's own level, else the most recently started.
+  const teacherIds = [student.tutorId, ...(student.coTutorIds ?? [])].filter(
+    (id): id is string => Boolean(id),
+  );
+  if (teacherIds.length) {
     const tutorSessions = await prisma.liveClassSession.findMany({
-      where: { kind: "cohort", lecturerId: student.tutorId, ...liveWhere(now) },
+      where: { kind: "cohort", lecturerId: { in: teacherIds }, ...liveWhere(now) },
       include: { lecturer: { select: { user: { select: { name: true } } } } },
       orderBy: { startedAt: "desc" },
     });

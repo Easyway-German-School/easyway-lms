@@ -5,7 +5,8 @@ import { NextResponse } from "next/server";
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { AGING_BUCKETS, focusPreset, type StudentFinance } from "@/lib/finance/receivables";
 import { churnRiskPreset } from "@/lib/student-risk";
-import { setStudentTutor } from "@/lib/tutor-pairing";
+import { setStudentTutor, setStudentCoTutors } from "@/lib/tutor-pairing";
+import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
 import { isOnlineBranch } from "@/lib/online-branch";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
@@ -113,10 +114,15 @@ export async function GET(request: Request) {
   const focus = focusPreset(filters.focus);
   const riskFocus = focus ? null : churnRiskPreset(filters.focus);
 
+  // Whether this school may put more than one tutor on an online / hybrid
+  // student — drives the "Additional tutors" picker on the add / edit form.
+  const sharedStudentsEnabled = (await featuresForCurrentTenant()).roster.sharedStudents;
+
   return NextResponse.json({
     students: enriched,
     totalCount,
     canSeeMoney,
+    sharedStudentsEnabled,
     // The roster uses this to decide whether to offer "Reset roster" — the
     // bulk wipe is super-admin only, and the server enforces that too.
     adminRole: gate.admin.adminRole,
@@ -168,6 +174,12 @@ export async function POST(request: Request) {
   const level = typeof body.level === "string" ? body.level : "A1";
   const branchId = typeof body.branchId === "string" ? body.branchId : null;
   const tutorId = typeof body.tutorId === "string" ? body.tutorId : null;
+  // Extra tutors, online / hybrid only, and only when the platform has turned
+  // `roster.sharedStudents` on for this school — enforced below, after the
+  // student exists and their delivery mode is known.
+  const coTutorIds = Array.isArray(body.coTutorIds)
+    ? (body.coTutorIds.filter((v): v is string => typeof v === "string" && v.trim().length > 0))
+    : [];
   const status = typeof body.status === "string" ? body.status : "active";
   const classType = body.classType === "private" ? "private" : "group";
   const sessionSlot = ["morning", "afternoon", "evening", "weekend"].includes(String(body.sessionSlot))
@@ -402,6 +414,26 @@ export async function POST(request: Request) {
       } catch (enrolmentError) {
         console.error("Enrolment history creation failed on manual add", enrolmentError);
       }
+
+      // Extra tutors — only for an online / hybrid student, and only when the
+      // platform has enabled student sharing for this school. Non-fatal: the
+      // account is already created, and the office can add co-tutors later
+      // from the student's row.
+      if (coTutorIds.length) {
+        try {
+          const features = await featuresForCurrentTenant();
+          if (features.roster.sharedStudents && ["online", "hybrid"].includes(deliveryMode)) {
+            await setStudentCoTutors({
+              studentId: student.id,
+              lecturerIds: coTutorIds,
+              assignedById: gate.session.user.id,
+              quiet: true,
+            });
+          }
+        } catch (coTutorError) {
+          console.error("Co-tutor assignment failed on manual add", coTutorError);
+        }
+      }
     }
 
     return NextResponse.json(
@@ -456,6 +488,14 @@ export async function PATCH(request: Request) {
   const level = typeof body.level === "string" ? body.level : undefined;
   const branchId = typeof body.branchId === "string" ? body.branchId : null;
   const tutorId = typeof body.tutorId === "string" ? body.tutorId : null;
+  // The COMPLETE desired set of extra tutors — only read when the key is
+  // present, so an unrelated edit never touches the shared-tutor list.
+  const coTutorIds =
+    body.coTutorIds !== undefined && Array.isArray(body.coTutorIds)
+      ? (body.coTutorIds as unknown[]).filter(
+          (v): v is string => typeof v === "string" && v.trim().length > 0,
+        )
+      : undefined;
   const status = typeof body.status === "string" ? body.status : undefined;
   const classType = body.classType === "private" || body.classType === "group" ? body.classType : undefined;
   const sessionSlot = ["morning", "afternoon", "evening", "weekend"].includes(String(body.sessionSlot))
@@ -733,6 +773,32 @@ export async function PATCH(request: Request) {
      */
     if (body.tutorId !== undefined) {
       const paired = await setStudentTutor({ studentId, lecturerId: tutorId });
+      if (!paired.ok) {
+        return NextResponse.json({ error: paired.error }, { status: paired.status });
+      }
+    }
+
+    /**
+     * Extra tutors. Runs after the primary pairing above so a co-tutor id that
+     * was just promoted to primary is dropped from the list rather than
+     * doubling the student up. The delivery-mode rule lives inside
+     * `setStudentCoTutors`; the feature flag is this route's to check, and when
+     * it is off we still let an empty list through so turning sharing off can
+     * clean up whatever it left behind.
+     */
+    if (coTutorIds !== undefined) {
+      const features = await featuresForCurrentTenant();
+      if (!features.roster.sharedStudents && coTutorIds.length) {
+        return NextResponse.json(
+          { error: "Sharing a student across tutors is not enabled for this school." },
+          { status: 400 },
+        );
+      }
+      const paired = await setStudentCoTutors({
+        studentId,
+        lecturerIds: features.roster.sharedStudents ? coTutorIds : [],
+        assignedById: gate.session.user.id,
+      });
       if (!paired.ok) {
         return NextResponse.json({ error: paired.error }, { status: paired.status });
       }

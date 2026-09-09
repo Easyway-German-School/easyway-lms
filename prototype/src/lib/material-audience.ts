@@ -171,6 +171,7 @@ export async function studentIdsForMaterial(material: MaterialAudienceRow): Prom
         id: true,
         admission: true,
         tutorId: true,
+        coTutors: { select: { lecturerId: true } },
         branchId: true,
         level: true,
         sessionSlot: true,

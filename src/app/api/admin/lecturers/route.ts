@@ -7,6 +7,7 @@ import {
   COURSE_LEVELS,
   assignmentToData,
   describeAssignment,
+  hasBatchConstraint,
   isAssigned,
   readAssignment,
   studentWhereForLecturer,
@@ -110,12 +111,19 @@ async function syncLecturerClasses(lecturerId: string, levels: string[]) {
 async function countStudents(assignment: ReturnType<typeof readAssignment>, lecturerId: string) {
   const where = studentWhereForLecturer(assignment, lecturerId);
   if (!where) return 0;
-  if (!assignment.batches.length) {
+  if (!hasBatchConstraint(assignment)) {
     return prisma.student.count({ where: where as any });
   }
   const rows = await prisma.student.findMany({
     where: where as any,
-    select: { admission: true, tutorId: true },
+    select: {
+      admission: true,
+      tutorId: true,
+      coTutors: { select: { lecturerId: true } },
+      branchId: true,
+      level: true,
+      sessionSlot: true,
+    },
   });
   return rows.filter((row) => belongsToLecturer(assignment, lecturerId, row)).length;
 }
@@ -362,9 +370,14 @@ export async function PATCH(request: NextRequest) {
   // The assignment fields move as a set. Sending any one of them rewrites all
   // of them, so a half-submitted form can never leave a tutor assigned to a
   // branch at a level they no longer teach.
-  const touchesAssignment = ["branchIds", "levels", "sessionSlots", "classTypes", "batches"].some(
-    (key) => body[key] !== undefined,
-  );
+  const touchesAssignment = [
+    "branchIds",
+    "levels",
+    "sessionSlots",
+    "classTypes",
+    "batches",
+    "assignmentGroups",
+  ].some((key) => body[key] !== undefined);
   let assignment: ReturnType<typeof assignmentToData> | null = null;
   if (touchesAssignment) {
     assignment = assignmentToData(body);
@@ -450,6 +463,10 @@ export async function DELETE(request: NextRequest) {
   for (const lecturer of lecturers) {
     await prisma.session.deleteMany({ where: { userId: lecturer.userId } });
     await prisma.student.updateMany({ where: { tutorId: lecturer.id }, data: { tutorId: null } });
+    // Co-tutor links are a hard delete — the lecturer row is only soft-deleted
+    // (prisma-guard), so a cascade never fires; a stale link would leave a
+    // student shared onto a tutor who no longer exists.
+    await prisma.studentCoTutor.deleteMany({ where: { lecturerId: lecturer.id } });
     await prisma.lecturer.delete({ where: { id: lecturer.id } });
     await prisma.user.delete({ where: { id: lecturer.userId } });
   }
