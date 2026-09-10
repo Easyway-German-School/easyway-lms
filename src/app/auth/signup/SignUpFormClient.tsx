@@ -769,9 +769,11 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                   what this sends. Shown for both, worded for each. */}
               {selectedBranch && onlineClosedForLevel ? (
                 <div className="rounded-3xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
-                  <p className="font-semibold">Online classes for {level} are not open right now.</p>
+                  <p className="font-semibold">We&apos;re not taking new online students for {level} at the moment.</p>
                   <p className="mt-1">
-                    Pick a different level, or choose a campus branch above to attend in person or hybrid.
+                    Online classes are still running for other levels &mdash; try changing
+                    &ldquo;What class are you starting with?&rdquo; above. Or pick a campus branch to
+                    take {level} in person or hybrid.
                   </p>
                 </div>
               ) : selectedBranch ? (
