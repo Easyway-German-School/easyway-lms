@@ -162,6 +162,116 @@ async function tutorForStudent(studentId: string): Promise<string | null> {
 }
 
 /**
+ * A Travel Package marketing enquiry.
+ *
+ * The /programs showcase card (TravelPackageShowcase.tsx) is the only thing
+ * that opens one, and it always files it with this subject and `fromPath`.
+ * Matching on both — rather than the exact string — means a hand-filed enquiry
+ * from the same page still counts, without a stray "travel package" mention in
+ * an unrelated question tripping it.
+ */
+export function isTravelPackageEnquiry(subject: string, fromPath: string | null): boolean {
+  return fromPath === "/programs" && /travel\s*package/i.test(subject);
+}
+
+/** The office's scripted first reply to a Travel Package enquiry. */
+function travelPackageAutoReplyBody(enquirerName: string | null): string {
+  const first = (enquirerName ?? "").trim().split(/\s+/)[0] || "there";
+  return (
+    `Hello ${first}, thank you for reaching out. Please speak with our customer care agent ` +
+    `via WhatsApp on this number: 07089002534.\n\n` +
+    `Or better still, you can drop your phone number here and we would reach out to you. Thank you.`
+  );
+}
+
+/**
+ * A real admin account to hang an automated office reply on.
+ *
+ * SupportTicketMessage needs an author FK, and BOTH inboxes decide "is this the
+ * office" from `authorRole === "admin"` on a message whose author is a genuine
+ * admin — so the autoresponder cannot be authored by the enquirer or a
+ * placeholder. Prefer whoever actually works the Enquiries queue (the
+ * `students` capability it sits behind); fall back to the oldest admin, and to
+ * null only on an instance with no admin at all.
+ */
+async function officeAuthorForAutoReply(): Promise<{ id: string; name: string | null } | null> {
+  const admins = await prisma.user.findMany({
+    where: { role: "ADMIN", deletedAt: null },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true, adminRole: true, adminCapabilities: true },
+  });
+  if (admins.length === 0) return null;
+
+  const { capabilitiesForUser } = await import("@/lib/admin-roles");
+  const worksEnquiries = admins.find((admin) =>
+    capabilitiesForUser(admin.adminRole, admin.adminCapabilities).includes("students"),
+  );
+  const chosen = worksEnquiries ?? admins[0];
+  return { id: chosen.id, name: chosen.name };
+}
+
+/**
+ * The Travel Package enquiry answers itself, the moment it opens.
+ *
+ * That track is walk-in / WhatsApp-run — the useful next step is a phone
+ * conversation, not a portal thread — so the office's standard first reply goes
+ * out immediately: here is the customer-care WhatsApp number, or leave a number
+ * for a call back. The ticket still lands in the Enquiries queue unread for the
+ * office (this is a courtesy autoresponder, not a resolution), and the enquirer
+ * gets the same bell + push + email a real marketing-origin reply would, since
+ * they may never reopen the portal.
+ *
+ * If the instance somehow has no admin user, the thread message is skipped but
+ * the notification and email still go, so the enquirer is not left on "we'll be
+ * in touch" with silence.
+ */
+async function sendTravelPackageAutoReply(input: {
+  ticketId: string;
+  subject: string;
+  enquirerUserId: string;
+  enquirerName: string | null;
+}): Promise<void> {
+  const body = travelPackageAutoReplyBody(input.enquirerName);
+  const office = await officeAuthorForAutoReply();
+
+  if (office) {
+    await prisma.supportTicketMessage.create({
+      data: {
+        ticketId: input.ticketId,
+        authorId: office.id,
+        authorRole: "admin",
+        body,
+      },
+    });
+    await prisma.supportTicket.update({
+      where: { id: input.ticketId },
+      data: {
+        lastMessageAt: new Date(),
+        // The autoresponder is for the enquirer to read. The office still owes
+        // a real follow-up, so `unreadForAdmin` / `status` are left as
+        // openTicket set them and the ticket stays in the queue.
+        unreadForUser: true,
+      },
+    });
+  }
+
+  notifyInBackground({
+    to: { userIds: [input.enquirerUserId] },
+    kind: KIND.supportReply,
+    severity: "info",
+    title: "The office replied to your enquiry",
+    message: input.subject,
+    link: `/dashboard?help=${input.ticketId}`,
+    senderId: office?.id,
+    push: true,
+    // Force the email regardless of routing settings — same reasoning as a
+    // staff reply to a marketing-origin ticket in replyToTicket().
+    email: true,
+    emailBody: `${body}\n\nYou can reply straight back from your student portal.`,
+  });
+}
+
+/**
  * Open a ticket and tell the office.
  *
  * The first message is written as a message rather than stored on the ticket,
@@ -247,6 +357,26 @@ export async function openTicket(input: {
     link: `/admin/enquiries?ticket=${ticket.id}`,
     senderId: input.userId,
   });
+
+  /**
+   * A Travel Package enquiry gets the office's WhatsApp / call-back reply
+   * straight away — see sendTravelPackageAutoReply. Awaited so the thread
+   * message and its notification are in place before the POST returns and the
+   * card flips to "we'll be in touch"; a failure here must not lose the
+   * enquiry, which is already saved.
+   */
+  if (isTravelPackageEnquiry(subject, input.fromPath)) {
+    try {
+      await sendTravelPackageAutoReply({
+        ticketId: ticket.id,
+        subject,
+        enquirerUserId: input.userId,
+        enquirerName: input.authorName,
+      });
+    } catch (error) {
+      console.error("Travel Package auto-reply failed", error);
+    }
+  }
 
   return ticket;
 }
