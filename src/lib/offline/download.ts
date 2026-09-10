@@ -76,7 +76,15 @@ export async function downloadVideoForOffline(
   // at the ceiling, then let the stream finish.
   if (await wouldExceedCap(0)) throw new OfflineCapError();
 
-  const blob = await fetchWithProgress(video.fileUrl, opts.onProgress, opts.signal);
+  // `proxy=1` keeps a recording download on the app's streaming proxy instead
+  // of being redirected to a signed bucket URL — this fetch reads the body for
+  // a progress bar, and a cross-origin redirect would fail the CORS check.
+  // Harmless on any other kind of file URL: the route only reads it for
+  // `recordings/` video keys.
+  const downloadUrl = video.fileUrl.includes("?")
+    ? `${video.fileUrl}&proxy=1`
+    : `${video.fileUrl}?proxy=1`;
+  const blob = await fetchWithProgress(downloadUrl, opts.onProgress, opts.signal);
 
   if (await wouldExceedCap(blob.size)) throw new OfflineCapError();
 
