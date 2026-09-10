@@ -7,7 +7,7 @@
  * deletes the old ones. Without that, a student who installed the app in
  * August would still be served August's JavaScript in December.
  */
-const CACHE = "easyway-v2";
+const CACHE = "easyway-v3";
 
 /**
  * The pages worth having before the network is asked.

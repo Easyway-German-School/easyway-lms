@@ -52,9 +52,10 @@ export default function InstallPrompt() {
     // Registration rejects on an insecure origin, which is the normal case for
     // http://<lan-ip>:3000 during development. Nothing to report.
     let reloadedForController = false;
+    let registration: ServiceWorkerRegistration | null = null;
     const registerWorker = async () => {
       try {
-        await navigator.serviceWorker.register("/sw.js");
+        registration = await navigator.serviceWorker.register("/sw.js");
       } catch {
         // Service workers are unavailable on some development origins.
       }
@@ -66,10 +67,26 @@ export default function InstallPrompt() {
       window.location.reload();
     };
 
+    /**
+     * A long-lived installed window (the admin app someone leaves open for
+     * days) never navigates, so the browser never re-checks /sw.js and a
+     * deploy never reaches it — the page runs last week's JavaScript against
+     * this week's API. Re-check whenever the window regains focus: the SW file
+     * changes every release, so this finds the new worker, which skipWaiting()s
+     * and fires controllerchange above, which reloads onto the new build.
+     */
+    const checkForUpdate = () => {
+      if (document.visibilityState === "visible") void registration?.update();
+    };
+
     void registerWorker();
     navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
+    document.addEventListener("visibilitychange", checkForUpdate);
+    window.addEventListener("focus", checkForUpdate);
     return () => {
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      document.removeEventListener("visibilitychange", checkForUpdate);
+      window.removeEventListener("focus", checkForUpdate);
     };
   }, []);
 
