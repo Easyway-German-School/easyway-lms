@@ -9,6 +9,7 @@ import AdminScheduleList, {
   type PrivateClass,
   type PrivateAnalytics,
 } from "@/components/admin/AdminScheduleList";
+import TutorCoveragePanel, { type TutorCoverage } from "@/components/admin/TutorCoveragePanel";
 
 type ClosedDay = { id: string; date: string; label: string; branchId: string | null };
 
@@ -20,6 +21,7 @@ export default function AdminSchedulePage() {
   const [groups, setGroups] = useState<GroupSession[]>([]);
   const [privates, setPrivates] = useState<PrivateClass[]>([]);
   const [privateAnalytics, setPrivateAnalytics] = useState<PrivateAnalytics | null>(null);
+  const [coverage, setCoverage] = useState<TutorCoverage | null>(null);
   const [closedDays, setClosedDays] = useState<ClosedDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -45,12 +47,16 @@ export default function AdminSchedulePage() {
       fetch("/api/schedule/closed-days", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : { closedDays: [] }))
         .catch(() => ({ closedDays: [] })),
+      fetch("/api/admin/tutor-coverage", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
     ])
-      .then(([schedule, closed]) => {
+      .then(([schedule, closed, cover]) => {
         setGroups(schedule.groupSessions ?? []);
         setPrivates(schedule.privateClasses ?? []);
         setPrivateAnalytics(schedule.privateAnalytics ?? null);
         setClosedDays(closed.closedDays ?? []);
+        setCoverage(cover ?? null);
         setError("");
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to load school schedule"))
@@ -111,6 +117,7 @@ export default function AdminSchedulePage() {
             privates={privates}
             closedDays={closedDays}
             privateAnalytics={privateAnalytics}
+            coverage={coverage}
             loading={loading}
             onReload={load}
           />
@@ -123,6 +130,8 @@ export default function AdminSchedulePage() {
             onReload={load}
           />
         )}
+
+        <TutorCoveragePanel coverage={coverage} loading={loading} onReload={load} />
       </main>
     </AdminShell>
   );

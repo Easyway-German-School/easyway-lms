@@ -9,6 +9,7 @@ import { effectiveDayKey } from "@/components/schedule/effectiveDay";
 import { SCHOOL_TIMEZONE, zonedClock, zonedDateKey, zonedTimeToInstant } from "@/lib/school-time";
 import { ClockIcon } from "@/components/icons";
 import type { GroupSession, PrivateClass, PrivateAnalytics } from "@/components/admin/AdminScheduleList";
+import type { TutorCoverage } from "@/components/admin/TutorCoveragePanel";
 
 /**
  * The admin schedule as a calendar — every group cohort and every private
@@ -91,6 +92,7 @@ export default function AdminScheduleCalendar({
   privates,
   closedDays,
   privateAnalytics,
+  coverage,
   loading,
   onReload,
 }: {
@@ -98,6 +100,7 @@ export default function AdminScheduleCalendar({
   privates: PrivateClass[];
   closedDays: ClosedDay[];
   privateAnalytics: PrivateAnalytics | null;
+  coverage?: TutorCoverage | null;
   loading: boolean;
   onReload: () => void;
 }) {
@@ -131,6 +134,17 @@ export default function AdminScheduleCalendar({
     privates.forEach((p) => p.tutorName && set.add(p.tutorName));
     return [...set].sort();
   }, [groups, privates]);
+
+  // Who teaches each cohort, keyed `branchId:LEVEL:slot` — so a group card can
+  // show the campus tutor and the online tutor, not just whoever last edited
+  // that day's ClassSession.
+  const coverageByCohort = useMemo(() => {
+    const map = new Map<string, TutorCoverage["cohorts"][number]>();
+    for (const cohort of coverage?.cohorts ?? []) map.set(cohort.key, cohort);
+    return map;
+  }, [coverage]);
+  const cohortKeyOf = (g: GroupSession) =>
+    `${g.branchId ?? "?"}:${g.level.toUpperCase()}:${(g.timeSlot ?? "").toLowerCase()}`;
 
   const groupMatches = (g: GroupSession) =>
     (!branch || g.branchName === branch) &&
@@ -435,8 +449,28 @@ export default function AdminScheduleCalendar({
                           <p className="truncate text-sm font-medium text-[var(--foreground)]">{g.cohort}</p>
                           <p className="mt-0.5 flex items-center gap-1 text-xs text-[var(--muted)]">
                             <ClockIcon className="h-3.5 w-3.5" />
-                            {g.startTime}–{g.endTime} · {g.tutorName ?? "Unassigned"}
+                            {g.startTime}–{g.endTime}
+                            {g.tutorName ? ` · ${g.tutorName} (this session)` : ""}
                           </p>
+                          {(() => {
+                            const cov = coverageByCohort.get(cohortKeyOf(g));
+                            if (!cov) return null;
+                            const names = (list: typeof cov.campusTutors) =>
+                              list.length ? list.map((t) => t.name).join(", ") : "—";
+                            return (
+                              <div className="mt-0.5 text-xs text-[var(--muted)]">
+                                <p>Campus: {names(cov.campusTutors)} · Online: {names(cov.onlineTutors)}</p>
+                                {cov.gaps.map((gap) => (
+                                  <span
+                                    key={gap}
+                                    className="mt-0.5 mr-1 inline-block rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300"
+                                  >
+                                    {gap}
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })()}
                           <span
                             className={`mt-1 inline-block rounded px-2 py-0.5 text-xs font-medium capitalize ${
                               STATUS_STYLES[g.status] ?? STATUS_STYLES.scheduled
