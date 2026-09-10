@@ -113,15 +113,23 @@ export async function POST(request: NextRequest) {
      * particularly here, because a reset email that silently failed to send
      * leaves somebody locked out with no way to tell that anything went wrong.
      *
-     * identity "support" because a person who cannot get in may well reply to
-     * it, and that reply should reach somebody.
+     * identity "noreply", matching the admin-triggered reset in
+     * `lib/student-password-reset-email.ts` and every other student-facing
+     * mail. This was "support" on the theory that a locked-out person might
+     * reply — but "support" sends as `support@<MAIL_DOMAIN>`, and if that
+     * address is not a verified sender with the mail provider the whole send is
+     * rejected while every `noreply@` mail (registration, welcome, admin reset)
+     * goes out fine. That asymmetry is the "registration email works, reset
+     * doesn't" report. `noreply` still carries `replyTo: SUPPORT_ADDRESS`, so a
+     * reply still reaches the office — the reason for "support" is kept without
+     * the address that was failing.
      */
     await queueEmail({
       to: email,
       subject: template.subject,
       html: template.html,
       type: "password_reset",
-      identity: "support",
+      identity: "noreply",
     });
   } catch (error) {
     /**
