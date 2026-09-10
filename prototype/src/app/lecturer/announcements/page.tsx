@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import LecturerShell from "@/components/LecturerShell";
+import { deliveryModeLabel, groupByClass } from "@/lib/lecturer-class-groups";
 import {
   AlertIcon,
   BroadcastMessageIcon,
@@ -29,6 +30,8 @@ type Student = {
   level: string;
   sessionSlot: string;
   classType: string;
+  deliveryMode: string | null;
+  batch: string | null;
 };
 
 type HistoryEntry = {
@@ -51,6 +54,9 @@ export default function LecturerAnnouncementsPage() {
   const [message, setMessage] = useState("");
   const [audience, setAudience] = useState<"cohort" | "student">("cohort");
   const [picked, setPicked] = useState<string[]>([]);
+  // Set when the tutor arrived here from a "Message this group" button on the
+  // roster — a note above the picker so they know why it opened pre-filled.
+  const [groupLabel, setGroupLabel] = useState<string | null>(null);
   const [urgent, setUrgent] = useState(false);
   const [sending, setSending] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -79,6 +85,19 @@ export default function LecturerAnnouncementsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // "Message this group" on the roster deep-links here with the class's student
+  // ids and a label. Read straight off the URL rather than useSearchParams,
+  // which would need a Suspense boundary and pull the whole route into CSR.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const ids = (params.get("students") || "").split(",").map((id) => id.trim()).filter(Boolean);
+    if (ids.length === 0) return;
+    setAudience("student");
+    setPicked(ids);
+    setGroupLabel(params.get("label"));
+  }, []);
 
   const recipientCount = audience === "cohort" ? students.length : picked.length;
 
@@ -206,38 +225,73 @@ export default function LecturerAnnouncementsPage() {
             </div>
 
             {audience === "student" && (
-              <div className="mt-4 max-h-56 overflow-y-auto rounded-2xl border border-[var(--border)] p-2">
-                {isLoading ? (
-                  <p className="p-3 text-sm text-[var(--muted)]">Loading your students…</p>
-                ) : students.length === 0 ? (
-                  <p className="p-3 text-sm text-[var(--muted)]">No students assigned to you yet.</p>
-                ) : (
-                  students.map((student) => {
-                    const checked = picked.includes(student.id);
-                    return (
-                      <label
-                        key={student.id}
-                        className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm transition hover:bg-[var(--background)]"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setPicked((current) =>
-                              checked ? current.filter((id) => id !== student.id) : [...current, student.id],
-                            )
-                          }
-                          className="h-4 w-4 accent-[var(--accent)]"
-                        />
-                        <span className="flex-1 font-medium">{student.name}</span>
-                        <span className="text-xs text-[var(--muted)]">
-                          {student.level}
-                          {student.classType === "private" ? " · private" : ""}
-                        </span>
-                      </label>
-                    );
-                  })
-                )}
+              <div className="mt-4 space-y-3">
+                {groupLabel ? (
+                  <p className="rounded-xl bg-[var(--accent-soft)] px-3 py-2 text-xs font-medium text-[var(--accent)]">
+                    Pre-selected the <strong>{groupLabel}</strong> group from your roster. Add or remove anyone below.
+                  </p>
+                ) : null}
+
+                <div className="max-h-72 overflow-y-auto rounded-2xl border border-[var(--border)] p-2">
+                  {isLoading ? (
+                    <p className="p-3 text-sm text-[var(--muted)]">Loading your students…</p>
+                  ) : students.length === 0 ? (
+                    <p className="p-3 text-sm text-[var(--muted)]">No students assigned to you yet.</p>
+                  ) : (
+                    groupByClass(students).map((group) => {
+                      const ids = group.members.map((member) => member.id);
+                      const allChecked = ids.every((id) => picked.includes(id));
+                      return (
+                        <div key={group.key} className="mb-2 last:mb-0">
+                          <label className="flex cursor-pointer items-center gap-3 rounded-xl bg-[var(--surface-alt)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                            <input
+                              type="checkbox"
+                              checked={allChecked}
+                              onChange={() =>
+                                setPicked((current) =>
+                                  allChecked
+                                    ? current.filter((id) => !ids.includes(id))
+                                    : [...new Set([...current, ...ids])],
+                                )
+                              }
+                              className="h-4 w-4 accent-[var(--accent)]"
+                            />
+                            <span className="flex-1">{group.label}</span>
+                            <span className="font-medium normal-case">
+                              {deliveryModeLabel(group.mode)} · {group.members.length}
+                            </span>
+                          </label>
+                          {group.members.map((student) => {
+                            const checked = picked.includes(student.id);
+                            return (
+                              <label
+                                key={student.id}
+                                className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 pl-8 text-sm transition hover:bg-[var(--background)]"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    setPicked((current) =>
+                                      checked
+                                        ? current.filter((id) => id !== student.id)
+                                        : [...current, student.id],
+                                    )
+                                  }
+                                  className="h-4 w-4 accent-[var(--accent)]"
+                                />
+                                <span className="flex-1 font-medium">{student.name}</span>
+                                <span className="text-xs text-[var(--muted)]">
+                                  {student.classType === "private" ? "private" : student.batch || ""}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             )}
 

@@ -57,6 +57,7 @@ async function reachableStudents(lecturer: AssignmentSource & { id: string }) {
       level: true,
       sessionSlot: true,
       classType: true,
+      deliveryMode: true,
       admission: true,
       tutorId: true,
       coTutors: { select: { lecturerId: true } },
@@ -123,13 +124,21 @@ export async function GET() {
     cohortLabel: isAssigned(readAssignment(lecturer))
       ? cohortDescription
       : `${students.length} student${students.length === 1 ? "" : "s"} assigned to you`,
-    students: students.map((s) => ({
-      id: s.id,
-      name: s.user.name ?? s.user.email,
-      level: s.level,
-      sessionSlot: s.sessionSlot,
-      classType: s.classType,
-    })),
+    students: students.map((s) => {
+      const admission =
+        typeof s.admission === "object" && s.admission !== null
+          ? (s.admission as Record<string, unknown>)
+          : {};
+      return {
+        id: s.id,
+        name: s.user.name ?? s.user.email,
+        level: s.level,
+        sessionSlot: s.sessionSlot,
+        classType: s.classType,
+        deliveryMode: s.deliveryMode,
+        batch: typeof admission.batch === "string" ? admission.batch : null,
+      };
+    }),
     history: [...byBatch.values()],
   });
 }

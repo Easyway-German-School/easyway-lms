@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { deliveryModeLabel, groupByClass } from "@/lib/lecturer-class-groups";
 
 export type LecturerStudent = {
   id: string;
@@ -11,6 +13,8 @@ export type LecturerStudent = {
   level: string;
   sessionSlot: string;
   classType: string;
+  deliveryMode: string | null;
+  branchName: string | null;
   status: string;
   pathway: string;
   /**
@@ -36,11 +40,14 @@ export type LecturerStudent = {
 };
 
 /**
- * The tutor's class list, with the picker the attendance page was missing.
+ * The tutor's class list, split into the classes they actually teach.
  *
  * Shared between /lecturer/students and the attendance tab so a tutor sees the
  * same names and the same details in both places — two roster views that
- * disagreed would be worse than one.
+ * disagreed would be worse than one. A tutor who takes more than one level, or
+ * the same level online and in the room, used to get all of it in one flat
+ * pile; it now groups by level · delivery mode · sitting (see
+ * lib/lecturer-class-groups) with a "Message this group" shortcut per class.
  */
 
 function naira(amount: number) {
@@ -59,6 +66,21 @@ function Avatar({ student }: { student: LecturerStudent }) {
   );
 }
 
+function ModeBadge({ mode }: { mode: string | null }) {
+  const normalised = (mode || "physical").toLowerCase();
+  const tone =
+    normalised === "online"
+      ? "bg-sky-500/12 text-sky-700"
+      : normalised === "hybrid"
+        ? "bg-violet-500/12 text-violet-700"
+        : "bg-[var(--surface-alt)] text-[var(--muted)]";
+  return (
+    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone}`}>
+      {deliveryModeLabel(normalised)}
+    </span>
+  );
+}
+
 function DetailPanel({ student }: { student: LecturerStudent }) {
   // `capitalize` is opt-in per row. Applied to the whole list it title-cased
   // email addresses into things like "Jasonoamen@Gmail.Com".
@@ -67,6 +89,9 @@ function DetailPanel({ student }: { student: LecturerStudent }) {
     ["Email", student.email],
     ["Phone", student.phone || "—"],
     ["Location", [student.city, student.country].filter(Boolean).join(", ") || "—"],
+    ["Branch", student.branchName || "—"],
+    ["Level", student.level, true],
+    ["Delivery", deliveryModeLabel(student.deliveryMode)],
     ["Batch", student.batch || "—"],
     ["Session", student.sessionSlot, true],
     ["Class type", student.classType, true],
@@ -108,7 +133,92 @@ function DetailPanel({ student }: { student: LecturerStudent }) {
   );
 }
 
+function StudentRow({
+  student,
+  onSelect,
+}: {
+  student: LecturerStudent;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <tr className="border-t border-[var(--border)]/60">
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <Avatar student={student} />
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 truncate font-medium text-[var(--foreground)]">
+              {student.name}
+              {student.namedByOffice ? (
+                <span
+                  className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[var(--accent)]"
+                  title="The office assigned this student to you individually."
+                >
+                  Assigned to you
+                </span>
+              ) : null}
+            </p>
+            <p className="truncate text-xs text-[var(--muted)]">{student.email}</p>
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-3 text-[var(--muted)]">{student.studentCode || "—"}</td>
+      <td className="px-4 py-3 text-[var(--muted)]">{student.phone || "—"}</td>
+      <td className="px-4 py-3 text-[var(--muted)]">
+        {student.attendanceRate === null ? "—" : `${student.attendanceRate}%`}
+      </td>
+      <td className="px-4 py-3">
+        {student.hasAccess ? (
+          <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700">Cleared</span>
+        ) : (
+          <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800">
+            {naira(student.outstanding)} owing
+          </span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <button
+          onClick={() => onSelect(student.id)}
+          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)]"
+        >
+          Details
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function GroupTable({
+  students,
+  onSelect,
+}: {
+  students: LecturerStudent[];
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-[var(--border)]">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-[var(--surface-alt)] text-xs uppercase tracking-wide text-[var(--muted)]">
+          <tr>
+            <th className="px-4 py-3">Student</th>
+            <th className="px-4 py-3">Code</th>
+            <th className="px-4 py-3">Phone</th>
+            <th className="px-4 py-3">Attendance</th>
+            <th className="px-4 py-3">Tuition</th>
+            <th className="px-4 py-3" />
+          </tr>
+        </thead>
+        <tbody>
+          {students.map((student) => (
+            <StudentRow key={student.id} student={student} onSelect={onSelect} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function LecturerStudentRoster({ compact = false }: { compact?: boolean }) {
+  const router = useRouter();
   const [students, setStudents] = useState<LecturerStudent[]>([]);
   const [cohortLabel, setCohortLabel] = useState<string | null>(null);
   const [assigned, setAssigned] = useState(true);
@@ -148,7 +258,17 @@ export default function LecturerStudentRoster({ compact = false }: { compact?: b
     );
   }, [students, query]);
 
+  // The classes this tutor teaches, each with its own students. One group is
+  // the ordinary case (a tutor with a single class) — the section header still
+  // earns its place there by carrying the "Message this group" button.
+  const groups = useMemo(() => groupByClass(filtered), [filtered]);
+
   const selected = students.find((student) => student.id === selectedId) ?? null;
+
+  function messageGroup(label: string, ids: string[]) {
+    const params = new URLSearchParams({ students: ids.join(","), label });
+    router.push(`/lecturer/announcements?${params.toString()}`);
+  }
 
   if (loading) return <p className="text-sm text-[var(--muted)]">Loading your students…</p>;
   if (error) return <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</p>;
@@ -178,6 +298,11 @@ export default function LecturerStudentRoster({ compact = false }: { compact?: b
         <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]">
           {students.length} student{students.length === 1 ? "" : "s"}
         </span>
+        {groups.length > 1 ? (
+          <span className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-medium text-[var(--muted)]">
+            {groups.length} classes
+          </span>
+        ) : null}
 
         {/* The picker the attendance tab was missing. */}
         <select
@@ -212,67 +337,41 @@ export default function LecturerStudentRoster({ compact = false }: { compact?: b
             className="w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-sm text-[var(--foreground)] placeholder-[var(--muted)]"
           />
 
-          <div className="overflow-x-auto rounded-2xl border border-[var(--border)]">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-[var(--surface-alt)] text-xs uppercase tracking-wide text-[var(--muted)]">
-                <tr>
-                  <th className="px-4 py-3">Student</th>
-                  <th className="px-4 py-3">Code</th>
-                  <th className="px-4 py-3">Phone</th>
-                  <th className="px-4 py-3">Attendance</th>
-                  <th className="px-4 py-3">Tuition</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((student) => (
-                  <tr key={student.id} className="border-t border-[var(--border)]/60">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar student={student} />
-                        <div className="min-w-0">
-                          <p className="flex items-center gap-2 truncate font-medium text-[var(--foreground)]">
-                            {student.name}
-                            {student.namedByOffice ? (
-                              <span
-                                className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[var(--accent)]"
-                                title="The office assigned this student to you individually."
-                              >
-                                Assigned to you
-                              </span>
-                            ) : null}
-                          </p>
-                          <p className="truncate text-xs text-[var(--muted)]">{student.email}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-[var(--muted)]">{student.studentCode || "—"}</td>
-                    <td className="px-4 py-3 text-[var(--muted)]">{student.phone || "—"}</td>
-                    <td className="px-4 py-3 text-[var(--muted)]">
-                      {student.attendanceRate === null ? "—" : `${student.attendanceRate}%`}
-                    </td>
-                    <td className="px-4 py-3">
-                      {student.hasAccess ? (
-                        <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700">Cleared</span>
-                      ) : (
-                        <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800">
-                          {naira(student.outstanding)} owing
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
+          {filtered.length === 0 ? (
+            <p className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-6 text-sm text-[var(--muted)]">
+              No student matches “{query.trim()}”.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {groups.map((group) => {
+                const ids = group.members.map((member) => member.id);
+                return (
+                  <details key={group.key} open className="group rounded-2xl border border-[var(--border)]">
+                    <summary className="flex cursor-pointer list-none flex-wrap items-center gap-3 rounded-2xl px-4 py-3 [&::-webkit-details-marker]:hidden">
+                      <span className="text-sm font-bold text-[var(--foreground)]">{group.label}</span>
+                      <ModeBadge mode={group.mode} />
+                      <span className="rounded-full bg-[var(--surface-alt)] px-2 py-0.5 text-xs font-semibold text-[var(--muted)]">
+                        {group.members.length} student{group.members.length === 1 ? "" : "s"}
+                      </span>
                       <button
-                        onClick={() => setSelectedId(student.id)}
-                        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)]"
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          messageGroup(group.label, ids);
+                        }}
+                        className="ml-auto rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-bold text-white transition hover:brightness-110"
                       >
-                        Details
+                        Message this group
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </summary>
+                    <div className="border-t border-[var(--border)] p-3">
+                      <GroupTable students={group.members} onSelect={setSelectedId} />
+                    </div>
+                  </details>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
     </div>
