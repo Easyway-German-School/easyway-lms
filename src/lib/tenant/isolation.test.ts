@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { Prisma } from "@prisma/client";
 import {
   TENANT_OWNED_MODELS,
@@ -171,6 +173,72 @@ describe("nested creates inherit the tenant", () => {
     });
 
     expect(out.data.student).toEqual({ connect: { id: "s1" } });
+  });
+});
+
+/**
+ * The bug this guards against, in full:
+ *
+ * `/api/auth/password/request` and `/api/email/unsubscribe` both run before
+ * anyone is signed in, so nothing puts a tenant in context. Both then call into
+ * the email queue, which reads `EmailSuppression` and writes `EmailMessage` —
+ * both tenant-owned. In strict isolation mode the extension throws
+ * `TenantIsolationError`; both routes had a `catch` that logged and returned a
+ * success-shaped response. The reset token was minted, the caller was told
+ * "check your email", and no mail was ever queued. It was invisible for a month.
+ *
+ * The fix at each site is one line — `setTenantScope(await resolveTenantId(req))`
+ * — and the failure mode is a route that quietly does nothing. So this test
+ * fails the build if a NEW route touches the mail queue without first
+ * establishing a scope (its own, an auth gate's, or an explicit unscoped one).
+ */
+describe("every route that queues mail establishes a tenant scope", () => {
+  const API_DIR = join(process.cwd(), "src", "app", "api");
+
+  /** Every `route.ts` under src/app/api, recursively. */
+  function routeFiles(dir: string): string[] {
+    if (!existsSync(dir)) return [];
+    const out: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...routeFiles(full));
+      else if (entry.name === "route.ts" || entry.name === "route.tsx") out.push(full);
+    }
+    return out;
+  }
+
+  // Touching the mail queue at all — the queue's own writes are what throw.
+  const TOUCHES_MAIL = /@\/lib\/(email-queue|sms-queue)|\b(queueEmail|queueCampaign|drainQueue|suppress)\b/;
+
+  // Any one of these means a scope is in context by the time the queue is hit:
+  //   - the route sets it itself (public routes: resolve from the host)
+  //   - an auth gate sets it (requireAuthSession / requireCapability call setTenantScope)
+  //   - the route declares itself deliberately cross-tenant
+  const ESTABLISHES_SCOPE =
+    /\b(setTenantScope|resolveTenantId|withRequestTenant|runWithTenant|runUnscoped|withUnscoped|maybeUnscoped|enterUnscoped|requireAuthSession|requireCapability|requireApiKey|resolveApiKey|getServerAuthSession)\b/;
+
+  it("finds the API directory", () => {
+    expect(existsSync(API_DIR), `expected ${API_DIR} to exist`).toBe(true);
+  });
+
+  it("leaves no mail-queuing route without a scope", () => {
+    const offenders: string[] = [];
+    for (const file of routeFiles(API_DIR)) {
+      const src = readFileSync(file, "utf8");
+      if (!TOUCHES_MAIL.test(src)) continue;
+      if (ESTABLISHES_SCOPE.test(src)) continue;
+      offenders.push(file.slice(API_DIR.length + 1).replace(/\\/g, "/"));
+    }
+
+    expect(
+      offenders,
+      `These routes reach the mail queue with no tenant scope in context. ` +
+        `The queue writes tenant-owned tables (EmailMessage / EmailSuppression), ` +
+        `so in strict isolation mode the send throws and is usually swallowed — ` +
+        `the mail silently never goes out. Add ` +
+        `\`setTenantScope(await resolveTenantId(request))\` (public routes) or route ` +
+        `through an auth gate:\n  ${offenders.join("\n  ")}`,
+    ).toEqual([]);
   });
 });
 
