@@ -8,6 +8,7 @@ import {
   teachingGroups,
 } from "@/lib/lecturer-assignment";
 import { LECTURER_STATUS_META, readLecturerStatus } from "@/lib/lecturer-status";
+import { cohortRoleOf, type CohortRole } from "@/lib/cohort-tutors";
 
 export const dynamic = "force-dynamic";
 
@@ -23,24 +24,8 @@ export const dynamic = "force-dynamic";
  * read-only.
  */
 
-type Role = "campus" | "online" | "both";
-
-/** Which side(s) of a hybrid cohort this tutor's class-type setting covers. */
-function roleOf(classTypes: string[]): Role | null {
-  const set = new Set(classTypes.map((value) => value.toLowerCase()));
-  const groupRoles = [...set].filter((value) => value !== "private");
-  if (groupRoles.length === 0) {
-    // No class type chosen at all — only counts as a group tutor if they are
-    // not explicitly a private-only tutor.
-    return set.has("private") ? null : "both";
-  }
-  const hasPhysical = groupRoles.includes("physical");
-  const hasOnline = groupRoles.includes("online");
-  if (hasPhysical && hasOnline) return "both";
-  if (hasPhysical) return "campus";
-  if (hasOnline) return "online";
-  return null;
-}
+type Role = CohortRole;
+const roleOf = cohortRoleOf;
 
 export async function GET() {
   const gate = await requireCapability("classes");

@@ -1,8 +1,64 @@
 import type { Student } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getMergedSchedule, type MergedSession } from "@/lib/class-sessions";
+import { getMergedSchedule, normalizeSlot, type MergedSession } from "@/lib/class-sessions";
 import { getPrivateSchedule } from "@/lib/private-classes";
 import { nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
+import { buildCohortTeachers, tutorNameForStudentCohort } from "@/lib/cohort-tutors";
+
+/**
+ * The tutor to show a student against every class on their timetable.
+ *
+ * A directly-named tutor (`Student.tutorId`, or a co-tutor) is the most
+ * specific answer and wins. Otherwise it is the cohort's assigned tutor, picked
+ * for how this student attends — an online student sees the online tutor, a
+ * campus student the in-person one. Only the classes a tutor has actually
+ * edited carry a `lecturerName` from the schedule engine itself; this fills the
+ * rest, per level+sitting so a hybrid student's "also joinable" sittings each
+ * name their own tutor.
+ */
+async function resolveTimetableTutors(
+  student: Pick<Student, "id" | "branchId" | "deliveryMode">,
+): Promise<{ nameFor: (level: string, slot: string) => string | null }> {
+  const [named, lecturers] = await Promise.all([
+    prisma.student.findUnique({
+      where: { id: student.id },
+      select: {
+        tutor: { select: { user: { select: { name: true } } } },
+        coTutors: { select: { lecturer: { select: { user: { select: { name: true } } } } } },
+      },
+    }),
+    prisma.lecturer.findMany({
+      where: { status: { not: "inactive" } },
+      select: {
+        id: true,
+        status: true,
+        user: { select: { name: true } },
+        branchId: true,
+        level: true,
+        sessionSlot: true,
+        branchIds: true,
+        levels: true,
+        sessionSlots: true,
+        assignmentGroups: true,
+        classTypes: true,
+        batches: true,
+      },
+    }),
+  ]);
+
+  const namedTutor =
+    named?.tutor?.user?.name ?? named?.coTutors?.[0]?.lecturer?.user?.name ?? null;
+  const teachers = buildCohortTeachers(lecturers);
+
+  return {
+    nameFor: (level: string, slot: string) => {
+      if (namedTutor) return namedTutor;
+      if (!student.branchId) return null;
+      const key = `${student.branchId}:${level.toUpperCase()}:${normalizeSlot(slot)}`;
+      return tutorNameForStudentCohort(teachers, key, student.deliveryMode);
+    },
+  };
+}
 
 /**
  * Builds the same timetable payload /api/schedule has always returned for a
@@ -107,6 +163,29 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
     );
     const withClasses = built.filter((b) => b.sessions.length > 0);
     if (withClasses.length) alsoJoinable = withClasses;
+  }
+
+  /**
+   * Put a tutor name on every class. The schedule engine only fills
+   * `lecturerName` for days a tutor has actually edited; this backfills the
+   * rest from the cohort assignment (or a named pairing) so a student can see
+   * who takes their class before the first topic is even set.
+   */
+  try {
+    const { nameFor } = await resolveTimetableTutors(student);
+    for (const month of schedule.months) {
+      for (const session of month.sessions) {
+        if (!session.lecturerName) session.lecturerName = nameFor(level, session.timeSlot);
+      }
+    }
+    for (const group of alsoJoinable ?? []) {
+      const name = nameFor(level, group.slot);
+      for (const session of group.sessions) {
+        if (!session.lecturerName) session.lecturerName = name;
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to resolve timetable tutors:", err);
   }
 
   return {
