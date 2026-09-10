@@ -29,11 +29,27 @@ import { validateImageFile } from "@/lib/upload";
  * people already read as "this is an identity photo, sit up straight".
  */
 
+/**
+ * Kept deliberately modest. A record photo is shown at ~130 px and printed on a
+ * certificate at maybe 300 px, so 720 is already generous — and a live camera
+ * feed plus a screenshot canvas at 960² was enough to tip an entry-level
+ * Android phone into "low memory" and kill the tab mid-capture. On a device
+ * that reports little RAM we ask for less again.
+ */
+const lowMemoryDevice =
+  typeof navigator !== "undefined" &&
+  typeof (navigator as Navigator & { deviceMemory?: number }).deviceMemory === "number" &&
+  (navigator as Navigator & { deviceMemory?: number }).deviceMemory! <= 2;
+
+const CAPTURE_EDGE = lowMemoryDevice ? 540 : 720;
+
 const VIDEO_CONSTRAINTS: MediaTrackConstraints = {
   facingMode: "user",
-  width: { ideal: 960 },
-  height: { ideal: 960 },
+  width: { ideal: CAPTURE_EDGE },
+  height: { ideal: CAPTURE_EDGE },
 };
+
+const SCREENSHOT_QUALITY = lowMemoryDevice ? 0.78 : 0.85;
 
 type Mode = "choose" | "camera" | "upload";
 
@@ -98,9 +114,18 @@ export default function PhotoCapture({
   );
 
   const capture = useCallback(() => {
-    const shot = webcamRef.current?.getScreenshot();
+    let shot: string | null | undefined;
+    try {
+      shot = webcamRef.current?.getScreenshot();
+    } catch {
+      // getScreenshot allocates a canvas the size of the video frame; on a
+      // phone that is already low on memory that allocation throws.
+      shot = null;
+    }
     if (!shot) {
-      setError("The camera did not return an image. Try once more.");
+      setError(
+        "Your phone could not save that frame — usually low memory. Close other apps and browser tabs, then try again. If it keeps failing, ask the office to add your photo for you.",
+      );
       return;
     }
     const file = dataUrlToFile(shot, `capture-${Date.now()}.jpg`);
@@ -205,7 +230,7 @@ export default function PhotoCapture({
             audio={false}
             mirrored
             screenshotFormat="image/jpeg"
-            screenshotQuality={0.92}
+            screenshotQuality={SCREENSHOT_QUALITY}
             videoConstraints={VIDEO_CONSTRAINTS}
             onUserMedia={() => setCameraReady(true)}
             onUserMediaError={(mediaError) => {

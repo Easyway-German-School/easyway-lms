@@ -73,7 +73,7 @@ async function convertHeicIfNeeded(file: File): Promise<File> {
  *    null `toBlob` — returns the original file untouched. Compression is an
  *    optimisation, never a gate.
  */
-async function downscaleImage(file: File, maxDim = 1600, quality = 0.82): Promise<File> {
+async function downscaleImage(file: File, maxDim?: number, quality = 0.82): Promise<File> {
   const type = file.type.toLowerCase();
   const isRaster =
     type === "image/jpeg" || type === "image/png" || type === "image/webp" || type === "image/heic" || type === "image/heif";
@@ -82,10 +82,19 @@ async function downscaleImage(file: File, maxDim = 1600, quality = 0.82): Promis
   if (file.size <= 512 * 1024) return file;
   if (typeof createImageBitmap !== "function" || typeof document === "undefined") return file;
 
+  // A phone that reports 2 GB or less of RAM is the one that throws mid-resize
+  // and surfaces the browser's own "low memory" — give it a smaller target so
+  // the canvas it has to allocate is a quarter of the size.
+  const deviceMemory =
+    typeof navigator !== "undefined"
+      ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory
+      : undefined;
+  const targetDim = maxDim ?? (typeof deviceMemory === "number" && deviceMemory <= 2 ? 1000 : 1400);
+
   try {
     const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
     const longest = Math.max(bitmap.width, bitmap.height);
-    const scale = Math.min(1, maxDim / longest);
+    const scale = Math.min(1, targetDim / longest);
     // Already within bounds AND not a heavy PNG worth transcoding — leave it.
     if (scale === 1 && file.size <= 1.5 * 1024 * 1024) {
       bitmap.close?.();
@@ -259,6 +268,16 @@ export function uploadErrorMessage(error: unknown, fallback = "Upload failed"): 
   const name = error instanceof DOMException ? error.name : "";
   if (name === "NotReadableError" || name === "NotFoundError") {
     return "Your device released that photo before it finished uploading. Please select it again.";
+  }
+  // A cheap phone decoding a big camera photo can exhaust its memory — the
+  // browser throws a RangeError or an out-of-memory DOMException, and the
+  // person just sees "low memory". Say what actually helps.
+  const raw = error instanceof Error ? `${error.name}: ${error.message}` : "";
+  if (
+    error instanceof RangeError ||
+    /out of memory|low memory|memory|allocation failed|array buffer allocation/i.test(raw)
+  ) {
+    return "Your phone ran low on memory handling that photo. Close other apps and browser tabs, then try again — or ask the office to add it for you.";
   }
   return error instanceof Error ? error.message : fallback;
 }

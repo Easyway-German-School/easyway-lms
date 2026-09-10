@@ -11,7 +11,7 @@ import BrandLoader from "@/components/BrandLoader";
 import BranchSetupCard from "@/components/BranchSetupCard";
 import PhotoCapture from "@/components/PhotoCapture";
 import { useGamification } from "@/lib/useGamification";
-import { uploadImage, validateImageFile } from "@/lib/upload";
+import { uploadErrorMessage, uploadImage, validateImageFile } from "@/lib/upload";
 import type { Badge, BadgeIcon } from "@/lib/gamification";
 import {
   AttendanceIcon,
@@ -402,7 +402,7 @@ export default function ProfilePage() {
       // away. Same shape as the gamification invalidate below.
       queryClient.invalidateQueries({ queryKey: studentAccessQueryKey });
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Could not upload that photo");
+      setError(uploadErrorMessage(uploadError, "Could not upload that photo"));
     } finally {
       setUploading(false);
     }
