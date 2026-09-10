@@ -757,9 +757,34 @@ export async function PATCH(request: Request) {
     });
     if (Object.keys(profileIncoming).length > 0) {
       const merged = mergeProfile(student.profile ?? {}, profileIncoming);
+      /**
+       * Tenant stamp for a BRAND-NEW profile row only. The student's own
+       * tenant anchor is trusted ahead of the acting admin's session: an
+       * existing Student row's `tenantId` is guaranteed to reference a live
+       * Tenant (the FK held when the row was written), whereas a staff
+       * session can outlive the Tenant it names — a JWT issued before a
+       * database restore still carries the old id. Prisma then fails the
+       * implied connect on `create` with P2025 ("...depends on one or more
+       * records that were required but not found. Record not found") and the
+       * whole edit 500s over an optional column. So: resolve a candidate from
+       * the student first, confirm it still exists, and simply leave the
+       * column null when it does not — a tenant-backfill can set it later.
+       */
+      let profileTenantId: string | undefined;
+      if (!student.profile) {
+        const candidate =
+          student.tenantId ?? student.branch?.tenantId ?? gate.session.user.tenantId ?? null;
+        if (candidate) {
+          const liveTenant = await prisma.tenant.findUnique({
+            where: { id: candidate },
+            select: { id: true },
+          });
+          profileTenantId = liveTenant?.id;
+        }
+      }
       await prisma.studentProfile.upsert({
         where: { studentId },
-        create: { studentId, tenantId: gate.session.user.tenantId, ...merged },
+        create: { studentId, ...(profileTenantId ? { tenantId: profileTenantId } : {}), ...merged },
         update: merged,
       });
     }
