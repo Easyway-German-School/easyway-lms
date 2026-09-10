@@ -9,6 +9,7 @@ import PasswordInput from "@/components/PasswordInput";
 import BulkStudentAdd from "@/components/BulkStudentAdd";
 import { goalFor } from "@/lib/germany-goals";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
+import { isModeEnabled, isSessionEnabled, type SessionSettings } from "@/lib/school-settings";
 import { isOnlineBranchName } from "@/lib/online-branch";
 import { CalendarIcon, CameraIcon } from "@/components/icons";
 import { packageOptions, countries } from "@/app/auth/signup/options";
@@ -222,6 +223,8 @@ function StudentsRoster() {
   const [newClassType, setNewClassType] = useState("group");
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
   const [newDeliveryMode, setNewDeliveryMode] = useState("physical");
+  // Which sittings/modes the school still runs, per level — set on /admin/settings.
+  const [sessionCfg, setSessionCfg] = useState<SessionSettings | null>(null);
   const [newBatch, setNewBatch] = useState("");
   const [newPathway, setNewPathway] = useState(
     addStudentPathwayOptions.includes(params.get("pathway") ?? "") ? (params.get("pathway") as string) : packageOptions[0],
@@ -367,6 +370,22 @@ function StudentsRoster() {
   useEffect(() => {
     void loadStudents();
   }, [loadStudents]);
+
+  useEffect(() => {
+    fetch("/api/school/sessions")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.sessions)) setSessionCfg(data as SessionSettings);
+      })
+      .catch(() => {});
+  }, []);
+
+  // The Add-student form only offers what the office still runs for the chosen
+  // level. Falls back to the full list until the config loads.
+  const addSlots = TIME_SLOTS.filter((slot) => isSessionEnabled(sessionCfg, newLevel, slot));
+  const addModes = (["physical", "hybrid"] as const).filter((mode) =>
+    isModeEnabled(sessionCfg, newLevel, mode),
+  );
 
   async function handleSaveStudent(addAnother = false) {
     setStudentError("");
@@ -1529,10 +1548,15 @@ function StudentsRoster() {
                   onChange={(event) => setNewSessionSlot(event.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="morning">Morning</option>
-                  <option value="afternoon">Afternoon</option>
-                  <option value="evening">Evening</option>
+                  {(addSlots.length ? addSlots : TIME_SLOTS).map((slot) => (
+                    <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
+                  ))}
                 </select>
+                {addSlots.length > 0 && addSlots.length < TIME_SLOTS.length && (
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Some sessions are switched off for {newLevel} on Settings.
+                  </span>
+                )}
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Class type</span>
@@ -1563,8 +1587,11 @@ function StudentsRoster() {
                     onChange={(event) => setNewDeliveryMode(event.target.value)}
                     className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                   >
-                    <option value="physical">On campus only</option>
-                    <option value="hybrid">On campus + live video (hybrid)</option>
+                    {(addModes.length ? addModes : (["physical", "hybrid"] as const)).map((mode) => (
+                      <option key={mode} value={mode}>
+                        {mode === "physical" ? "On campus only" : "On campus + live video (hybrid)"}
+                      </option>
+                    ))}
                   </select>
                 )}
                 <span className="block text-xs font-normal text-[var(--muted)]">

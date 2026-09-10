@@ -20,6 +20,12 @@ import {
 } from "@/lib/online-branch";
 import { TIME_SLOTS, slotLabel } from "@/lib/class-times";
 import { OFFERED_LEVELS } from "@/lib/levels";
+import {
+  defaultSessionSettings,
+  isModeEnabled,
+  isSessionEnabled,
+  type SessionSettings,
+} from "@/lib/school-settings";
 
 type BranchOption = { id: string; name: string; location?: string | null; mode?: string | null };
 
@@ -65,13 +71,10 @@ const BRANCH_DEFAULT_STATE: Record<string, string> = {
  * timetable that silently reads differently for two classmates is worse than
  * one everybody has to convert once.
  *
- * These come from TIME_SLOTS in lib/class-sessions — the same table the
- * generated timetable and the tutor's editor use. They were hardcoded here and
- * had drifted out of step with it, so the signup form quoted students hours
- * their class does not actually run.
+ * The list itself comes from TIME_SLOTS in lib/class-times — the same table the
+ * generated timetable and the tutor's editor use — filtered per level by
+ * `offeredSlots` below against what the office still runs (/admin/settings).
  */
-const SESSION_SLOTS = TIME_SLOTS.map((slot) => ({ value: slot, label: slotLabel(slot) }));
-
 export default function SignUpFormClient({ pageTitle, initialBranchName, initialPrefill }: SignUpFormClientProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -135,6 +138,10 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   const [device, setDevice] = useState("");
   const [connection, setConnection] = useState("");
   const [branches, setBranches] = useState<BranchOption[]>([]);
+  // Which sittings and attendance modes the school currently runs, per level —
+  // set on /admin/settings. Until it loads we assume everything runs, so the
+  // form never loses its session dropdown to a slow request.
+  const [sessionCfg, setSessionCfg] = useState<SessionSettings>(() => defaultSessionSettings());
   const [error, setError] = useState("");
   // Set when signup is refused because the email already has an account — shown
   // as a friendly "sign in / reset password" panel, never as an error.
@@ -164,6 +171,16 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   // rather than testing the branch name again, so an online student never sees
   // a campus question and a campus student never sees a bandwidth one.
   const isOnline = isOnlineBranch(selectedBranch);
+
+  // The sittings still running at the chosen level (per /admin/settings). Before
+  // a level is picked we show the full list rather than nothing.
+  const offeredSlots = TIME_SLOTS.filter(
+    (slot) => !level || isSessionEnabled(sessionCfg, level, slot),
+  );
+  // Online-branch student at a level whose online mode has been switched off:
+  // they cannot be enrolled here, and are told to pick another level or a campus.
+  const onlineClosedForLevel =
+    isOnline && Boolean(level) && !isModeEnabled(sessionCfg, level, "online");
 
   // Prefill the state from the chosen campus branch — see BRANCH_DEFAULT_STATE.
   // Only while the student has not touched the field, only inside Nigeria, and
@@ -242,6 +259,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         pathway.trim() !== "" &&
         batch !== "" &&
         level !== "" &&
+        // The online branch cannot enrol a level whose online mode is off.
+        !onlineClosedForLevel &&
         // A private student agrees their own times with their tutor and never
         // sees the session dropdown (it is hidden below), so it cannot gate
         // them forward.
@@ -295,6 +314,29 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
 
     loadBranches();
   }, [initialBranchName]);
+
+  useEffect(() => {
+    fetch(buildApiUrl("/api/school/sessions"))
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.sessions)) setSessionCfg(data as SessionSettings);
+      })
+      .catch(() => {
+        /* keep the permissive default — every option stays offered */
+      });
+  }, []);
+
+  // If the level changes to one that no longer runs the picked sitting, drop it
+  // so the student re-chooses rather than submitting a closed slot. Same for a
+  // campus student whose picked attendance mode is no longer offered.
+  useEffect(() => {
+    if (sessionSlot && level && !isSessionEnabled(sessionCfg, level, sessionSlot)) {
+      setSessionSlot("");
+    }
+    if (!isOnline && level && !isModeEnabled(sessionCfg, level, deliveryMode)) {
+      setDeliveryMode(isModeEnabled(sessionCfg, level, "physical") ? "physical" : "hybrid");
+    }
+  }, [level, sessionCfg, sessionSlot, isOnline, deliveryMode]);
 
   /**
    * Prefill from an enrolment invite link.
@@ -725,7 +767,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                   student is choosing an informational flag only, since the
                   server always forces "online" for that branch regardless of
                   what this sends. Shown for both, worded for each. */}
-              {selectedBranch ? (
+              {selectedBranch && onlineClosedForLevel ? (
+                <div className="rounded-3xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
+                  <p className="font-semibold">Online classes for {level} are not open right now.</p>
+                  <p className="mt-1">
+                    Pick a different level, or choose a campus branch above to attend in person or hybrid.
+                  </p>
+                </div>
+              ) : selectedBranch ? (
                 <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
                   <p className="text-sm font-semibold text-[var(--foreground)]">How will you attend?</p>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -754,7 +803,12 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                             blurb: "Attend on campus when you can, and join the same class live over video when you cannot.",
                           },
                         ]
-                    ).map((option) => (
+                    )
+                      // A campus branch offers only the modes the office still
+                      // runs for this level; the online branch's two are just
+                      // an in-person-interest flag, so both always show there.
+                      .filter((option) => isOnline || !level || isModeEnabled(sessionCfg, level, option.value))
+                      .map((option) => (
                       <button
                         key={option.value}
                         type="button"
@@ -830,13 +884,16 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                   <label htmlFor="sessionSlot" className="block text-sm font-semibold text-[var(--muted)]">Which session suits you?</label>
                   <select id="sessionSlot" name="sessionSlot" value={sessionSlot} onChange={(e) => setSessionSlot(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
                     <option value="">Select a session</option>
-                    {SESSION_SLOTS.map((slot) => (
-                      <option key={slot.value} value={slot.value}>
-                        {isOnline ? `${slot.label} WAT` : slot.label}
+                    {offeredSlots.map((slot) => (
+                      <option key={slot} value={slot}>
+                        {isOnline ? `${slotLabel(slot)} WAT` : slotLabel(slot)}
                       </option>
                     ))}
                   </select>
                   <p className="mt-2 text-xs text-[var(--muted)]">
+                    {level && offeredSlots.length < TIME_SLOTS.length
+                      ? "Some sessions are not running for this level right now. "
+                      : ""}
                     {isOnline
                       ? "Class times are Nigerian time (WAT). Your dashboard converts them to your own timezone once you tell us where you are, on the next step."
                       : "Your calendar and your tutor come from the session you pick. Contact your branch office if you need to change it later."}

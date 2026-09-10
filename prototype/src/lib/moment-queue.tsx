@@ -105,6 +105,7 @@ export type MomentId =
   | "goal"
   | "level-advance"
   | "office-reply"
+  | "class-schedule-changed"
   | "lesson-complete"
   | "notifications"
   | "daily-briefing"
@@ -162,6 +163,19 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "The office replied",
     dockBlurb: "Your question has an answer waiting.",
+  },
+  /**
+   * "Your class time changed." The office switched a sitting off and this
+   * student was moved to another one. Logistics they have to know before the
+   * next class, so it sits just below the office reply and above a single
+   * finished lesson — but still well below orientation, and it drops to the
+   * dock (where the bell still carries it) if the two-modal cap is spent.
+   */
+  "class-schedule-changed": {
+    priority: 66,
+    kind: "modal",
+    dockLabel: "Your class time changed",
+    dockBlurb: "Your session moved — here is where to now.",
   },
   /**
    * A single lesson finished, not a whole level — smaller news, so it sits

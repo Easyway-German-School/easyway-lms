@@ -58,6 +58,8 @@ export const KIND = {
   resultPublished: "result.published",
   certificateIssued: "certificate.issued",
   classStarting: "class.starting",
+  /** The office switched a sitting or an attendance mode off, and this student was moved to another. See /api/admin/settings. */
+  classSessionChanged: "class.session_changed",
   privateClassUpdated: "private_class.updated",
   attendanceMarked: "attendance.marked",
   lecturerMessage: "lecturer.message",

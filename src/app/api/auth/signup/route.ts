@@ -13,6 +13,8 @@ import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
 import { currentTenantId, setTenantScope } from "@/lib/tenant/context";
 import { resolveTenantId } from "@/lib/tenant/resolve";
 import { defaultBatchMonth } from "@/lib/intake-server";
+import { readSessionSettings } from "@/lib/school-settings-server";
+import { isModeEnabled, isSessionEnabled } from "@/lib/school-settings";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import { TIME_SLOTS } from "@/lib/class-times";
 import { TERMS_CONTEXT, TERMS_VERSION } from "@/lib/terms";
@@ -434,6 +436,31 @@ export async function POST(request: NextRequest) {
         { error: "Please select a session" },
         { status: 400 }
       );
+    }
+
+    /**
+     * The office can switch a sitting or an attendance mode off for a level on
+     * /admin/settings. The form already hides those, but this is the boundary:
+     * a crafted request must not be able to enrol into a class that no longer
+     * runs. Same defence-in-depth as the level check above.
+     */
+    if (normalizedRole === "STUDENT") {
+      const sessionSettings = await readSessionSettings(currentTenantId());
+      if (
+        normalizedClassType !== "private" &&
+        !isSessionEnabled(sessionSettings, normalizedLevel, normalizedSessionSlot)
+      ) {
+        return NextResponse.json(
+          { error: `The ${normalizedSessionSlot} session is not running for ${normalizedLevel} right now. Please choose another.` },
+          { status: 400 }
+        );
+      }
+      if (!isModeEnabled(sessionSettings, normalizedLevel, normalizedDeliveryMode)) {
+        return NextResponse.json(
+          { error: `Attending ${normalizedLevel} this way is not open right now. Please choose another level or branch.` },
+          { status: 400 }
+        );
+      }
     }
 
     if (normalizedPathway === "Ausbildung (vocational training)" && !normalizedAdmission.profession) {

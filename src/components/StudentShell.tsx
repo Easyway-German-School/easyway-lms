@@ -9,6 +9,7 @@ import ImpersonationBanner from "@/components/ImpersonationBanner";
 import OfflineBanner from "@/components/OfflineBanner";
 import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import OfficeReplyMoment from "@/components/moment/OfficeReplyMoment";
+import ScheduleChangeMoment from "@/components/moment/ScheduleChangeMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
@@ -530,6 +531,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         stacks on the tour or a celebration. See OfficeReplyMoment.
       */}
       <OfficeReplyMoment />
+
+      {/*
+        The office switched a sitting off and moved this student to another one.
+        Queue-managed like the reply above so it never stacks on the tour or a
+        celebration. See ScheduleChangeMoment.
+      */}
+      <ScheduleChangeMoment />
 
       {/*
         Message popups, mounted once per shell so they follow the reader onto

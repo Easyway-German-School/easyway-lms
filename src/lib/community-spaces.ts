@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import { readAssignment, spaceWhereForAssignment } from "@/lib/lecturer-assignment";
+import { isSessionEnabled } from "@/lib/school-settings";
+import { readSessionSettings } from "@/lib/school-settings-server";
 
 /**
  * Who may read and write in which cohort's chat.
@@ -169,6 +171,14 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
     select: { tenantId: true },
   });
 
+  // Never re-provision a room for a sitting the office has switched off on
+  // /admin/settings. The data for a previously-run sitting is kept (re-enabling
+  // brings the room back), but a disabled one must not spring back to life the
+  // next time a stray student record still points at it.
+  if (!isSessionEnabled(await readSessionSettings(branch?.tenantId), level, sessionSlot)) {
+    return null;
+  }
+
   const space = await prisma.space.upsert({
     where: {
       branchId_level_sessionSlot: { branchId: cohort.branchId, level, sessionSlot },
@@ -197,17 +207,44 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
   return space;
 }
 
+/**
+ * Drop the rooms whose sitting the office has switched off on /admin/settings.
+ * Staff (admins and tutors) would otherwise keep seeing a room no student
+ * resolves to any more. `tenantId` comes from the viewer's own account.
+ */
+async function keepEnabledSpaces(
+  rows: Array<{ id: string; level: string; sessionSlot: string }>,
+  tenantId: string | null | undefined,
+): Promise<string[]> {
+  if (rows.length === 0) return [];
+  const settings = await readSessionSettings(tenantId);
+  return rows.filter((r) => isSessionEnabled(settings, r.level, r.sessionSlot)).map((r) => r.id);
+}
+
 /** Resolve exactly which spaces this viewer may read or post in. */
 export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
+  const account = await prisma.user.findUnique({
+    where: { id: viewer.userId },
+    select: { tenantId: true },
+  });
+  const tenantId = account?.tenantId ?? null;
+
   if (isAdminRole(viewer.role)) {
     // Admins see every room in the school, minus the ones for levels it no
     // longer runs — moderation covers what is live, and a retired C2 room
-    // would otherwise sit in the admin's list forever.
+    // would otherwise sit in the admin's list forever. Sittings the office
+    // switched off are dropped for the same reason.
     const all = await prisma.space.findMany({
       where: { level: { in: OFFERED_LEVELS as unknown as string[] } },
-      select: { id: true },
+      select: { id: true, level: true, sessionSlot: true },
     });
-    return { spaceIds: all.map((s) => s.id), isStaff: true, branchId: null, level: null, sessionSlot: null };
+    return {
+      spaceIds: await keepEnabledSpaces(all, tenantId),
+      isStaff: true,
+      branchId: null,
+      level: null,
+      sessionSlot: null,
+    };
   }
 
   if (isStaffRole(viewer.role)) {
@@ -232,8 +269,17 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
       return { spaceIds: [], isStaff: true, branchId: null, level: null, sessionSlot: null };
     }
 
-    const rooms = await prisma.space.findMany({ where, select: { id: true } });
-    return { spaceIds: rooms.map((s) => s.id), isStaff: true, branchId: null, level: null, sessionSlot: null };
+    const rooms = await prisma.space.findMany({
+      where,
+      select: { id: true, level: true, sessionSlot: true },
+    });
+    return {
+      spaceIds: await keepEnabledSpaces(rooms, tenantId),
+      isStaff: true,
+      branchId: null,
+      level: null,
+      sessionSlot: null,
+    };
   }
 
   const student = await prisma.student.findUnique({
