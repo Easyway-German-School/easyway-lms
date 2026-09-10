@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import BrandLogo from '@/components/BrandLogo';
 import AdminAssistantLauncher from '@/components/AdminAssistantLauncher';
 import AdminDailyBriefing from '@/components/AdminDailyBriefing';
@@ -47,6 +47,7 @@ import {
   ResultsIcon,
   RobotIcon,
   RosterIcon,
+  SearchIcon,
   SendIcon,
   ShieldIcon,
   TicketIcon,
@@ -185,6 +186,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   // Below lg the sidebar is a drawer. The admin area is used from a phone at
   // the front desk more often than the desktop-only layout assumed.
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // The sidebar has ~45 destinations across seven groups; scrolling the rail
+  // to hunt for one is the slow path. This filters the whole list by name (or
+  // group) as you type. Cmd/Ctrl+K from any admin page jumps straight here.
+  const [navQuery, setNavQuery] = useState('');
+  const navSearchRef = useRef<HTMLInputElement>(null);
   // null while unknown — everything stays visible rather than flickering
   // items away on first paint.
   const [capabilities, setCapabilities] = useState<string[] | null>(null);
@@ -271,6 +277,24 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   const groups = ['Main', 'Academics', 'Exams', 'Content', 'Billing', 'Intelligence', 'Settings'];
 
+  /**
+   * Cmd/Ctrl+K from anywhere in the portal focuses the sidebar search. On a
+   * phone the sidebar is a drawer and the desktop rail can be collapsed, so
+   * open/expand it first, then focus once the transition has room.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCollapsed(false);
+        setDrawerOpen(true);
+        setTimeout(() => navSearchRef.current?.focus(), 60);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   useEffect(() => {
     if (status === 'unauthenticated' || (status === 'authenticated' && session?.user?.role?.toLowerCase() !== 'admin')) {
       router.replace('/auth/admin');
@@ -321,6 +345,28 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const blocked = Boolean(
     currentCapability && capabilities !== null && !capabilities.includes(currentCapability),
   );
+
+  // An item is offered only if this admin's sub-role covers it — the same test
+  // the grouped nav uses below, pulled out so the search results honour it too.
+  const maySee = (item: NavItem) => {
+    const capability = capabilityOf(item);
+    return !capability || capabilities === null || capabilities.includes(capability);
+  };
+
+  const navQ = navQuery.trim().toLowerCase();
+  const searchMatches = navQ
+    ? navItems.filter(
+        (item) =>
+          maySee(item) &&
+          (item.label.toLowerCase().includes(navQ) || (item.group ?? '').toLowerCase().includes(navQ)),
+      )
+    : [];
+
+  const goTo = (href: string) => {
+    setDrawerOpen(false);
+    setNavQuery('');
+    router.push(href);
+  };
 
   return (
     <div className="app-canvas flex min-h-screen text-[var(--foreground)]">
@@ -392,14 +438,86 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto p-3">
-          {groups.map((group) => {
+          {/* Collapsed rail: no room for a field, so a magnifier that expands
+              the rail and lands the cursor in the search box. */}
+          {collapsed && (
+            <button
+              onClick={() => {
+                setCollapsed(false);
+                setTimeout(() => navSearchRef.current?.focus(), 60);
+              }}
+              aria-label="Search pages"
+              className="mb-3 hidden w-full items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-2.5 text-[var(--muted)] transition hover:text-[var(--accent)] lg:flex"
+            >
+              <SearchIcon className="h-4 w-4" />
+            </button>
+          )}
+
+          <div
+            className={`sticky top-0 z-10 -mx-3 -mt-3 mb-3 border-b border-[var(--border)] bg-[var(--surface)] px-3 pb-3 pt-3 ${
+              collapsed ? 'lg:hidden' : ''
+            }`}
+          >
+            <span className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 text-[var(--muted)]">
+              <SearchIcon className="h-4 w-4" />
+            </span>
+            <input
+              ref={navSearchRef}
+              type="search"
+              value={navQuery}
+              onChange={(e) => setNavQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setNavQuery('');
+                  navSearchRef.current?.blur();
+                } else if (e.key === 'Enter' && searchMatches[0]) {
+                  goTo(searchMatches[0].href);
+                }
+              }}
+              placeholder="Search pages…"
+              aria-label="Search admin pages"
+              className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] py-2.5 pl-9 pr-3 text-sm text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]"
+            />
+          </div>
+
+          {navQ ? (
+            <div className="space-y-1">
+              {searchMatches.length === 0 ? (
+                <p className="px-3 py-6 text-center text-sm text-[var(--muted)]">
+                  No pages match &ldquo;{navQuery.trim()}&rdquo;.
+                </p>
+              ) : (
+                searchMatches.map((item) => {
+                  const active = pathname === item.href || pathname.startsWith(item.href + '/');
+                  return (
+                    <button
+                      key={item.href}
+                      onClick={() => goTo(item.href)}
+                      className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition-all duration-200 ${
+                        active
+                          ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                          : 'text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]'
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm">
+                        {item.icon}
+                      </span>
+                      <span className="flex-1 font-medium">{item.label}</span>
+                      {item.group ? (
+                        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
+                          {item.group}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+          groups.map((group) => {
             // Hide areas this admin's sub-role does not cover. The routes
             // enforce it too — this only avoids showing doors that 403.
-            const groupItems = navItems.filter((item) => {
-              if (item.group !== group) return false;
-              const capability = capabilityOf(item);
-              return !capability || capabilities === null || capabilities.includes(capability);
-            });
+            const groupItems = navItems.filter((item) => item.group === group && maySee(item));
             if (groupItems.length === 0) return null;
             return (
               <div
@@ -465,7 +583,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 </div>
               </div>
             );
-          })}
+          })
+          )}
         </nav>
 
         {/* Footer */}
