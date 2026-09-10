@@ -3,6 +3,8 @@ import { createResetToken } from "@/lib/password-reset";
 import { queueEmail } from "@/lib/email-queue";
 import { passwordResetEmailTemplate } from "@/lib/email-templates";
 import { checkRateLimit, clientIp, rateLimitResponse } from "@/lib/rate-limit";
+import { setTenantScope } from "@/lib/tenant/context";
+import { resolveTenantId } from "@/lib/tenant/resolve";
 
 /**
  * "I have forgotten my password."
@@ -48,6 +50,21 @@ export async function POST(request: NextRequest) {
   if (!byEmail.ok) return accepted;
 
   try {
+    /**
+     * Which school this reset belongs to, from the hostname it arrived on —
+     * exactly as the public signup route does it, and for the same reason.
+     *
+     * This runs before anyone is signed in, so there is no session to carry a
+     * tenant. `queueEmail` writes to `EmailMessage` (and reads `EmailSuppression`
+     * on the way), both tenant-owned tables, so with no tenant in context the
+     * isolation layer throws `TenantIsolationError` — which the catch below then
+     * swallowed. The reset token was still minted, the caller still saw "check
+     * your email", and the mail was never queued: every "forgot password sends
+     * nothing" report traces to here. The user lookup itself is on the global
+     * `User` table and is unaffected; this only puts a tenant on the queued mail.
+     */
+    setTenantScope(await resolveTenantId(request));
+
     const issued = await createResetToken(email, ip);
 
     // No account. Say nothing different.
