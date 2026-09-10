@@ -8,18 +8,17 @@ import {
   SESSION_SLOTS as SESSIONS,
   MODE_SLOTS as MODES,
   MODE_LABELS,
+  slotTitle,
   defaultSessionSettings,
   type SessionSettings as Settings,
-  type SessionConfig,
+  type SessionSlot,
+  type ModeSlot,
 } from "@/lib/school-settings";
 import { MONTH_NAMES } from "@/lib/batch";
 import { defaultCurrentIntake, type CurrentIntake } from "@/lib/intake";
 
-/** Any of the seven boolean columns on a level row. */
-type Toggle = keyof Omit<SessionConfig, "level">;
-
-type MovePreview = { level: string; kind: "slot" | "mode"; from: string; to: string; count: number };
-type StrandPreview = { level: string; from: string; count: number };
+type MovePreview = { level: string; mode: ModeSlot; from: string; to: string; count: number };
+type StrandPreview = { level: string; mode: ModeSlot; slot: string; count: number };
 type TutorWarning = { name: string; detail: string };
 
 type ImpactResponse = {
@@ -29,19 +28,15 @@ type ImpactResponse = {
   tutorWarnings: TutorWarning[];
 };
 
+const modeWord = (m: ModeSlot) => (m === "physical" ? "on campus" : m);
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(() => defaultSessionSettings());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-
-  // Filled after a preview call when a save would move real students. The
-  // confirm dialog reads it; confirming re-POSTs with { confirm: true }.
   const [pendingImpact, setPendingImpact] = useState<ImpactResponse | null>(null);
 
-  // The school's current intake — the month a new student joins by default
-  // when the sign-up form, the Add-student form or the CSV import did not
-  // carry one. See lib/intake.ts.
   const [intake, setIntake] = useState<CurrentIntake>(() => defaultCurrentIntake());
   const [intakeSaving, setIntakeSaving] = useState(false);
   const [intakeMsg, setIntakeMsg] = useState("");
@@ -87,10 +82,7 @@ export default function SettingsPage() {
   async function loadSettings() {
     try {
       const res = await fetch("/api/admin/settings", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setSettings(data);
-      }
+      if (res.ok) setSettings(await res.json());
     } catch (error) {
       console.error("Failed to load settings:", error);
       setMessage("Failed to load settings");
@@ -100,7 +92,6 @@ export default function SettingsPage() {
   }
 
   /**
-   * Send the current toggles to the server.
    *   phase "preview"  → ask what would move, write nothing
    *   phase "confirm"  → write the setting and move the students
    * A plain save with nobody affected goes straight through as a confirm.
@@ -127,13 +118,11 @@ export default function SettingsPage() {
         if (data.affected > 0 || (data.tutorWarnings?.length ?? 0) > 0) {
           setPendingImpact(data as ImpactResponse);
         } else {
-          // Nothing to move — save immediately.
           await submitSettings("confirm");
         }
         return;
       }
 
-      // confirm
       setPendingImpact(null);
       if (res.ok) {
         const moved = data.moved as number;
@@ -154,19 +143,36 @@ export default function SettingsPage() {
     }
   }
 
-  /**
-   * Keyed by level, not by array index, and immutable.
-   *
-   * The index version broke twice over: it mutated the row in place inside a
-   * setState updater, so React saw the same object reference and could skip
-   * the re-render, and it assumed the stored order matched the order this page
-   * renders — which stops being true the moment a level is missing from the
-   * saved value.
-   */
-  function toggle(level: string, key: Toggle) {
+  /** Immutable, keyed by level then slot then mode. */
+  function toggleCell(level: string, slot: SessionSlot, mode: ModeSlot) {
     setSettings((prev) => ({
       sessions: prev.sessions.map((row) =>
-        row.level === level ? { ...row, [key]: !row[key] } : row,
+        row.level !== level
+          ? row
+          : {
+              ...row,
+              grid: {
+                ...row.grid,
+                [slot]: { ...row.grid[slot], [mode]: !row.grid[slot][mode] },
+              },
+            },
+      ),
+    }));
+  }
+
+  /** Toggle a whole session row on/off for a level. */
+  function toggleRow(level: string, slot: SessionSlot, on: boolean) {
+    setSettings((prev) => ({
+      sessions: prev.sessions.map((row) =>
+        row.level !== level
+          ? row
+          : {
+              ...row,
+              grid: {
+                ...row.grid,
+                [slot]: { physical: on, hybrid: on, online: on },
+              },
+            },
       ),
     }));
   }
@@ -184,20 +190,18 @@ export default function SettingsPage() {
   return (
     <AdminShell>
       <div className="mx-auto max-w-6xl space-y-6 p-6">
-        {/* Header */}
         <div className="space-y-2">
           <div className="flex items-center gap-3">
             <SlidersIcon className="h-8 w-8 text-[var(--accent)]" />
             <h1 className="text-3xl font-bold text-[var(--foreground)]">Settings</h1>
           </div>
-          <p className="text-[var(--muted)]">Configure class sessions and availability for each level</p>
+          <p className="text-[var(--muted)]">Configure which sessions run — and in which mode — for each level</p>
         </div>
 
-        {/* Message */}
         {message && (
           <div
             className={`rounded-lg px-4 py-3 text-sm font-medium ${
-              message.includes("success") || message.toLowerCase().includes("saved")
+              message.toLowerCase().includes("saved")
                 ? "bg-emerald-50 text-emerald-700"
                 : "bg-red-50 text-red-700"
             }`}
@@ -212,10 +216,8 @@ export default function SettingsPage() {
           <p className="mb-6 text-sm text-[var(--muted)]">
             The month a new student is placed in when no batch was chosen — on the public
             sign-up form, the Add-student form, or a CSV import row with no batch column.
-            Set this to the intake you are currently taking people into. It does not touch
-            students who already have a batch.
+            It does not touch students who already have a batch.
           </p>
-
           <div className="flex flex-wrap items-end gap-4">
             <label className="flex flex-col gap-1.5 text-sm font-medium text-[var(--foreground)]">
               Month
@@ -225,13 +227,10 @@ export default function SettingsPage() {
                 className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-normal text-[var(--foreground)]"
               >
                 {MONTH_NAMES.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
+                  <option key={m} value={m}>{m}</option>
                 ))}
               </select>
             </label>
-
             <label className="flex flex-col gap-1.5 text-sm font-medium text-[var(--foreground)]">
               Year
               <input
@@ -243,7 +242,6 @@ export default function SettingsPage() {
                 className="w-28 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-normal text-[var(--foreground)]"
               />
             </label>
-
             <button
               onClick={saveIntake}
               disabled={intakeSaving}
@@ -252,86 +250,79 @@ export default function SettingsPage() {
               {intakeSaving ? "Saving..." : "Save intake"}
             </button>
           </div>
-
           {intakeMsg && (
-            <p
-              className={`mt-3 text-sm font-medium ${
-                intakeMsg.startsWith("Saved") ? "text-emerald-700" : "text-red-700"
-              }`}
-            >
+            <p className={`mt-3 text-sm font-medium ${intakeMsg.startsWith("Saved") ? "text-emerald-700" : "text-red-700"}`}>
               {intakeMsg}
             </p>
           )}
         </div>
 
-        {/* Sessions Configuration */}
+        {/* Session × mode grid */}
         <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
-          <h2 className="mb-2 text-lg font-bold text-[var(--foreground)]">Class sessions &amp; attendance</h2>
+          <h2 className="mb-2 text-lg font-bold text-[var(--foreground)]">Sessions &amp; attendance</h2>
           <p className="mb-6 text-sm text-[var(--muted)]">
-            Turn off a session slot or an attendance mode a level no longer runs. It disappears
-            from student registration and its community room is hidden. Students already in it are
-            moved to the nearest option that still runs, and are told. Re-enabling it later does
-            not bring anyone back automatically.
+            For each level, tick the ways each session actually runs. Unticking a cell removes
+            it from student registration and hides its community room. Students already in it
+            move to the nearest session that still runs their mode — an online morning student
+            goes to online afternoon, not onto a campus — and are told. If a mode has no
+            session left, those students are listed for the office instead. Re-enabling a cell
+            later does not bring anyone back automatically.
           </p>
 
-          <div className="space-y-6">
+          <div className="space-y-8">
             {LEVELS.map((level) => {
               const config = settings.sessions.find((s) => s.level === level);
               if (!config) return null;
 
               return (
-                <div
-                  key={level}
-                  className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-6"
-                >
-                  <h3 className="mb-4 text-base font-bold text-[var(--foreground)]">{level}</h3>
-
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-                    Session slots
-                  </p>
-                  <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {SESSIONS.map((slot) => (
-                      <label
-                        key={`${level}-${slot}`}
-                        className="flex cursor-pointer items-center gap-3 rounded-lg p-3 hover:bg-[var(--surface)]"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={config[slot]}
-                          onChange={() => toggle(level, slot)}
-                          className="h-5 w-5 rounded border-[var(--border)] accent-[var(--accent)]"
-                        />
-                        <span className="font-medium capitalize text-[var(--foreground)]">{slot}</span>
-                      </label>
-                    ))}
-                  </div>
-
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-                    Ways to attend
-                  </p>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    {MODES.map((mode) => (
-                      <label
-                        key={`${level}-${mode}`}
-                        className="flex cursor-pointer items-center gap-3 rounded-lg p-3 hover:bg-[var(--surface)]"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={config[mode]}
-                          onChange={() => toggle(level, mode)}
-                          className="h-5 w-5 rounded border-[var(--border)] accent-[var(--accent)]"
-                        />
-                        <span className="font-medium text-[var(--foreground)]">{MODE_LABELS[mode]}</span>
-                      </label>
-                    ))}
-                  </div>
+                <div key={level} className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4 sm:p-6">
+                  <h3 className="mb-3 text-base font-bold text-[var(--foreground)]">{level}</h3>
+                  <table className="w-full min-w-[420px] border-collapse text-sm">
+                    <thead>
+                      <tr className="text-left text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                        <th className="py-2 pr-4 font-semibold">Session</th>
+                        {MODES.map((mode) => (
+                          <th key={mode} className="px-3 py-2 text-center font-semibold">{MODE_LABELS[mode]}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {SESSIONS.map((slot) => {
+                        const rowAllOn = MODES.every((m) => config.grid[slot][m]);
+                        return (
+                          <tr key={slot} className="border-t border-[var(--border)]">
+                            <td className="py-2 pr-4">
+                              <button
+                                type="button"
+                                onClick={() => toggleRow(level, slot, !rowAllOn)}
+                                className="font-medium text-[var(--foreground)] hover:text-[var(--accent)]"
+                                title={rowAllOn ? "Turn this whole session off" : "Turn this whole session on"}
+                              >
+                                {slotTitle(slot)}
+                              </button>
+                            </td>
+                            {MODES.map((mode) => (
+                              <td key={mode} className="px-3 py-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={config.grid[slot][mode]}
+                                  onChange={() => toggleCell(level, slot, mode)}
+                                  aria-label={`${level} ${slotTitle(slot)} ${MODE_LABELS[mode]}`}
+                                  className="h-5 w-5 rounded border-[var(--border)] accent-[var(--accent)]"
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* Actions */}
         <div className="flex justify-end gap-3">
           <button
             onClick={loadSettings}
@@ -350,25 +341,24 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Confirm dialog — only when a save would move real students */}
       {pendingImpact && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-5">
           <div className="w-full max-w-lg rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl">
             <h2 className="text-lg font-bold text-[var(--foreground)]">This moves students</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Saving these settings changes where enrolled students are. Review before you apply it.
+              Saving these settings changes which session enrolled students are in. Review before you apply it.
             </p>
 
             <div className="mt-4 space-y-4 text-sm">
               {pendingImpact.moves.length > 0 && (
                 <div>
-                  <p className="font-semibold text-[var(--foreground)]">Auto-moved</p>
+                  <p className="font-semibold text-[var(--foreground)]">Auto-moved (same mode, new time)</p>
                   <ul className="mt-1 list-disc space-y-1 pl-5 text-[var(--muted)]">
                     {pendingImpact.moves.map((m, i) => (
                       <li key={i}>
                         <strong className="text-[var(--foreground)]">{m.count}</strong>{" "}
-                        {m.level} {m.kind === "slot" ? "" : "student"}
-                        {m.count === 1 ? "" : "s"} — {m.from} → <strong className="text-[var(--foreground)]">{m.to}</strong>
+                        {m.level} {modeWord(m.mode)} student{m.count === 1 ? "" : "s"} —{" "}
+                        {slotTitle(m.from)} → <strong className="text-[var(--foreground)]">{slotTitle(m.to)}</strong>
                       </li>
                     ))}
                   </ul>
@@ -377,12 +367,12 @@ export default function SettingsPage() {
 
               {pendingImpact.stranded.length > 0 && (
                 <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-900">
-                  <p className="font-semibold">Left with no class — the office will be notified</p>
+                  <p className="font-semibold">No session left for their mode — the office will be notified</p>
                   <ul className="mt-1 list-disc space-y-1 pl-5">
                     {pendingImpact.stranded.map((s, i) => (
                       <li key={i}>
-                        <strong>{s.count}</strong> {s.level} {s.from} student{s.count === 1 ? "" : "s"} —
-                        not moved (no campus nearby). Re-place them on /admin/students.
+                        <strong>{s.count}</strong> {s.level} {modeWord(s.mode)} student{s.count === 1 ? "" : "s"} —
+                        not moved. Re-place them on /admin/students.
                       </li>
                     ))}
                   </ul>
@@ -394,9 +384,7 @@ export default function SettingsPage() {
                   <p className="font-semibold text-[var(--foreground)]">Tutors that may lose classes</p>
                   <ul className="mt-1 list-disc space-y-1 pl-5">
                     {pendingImpact.tutorWarnings.map((t, i) => (
-                      <li key={i}>
-                        {t.name} — {t.detail}
-                      </li>
+                      <li key={i}>{t.name} — {t.detail}</li>
                     ))}
                   </ul>
                 </div>

@@ -1,147 +1,144 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultSessionSettings,
-  diffDisabled,
+  diffDisabledCells,
+  enabledSlotsForMode,
+  isCellEnabled,
   isModeEnabled,
   isSessionEnabled,
-  levelsWithNoMode,
-  levelsWithNoSlot,
-  nearestEnabledMode,
-  nearestEnabledSlot,
+  levelsWithNoCell,
+  nearestEnabledSlotForMode,
   parseSessionSettings,
+  type ModeFlags,
   type SessionConfig,
 } from "@/lib/school-settings";
 
-const row = (over: Partial<SessionConfig> = {}): SessionConfig => ({
-  level: "A1",
-  morning: true,
-  afternoon: true,
-  evening: true,
-  weekend: true,
+const modes = (over: Partial<ModeFlags> = {}): ModeFlags => ({
   physical: true,
   hybrid: true,
   online: true,
   ...over,
 });
 
+const row = (level: string, grid?: Partial<Record<string, Partial<ModeFlags>>>): SessionConfig => ({
+  level,
+  grid: {
+    morning: modes(grid?.morning),
+    afternoon: modes(grid?.afternoon),
+    evening: modes(grid?.evening),
+    weekend: modes(grid?.weekend),
+  },
+});
+
 describe("parseSessionSettings", () => {
-  it("round-trips the mode flags", () => {
-    const input = { sessions: [row({ level: "A1", hybrid: false, online: false, weekend: false })] };
-    const parsed = parseSessionSettings(input);
+  it("round-trips a grid value", () => {
+    const parsed = parseSessionSettings({
+      sessions: [row("A1", { morning: { online: false }, afternoon: { physical: false } })],
+    });
     const a1 = parsed.sessions.find((s) => s.level === "A1")!;
-    expect(a1.hybrid).toBe(false);
-    expect(a1.online).toBe(false);
-    expect(a1.weekend).toBe(false);
-    expect(a1.physical).toBe(true);
+    expect(a1.grid.morning.online).toBe(false);
+    expect(a1.grid.morning.physical).toBe(true);
+    expect(a1.grid.afternoon.physical).toBe(false);
   });
 
-  it("defaults the mode flags to true for a row written before modes existed", () => {
-    const legacy = { sessions: [{ level: "A1", morning: true, afternoon: false, evening: true, weekend: true }] };
+  it("migrates the old flat shape: cell = session AND mode", () => {
+    const legacy = {
+      sessions: [
+        { level: "A1", morning: false, afternoon: true, evening: true, weekend: true, online: false },
+      ],
+    };
     const a1 = parseSessionSettings(legacy).sessions.find((s) => s.level === "A1")!;
-    expect(a1.afternoon).toBe(false);
-    expect(a1.physical).toBe(true);
-    expect(a1.hybrid).toBe(true);
-    expect(a1.online).toBe(true);
+    // morning was off -> whole morning row off
+    expect(a1.grid.morning).toEqual({ physical: false, hybrid: false, online: false });
+    // online mode was off -> every online cell off
+    expect(a1.grid.afternoon.online).toBe(false);
+    // afternoon on + physical absent(=on) -> afternoon physical runs
+    expect(a1.grid.afternoon.physical).toBe(true);
+    expect(a1.grid.afternoon.hybrid).toBe(true);
   });
 
-  it("always returns every offered level, in order, even from a partial value", () => {
-    const parsed = parseSessionSettings({ sessions: [row({ level: "B1", morning: false })] });
+  it("returns every offered level in order, filling gaps as fully open", () => {
+    const parsed = parseSessionSettings({ sessions: [row("B1", { morning: { physical: false } })] });
     expect(parsed.sessions.map((s) => s.level)).toEqual(["A1", "A2", "B1", "B2", "C1"]);
-    expect(parsed.sessions.find((s) => s.level === "A1")!.morning).toBe(true); // fell back to open
-    expect(parsed.sessions.find((s) => s.level === "B1")!.morning).toBe(false);
+    expect(parsed.sessions.find((s) => s.level === "A1")!.grid.morning.physical).toBe(true);
+    expect(parsed.sessions.find((s) => s.level === "B1")!.grid.morning.physical).toBe(false);
   });
 
-  it("is lenient on garbage (returns the permissive default) but strict rejects it", () => {
-    expect(parseSessionSettings("nonsense")).toEqual(defaultSessionSettings());
-    expect(parseSessionSettings({ sessions: [{ level: "A1", hybrid: "yes" }] }, { strict: true })).toBeNull();
-  });
-});
-
-describe("isSessionEnabled / isModeEnabled", () => {
-  const settings = { sessions: [row({ level: "A1", morning: false, hybrid: false })] };
-  it("reads a specific toggle, defaulting unknown input to open", () => {
-    expect(isSessionEnabled(settings, "A1", "morning")).toBe(false);
-    expect(isSessionEnabled(settings, "A1", "afternoon")).toBe(true);
-    expect(isSessionEnabled(settings, "A1", "lunchtime")).toBe(true); // unknown slot
-    expect(isSessionEnabled(settings, "ZZ", "morning")).toBe(true); // unknown level
-    expect(isModeEnabled(settings, "A1", "hybrid")).toBe(false);
-    expect(isModeEnabled(settings, "A1", "physical")).toBe(true);
-  });
-});
-
-describe("nearestEnabledSlot", () => {
-  it("moves a morning student to the afternoon", () => {
-    expect(nearestEnabledSlot(row({ morning: false }), "morning")).toBe("afternoon");
-  });
-
-  it("keeps a weekday student on a weekday even when weekend is open", () => {
-    // evening off; afternoon is nearer than weekend and same family
-    expect(nearestEnabledSlot(row({ evening: false }), "evening")).toBe("afternoon");
-  });
-
-  it("falls back across the family boundary when it has to", () => {
+  it("is lenient on garbage but strict rejects it / a missing grid", () => {
+    expect(parseSessionSettings("nope")).toEqual(defaultSessionSettings());
+    expect(parseSessionSettings({ sessions: [{ level: "A1", morning: true }] }, { strict: true })).toBeNull();
     expect(
-      nearestEnabledSlot(row({ morning: false, afternoon: false, evening: false }), "morning"),
-    ).toBe("weekend");
-  });
-
-  it("sends a weekend student to the nearest weekday", () => {
-    expect(nearestEnabledSlot(row({ weekend: false }), "weekend")).toBe("evening");
-  });
-
-  it("returns null when the level has nothing left", () => {
-    expect(
-      nearestEnabledSlot(
-        row({ morning: false, afternoon: false, evening: false, weekend: false }),
-        "morning",
+      parseSessionSettings(
+        { sessions: [{ level: "A1", grid: { morning: { online: "yes" } } }] },
+        { strict: true },
       ),
     ).toBeNull();
   });
 });
 
-describe("nearestEnabledMode", () => {
-  it("swaps hybrid and physical", () => {
-    expect(nearestEnabledMode(row({ hybrid: false }), "hybrid")).toBe("physical");
-    expect(nearestEnabledMode(row({ physical: false }), "physical")).toBe("hybrid");
+describe("isCellEnabled / isSessionEnabled / isModeEnabled", () => {
+  const settings = { sessions: [row("A1", { morning: { online: false, physical: false, hybrid: false }, afternoon: { online: false } })] };
+  it("isCellEnabled reads one cell, unknown input open", () => {
+    expect(isCellEnabled(settings, "A1", "morning", "online")).toBe(false);
+    expect(isCellEnabled(settings, "A1", "afternoon", "physical")).toBe(true);
+    expect(isCellEnabled(settings, "A1", "lunch", "online")).toBe(true);
+    expect(isCellEnabled(settings, "ZZ", "morning", "online")).toBe(true);
   });
-
-  it("never routes anyone into or out of online", () => {
-    expect(nearestEnabledMode(row({ online: false }), "online")).toBeNull();
+  it("isSessionEnabled = any mode runs the session", () => {
+    expect(isSessionEnabled(settings, "A1", "morning")).toBe(false); // all three off
+    expect(isSessionEnabled(settings, "A1", "afternoon")).toBe(true); // physical + hybrid still on
   });
-
-  it("returns null when the only campus fallback is also off", () => {
-    expect(nearestEnabledMode(row({ hybrid: false, physical: false }), "hybrid")).toBeNull();
+  it("isModeEnabled = any session runs the mode", () => {
+    expect(isModeEnabled(settings, "A1", "online")).toBe(true); // evening/weekend still online
+    const noOnline = { sessions: [row("A1", {
+      morning: { online: false }, afternoon: { online: false }, evening: { online: false }, weekend: { online: false },
+    })] };
+    expect(isModeEnabled(noOnline, "A1", "online")).toBe(false);
   });
 });
 
-describe("diffDisabled", () => {
-  it("lists only the toggles that flipped on -> off", () => {
-    const prev = parseSessionSettings({ sessions: [row({ level: "A1" })] });
-    const next = parseSessionSettings({
-      sessions: [row({ level: "A1", morning: false, hybrid: false })],
+describe("nearestEnabledSlotForMode", () => {
+  it("moves an online-morning student to online-afternoon, staying online", () => {
+    expect(nearestEnabledSlotForMode(row("A1", { morning: { online: false } }), "morning", "online")).toBe("afternoon");
+  });
+  it("keeps a weekday student on a weekday", () => {
+    expect(nearestEnabledSlotForMode(row("A1", { evening: { online: false } }), "evening", "online")).toBe("afternoon");
+  });
+  it("ignores other modes when scanning", () => {
+    // afternoon online is off too; morning online must jump to evening, not afternoon
+    const r = row("A1", { morning: { online: false }, afternoon: { online: false } });
+    expect(nearestEnabledSlotForMode(r, "morning", "online")).toBe("evening");
+  });
+  it("returns null when no session runs this mode -> caller strands them", () => {
+    const r = row("A1", {
+      morning: { online: false }, afternoon: { online: false }, evening: { online: false }, weekend: { online: false },
     });
-    expect(diffDisabled(prev, next)).toEqual([
-      { level: "A1", kind: "slot", key: "morning" },
-      { level: "A1", kind: "mode", key: "hybrid" },
+    expect(nearestEnabledSlotForMode(r, "morning", "online")).toBeNull();
+  });
+});
+
+describe("diffDisabledCells", () => {
+  it("lists only cells that flipped on -> off", () => {
+    const prev = parseSessionSettings({ sessions: [row("A1")] });
+    const next = parseSessionSettings({ sessions: [row("A1", { morning: { online: false }, evening: { hybrid: false } })] });
+    expect(diffDisabledCells(prev, next)).toEqual([
+      { level: "A1", slot: "morning", mode: "online" },
+      { level: "A1", slot: "evening", mode: "hybrid" },
     ]);
   });
-
-  it("ignores a toggle turned back on", () => {
-    const prev = parseSessionSettings({ sessions: [row({ level: "A1", evening: false })] });
-    const next = parseSessionSettings({ sessions: [row({ level: "A1" })] });
-    expect(diffDisabled(prev, next)).toEqual([]);
-  });
 });
 
-describe("levelsWithNoSlot / levelsWithNoMode", () => {
-  it("flags a level a save would leave with nothing", () => {
-    const settings = parseSessionSettings({
-      sessions: [
-        row({ level: "A1", morning: false, afternoon: false, evening: false, weekend: false }),
-        row({ level: "A2", physical: false, hybrid: false, online: false }),
-      ],
-    });
-    expect(levelsWithNoSlot(settings)).toEqual(["A1"]);
-    expect(levelsWithNoMode(settings)).toEqual(["A2"]);
+describe("levelsWithNoCell / enabledSlotsForMode", () => {
+  it("flags a level a save would leave completely empty", () => {
+    const allOff = row("A1");
+    for (const s of ["morning", "afternoon", "evening", "weekend"] as const) {
+      allOff.grid[s] = { physical: false, hybrid: false, online: false };
+    }
+    const settings = parseSessionSettings({ sessions: [allOff, row("A2")] });
+    expect(levelsWithNoCell(settings)).toEqual(["A1"]);
+  });
+  it("enabledSlotsForMode lists the running sessions for a mode", () => {
+    const settings = parseSessionSettings({ sessions: [row("A1", { morning: { online: false }, weekend: { online: false } })] });
+    expect(enabledSlotsForMode(settings, "A1", "online")).toEqual(["afternoon", "evening"]);
   });
 });

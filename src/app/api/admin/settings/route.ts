@@ -7,12 +7,13 @@ import { notifyInBackground, KIND } from "@/lib/notify";
 import { readAssignment } from "@/lib/lecturer-assignment";
 import {
   CLASS_SESSIONS_KEY,
-  diffDisabled,
-  levelsWithNoMode,
-  levelsWithNoSlot,
-  nearestEnabledMode,
-  nearestEnabledSlot,
+  diffDisabledCells,
+  isSessionEnabled,
+  levelsWithNoCell,
+  nearestEnabledSlotForMode,
   parseSessionSettings,
+  slotTitle,
+  MODE_LABELS,
   type ModeSlot,
   type SessionConfig,
   type SessionSettings,
@@ -22,20 +23,18 @@ import {
 /**
  * The school's own configuration, read and written by /admin/settings.
  *
- * Persisted in SchoolSetting rather than held in module state. That is not a
- * refinement — a Map on the module lives inside one serverless instance, so on
- * Vercel a save would appear to work, then vanish the moment the next request
- * landed on a different lambda. A settings screen that silently forgets is
- * worse than no settings screen, because the office stops trusting every other
- * number on the site too.
+ * Persisted in SchoolSetting rather than held in module state — a Map on the
+ * module lives inside one serverless instance, so on Vercel a save would appear
+ * to work, then vanish on the next lambda.
  *
- * The POST here does more than store a JSON blob. Turning a sitting or a mode
- * OFF is a real event: the students already in it have nowhere to be. So the
- * write is a two-step handshake —
+ * The POST does more than store JSON. Turning a (session × mode) cell OFF is a
+ * real event: the students in it have nowhere to be. So the write is a
+ * two-step handshake —
  *   POST { preview: true, ...settings }  → what would move, nothing written
  *   POST { confirm: true, ...settings }  → write the setting AND move them
  * — and a plain POST with people in the firing line returns 409 needsConfirm
- * rather than moving anyone by surprise.
+ * rather than moving anyone by surprise. A moved student keeps their mode and
+ * only changes session (online-morning → online-afternoon).
  */
 
 export const dynamic = "force-dynamic";
@@ -47,10 +46,7 @@ export async function GET() {
   if (!gate.ok) return gate.response;
 
   try {
-    const row = await prisma.schoolSetting.findFirst({
-      where: { key: CLASS_SESSIONS_KEY },
-    });
-
+    const row = await prisma.schoolSetting.findFirst({ where: { key: CLASS_SESSIONS_KEY } });
     return NextResponse.json(parseSessionSettings(row?.value));
   } catch (error) {
     console.error("Failed to load school settings:", error);
@@ -66,18 +62,17 @@ function tenantWhere(tenantId: string | null | undefined) {
 
 type MoveGroup = {
   level: string;
-  kind: "slot" | "mode";
-  from: string;
-  to: string;
+  mode: ModeSlot;
+  from: SessionSlot;
+  to: SessionSlot;
   count: number;
   studentIds: string[];
-  userIds: string[];
 };
 
 type StrandedGroup = {
   level: string;
-  reason: "mode";
-  from: string;
+  mode: ModeSlot;
+  slot: SessionSlot;
   count: number;
   studentIds: string[];
 };
@@ -93,8 +88,7 @@ function rowOf(settings: SessionSettings, level: string): SessionConfig | undefi
 }
 
 /**
- * What a save would do to the students already enrolled. Reads only — the
- * caller decides whether to act on it.
+ * What a save would do to the students already enrolled. Reads only.
  */
 async function computeImpact(
   prev: SessionSettings,
@@ -102,97 +96,79 @@ async function computeImpact(
   tenantId: string | null,
   allowedBranchIds: string[] | null,
 ): Promise<Impact> {
-  const changes = diffDisabled(prev, next);
+  const cells = diffDisabledCells(prev, next);
   const moves: MoveGroup[] = [];
   const stranded: StrandedGroup[] = [];
 
-  const baseWhere: Record<string, unknown> = {
-    status: "active",
-    ...tenantWhere(tenantId),
-  };
+  const baseWhere: Record<string, unknown> = { status: "active", ...tenantWhere(tenantId) };
   if (allowedBranchIds) baseWhere.branchId = { in: allowedBranchIds };
 
-  for (const change of changes) {
-    const nextRow = rowOf(next, change.level);
+  for (const cell of cells) {
+    const nextRow = rowOf(next, cell.level);
     if (!nextRow) continue;
 
-    if (change.kind === "slot") {
-      const from = change.key as SessionSlot;
-      const to = nearestEnabledSlot(nextRow, from);
-      const students = await prisma.student.findMany({
-        where: { ...baseWhere, level: change.level, sessionSlot: from },
-        select: { id: true, userId: true },
-        take: MAX_GROUP,
-      });
-      if (students.length === 0) continue;
-      // `to` is only null when the level has no sitting left at all, which the
-      // validation below refuses before we ever get here.
-      moves.push({
-        level: change.level,
-        kind: "slot",
-        from,
-        to: to ?? from,
-        count: students.length,
-        studentIds: students.map((s) => s.id),
-        userIds: students.map((s) => s.userId),
-      });
-      continue;
-    }
-
-    // mode change
-    const from = change.key as ModeSlot;
     const students = await prisma.student.findMany({
-      where: { ...baseWhere, level: change.level, deliveryMode: from },
-      select: { id: true, userId: true },
+      where: {
+        ...baseWhere,
+        level: cell.level,
+        sessionSlot: cell.slot,
+        deliveryMode: cell.mode,
+      },
+      select: { id: true },
       take: MAX_GROUP,
     });
     if (students.length === 0) continue;
 
-    const to = from === "online" ? null : nearestEnabledMode(nextRow, from);
+    const to = nearestEnabledSlotForMode(nextRow, cell.slot, cell.mode);
     if (to) {
       moves.push({
-        level: change.level,
-        kind: "mode",
-        from,
+        level: cell.level,
+        mode: cell.mode,
+        from: cell.slot,
         to,
         count: students.length,
         studentIds: students.map((s) => s.id),
-        userIds: students.map((s) => s.userId),
       });
     } else {
-      // online-only switched off, or physical AND hybrid both gone: these
-      // students cannot be auto-placed. The office gets a worklist, not a
-      // surprise move onto a campus they may live hundreds of km from.
+      // No session runs this mode at this level any more — cannot auto-place.
       stranded.push({
-        level: change.level,
-        reason: "mode",
-        from,
+        level: cell.level,
+        mode: cell.mode,
+        slot: cell.slot,
         count: students.length,
         studentIds: students.map((s) => s.id),
       });
     }
   }
 
-  return { moves, stranded, tutorWarnings: await tutorWarningsFor(changes, next, tenantId) };
+  return { moves, stranded, tutorWarnings: await tutorWarningsFor(next, prev, tenantId) };
 }
 
 /**
- * Best-effort heads-up: tutors whose assignment points only at sittings being
- * switched off. Informational — it never blocks the save.
+ * Best-effort heads-up: tutors every one of whose assigned sessions, for a
+ * level they teach, now runs no mode at all. Informational — never blocks.
  */
 async function tutorWarningsFor(
-  changes: ReturnType<typeof diffDisabled>,
   next: SessionSettings,
+  prev: SessionSettings,
   tenantId: string | null,
 ): Promise<Array<{ name: string; detail: string }>> {
-  const disabledSlotsByLevel = new Map<string, Set<string>>();
-  for (const c of changes) {
-    if (c.kind !== "slot") continue;
-    const set = disabledSlotsByLevel.get(c.level) ?? new Set<string>();
-    set.add(c.key);
-    disabledSlotsByLevel.set(c.level, set);
+  // Only bother if some session went fully dark (all modes off) that wasn't before.
+  const wentDark = new Map<string, Set<string>>();
+  for (const nextRow of next.sessions) {
+    const prevRow = prev.sessions.find((r) => r.level === nextRow.level);
+    if (!prevRow) continue;
+    for (const slot of ["morning", "afternoon", "evening", "weekend"] as const) {
+      const before = ["physical", "hybrid", "online"].some((m) => prevRow.grid[slot][m as ModeSlot]);
+      const after = ["physical", "hybrid", "online"].some((m) => nextRow.grid[slot][m as ModeSlot]);
+      if (before && !after) {
+        const set = wentDark.get(nextRow.level) ?? new Set<string>();
+        set.add(slot);
+        wentDark.set(nextRow.level, set);
+      }
+    }
   }
-  if (disabledSlotsByLevel.size === 0) return [];
+  if (wentDark.size === 0) return [];
 
   try {
     const lecturers = await unguardedPrisma.lecturer.findMany({
@@ -207,19 +183,15 @@ async function tutorWarningsFor(
     const out: Array<{ name: string; detail: string }> = [];
     for (const lecturer of lecturers) {
       const a = readAssignment(lecturer);
-      if (a.sessionSlots.length === 0) continue; // teaches every sitting — safe
-
-      for (const [level, disabled] of disabledSlotsByLevel) {
+      if (a.sessionSlots.length === 0) continue; // teaches every session — safe
+      for (const [level, dark] of wentDark) {
         const teachesLevel = a.levels.length === 0 || a.levels.includes(level);
         if (!teachesLevel) continue;
-        const stillHas = a.sessionSlots.some((slot) => {
-          const stillOn = rowOf(next, level);
-          return stillOn ? Boolean(stillOn[slot as SessionSlot]) : true;
-        });
-        if (!stillHas && a.sessionSlots.every((slot) => disabled.has(slot))) {
+        const stillHasASession = a.sessionSlots.some((slot) => isSessionEnabled(next, level, slot));
+        if (!stillHasASession && a.sessionSlots.every((slot) => dark.has(slot))) {
           out.push({
             name: lecturer.user?.name ?? "A tutor",
-            detail: `assigned to ${level} · ${[...disabled].join(", ")}`,
+            detail: `${level} · ${[...dark].map(slotTitle).join(", ")}`,
           });
         }
       }
@@ -244,27 +216,15 @@ export async function POST(request: Request) {
     const preview = body?.preview === true;
     const confirm = body?.confirm === true;
 
-    /**
-     * Validated into the known shape rather than stored as sent. This column
-     * is JSON, so without this a malformed POST becomes a malformed row, and
-     * the thing that breaks is the sign-up form reading it back weeks later.
-     */
     const next: SessionSettings | null = parseSessionSettings(body, { strict: true });
     if (!next) {
       return NextResponse.json({ error: "Invalid settings format" }, { status: 400 });
     }
 
-    const noSlot = levelsWithNoSlot(next);
-    if (noSlot.length) {
+    const empty = levelsWithNoCell(next);
+    if (empty.length) {
       return NextResponse.json(
-        { error: `Every level needs at least one session. Re-enable one for: ${noSlot.join(", ")}.` },
-        { status: 400 },
-      );
-    }
-    const noMode = levelsWithNoMode(next);
-    if (noMode.length) {
-      return NextResponse.json(
-        { error: `Every level needs at least one way to attend. Re-enable one for: ${noMode.join(", ")}.` },
+        { error: `Every level needs at least one session running. Re-enable one for: ${empty.join(", ")}.` },
         { status: 400 },
       );
     }
@@ -279,8 +239,8 @@ export async function POST(request: Request) {
       impact.stranded.reduce((n, g) => n + g.count, 0);
 
     const summary = {
-      moves: impact.moves.map(({ level, kind, from, to, count }) => ({ level, kind, from, to, count })),
-      stranded: impact.stranded.map(({ level, from, count }) => ({ level, from, count })),
+      moves: impact.moves.map(({ level, mode, from, to, count }) => ({ level, mode, from, to, count })),
+      stranded: impact.stranded.map(({ level, mode, slot, count }) => ({ level, mode, slot, count })),
       tutorWarnings: impact.tutorWarnings,
     };
 
@@ -289,20 +249,17 @@ export async function POST(request: Request) {
     }
 
     if (affected > 0 && !confirm) {
-      return NextResponse.json(
-        { ok: false, needsConfirm: true, affected, ...summary },
-        { status: 409 },
-      );
+      return NextResponse.json({ ok: false, needsConfirm: true, affected, ...summary }, { status: 409 });
     }
 
-    // ---- write the setting -------------------------------------------------
+    // ---- write the setting ----------------------------------------------
     await prisma.schoolSetting.upsert({
       where: { tenantId_key: { tenantId, key: CLASS_SESSIONS_KEY } },
       update: { value: next },
       create: { tenantId, key: CLASS_SESSIONS_KEY, value: next },
     });
 
-    // ---- move the students who were in a now-closed sitting / mode --------
+    // ---- move the students out of a now-closed session -----------------
     const now = new Date().toISOString();
     let moved = 0;
 
@@ -322,12 +279,13 @@ export async function POST(request: Request) {
             return prisma.student.update({
               where: { id: s.id },
               data: {
-                ...(group.kind === "slot" ? { sessionSlot: group.to } : { deliveryMode: group.to }),
+                sessionSlot: group.to,
                 admission: {
                   ...admission,
                   scheduleChange: {
-                    kind: group.kind,
+                    kind: "slot",
                     level: group.level,
+                    mode: group.mode,
                     from: group.from,
                     to: group.to,
                     at: now,
@@ -342,61 +300,52 @@ export async function POST(request: Request) {
       moved += group.count;
 
       await writeAudit(unguardedPrisma, {
-        action: group.kind === "slot" ? "sessionSlotBulkMove" : "deliveryModeBulkMove",
+        action: "sessionSlotBulkMove",
         model: "Student",
         affectedCount: group.count,
         severity: "notice",
-        summary: `${group.level}: ${group.count} student${group.count === 1 ? "" : "s"} moved from ${group.from} to ${group.to} (session settings)`,
-        before: { level: group.level, [group.kind === "slot" ? "sessionSlot" : "deliveryMode"]: group.from },
-        after: { level: group.level, [group.kind === "slot" ? "sessionSlot" : "deliveryMode"]: group.to },
+        summary: `${group.level} ${MODE_LABELS[group.mode]}: ${group.count} student${group.count === 1 ? "" : "s"} moved from ${group.from} to ${group.to} (session settings)`,
+        before: { level: group.level, sessionSlot: group.from, deliveryMode: group.mode },
+        after: { level: group.level, sessionSlot: group.to, deliveryMode: group.mode },
       });
 
-      const label =
-        group.kind === "slot"
-          ? `Your ${group.level} class has moved to the ${group.to} session.`
-          : `Your ${group.level} class is now ${group.to === "physical" ? "on campus" : group.to}.`;
       notifyInBackground({
         to: { studentIds: group.studentIds },
         kind: KIND.classSessionChanged,
         severity: "warning",
-        title: "Your class schedule has changed",
-        message: `${label} Your timetable and community are already updated — open your dashboard for the details.`,
+        title: "Your class time has changed",
+        message: `Your ${group.level} class has moved to the ${slotTitle(group.to)} session (you are still ${group.mode === "physical" ? "on campus" : group.mode}). Your timetable and community are already updated — open your dashboard for the details.`,
         link: "/dashboard",
         push: true,
       });
     }
 
-    // ---- online-only (and other un-placeable) students: tell the office ---
+    // ---- students whose mode has no session left: tell the office ------
     for (const group of impact.stranded) {
       await writeAudit(unguardedPrisma, {
         action: "sessionSettingsStranded",
         model: "Student",
         affectedCount: group.count,
         severity: "warning",
-        summary: `${group.level}: ${group.count} ${group.from} student${group.count === 1 ? "" : "s"} left with no class after ${group.from} was switched off`,
-        after: { level: group.level, mode: group.from, studentIds: group.studentIds },
+        summary: `${group.level} ${MODE_LABELS[group.mode]}: ${group.count} student${group.count === 1 ? "" : "s"} left with no session after ${group.slot} ${MODE_LABELS[group.mode]} was switched off`,
+        after: { level: group.level, mode: group.mode, slot: group.slot, studentIds: group.studentIds },
       });
     }
     if (impact.stranded.length) {
       const lines = impact.stranded
-        .map((g) => `${g.count} × ${g.level} (${g.from})`)
+        .map((g) => `${g.count} × ${g.level} ${MODE_LABELS[g.mode]}`)
         .join(", ");
       notifyInBackground({
         to: { audience: "admin", capability: "students" },
         kind: KIND.general,
         severity: "warning",
         title: "Students need re-placing after a session change",
-        message: `Switching sessions off on /admin/settings left students with no class: ${lines}. They have not been moved — re-place them on /admin/students.`,
+        message: `Switching sessions off on /admin/settings left students with no class of their mode: ${lines}. They have not been moved — re-place them on /admin/students.`,
         link: "/admin/students",
       });
     }
 
-    return NextResponse.json({
-      ok: true,
-      saved: true,
-      moved,
-      ...summary,
-    });
+    return NextResponse.json({ ok: true, saved: true, moved, ...summary });
   } catch (error) {
     console.error("Failed to save school settings:", error);
     return NextResponse.json({ error: "Unable to save settings" }, { status: 500 });

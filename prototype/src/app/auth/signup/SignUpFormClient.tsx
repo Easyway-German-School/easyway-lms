@@ -22,8 +22,8 @@ import { TIME_SLOTS, slotLabel } from "@/lib/class-times";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import {
   defaultSessionSettings,
+  isCellEnabled,
   isModeEnabled,
-  isSessionEnabled,
   type SessionSettings,
 } from "@/lib/school-settings";
 
@@ -172,15 +172,22 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   // a campus question and a campus student never sees a bandwidth one.
   const isOnline = isOnlineBranch(selectedBranch);
 
-  // The sittings still running at the chosen level (per /admin/settings). Before
-  // a level is picked we show the full list rather than nothing.
+  // How this student attends — the mode we filter sessions by. The Online
+  // branch is always "online"; a campus student is whatever they picked.
+  const attendMode: "physical" | "hybrid" | "online" = isOnline
+    ? "online"
+    : deliveryMode === "hybrid"
+      ? "hybrid"
+      : "physical";
+
+  // The sessions still running at the chosen level FOR THIS MODE (per
+  // /admin/settings). Before a level is picked we show the full list.
   const offeredSlots = TIME_SLOTS.filter(
-    (slot) => !level || isSessionEnabled(sessionCfg, level, slot),
+    (slot) => !level || isCellEnabled(sessionCfg, level, slot, attendMode),
   );
-  // Online-branch student at a level whose online mode has been switched off:
-  // they cannot be enrolled here, and are told to pick another level or a campus.
-  const onlineClosedForLevel =
-    isOnline && Boolean(level) && !isModeEnabled(sessionCfg, level, "online");
+  // Online-branch student at a level with no online session left at all: they
+  // cannot be enrolled here, and are told to pick another level or a campus.
+  const onlineClosedForLevel = isOnline && Boolean(level) && offeredSlots.length === 0;
 
   // Prefill the state from the chosen campus branch — see BRANCH_DEFAULT_STATE.
   // Only while the student has not touched the field, only inside Nigeria, and
@@ -326,17 +333,17 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
       });
   }, []);
 
-  // If the level changes to one that no longer runs the picked sitting, drop it
-  // so the student re-chooses rather than submitting a closed slot. Same for a
-  // campus student whose picked attendance mode is no longer offered.
+  // If the picked session no longer runs for this level in this mode, drop it so
+  // the student re-chooses rather than submitting a closed one. Same for a
+  // campus student whose picked attendance mode is no longer offered at all.
   useEffect(() => {
-    if (sessionSlot && level && !isSessionEnabled(sessionCfg, level, sessionSlot)) {
+    if (sessionSlot && level && !isCellEnabled(sessionCfg, level, sessionSlot, attendMode)) {
       setSessionSlot("");
     }
     if (!isOnline && level && !isModeEnabled(sessionCfg, level, deliveryMode)) {
       setDeliveryMode(isModeEnabled(sessionCfg, level, "physical") ? "physical" : "hybrid");
     }
-  }, [level, sessionCfg, sessionSlot, isOnline, deliveryMode]);
+  }, [level, sessionCfg, sessionSlot, isOnline, deliveryMode, attendMode]);
 
   /**
    * Prefill from an enrolment invite link.
@@ -893,8 +900,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                     ))}
                   </select>
                   <p className="mt-2 text-xs text-[var(--muted)]">
-                    {level && offeredSlots.length < TIME_SLOTS.length
-                      ? "Some sessions are not running for this level right now. "
+                    {level && offeredSlots.length > 0 && offeredSlots.length < TIME_SLOTS.length
+                      ? `Only the times listed run ${attendMode === "physical" ? "on campus" : attendMode} for ${level} right now. `
                       : ""}
                     {isOnline
                       ? "Class times are Nigerian time (WAT). Your dashboard converts them to your own timezone once you tell us where you are, on the next step."

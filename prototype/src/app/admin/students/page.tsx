@@ -9,7 +9,7 @@ import PasswordInput from "@/components/PasswordInput";
 import BulkStudentAdd from "@/components/BulkStudentAdd";
 import { goalFor } from "@/lib/germany-goals";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
-import { isModeEnabled, isSessionEnabled, type SessionSettings } from "@/lib/school-settings";
+import { isCellEnabled, isModeEnabled, type SessionSettings } from "@/lib/school-settings";
 import { isOnlineBranchName } from "@/lib/online-branch";
 import { CalendarIcon, CameraIcon } from "@/components/icons";
 import { packageOptions, countries } from "@/app/auth/signup/options";
@@ -381,8 +381,15 @@ function StudentsRoster() {
   }, []);
 
   // The Add-student form only offers what the office still runs for the chosen
-  // level. Falls back to the full list until the config loads.
-  const addSlots = TIME_SLOTS.filter((slot) => isSessionEnabled(sessionCfg, newLevel, slot));
+  // level in the chosen mode. Falls back to the full list until the config loads.
+  const addMode: "physical" | "hybrid" | "online" = isOnlineBranchName(
+    branches.find((branch) => branch.id === newBranchId)?.name,
+  )
+    ? "online"
+    : newDeliveryMode === "hybrid"
+      ? "hybrid"
+      : "physical";
+  const addSlots = TIME_SLOTS.filter((slot) => isCellEnabled(sessionCfg, newLevel, slot, addMode));
   const addModes = (["physical", "hybrid"] as const).filter((mode) =>
     isModeEnabled(sessionCfg, newLevel, mode),
   );

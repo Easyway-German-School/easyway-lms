@@ -14,7 +14,7 @@ import { currentTenantId, setTenantScope } from "@/lib/tenant/context";
 import { resolveTenantId } from "@/lib/tenant/resolve";
 import { defaultBatchMonth } from "@/lib/intake-server";
 import { readSessionSettings } from "@/lib/school-settings-server";
-import { isModeEnabled, isSessionEnabled } from "@/lib/school-settings";
+import { isCellEnabled, isModeEnabled } from "@/lib/school-settings";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import { TIME_SLOTS } from "@/lib/class-times";
 import { TERMS_CONTEXT, TERMS_VERSION } from "@/lib/terms";
@@ -446,18 +446,18 @@ export async function POST(request: NextRequest) {
      */
     if (normalizedRole === "STUDENT") {
       const sessionSettings = await readSessionSettings(currentTenantId());
-      if (
-        normalizedClassType !== "private" &&
-        !isSessionEnabled(sessionSettings, normalizedLevel, normalizedSessionSlot)
-      ) {
+      if (!isModeEnabled(sessionSettings, normalizedLevel, normalizedDeliveryMode)) {
         return NextResponse.json(
-          { error: `The ${normalizedSessionSlot} session is not running for ${normalizedLevel} right now. Please choose another.` },
+          { error: `${normalizedLevel} is not offered ${normalizedDeliveryMode === "physical" ? "on campus" : normalizedDeliveryMode} right now. Please choose another level or branch.` },
           { status: 400 }
         );
       }
-      if (!isModeEnabled(sessionSettings, normalizedLevel, normalizedDeliveryMode)) {
+      if (
+        normalizedClassType !== "private" &&
+        !isCellEnabled(sessionSettings, normalizedLevel, normalizedSessionSlot, normalizedDeliveryMode)
+      ) {
         return NextResponse.json(
-          { error: `Attending ${normalizedLevel} this way is not open right now. Please choose another level or branch.` },
+          { error: `The ${normalizedSessionSlot} session is not running for ${normalizedLevel} ${normalizedDeliveryMode === "physical" ? "on campus" : normalizedDeliveryMode} right now. Please choose another.` },
           { status: 400 }
         );
       }
