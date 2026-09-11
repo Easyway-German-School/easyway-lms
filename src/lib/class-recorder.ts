@@ -290,15 +290,52 @@ export async function finaliseRecording(egress: {
     if (!row) return "unknown";
     if (row.materialId) return "already";
 
-    const failed = egress.status === EgressStatus.EGRESS_FAILED || egress.status === EgressStatus.EGRESS_ABORTED;
+    /**
+     * `EGRESS_LIMIT_REACHED` belongs here, not on the success path below.
+     *
+     * LiveKit reports it as its own status, separate from COMPLETE — it means
+     * the egress was force-stopped at LiveKit's own duration cap rather than
+     * closed normally, and a forced stop is not a graceful one: the MP4
+     * trailer (the index a player needs to seek or even start playing) is
+     * written on a clean close, and there is no guarantee LiveKit gets to
+     * write it when it is the one pulling the plug. Treating this as success
+     * — which this code used to do, because the status check below only
+     * knew about FAILED and ABORTED — is how a forcibly-capped recording
+     * became a Material row pointing at a file that plays back blank. Now
+     * that `restartRecordingIfNearingLimit` stops recordings gracefully well
+     * before the cap (see its module comment), this status should be rare;
+     * when it does happen anyway, the honest outcome is "no usable
+     * recording", the same as any other failure.
+     */
+    const failed =
+      egress.status === EgressStatus.EGRESS_FAILED ||
+      egress.status === EgressStatus.EGRESS_ABORTED ||
+      egress.status === EgressStatus.EGRESS_LIMIT_REACHED;
     if (failed) {
+      const error =
+        egress.error ||
+        (egress.status === EgressStatus.EGRESS_LIMIT_REACHED
+          ? "LiveKit force-stopped this recording at its own duration cap — the file it produced is not reliably playable."
+          : "Egress did not complete");
       await prisma.classRecording.update({
         where: { id: row.id },
         data: {
           status: egress.status === EgressStatus.EGRESS_ABORTED ? "aborted" : "failed",
           endedAt: new Date(),
-          error: egress.error || "Egress did not complete",
+          error,
         },
+      });
+      // Silence here is exactly how today's blank clip reached a student's
+      // shelf unnoticed. A failure nobody hears about is worse than no
+      // recording at all, because the admin only finds out from a complaint.
+      notifyInBackground({
+        to: { audience: "admin", capability: "materials" },
+        kind: KIND.recordingFailed,
+        severity: "critical",
+        title: "A class recording failed",
+        message: `${recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: row.startedAt, part: partFromObjectKey(row.objectKey ?? "") })}: ${error}`,
+        link: "/admin/materials",
+        dedupeKey: `recording-failed:${row.egressId}`,
       });
       return "failed";
     }
@@ -514,10 +551,17 @@ export async function reconcileRecordings(): Promise<{ checked: number; finalise
         }
         continue;
       }
+      // EGRESS_LIMIT_REACHED belongs here too — see the module comment on
+      // this exact status in `finaliseRecording`. Without it, a row whose
+      // webhook never arrived (the reconciler's whole reason to exist) would
+      // sit here forever: `listEgress` keeps answering with a terminal
+      // status this loop does not recognise as terminal, so `done` never
+      // flips true and the row never gets a second chance at finalising.
       const done =
         info.status === EgressStatus.EGRESS_COMPLETE ||
         info.status === EgressStatus.EGRESS_FAILED ||
-        info.status === EgressStatus.EGRESS_ABORTED;
+        info.status === EgressStatus.EGRESS_ABORTED ||
+        info.status === EgressStatus.EGRESS_LIMIT_REACHED;
       if (!done) continue;
 
       const outcome = await finaliseRecording({
