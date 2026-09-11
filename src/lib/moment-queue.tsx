@@ -103,6 +103,7 @@ export type MomentId =
   | "payment-success"
   | "welcome-tour"
   | "goal"
+  | "login-upgrade"
   | "level-advance"
   | "office-reply"
   | "class-schedule-changed"
@@ -142,6 +143,20 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Why German?",
     dockBlurb: "One question, and your map redraws around the answer.",
+  },
+  /**
+   * "Let's set up your real login." A placeholder-login student (office-added
+   * from a form, or a phone-number login) swaps it for an email and password
+   * of their own. Below the goal question and the tour on purpose — this is
+   * upkeep, not orientation — but above a level completing, because an
+   * account that is still the office's temporary one is the more pressing
+   * thing. See the module comment on LoginUpgradeMoment.tsx.
+   */
+  "login-upgrade": {
+    priority: 74,
+    kind: "modal",
+    dockLabel: "Set up your login",
+    dockBlurb: "Swap your temporary login for an email and password you'll remember.",
   },
   "level-advance": {
     priority: 70,

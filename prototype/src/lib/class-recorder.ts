@@ -242,11 +242,29 @@ const SLOT_LABEL: Record<string, string> = {
 };
 
 /** "A1 · Morning class · 2 August", or "A2 · Private class · 2 August" — what a student scanning the shelf reads. */
-function recordingTitle(input: { level?: string | null; sessionSlot?: string | null; at: Date; isPrivate?: boolean }): string {
+function recordingTitle(input: {
+  level?: string | null;
+  sessionSlot?: string | null;
+  at: Date;
+  isPrivate?: boolean;
+  part?: number | null;
+}): string {
   const level = (input.level || "Class").toUpperCase();
   const slot = input.isPrivate ? "Private" : (SLOT_LABEL[String(input.sessionSlot || "")] ?? null);
   const date = input.at.toLocaleDateString("en-GB", { day: "numeric", month: "long" });
-  return slot ? `${level} · ${slot} class · ${date}` : `${level} · ${date}`;
+  const base = slot ? `${level} · ${slot} class · ${date}` : `${level} · ${date}`;
+  // A class restarted by `restartRecordingIfNearingLimit` (past LiveKit's 3h
+  // cap) or retried after a crash produces a SECOND file for the same room on
+  // the same day. Without this, two unrelated-looking rows show up on a
+  // student's shelf with the identical title — this is what tells them
+  // they're looking at one long class in two parts, not a duplicate.
+  return input.part && input.part > 1 ? `${base} (Part ${input.part})` : base;
+}
+
+/** The `-2`, `-3`, … `recordingObjectKey` appends past a room's first take of the day. */
+function partFromObjectKey(objectKey: string): number | null {
+  const match = /-(\d+)\.mp4$/.exec(objectKey);
+  return match ? Number(match[1]) : null;
 }
 
 /**
@@ -288,6 +306,7 @@ export async function finaliseRecording(egress: {
     const result = egress.fileResults?.[0];
     const objectKey = result?.filename || row.objectKey;
     if (!objectKey) return "unknown";
+    const part = partFromObjectKey(objectKey);
 
     // LiveKit saying the upload finished is not the same as this app being
     // able to read it back — see the comment on `verifyRecordingObject`. A
@@ -307,7 +326,7 @@ export async function finaliseRecording(egress: {
         kind: KIND.recordingFailed,
         severity: "critical",
         title: "A class recording uploaded but can't be read back",
-        message: `${recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: row.startedAt })}: ${verified.reason}`,
+        message: `${recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: row.startedAt, part })}: ${verified.reason}`,
         link: "/admin/materials",
         dedupeKey: `recording-verify-failed:${row.egressId}`,
       });
@@ -324,7 +343,7 @@ export async function finaliseRecording(egress: {
     try {
       thumbnailPath = await createRecordingThumbnail({
         objectKey,
-        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt, isPrivate }),
+        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt, isPrivate, part }),
         level: row.level,
         recordedAt,
       });
@@ -334,7 +353,7 @@ export async function finaliseRecording(egress: {
 
     const material = await prisma.material.create({
       data: {
-        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt, isPrivate }),
+        title: recordingTitle({ level: row.level, sessionSlot: row.sessionSlot, at: recordedAt, isPrivate, part }),
         description: isPrivate ? "Recorded automatically from your private class." : "Recorded automatically from the live class.",
         filePath: fileUrl,
         fileName: objectKey.split("/").pop() || "class.mp4",
