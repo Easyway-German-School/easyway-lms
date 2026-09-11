@@ -1105,10 +1105,14 @@ export default function LiveKitClassroom({
     : [];
   const speakingIds = new Set((room?.activeSpeakers ?? []).map((participant) => participant.identity));
 
-  // Who goes on the main stage: whoever is talking, else the tutor, else the
-  // first person in the room. A language class is a conversation, so following
-  // the speaker is right far more often than a fixed grid.
+  // Who goes on the main stage: a live screen share first — that's what the
+  // class needs to see, and a student answering a question out loud must
+  // never yank the stage away from it — else whoever is talking, else the
+  // tutor, else the first person in the room. A language class is a
+  // conversation, so following the speaker is right far more often than a
+  // fixed grid, but only once nobody is sharing their screen.
   const liveStage =
+    participants.find((participant) => participant.getTrackPublication(Track.Source.ScreenShare)?.track) ??
     participants.find((participant) => speakingIds.has(participant.identity) && participants.length > 1) ??
     participants.find((participant) => isTutor(participant)) ??
     participants[0];
