@@ -8,7 +8,7 @@ import {
   ringStudents,
   touchLiveSession,
 } from "@/lib/live-presence";
-import { ensureRecordingStarted, stopRecordingForRoom } from "@/lib/class-recorder";
+import { ensureRecordingStarted, restartRecordingIfNearingLimit, stopRecordingForRoom } from "@/lib/class-recorder";
 
 export const dynamic = "force-dynamic";
 
@@ -124,7 +124,7 @@ export async function POST(request: Request) {
        */
       if (owned.kind !== "private") {
         const { currentTenantId } = await import("@/lib/tenant/context");
-        void ensureRecordingStarted({
+        const recordingInput = {
           roomName: owned.roomName,
           tenantId: currentTenantId(),
           branchId: owned.branchId,
@@ -132,7 +132,17 @@ export async function POST(request: Request) {
           level: owned.level,
           sessionSlot: owned.sessionSlot,
           startedByUserId: owned.startedByUserId,
-        });
+        };
+        // Chained, not run alongside each other: the restart has to flip the
+        // old row off "active" before this same tick's start-attempt looks
+        // for one, or the idempotency check below sees the still-active old
+        // row and (correctly, but uselessly) no-ops instead of picking up the
+        // replacement. See the module comment on
+        // `restartRecordingIfNearingLimit` in class-recorder.ts for why a
+        // capture needs swapping out at all.
+        void restartRecordingIfNearingLimit(recordingInput).then(() =>
+          ensureRecordingStarted(recordingInput),
+        );
       }
 
       return NextResponse.json({ ok: true, live: true });

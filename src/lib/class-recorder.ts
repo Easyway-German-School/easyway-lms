@@ -162,6 +162,56 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
   }
 }
 
+// LiveKit Cloud hard-caps a single Room Composite Egress at 180 minutes and
+// simply stops it — status `LIMIT_REACHED`, no warning, no replacement. A
+// class that runs long (and some do) loses its tail silently: the room stays
+// open, the recording does not. Restarting a good margin before the wall
+// turns a marathon class into two files on the shelf instead of one file
+// missing its last twenty minutes.
+const EGRESS_RESTART_AFTER_MINUTES = 170;
+
+/**
+ * Swap a capture nearing LiveKit's duration cap for a fresh one, before
+ * LiveKit pulls the plug on its own.
+ *
+ * Called from the tutor's heartbeat (every ~45s while a class is live — see
+ * `/api/live/presence`), so a recording crossing the threshold is caught
+ * within one heartbeat interval, not once a day on the reconcile cron.
+ *
+ * No-ops instantly for the overwhelming majority of heartbeats (classes that
+ * are nowhere near three hours old) — one indexed query, nothing else.
+ */
+export async function restartRecordingIfNearingLimit(input: StartRecordingInput): Promise<void> {
+  try {
+    const client = egressClient();
+    if (!client) return;
+
+    const active = await prisma.classRecording.findFirst({
+      where: { roomName: input.roomName, status: "active" },
+      select: { id: true, egressId: true, startedAt: true },
+    });
+    if (!active) return;
+
+    const ageMinutes = (Date.now() - active.startedAt.getTime()) / 60_000;
+    if (ageMinutes < EGRESS_RESTART_AFTER_MINUTES) return;
+
+    // Move this row out of "active" FIRST. `ensureRecordingStarted`'s own
+    // idempotency check looks for a row still marked "active" on this room —
+    // left alone it would see this one and refuse to start the replacement.
+    // The webhook and `reconcileRecordings` both find this row by `egressId`
+    // regardless of `status`, so flipping it here does not affect it getting
+    // finalised into its own Material entry once LiveKit's upload lands.
+    await prisma.classRecording.update({ where: { id: active.id }, data: { status: "restarting" } });
+    await client.stopEgress(active.egressId).catch((error) => {
+      console.error(`Could not stop egress ${active.egressId} ahead of the LiveKit duration cap:`, error);
+    });
+
+    await ensureRecordingStarted(input);
+  } catch (error) {
+    console.error("Could not restart a long-running recording:", error);
+  }
+}
+
 /** Stop a capture early. Used when a tutor ends a class deliberately. */
 export async function stopRecordingForRoom(roomName: string): Promise<boolean> {
   try {
@@ -414,14 +464,18 @@ export async function reconcileRecordings(): Promise<{ checked: number; finalise
   const client = egressClient();
   if (!client || !recordingConfigured()) return { checked: 0, finalised: 0 };
 
-  // Only ACTIVE rows belong here. A row already sitting at "failed" or
-  // "aborted" already went through `finaliseRecording` once and got that
-  // status from LiveKit's own report — there is no second opinion to ask for,
-  // and re-finalising it by faking `EGRESS_COMPLETE` (the bug this used to
-  // have) is exactly how a class that genuinely never recorded ends up with a
-  // Material row pointing at a file that was never written.
+  // "active" rows belong here, and so do "restarting" ones — a segment
+  // `restartRecordingIfNearingLimit` stopped ahead of LiveKit's duration cap
+  // still needs its own webhook to land before it becomes a Material row, and
+  // this is the net under that webhook same as for any other capture. A row
+  // already sitting at "failed" or "aborted" already went through
+  // `finaliseRecording` once and got that status from LiveKit's own report —
+  // there is no second opinion to ask for, and re-finalising it by faking
+  // `EGRESS_COMPLETE` (the bug this used to have) is exactly how a class that
+  // genuinely never recorded ends up with a Material row pointing at a file
+  // that was never written.
   const open = await prisma.classRecording.findMany({
-    where: { status: "active", objectKey: { not: null } },
+    where: { status: { in: ["active", "restarting"] }, objectKey: { not: null } },
     select: { egressId: true, startedAt: true },
   });
   if (open.length === 0) return { checked: 0, finalised: 0 };
