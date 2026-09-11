@@ -17,6 +17,23 @@ const nextConfig = {
   outputFileTracingRoot: __dirname,
 
   /**
+   * `ffmpeg-static` resolves its own binary path as
+   * `path.join(__dirname, "ffmpeg")` relative to ITS OWN index.js — but Next's
+   * webpack bundler inlines that index.js straight into whichever route
+   * imports it, and once inlined, `__dirname` no longer means
+   * `node_modules/ffmpeg-static`, it means that route's own output folder
+   * (hence the health check's exact error: the binary path it reports lands
+   * at `.../app/api/admin/class-notes-health/ffmpeg`, not anywhere near
+   * `node_modules`). `outputFileTracingIncludes` below was shipping the real
+   * binary into the deploy the whole time — it was just never at the path the
+   * bundled code went looking for it. Keeping the package external stops
+   * webpack from bundling it at all, so the real `require("ffmpeg-static")`
+   * resolves against the real `node_modules/ffmpeg-static` folder the tracing
+   * config copies in, and `__dirname` inside it means what it always meant.
+   */
+  serverExternalPackages: ['ffmpeg-static'],
+
+  /**
    * Force the serverless functions that need them to carry two things Next's
    * dependency tracer never picks up on its own, because neither is reached by
    * a plain `require()`:
