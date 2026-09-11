@@ -11,6 +11,26 @@ import {
   teachingGroups,
 } from "./lecturer-assignment";
 import { batchMonthSpan, batchRangeLabel } from "./levels";
+import { liveSessionNamedStudentsWhere } from "./live-presence";
+
+describe("liveSessionNamedStudentsWhere", () => {
+  it("keeps a tutor's live-class ping inside the same branch and level", () => {
+    const where = liveSessionNamedStudentsWhere({
+      lecturerId: "lecturer-1",
+      branchId: "branch-a",
+      level: "B2",
+    });
+
+    expect(where).toMatchObject({
+      branchId: "branch-a",
+      level: "B2",
+      OR: [
+        { branchId: "branch-a", level: "B2", tutorId: "lecturer-1" },
+        { branchId: "branch-a", level: "B2", coTutors: { some: { lecturerId: "lecturer-1" } } },
+      ],
+    });
+  });
+});
 
 describe("studentWhereForLecturerScope", () => {
   it("narrows the tutor cohort to the selected session when the admin assignment is broader", () => {

@@ -13,6 +13,7 @@ import {
   announceLiveToVideoStudents,
   liveSessionByCode,
   liveSessionForStudent,
+  liveSessionNamedStudentsWhere,
   mayJoinPrivateRoom,
   openLiveSession,
   recordAttendance,
@@ -373,10 +374,11 @@ export async function GET(request: Request) {
        */
       if (opened.kind === "cohort" && lecturer) {
         const named = await prisma.student.findMany({
-          where: {
-            deletedAt: null,
-            OR: [{ tutorId: lecturer.id }, { coTutors: { some: { lecturerId: lecturer.id } } }],
-          },
+          where: liveSessionNamedStudentsWhere({
+            lecturerId: lecturer.id,
+            branchId: opened.branchId,
+            level: opened.level,
+          }),
           select: { id: true },
         });
         // Only the ones who could actually answer it — a locked portal (unpaid
