@@ -10,6 +10,7 @@ import OfflineBanner from "@/components/OfflineBanner";
 import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import OfficeReplyMoment from "@/components/moment/OfficeReplyMoment";
 import ScheduleChangeMoment from "@/components/moment/ScheduleChangeMoment";
+import CohortCheckMoment from "@/components/moment/CohortCheckMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
@@ -538,6 +539,15 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         celebration. See ScheduleChangeMoment.
       */}
       <ScheduleChangeMoment />
+
+      {/*
+        "Which one are you?" — new vs already mid-course, for the account the
+        cohort classifier can't confidently place during the manual onboarding
+        push. Same reasoning as the two moments above: not behind `hasAccess`,
+        because an unpaid or just-onboarded student is exactly who this is for.
+        See CohortCheckMoment.
+      */}
+      <CohortCheckMoment />
 
       {/*
         Message popups, mounted once per shell so they follow the reader onto

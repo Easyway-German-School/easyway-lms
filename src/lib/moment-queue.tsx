@@ -104,6 +104,7 @@ export type MomentId =
   | "welcome-tour"
   | "goal"
   | "login-upgrade"
+  | "cohort-check"
   | "level-advance"
   | "office-reply"
   | "class-schedule-changed"
@@ -157,6 +158,20 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Set up your login",
     dockBlurb: "Swap your temporary login for an email and password you'll remember.",
+  },
+  /**
+   * "Which one are you?" — two taps, no typing, for the account the cohort
+   * classifier cannot confidently place (new vs already mid-course) during
+   * the manual onboarding push. Below login-upgrade (that one's an account
+   * a student cannot otherwise fully use) but above level-advance: getting
+   * placed in the right batch decides whether the whole dashboard — the
+   * timetable, the journey clock — makes sense at all.
+   */
+  "cohort-check": {
+    priority: 72,
+    kind: "modal",
+    dockLabel: "Quick check",
+    dockBlurb: "Tell us if you're new or already in class, so your dashboard matches.",
   },
   "level-advance": {
     priority: 70,

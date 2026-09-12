@@ -3,6 +3,7 @@ import { PencilIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PublicQuestion } from "@/lib/assignments";
+import { uploadFile, uploadErrorMessage } from "@/lib/upload";
 
 /**
  * Assignments for a student: documents to hand in, and timed quizzes.
@@ -77,6 +78,8 @@ export default function AssignmentsPanel() {
   const [remaining, setRemaining] = useState<number>(0);
   const [busy, setBusy] = useState(false);
   const [docText, setDocText] = useState("");
+  const [docFile, setDocFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -103,6 +106,20 @@ export default function AssignmentsPanel() {
     setBusy(true);
 
     try {
+      // The file goes to the bucket first, through the same presigned path
+      // every other upload in the app uses — posting it as part of this JSON
+      // body would mean recording a filename with nothing behind it, which is
+      // exactly the bug that used to sit on /assignment?lessonId=…
+      let filePath: string | undefined;
+      let fileName: string | undefined;
+      if (active.type === "document" && docFile) {
+        setUploading(true);
+        const uploaded = await uploadFile(docFile, "files");
+        filePath = uploaded.url;
+        fileName = uploaded.filename;
+        setUploading(false);
+      }
+
       const res = await fetch("/api/student/assignments", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -111,6 +128,8 @@ export default function AssignmentsPanel() {
           action: "submit",
           answers: active.type === "quiz" ? answers : undefined,
           text: active.type === "document" ? docText : undefined,
+          filePath,
+          fileName,
         }),
       });
       const data = await res.json();
@@ -119,15 +138,17 @@ export default function AssignmentsPanel() {
       setActive(null);
       setDeadline(null);
       setDocText("");
+      setDocFile(null);
       await load();
       if (auto) setError("Time ran out — your answers were submitted automatically.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not submit");
+      setUploading(false);
+      setError(uploadErrorMessage(e, "Could not submit"));
     } finally {
       submittingRef.current = false;
       setBusy(false);
     }
-  }, [active, answers, docText, load]);
+  }, [active, answers, docText, docFile, load]);
 
   // Tick the countdown and auto-submit at zero.
   useEffect(() => {
@@ -333,15 +354,40 @@ export default function AssignmentsPanel() {
           className="mt-4 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-sm"
         />
 
+        <div className="mt-4">
+          <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">Or attach a file</label>
+          <div className="rounded-2xl border-2 border-dashed border-[var(--border-strong)] p-5 text-center transition hover:border-[var(--accent)]">
+            <input
+              type="file"
+              id="doc-file-input"
+              className="hidden"
+              // Narrowed to what the upload path actually accepts — offering a
+              // type the presign route rejects fails at the end of the wait,
+              // after the student believes their homework is already in.
+              accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.heic"
+              onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
+            />
+            <label htmlFor="doc-file-input" className="cursor-pointer">
+              <p className="text-sm font-semibold text-[var(--foreground)]">
+                {docFile ? docFile.name : "Click to attach a photo or file"}
+              </p>
+              <p className="mt-1 text-xs text-[var(--muted)]">PDF, DOCX, or a photo of your written work</p>
+            </label>
+          </div>
+        </div>
+
         <div className="mt-4 flex gap-3">
           <button
             onClick={() => submit(false)}
-            disabled={busy || !docText.trim()}
+            disabled={busy || uploading || (!docText.trim() && !docFile)}
             className="rounded-full btn-glow px-6 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {busy ? "Submitting…" : "Hand in"}
+            {uploading ? "Uploading…" : busy ? "Submitting…" : "Hand in"}
           </button>
-          <button onClick={() => setActive(null)} className="rounded-full border border-[var(--border)] px-6 py-3 text-sm font-semibold">
+          <button
+            onClick={() => { setActive(null); setDocFile(null); }}
+            className="rounded-full border border-[var(--border)] px-6 py-3 text-sm font-semibold"
+          >
             Back
           </button>
         </div>
