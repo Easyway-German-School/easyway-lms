@@ -46,6 +46,7 @@ import {
 } from "@/components/icons";
 import type { RoomRole } from "@/lib/live-classroom";
 import type { LeaveOutcome } from "./LiveKitClassroom";
+import LiveClassFeedbackCard from "./LiveClassFeedbackCard";
 
 type Recap = {
   title: string;
@@ -250,6 +251,15 @@ export default function SessionEndScreen({
           }
         />
       </div>
+
+      {/*
+        Only once the class is genuinely over for this student — not a drop or
+        a device switch they might still rejoin — and only for a student who
+        has never answered before. See LiveClassFeedbackCard.
+      */}
+      {!isTutor && classOver ? (
+        <LiveClassFeedbackCard liveSessionId={liveSessionId} sessionTitle={recap?.title ?? title} />
+      ) : null}
 
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
         <h2 className="text-lg font-semibold text-[var(--foreground)]">What next</h2>
