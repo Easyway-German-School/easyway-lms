@@ -45,6 +45,10 @@ export default function BookPage() {
     dateOfBirth: "", placeOfBirth: "",
   });
   const [ack, setAck] = useState(false);
+  const [consent, setConsent] = useState(false);
+  // Honeypot — invisible to a real candidate (off-screen, unreachable by
+  // tab), filled only by a bot that fills every field it finds in the DOM.
+  const [website, setWebsite] = useState("");
 
   useEffect(() => {
     fetch("/api/sessions")
@@ -83,7 +87,7 @@ export default function BookPage() {
       );
     }
     if (step === 2) return selection === "full" || modules.size > 0;
-    return ack;
+    return ack && consent;
   }
 
   async function submit() {
@@ -97,6 +101,8 @@ export default function BookPage() {
           sessionId,
           ...form,
           modules: selection === "full" ? ["full"] : Array.from(modules),
+          consentAccepted: consent,
+          website,
         }),
       });
       const data = await res.json();
@@ -126,6 +132,18 @@ export default function BookPage() {
         </div>
 
         {error && <p className="mt-6 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
+
+        {/* Honeypot: real candidates never see this field. */}
+        <input
+          type="text"
+          name="website"
+          value={website}
+          onChange={(e) => setWebsite(e.target.value)}
+          tabIndex={-1}
+          autoComplete="off"
+          aria-hidden="true"
+          style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+        />
 
         <div className="mt-8 seal-border rounded-sm bg-[var(--paper-raised)] p-6">
           {step === 0 && (
@@ -242,6 +260,17 @@ export default function BookPage() {
                   I have read the examination rules above, and I understand this booking is{" "}
                   <strong>not reversible or refundable</strong> once payment is confirmed, and that I
                   must pay from a commercial bank account, not a wallet app.
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 rounded-sm border border-[var(--line)] p-4">
+                <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" />
+                <span className="text-xs text-[var(--ink-soft)]">
+                  I consent to Easyway German Language School collecting and processing the personal data above —
+                  including my passport photograph and data page once uploaded — for the purpose of registering me
+                  for this ÖSD examination and issuing my certificate, per the{" "}
+                  <a href="/privacy" target="_blank" className="underline">privacy policy</a> and{" "}
+                  <a href="/terms" target="_blank" className="underline">terms</a>.
                 </span>
               </label>
             </div>

@@ -31,6 +31,10 @@ export function SiteFooter() {
         Prep classes and student portal at{" "}
         <a href="https://easywayschoollms.com.ng" className="underline">easywayschoollms.com.ng</a>
       </p>
+      <p className="mt-2 flex justify-center gap-4">
+        <Link href="/terms" className="underline">Terms</Link>
+        <Link href="/privacy" className="underline">Privacy</Link>
+      </p>
       <div className="mt-4 flex justify-center">
         <NeedHelp />
       </div>

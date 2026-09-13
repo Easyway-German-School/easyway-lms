@@ -3,7 +3,7 @@ import { generateReferenceCode } from "@/lib/reference-code";
 import { seatNumberForIndex } from "@/lib/seat-numbering";
 import { sendEmail } from "@/lib/email";
 import { bookingLink } from "@/lib/config";
-import { verifyCardPayment } from "@/lib/payments";
+import { refundCardPayment, verifyCardPayment } from "@/lib/payments";
 
 export const MODULES = ["reading", "listening", "writing", "speaking"] as const;
 export type ExamModule = (typeof MODULES)[number];
@@ -13,6 +13,65 @@ export async function resolveOwnedBooking(referenceCode: string, email: string) 
   const booking = await prisma.examBooking.findUnique({ where: { referenceCode } });
   if (!booking || booking.email !== email.trim().toLowerCase()) return null;
   return booking;
+}
+
+/** Shared between the booking and manual-add zod schemas so the two never quietly drift apart. */
+export const MIN_AGE_YEARS = 5; // ÖSD's own Fit-level exams are aimed at children this young
+export const MAX_AGE_YEARS = 100;
+
+export function isPlausibleDateOfBirth(value: string): boolean {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const ageYears = (Date.now() - date.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+  return ageYears >= MIN_AGE_YEARS && ageYears <= MAX_AGE_YEARS;
+}
+
+export type UpdateBookingDetailsInput = Partial<{
+  fullName: string;
+  phone: string;
+  addressLine: string;
+  city: string;
+  country: string;
+  dateOfBirth: string;
+  placeOfBirth: string;
+}>;
+
+/**
+ * A candidate correcting their own typo before paying — a wrong date of
+ * birth or a misspelled name is exactly the kind of thing worth fixing
+ * before it ends up on a certificate. Deliberately closed off once payment
+ * has started (`unpaid` only): a booking under review or already paid needs
+ * the office involved in a change, not a silent self-edit. Email is not
+ * editable here at all — it's the lookup key a candidate needs to find
+ * their own booking again, so changing it needs more care than this.
+ */
+export async function updateBookingDetails(
+  bookingId: string,
+  updates: UpdateBookingDetailsInput,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const booking = await prisma.examBooking.findUnique({ where: { id: bookingId }, select: { paymentStatus: true } });
+  if (!booking) return { ok: false, error: "Booking not found" };
+  if (booking.paymentStatus !== "unpaid") {
+    return { ok: false, error: "This booking can no longer be edited — use \"Need help?\" instead." };
+  }
+  if (updates.dateOfBirth !== undefined && !isPlausibleDateOfBirth(updates.dateOfBirth)) {
+    return { ok: false, error: "Enter a valid date of birth." };
+  }
+
+  await prisma.examBooking.update({
+    where: { id: bookingId },
+    data: {
+      ...(updates.fullName !== undefined ? { fullName: updates.fullName.trim() } : {}),
+      ...(updates.phone !== undefined ? { phone: updates.phone.trim() } : {}),
+      ...(updates.addressLine !== undefined ? { addressLine: updates.addressLine.trim() } : {}),
+      ...(updates.city !== undefined ? { city: updates.city.trim() } : {}),
+      ...(updates.country !== undefined ? { country: updates.country.trim() } : {}),
+      ...(updates.dateOfBirth !== undefined ? { dateOfBirth: new Date(updates.dateOfBirth) } : {}),
+      ...(updates.placeOfBirth !== undefined ? { placeOfBirth: updates.placeOfBirth.trim() } : {}),
+    },
+  });
+
+  return { ok: true };
 }
 
 export type CreateBookingInput = {
@@ -26,11 +85,17 @@ export type CreateBookingInput = {
   dateOfBirth: string; // ISO date
   placeOfBirth: string;
   modules: string[]; // ["full"] or a subset of MODULES
+  /** True the instant the candidate ticks the consent checkbox — see ExamBooking.consentAcceptedAt. */
+  consentAccepted: boolean;
 };
 
 export type CreateBookingResult =
   | { ok: true; referenceCode: string; feeTotal: number }
-  | { ok: false; error: string; code: "not_found" | "closed" | "invalid" };
+  | { ok: false; error: string; code: "not_found" | "closed" | "invalid" | "duplicate" | "rate_limited" };
+
+/** More than this many bookings from one email in an hour is spam, not enthusiasm. */
+const BOOKING_RATE_LIMIT = 3;
+const BOOKING_RATE_WINDOW_MS = 60 * 60 * 1000;
 
 /**
  * Book a place. Deliberately does NOT assign a seat — seats are assigned
@@ -41,6 +106,12 @@ export type CreateBookingResult =
  * confirmBooking's seat count.
  */
 export async function createBooking(input: CreateBookingInput): Promise<CreateBookingResult> {
+  if (!input.consentAccepted) {
+    return { ok: false, error: "You must accept the rules and data-consent notice to book.", code: "invalid" };
+  }
+
+  const email = input.email.trim().toLowerCase();
+
   const session = await prisma.examSession.findUnique({
     where: { id: input.sessionId },
     include: { modulePrices: true },
@@ -51,6 +122,28 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
   const now = new Date();
   if (now > session.registrationDeadline || session.startDate <= now) {
     return { ok: false, error: "Registration for this sitting has closed.", code: "closed" };
+  }
+
+  // Same person, same sitting, twice — a double-click or a genuine repeat
+  // attempt, either way one booking is enough. "closed" excludes bookings
+  // the candidate has already walked away from.
+  const existing = await prisma.examBooking.findFirst({
+    where: { sessionId: session.id, email, status: { not: "cancelled" } },
+    select: { referenceCode: true },
+  });
+  if (existing) {
+    return {
+      ok: false,
+      error: `You already have a booking for this sitting (reference ${existing.referenceCode}) — check its status instead of booking again.`,
+      code: "duplicate",
+    };
+  }
+
+  const recentCount = await prisma.examBooking.count({
+    where: { email, createdAt: { gte: new Date(now.getTime() - BOOKING_RATE_WINDOW_MS) } },
+  });
+  if (recentCount >= BOOKING_RATE_LIMIT) {
+    return { ok: false, error: "Too many booking attempts from this email recently — please contact the office directly.", code: "rate_limited" };
   }
 
   const modules = input.modules.length ? input.modules : ["full"];
@@ -74,7 +167,7 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
       referenceCode,
       sessionId: session.id,
       fullName: input.fullName.trim(),
-      email: input.email.trim().toLowerCase(),
+      email,
       phone: input.phone.trim(),
       addressLine: input.addressLine.trim(),
       city: input.city.trim(),
@@ -83,6 +176,7 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
       placeOfBirth: input.placeOfBirth.trim(),
       modules,
       feeTotal,
+      consentAcceptedAt: new Date(),
     },
   });
 
@@ -100,6 +194,74 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
   });
 
   return { ok: true, referenceCode: booking.referenceCode, feeTotal };
+}
+
+export type CreateManualBookingInput = Omit<CreateBookingInput, "consentAccepted">;
+
+/**
+ * The office books on a candidate's behalf — a phone call, a walk-in, or a
+ * cash payment taken in person. Skips the public rules: no published/
+ * deadline check (an admin exercising judgment overrides those), no
+ * consent timestamp (there was no online form to consent through — the
+ * office is vouching for the data instead), and marks it paid + seated
+ * immediately since the office is also confirming payment was received.
+ */
+export async function createManualBooking(
+  input: CreateManualBookingInput,
+  adminId: string,
+): Promise<CreateBookingResult> {
+  const email = input.email.trim().toLowerCase();
+  const session = await prisma.examSession.findUnique({
+    where: { id: input.sessionId },
+    include: { modulePrices: true },
+  });
+  if (!session) return { ok: false, error: "That sitting does not exist.", code: "not_found" };
+
+  const existing = await prisma.examBooking.findFirst({
+    where: { sessionId: session.id, email, status: { not: "cancelled" } },
+    select: { referenceCode: true },
+  });
+  if (existing) {
+    return { ok: false, error: `This candidate already has a booking for this sitting (${existing.referenceCode}).`, code: "duplicate" };
+  }
+
+  const modules = input.modules.length ? input.modules : ["full"];
+  const feeTotal = computeFee(session, modules);
+  if (feeTotal === null) return { ok: false, error: "Could not price that selection of modules.", code: "invalid" };
+
+  let referenceCode = generateReferenceCode(session.startDate.getFullYear());
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const clash = await prisma.examBooking.findUnique({ where: { referenceCode } });
+    if (!clash) break;
+    referenceCode = generateReferenceCode(session.startDate.getFullYear());
+  }
+
+  const booking = await prisma.examBooking.create({
+    data: {
+      referenceCode,
+      sessionId: session.id,
+      fullName: input.fullName.trim(),
+      email,
+      phone: input.phone.trim(),
+      addressLine: input.addressLine.trim(),
+      city: input.city.trim(),
+      country: input.country?.trim() || "Nigeria",
+      dateOfBirth: new Date(input.dateOfBirth),
+      placeOfBirth: input.placeOfBirth.trim(),
+      modules,
+      feeTotal,
+      addedByOffice: true,
+    },
+  });
+
+  // Reuses the exact same seat-assignment transaction the public flow does
+  // — an office-entered booking is not exempt from the capacity check.
+  const confirmed = await confirmBookingPayment(booking.id, adminId, { paymentMethod: "office" });
+  if (!confirmed.ok) {
+    return { ok: false, error: `Booking created (${referenceCode}) but could not be seated: ${confirmed.error}`, code: "invalid" };
+  }
+
+  return { ok: true, referenceCode, feeTotal };
 }
 
 export function computeFee(
@@ -122,14 +284,18 @@ export function computeFee(
  * assigned — inside a transaction that re-reads the taken count, so two
  * transfers verified in the same second cannot land on the same seat.
  */
+export type ConfirmPaymentResult =
+  | { ok: true; seatNumber: number; alreadyConfirmed: boolean }
+  | { ok: false; error: string; code: "not_found" | "full" | "amount_mismatch" };
+
 export async function confirmBookingPayment(
   bookingId: string,
   verifiedBy: string,
   opts?: { paymentMethod?: string; reference?: string; expectedAmount?: number },
-): Promise<{ ok: true; seatNumber: number; alreadyConfirmed: boolean } | { ok: false; error: string }> {
+): Promise<ConfirmPaymentResult> {
   return prisma.$transaction(async (tx) => {
     const booking = await tx.examBooking.findUnique({ where: { id: bookingId } });
-    if (!booking) return { ok: false, error: "Booking not found" };
+    if (!booking) return { ok: false, error: "Booking not found", code: "not_found" };
     if (booking.seatNumber !== null) {
       return { ok: true, seatNumber: booking.seatNumber, alreadyConfirmed: true };
     }
@@ -142,6 +308,7 @@ export async function confirmBookingPayment(
       return {
         ok: false,
         error: `Amount paid (₦${opts.expectedAmount.toLocaleString()}) is less than the ₦${booking.feeTotal.toLocaleString()} fee due.`,
+        code: "amount_mismatch",
       };
     }
 
@@ -150,7 +317,11 @@ export async function confirmBookingPayment(
       where: { sessionId: booking.sessionId, seatNumber: { not: null } },
     });
     if (session && taken >= session.capacity) {
-      return { ok: false, error: `This sitting is full (${session.capacity} seats) — do not confirm this payment without arranging a different sitting.` };
+      return {
+        ok: false,
+        error: `This sitting is full (${session.capacity} seats) — do not confirm this payment without arranging a different sitting.`,
+        code: "full",
+      };
     }
     const seatNumber = seatNumberForIndex(taken);
 
@@ -189,6 +360,12 @@ export async function confirmBookingPayment(
  * Called from both the browser's redirect back and the webhook — safe to
  * call twice for the same transaction, since confirmBookingPayment is
  * idempotent on seatNumber.
+ *
+ * The one path that does more than that: if confirmation fails because the
+ * sitting filled up, the candidate's card has still been charged — a real
+ * charge for a seat that no longer exists. Rather than leave that silently
+ * unresolved, this immediately requests a Flutterwave refund and marks the
+ * booking so it can't be missed on the admin dashboard.
  */
 export async function settleCardPayment(
   transactionId: string,
@@ -201,9 +378,47 @@ export async function settleCardPayment(
     reference: transactionId,
     expectedAmount: verified.amount,
   });
-  if (!result.ok) return result;
+  if (result.ok) return { ok: true, bookingId: verified.bookingId, seatNumber: result.seatNumber };
 
-  return { ok: true, bookingId: verified.bookingId, seatNumber: result.seatNumber };
+  if (result.code === "full") {
+    await refundFilledSittingCharge(verified.bookingId, transactionId, verified.amount);
+  }
+  return result;
+}
+
+async function refundFilledSittingCharge(bookingId: string, transactionId: string, amount: number): Promise<void> {
+  const refund = await refundCardPayment(transactionId, amount);
+  const booking = await prisma.examBooking.update({
+    where: { id: bookingId },
+    data: {
+      paymentMethod: "card",
+      paymentStatus: refund.ok ? "refund_pending" : "refund_failed",
+      transferReference: transactionId,
+      ...(refund.ok ? { refundRequestedAt: new Date() } : {}),
+      transferRejectedReason: refund.ok
+        ? "This sitting filled up before your payment could be confirmed. A refund has been requested — it can take a few business days to reflect."
+        : `This sitting filled up before your payment could be confirmed. Automatic refund failed (${refund.error}) — the office has been notified to refund you manually.`,
+    },
+  });
+
+  await sendEmail({
+    to: booking.email,
+    subject: "Your seat could not be reserved — refund in progress",
+    html: `
+      <p>Hello ${booking.fullName},</p>
+      <p>Your card was charged ₦${amount.toLocaleString()} for booking ${booking.referenceCode}, but the sitting filled up
+         in the moments before your payment was confirmed — we're sorry for that.</p>
+      <p>${refund.ok
+        ? "A refund has been requested automatically and should reflect on your card within a few business days."
+        : "We could not process the refund automatically — our office has been notified and will refund you directly."}</p>
+      <p>Use "Need help?" from <a href="${bookingLink(booking.referenceCode, booking.email)}">your booking page</a> if you
+         don't see it resolved within a week.</p>
+    `,
+  });
+
+  if (!refund.ok) {
+    console.error(`AUTOMATIC REFUND FAILED for booking ${bookingId}, transaction ${transactionId}: ${refund.error}. Manual refund required.`);
+  }
 }
 
 export async function rejectBookingPayment(bookingId: string, reason: string): Promise<void> {

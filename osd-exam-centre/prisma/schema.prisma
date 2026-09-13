@@ -88,13 +88,43 @@ model ExamBooking {
   /// bank_transfer | card — bank_transfer is manual (an admin verifies a
   /// slip); card settles automatically via Flutterwave. See lib/payments.ts.
   paymentMethod          String?
-  /// unpaid | pending_verification | paid | rejected
+  /// unpaid | pending_verification | paid | refund_pending | refund_failed
+  ///
+  /// The last two exist for one specific, real scenario: a sitting fills up
+  /// (via bank transfers an admin already verified) in the moments between
+  /// a candidate starting a card checkout and Flutterwave confirming the
+  /// charge. The card payment succeeds — real money moves — but there is no
+  /// seat left to give them. See lib/booking.ts settleCardPayment(), which
+  /// automatically requests a Flutterwave refund the instant this happens,
+  /// rather than silently leaving someone charged with nothing to show for
+  /// it. `refund_pending` if Flutterwave accepted the refund request (the
+  /// money itself can take days to actually land back on their card);
+  /// `refund_failed` if even the automatic refund attempt was rejected —
+  /// that one needs an admin to refund by hand, and is flagged loudly on
+  /// the dashboard for exactly that reason. Bank transfer can never reach
+  /// either state — an admin verifies the amount before anything is marked
+  /// paid, so there is nothing to accidentally overcharge.
   paymentStatus          String    @default("unpaid")
   transferProofUrl       String?
   transferReference      String?
+  /// Human-readable reason a payment isn't settled — a rejected bank slip,
+  /// or (for the refund case above) an explanation for the candidate.
   transferRejectedReason String?
   verifiedBy             String?
   verifiedAt             DateTime?
+  /// When the refund request was sent to Flutterwave — not when the money
+  /// actually lands back on the candidate's card, which this app has no
+  /// way to observe (no refund-completion webhook is wired up).
+  refundRequestedAt      DateTime?
+
+  /// When the "I have read the rules and consent to my data being used for
+  /// registration and certification" checkbox was ticked — a timestamp, not
+  /// just a boolean, because "did we ask for consent" is exactly the kind of
+  /// thing worth being able to prove later. Null on a manually-added booking
+  /// (see lib/booking.ts createManualBooking) — the candidate never saw the
+  /// online form to consent to in the first place; the office is vouching
+  /// for the data instead.
+  consentAcceptedAt DateTime?
 
   // ----- documents -----
   passportPhotoUrl       String?
@@ -106,8 +136,13 @@ model ExamBooking {
   /// Only set once payment is verified — see lib/seat-numbering.ts. Null
   /// means "not yet confirmed", not "seat 0".
   seatNumber Int?
-  /// booked | confirmed | cancelled
+  /// booked | confirmed | cancelled | no_show
   status     String @default("booked")
+
+  /// Set only when the office booked this on a candidate's behalf (a phone
+  /// or walk-in registration) — see lib/booking.ts createManualBooking().
+  /// Null means the candidate booked it themselves online.
+  addedByOffice Boolean @default(false)
 
   /// Which nurture-drip stages have already fired, so the cron sweep is
   /// idempotent without a separate notification-log table. See

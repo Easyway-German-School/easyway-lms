@@ -24,6 +24,7 @@ export default function NeedHelp({
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
+  const [website, setWebsite] = useState(""); // honeypot
 
   async function send() {
     setSending(true);
@@ -32,7 +33,7 @@ export default function NeedHelp({
       const res = await fetch("/api/support", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ bookingReference, name, email, message }),
+        body: JSON.stringify({ bookingReference, name, email, message, website }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not send that");
@@ -67,6 +68,15 @@ export default function NeedHelp({
     <div className="seal-border rounded-sm bg-[var(--paper-raised)] p-4 text-left">
       <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Send a message to the office</p>
       {error && <p className="mt-2 text-xs text-[var(--red)]">{error}</p>}
+      <input
+        type="text"
+        value={website}
+        onChange={(e) => setWebsite(e.target.value)}
+        tabIndex={-1}
+        autoComplete="off"
+        aria-hidden="true"
+        style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+      />
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <input
           value={name}

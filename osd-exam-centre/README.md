@@ -76,6 +76,31 @@ component library — deliberately small.
   Saved to the database either way; emailed to `OFFICE_NOTIFICATION_EMAIL`
   when it's set — there's no in-app admin notification system in an app
   this small, so email is the actual inbox.
+- **Payment integrity** — a sitting can fill up (via bank transfers an admin
+  already verified) in the moments between a candidate starting a card
+  checkout and Flutterwave confirming it. Rather than leave someone charged
+  with no seat, `settleCardPayment()` in `lib/booking.ts` automatically
+  requests a Flutterwave refund the instant that happens, marks the booking
+  `refund_pending`/`refund_failed`, and flags it loudly on the admin
+  dashboard. Bank transfer can never reach this state — an admin verifies
+  the amount before anything is marked paid.
+- **Abuse protection on public forms** — a honeypot field (off-screen,
+  real visitors never fill it; a bot filling every field it finds gets a
+  fake success, not a tell) and a per-email rate limit on both booking
+  and "Need help?" submissions. Also: the same email can't book the same
+  sitting twice, and a date of birth is validated as a real, plausible date
+  rather than trusted as a bare string.
+- **Consent** — a candidate explicitly consents to their data (including
+  the passport photo/data page they upload) being processed for
+  registration and certification, timestamped
+  (`ExamBooking.consentAcceptedAt`), separate from the rules acknowledgment
+  — see `/terms` and `/privacy`.
+- **Office operations**: editing an existing sitting after creation (not
+  just create-once), cancelling a booking, exporting a CSV exam-day roster
+  per sitting, adding a booking manually for a phone/walk-in candidate
+  (`createManualBooking`), and a candidate correcting their own typo'd
+  details before paying (`updateBookingDetails` — locked once payment
+  starts, so a paid/under-review booking needs the office involved instead).
 
 ## Local setup
 
@@ -109,3 +134,11 @@ at `/admin/login` first) before `/book` has anything to show.
   ÖSD itself requires. Revisit once Jason sends the actual list.
 - **Nothing here has been deployed, browser-tested end to end, or shown to
   Jason.** Typechecked and reviewed only.
+- **No admin-initiated refund.** The automatic refund only fires for the
+  specific "sitting filled up mid-card-payment" case. If an admin cancels a
+  booking that was already paid by card for an ordinary reason (a genuine
+  cancellation request, a duplicate), nothing refunds it automatically —
+  that still has to be done by hand, same as it would with a bank transfer.
+- **`no_show` is a documented status with no admin action to set it yet.**
+  Worth adding once there's an actual exam day to mark attendance for —
+  premature before then.

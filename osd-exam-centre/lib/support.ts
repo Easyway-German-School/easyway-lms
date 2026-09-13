@@ -22,12 +22,22 @@ export type SubmitSupportMessageInput = {
   message: string;
 };
 
+const MESSAGE_RATE_LIMIT = 5;
+const MESSAGE_RATE_WINDOW_MS = 60 * 60 * 1000;
+
 export async function submitSupportMessage(input: SubmitSupportMessageInput): Promise<{ ok: true } | { ok: false; error: string }> {
   const name = input.name.trim();
   const email = input.email.trim().toLowerCase();
   const message = input.message.trim();
   if (!name || !email || !message) {
     return { ok: false, error: "Name, email and a message are required." };
+  }
+
+  const recentCount = await prisma.supportMessage.count({
+    where: { email, createdAt: { gte: new Date(Date.now() - MESSAGE_RATE_WINDOW_MS) } },
+  });
+  if (recentCount >= MESSAGE_RATE_LIMIT) {
+    return { ok: false, error: "Too many messages sent recently — please wait before sending another." };
   }
 
   let booking: { id: string; referenceCode: string; session: { title: string } } | null = null;

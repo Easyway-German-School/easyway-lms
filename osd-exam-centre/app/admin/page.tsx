@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import ManualBookingForm from "@/components/ManualBookingForm";
 
 type Booking = {
   id: string;
@@ -15,6 +16,7 @@ type Booking = {
   paymentMethod: string | null;
   transferProofUrl: string | null;
   transferReference: string | null;
+  transferRejectedReason: string | null;
   passportPhotoUrl: string | null;
   passportDataPageUrl: string | null;
   documentStatus: string;
@@ -74,7 +76,14 @@ export default function AdminDashboard() {
 
   if (!loaded) return <div className="p-8 text-sm text-[var(--ink-soft)]">Loading…</div>;
 
-  const shown = filter === "all" ? bookings : bookings.filter((b) => b.paymentStatus === "pending_verification" || (b.passportPhotoUrl && b.passportDataPageUrl && b.documentStatus === "pending"));
+  const shown = filter === "all"
+    ? bookings
+    : bookings.filter((b) =>
+        b.paymentStatus === "pending_verification" ||
+        b.paymentStatus === "refund_pending" ||
+        b.paymentStatus === "refund_failed" ||
+        (b.passportPhotoUrl && b.passportDataPageUrl && b.documentStatus === "pending"),
+      );
 
   return (
     <div className="min-h-screen bg-[var(--paper)] p-6">
@@ -89,6 +98,10 @@ export default function AdminDashboard() {
         </div>
 
         {error && <p className="mt-4 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
+
+        <div className="mt-4">
+          <ManualBookingForm onCreated={load} />
+        </div>
 
         <div className="mt-4 flex gap-2">
           {(["review", "all"] as Filter[]).map((f) => (
@@ -136,6 +149,15 @@ export default function AdminDashboard() {
                   )}
                 </div>
               </div>
+
+              {(b.paymentStatus === "refund_pending" || b.paymentStatus === "refund_failed") && (
+                <div className={`mt-3 rounded-sm p-2.5 text-xs font-semibold ${b.paymentStatus === "refund_failed" ? "bg-[var(--red-soft)] text-[var(--red)]" : "bg-[var(--gold-soft)] text-[var(--navy)]"}`}>
+                  {b.paymentStatus === "refund_failed"
+                    ? "⚠ Automatic refund FAILED — this candidate was charged for a sitting that filled up. Refund them manually."
+                    : "A card charge for a full sitting was automatically refunded via Flutterwave — check it lands."}
+                  {b.transferRejectedReason && <span className="mt-1 block font-normal">{b.transferRejectedReason}</span>}
+                </div>
+              )}
 
               {b.paymentStatus === "pending_verification" && (
                 <div className="mt-3 flex flex-wrap items-center gap-2 rounded-sm bg-[var(--gold-soft)]/40 p-2.5">

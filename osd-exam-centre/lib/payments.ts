@@ -122,6 +122,36 @@ export async function verifyCardPayment(
   return { ok: true, bookingId, amount: tx.amount };
 }
 
+/**
+ * Refund a card charge — the one scenario this ever needs to run: a sitting
+ * fills up (via bank transfers an admin already verified) in the window
+ * between a candidate starting a card checkout and Flutterwave confirming
+ * it. The charge succeeds; there is no seat to give them. See
+ * lib/booking.ts settleCardPayment(), which calls this automatically the
+ * instant that happens, rather than leaving someone charged with nothing.
+ *
+ * Untested against Flutterwave's real API, same as the rest of this file —
+ * no live key exists yet to test a real refund against.
+ */
+export async function refundCardPayment(
+  transactionId: string,
+  amount: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+  if (!secretKey) return { ok: false, error: "Card payments are not configured." };
+
+  const res = await fetch(`${FLW_BASE}/transactions/${encodeURIComponent(transactionId)}/refund`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ amount }),
+  });
+  const data = (await res.json().catch(() => null)) as { status?: string; message?: string } | null;
+  if (!res.ok || data?.status !== "success") {
+    return { ok: false, error: data?.message || "Flutterwave refused the refund request." };
+  }
+  return { ok: true };
+}
+
 /** Flutterwave signs webhooks with a shared secret hash header, not a signature scheme. */
 export function verifyFlutterwaveWebhookSignature(headerValue: string | null): boolean {
   const expected = process.env.FLUTTERWAVE_WEBHOOK_SECRET_HASH;

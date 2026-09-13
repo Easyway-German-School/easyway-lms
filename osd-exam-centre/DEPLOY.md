@@ -64,6 +64,12 @@ name too. Revisit only if this ever gets licensed to another school.
   the LMS's.
 - **Office notifications** — set `OFFICE_NOTIFICATION_EMAIL` so "Need help?"
   messages actually reach someone, not just `/admin/support`.
+- **Terms & Privacy pages** (`/terms`, `/privacy`) — the text there is
+  placeholder, written to describe exactly what the code does (data
+  collected, the non-refundable/automatic-refund policy, exam-day conduct),
+  not counsel-approved wording. Have Easyway's management (and ideally a
+  lawyer, given this collects passport data and takes payments) review and
+  replace it — `app/terms/page.tsx` and `app/privacy/page.tsx`.
 
 ## 5. Optional — add when ready, not blocking
 

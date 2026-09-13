@@ -4,11 +4,18 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
 import NeedHelp from "@/components/NeedHelp";
+import EditBookingDetails from "@/components/EditBookingDetails";
 
 type Booking = {
   referenceCode: string;
   fullName: string;
   email: string;
+  phone: string;
+  addressLine: string;
+  city: string;
+  country: string;
+  dateOfBirth: string;
+  placeOfBirth: string;
   modules: string[];
   feeTotal: number;
   paymentMethod: string | null;
@@ -255,6 +262,18 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
       )}
       <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">{booking.session.title}</h1>
       <p className="mt-1 text-sm text-[var(--ink-soft)]">Reference: <span className="font-mono">{booking.referenceCode}</span></p>
+
+      {booking.paymentStatus === "unpaid" && (
+        <EditBookingDetails
+          referenceCode={booking.referenceCode}
+          email={email}
+          initial={{
+            fullName: booking.fullName, phone: booking.phone, addressLine: booking.addressLine,
+            city: booking.city, country: booking.country, dateOfBirth: booking.dateOfBirth, placeOfBirth: booking.placeOfBirth,
+          }}
+          onSaved={onChange}
+        />
+      )}
 
       {error && <p className="mt-4 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
 
