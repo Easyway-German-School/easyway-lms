@@ -14,17 +14,28 @@ unfamiliar new domain; this app is organizationally separate (own repo
 folder, own database, own Vercel project) without needing a separate domain
 name too. Revisit only if this ever gets licensed to another school.
 
-## 2. Database — before it's usable at all
+## 2. Database — DONE (2026-09-13)
 
-1. Create a **new Neon project** (or a new branch on the existing one — but
-   a new project is cleaner isolation from the LMS's production database).
-   Do not point this at the LMS's `DATABASE_URL` — see `README.md` for why
-   they're deliberately separate.
-2. Copy the connection string. That's `DATABASE_URL`.
-3. Migrations run automatically on every Vercel build (see
+~~Create a new Neon project~~ — done: `easyway-osd-exam-centre`
+(`wild-violet-09588211`, `eu-central-1`, same org as the LMS's Neon
+projects but its own project — separate isolation, per `README.md`). Both
+connection strings (`DATABASE_URL` pooled, `DIRECT_DATABASE_URL` direct)
+are set in this worktree's `osd-exam-centre/.env.local` (gitignored, never
+committed) and the initial migration has been applied. Also ran a full
+smoke test against it for real — created a sitting, submitted a public
+booking, submitted a bank-transfer slip, verified it as admin, confirmed a
+real seat number came back (50, matching the descending scheme), confirmed
+the roster CSV export and the "seat confirmed" email fired — then deleted
+that test data so the database is clean for the real first login. Still
+needed for a real production deploy:
+
+1. Set the same two connection strings as env vars on the Vercel project
+   (step 3) — `.env.local` only reaches local dev, not Vercel.
+2. Migrations run automatically on every subsequent Vercel build (see
    `scripts/vercel-migrate.mjs` — only fires when `VERCEL` is set, so a
-   local `npm run build` never touches a real database). Nothing to run by
-   hand for the first deploy.
+   local `npm run build` never touches the real database). The very first
+   migration was already applied by hand from this session, so Vercel's
+   first build will find it a no-op and move on.
 
 ## 3. Vercel project — before it's usable at all
 
@@ -33,11 +44,14 @@ name too. Revisit only if this ever gets licensed to another school.
 2. Set environment variables (Production, and Preview if you want PR
    previews to work) — see `.env.example` for the full list with comments.
    At minimum to boot at all:
-   - `DATABASE_URL` (step 2) — note this now gates `/admin/login` itself, not
-     just the dashboard behind it: checking the login-attempt lockout needs
-     a database read, so a database outage means nobody can sign in at all
-     (even with the right password) rather than only "can't see bookings".
-     A deliberate fail-closed trade-off — see `lib/admin-auth.ts`.
+   - `DATABASE_URL` and `DIRECT_DATABASE_URL` (step 2 — Neon's connection
+     page gives you both; the pooled one has "-pooler" in the hostname, use
+     that for `DATABASE_URL`) — note `DATABASE_URL` now gates `/admin/login`
+     itself, not just the dashboard behind it: checking the login-attempt
+     lockout needs a database read, so a database outage means nobody can
+     sign in at all (even with the right password) rather than only "can't
+     see bookings". A deliberate fail-closed trade-off — see
+     `lib/admin-auth.ts`.
    - `ADMIN_PASSWORD` — pick a real one, this gates the whole back office
    - `SITE_URL` — the domain from step 1, e.g. `https://exams.easywayschoollms.com.ng`
    - `EXAM_BANK_ACCOUNT_NUMBER` (+ `EXAM_BANK_NAME`/`EXAM_BANK_ACCOUNT_NAME`

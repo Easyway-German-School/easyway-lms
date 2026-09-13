@@ -8,8 +8,15 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // DATABASE_URL is the POOLED connection (via PgBouncer) — what the app
+  // actually queries with, since every serverless invocation is a fresh
+  // connection. Migrations use DIRECT_DATABASE_URL instead: PgBouncer's
+  // transaction mode doesn't support the prepared statements/advisory locks
+  // `prisma migrate` needs. Same split the EasyWay LMS's own schema uses —
+  // see prototype/.env.example.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 /// One sitting: a date, a level, a venue, a capacity, a fee. An admin
