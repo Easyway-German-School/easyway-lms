@@ -15,6 +15,7 @@ import { CalendarIcon, CameraIcon } from "@/components/icons";
 import { packageOptions, countries } from "@/app/auth/signup/options";
 import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload";
 import { DERIVED_SEGMENT_IDS, SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
+import SchedulePreview from "@/components/admin/SchedulePreview";
 
 /**
  * Pathway choices for the manual "Add student" form only. Mirrors the signup
@@ -1561,7 +1562,8 @@ function StudentsRoster() {
                 </select>
                 {addSlots.length > 0 && addSlots.length < TIME_SLOTS.length && (
                   <span className="block text-xs font-normal text-[var(--muted)]">
-                    Some sessions are switched off for {newLevel} on Settings.
+                    Some sessions are switched off for {newLevel} · {addMode === "physical" ? "on campus" : addMode} on
+                    Settings. Changing Delivery mode or Branch below can reveal others (e.g. Weekend).
                   </span>
                 )}
               </label>
@@ -1607,6 +1609,13 @@ function StudentsRoster() {
                   that switches this to Online on its own.
                 </span>
               </label>
+              <SchedulePreview
+                branchId={newBranchId}
+                level={newLevel}
+                sessionSlot={newSessionSlot}
+                classType={newClassType}
+                batch={newBatch}
+              />
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">City / town</span>
                 <input

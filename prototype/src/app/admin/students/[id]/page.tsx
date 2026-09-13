@@ -25,6 +25,10 @@ import {
   WalletIcon,
 } from "@/components/icons";
 import { SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
+import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
+import { defaultSessionSettings, isCellEnabled, isModeEnabled, type SessionSettings } from "@/lib/school-settings";
+import { isOnlineBranch } from "@/lib/online-branch";
+import SchedulePreview from "@/components/admin/SchedulePreview";
 
 /**
  * One student's file.
@@ -492,7 +496,8 @@ export default function StudentDossierPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
-  const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; mode?: string | null }>>([]);
+  const [sessionCfg, setSessionCfg] = useState<SessionSettings>(() => defaultSessionSettings());
   const [editForm, setEditForm] = useState({
     name: "",
     email: "",
@@ -527,6 +532,27 @@ export default function StudentDossierPage() {
       .then((payload) => setBranches(payload?.branches || []))
       .catch(() => {});
   }, []);
+
+  // Which (session × attendance-mode) combinations the office still runs, per
+  // level — see /admin/settings. The edit form only offers what is actually
+  // on, the same rule the sign-up form and the roster's Add-student form obey.
+  useEffect(() => {
+    fetch("/api/school/sessions")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.sessions)) setSessionCfg(data as SessionSettings);
+      })
+      .catch(() => {});
+  }, []);
+
+  const editBranchIsOnline = isOnlineBranch(branches.find((branch) => branch.id === editForm.branchId));
+  const editMode: "physical" | "hybrid" | "online" = editBranchIsOnline
+    ? "online"
+    : editForm.deliveryMode === "hybrid"
+      ? "hybrid"
+      : "physical";
+  const editSlots = TIME_SLOTS.filter((slot) => isCellEnabled(sessionCfg, editForm.level, slot, editMode));
+  const editModes = (["physical", "hybrid"] as const).filter((mode) => isModeEnabled(sessionCfg, editForm.level, mode));
 
   async function issueCode() {
     if (issuingCode) return;
@@ -2067,10 +2093,16 @@ export default function StudentDossierPage() {
                   onChange={(event) => setEditForm((form) => ({ ...form, sessionSlot: event.target.value }))}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="morning">Morning</option>
-                  <option value="afternoon">Afternoon</option>
-                  <option value="evening">Evening</option>
+                  {(editSlots.length ? editSlots : TIME_SLOTS).map((slot) => (
+                    <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
+                  ))}
                 </select>
+                {editSlots.length > 0 && editSlots.length < TIME_SLOTS.length && (
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Some sessions are switched off for {editForm.level} · {editMode === "physical" ? "on campus" : editMode} on Settings.
+                    Changing Delivery mode or Branch can reveal others (e.g. Weekend).
+                  </span>
+                )}
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Class type</span>
@@ -2082,6 +2114,12 @@ export default function StudentDossierPage() {
                   <option value="group">Group class</option>
                   <option value="private">Private (one-to-one)</option>
                 </select>
+                {editForm.classType === "private" && (
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Private students follow no group timetable — their calendar comes only from sessions booked
+                    on the tutor&apos;s Private classes page.
+                  </span>
+                )}
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Branch</span>
@@ -2095,21 +2133,38 @@ export default function StudentDossierPage() {
                     <option key={branch.id} value={branch.id}>{branch.name}</option>
                   ))}
                 </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  To move this student fully online, pick the <span className="font-semibold">Online</span> branch —
+                  that sets Delivery mode below automatically.
+                </span>
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Delivery mode</span>
-                <select
-                  value={editForm.deliveryMode}
-                  onChange={(event) => setEditForm((form) => ({ ...form, deliveryMode: event.target.value }))}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                >
-                  <option value="physical">On campus only</option>
-                  <option value="hybrid">On campus + live video (hybrid)</option>
-                </select>
-                <span className="block text-xs font-normal text-[var(--muted)]">
-                  Placing them on the Online branch overrides this to online automatically.
-                </span>
+                {editBranchIsOnline ? (
+                  <div className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--muted)]">
+                    Online — set automatically by the Online branch
+                  </div>
+                ) : (
+                  <select
+                    value={editForm.deliveryMode}
+                    onChange={(event) => setEditForm((form) => ({ ...form, deliveryMode: event.target.value }))}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    {(editModes.length ? editModes : (["physical", "hybrid"] as const)).map((mode) => (
+                      <option key={mode} value={mode}>
+                        {mode === "physical" ? "On campus only" : "On campus + live video (hybrid)"}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </label>
+              <SchedulePreview
+                branchId={editForm.branchId}
+                level={editForm.level}
+                sessionSlot={editForm.sessionSlot}
+                classType={editForm.classType}
+                registeredAt={data?.identity.registeredAt}
+              />
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Status</span>
                 <select

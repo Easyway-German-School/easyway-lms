@@ -25,6 +25,10 @@ import {
   WalletIcon,
 } from "@/components/icons";
 import { SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
+import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
+import { defaultSessionSettings, isCellEnabled, isModeEnabled, type SessionSettings } from "@/lib/school-settings";
+import { isOnlineBranch } from "@/lib/online-branch";
+import SchedulePreview from "@/components/admin/SchedulePreview";
 
 /**
  * One student's file.
@@ -52,7 +56,7 @@ import { SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
 
 type Dossier = {
   generatedAt: string;
-  viewer: { adminRole: string; canSeeMoney: boolean };
+  viewer: { adminRole: string; canSeeMoney: boolean; canRecordPayment: boolean };
   identity: {
     id: string;
     studentCode: string | null;
@@ -468,6 +472,21 @@ export default function StudentDossierPage() {
   const [balanceBusy, setBalanceBusy] = useState<"grace" | "reminder" | null>(null);
   const [balanceMsg, setBalanceMsg] = useState<string | null>(null);
 
+  // "Record a payment this student made" — cash / transfer taken at the desk or
+  // over the phone. Open to a viewer with `payments` (the fee book) OR
+  // `enrolment` (Customer Care, who sees no amounts but can still clear a
+  // student's way into class). The server replies with that one student's
+  // unlock status, which is all this panel shows.
+  const [payOpen, setPayOpen] = useState(false);
+  const [payForm, setPayForm] = useState({
+    amount: "",
+    method: "bank_transfer",
+    kind: "tuition" as "tuition" | "registration",
+    note: "",
+  });
+  const [payBusy, setPayBusy] = useState(false);
+  const [payMsg, setPayMsg] = useState<{ tone: "ok" | "warn" | "bad"; text: string } | null>(null);
+
   /**
    * Editing is deliberately behind its own modal rather than inline fields —
    * this file is read from during a live phone call, and a value that changes
@@ -477,7 +496,8 @@ export default function StudentDossierPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
-  const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; mode?: string | null }>>([]);
+  const [sessionCfg, setSessionCfg] = useState<SessionSettings>(() => defaultSessionSettings());
   const [editForm, setEditForm] = useState({
     name: "",
     email: "",
@@ -512,6 +532,27 @@ export default function StudentDossierPage() {
       .then((payload) => setBranches(payload?.branches || []))
       .catch(() => {});
   }, []);
+
+  // Which (session × attendance-mode) combinations the office still runs, per
+  // level — see /admin/settings. The edit form only offers what is actually
+  // on, the same rule the sign-up form and the roster's Add-student form obey.
+  useEffect(() => {
+    fetch("/api/school/sessions")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.sessions)) setSessionCfg(data as SessionSettings);
+      })
+      .catch(() => {});
+  }, []);
+
+  const editBranchIsOnline = isOnlineBranch(branches.find((branch) => branch.id === editForm.branchId));
+  const editMode: "physical" | "hybrid" | "online" = editBranchIsOnline
+    ? "online"
+    : editForm.deliveryMode === "hybrid"
+      ? "hybrid"
+      : "physical";
+  const editSlots = TIME_SLOTS.filter((slot) => isCellEnabled(sessionCfg, editForm.level, slot, editMode));
+  const editModes = (["physical", "hybrid"] as const).filter((mode) => isModeEnabled(sessionCfg, editForm.level, mode));
 
   async function issueCode() {
     if (issuingCode) return;
@@ -687,6 +728,59 @@ export default function StudentDossierPage() {
       setBalanceBusy(null);
     }
   }, [id, load]);
+
+  const recordPayment = useCallback(async () => {
+    if (!id) return;
+    const amount = Math.round(Number(payForm.amount));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPayMsg({ tone: "bad", text: "Enter the amount received, in whole naira." });
+      return;
+    }
+    setPayBusy(true);
+    setPayMsg(null);
+    try {
+      const response = await fetch("/api/admin/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: id,
+          amount,
+          currency: "ngn",
+          method: payForm.method,
+          status: "completed",
+          // "Registration fee" is the prefix lib/payment.ts keys on to keep
+          // this row out of the tuition total — so a registration payment says
+          // nothing about unlocking, exactly as intended.
+          description:
+            payForm.kind === "registration"
+              ? `Registration fee${payForm.note.trim() ? ` — ${payForm.note.trim()}` : ""}`
+              : payForm.note.trim() || "Tuition payment (recorded by office)",
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || "Could not record that payment");
+      // The route says plainly whether this opened their classes, or by how
+      // much it fell short — it never returns another student's figures or any
+      // school total, so this is safe to show whatever the viewer's role.
+      setPayMsg(
+        json.notice
+          ? { tone: "ok", text: json.notice }
+          : json.warning
+            ? { tone: "warn", text: json.warning }
+            : { tone: "ok", text: "Payment recorded." },
+      );
+      setPayForm({ amount: "", method: "bank_transfer", kind: "tuition", note: "" });
+      setPayOpen(false);
+      void load(false);
+    } catch (payErr) {
+      setPayMsg({
+        tone: "bad",
+        text: payErr instanceof Error ? payErr.message : "Could not record that payment",
+      });
+    } finally {
+      setPayBusy(false);
+    }
+  }, [id, payForm, load]);
 
   const resetPassword = useCallback(async () => {
     if (!id) return;
@@ -875,7 +969,7 @@ export default function StudentDossierPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="overflow-hidden rounded-3xl border border-[var(--border)] bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-6 text-white shadow-lg sm:p-8"
+          className="theme-dark overflow-hidden rounded-3xl border border-[var(--border)] bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-6 text-white shadow-lg sm:p-8"
         >
           <div className="flex flex-wrap items-start gap-6">
             <div className="relative">
@@ -1091,18 +1185,35 @@ export default function StudentDossierPage() {
           {/* ---- Money --------------------------------------------------- */}
           <Card
             title="Payments"
-            hint={data.viewer.canSeeMoney ? `${money.payments?.length ?? 0} transactions` : "Restricted"}
+            hint={
+              data.viewer.canSeeMoney
+                ? `${money.payments?.length ?? 0} transactions`
+                : data.viewer.canRecordPayment
+                  ? "Record a payment"
+                  : "Restricted"
+            }
           >
             {!data.viewer.canSeeMoney ? (
               <div className="flex items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/40 p-4 text-sm text-[var(--muted)]">
                 <span className="text-[var(--muted)]">
                   <ShieldIcon />
                 </span>
-                <p>
-                  Amounts are visible only to an admin with the payments capability. You can still see that this student
-                  is <strong>{PAYWALL_LABEL[money.paywall].toLowerCase()}</strong>, which is what decides whether their
-                  portal is locked.
-                </p>
+                {data.viewer.canRecordPayment ? (
+                  <p>
+                    This student is{" "}
+                    <strong>{PAYWALL_LABEL[money.paywall].toLowerCase()}</strong>
+                    {money.lockedOut ? " and their portal is locked" : ""}. Record a payment they have
+                    made below and, once the tuition deposit is met, their classes open. The running
+                    totals and payment history live with the fee book.
+                  </p>
+                ) : (
+                  <p>
+                    Amounts are visible only to an admin with the payments capability. You can still
+                    see that this student is{" "}
+                    <strong>{PAYWALL_LABEL[money.paywall].toLowerCase()}</strong>, which is what
+                    decides whether their portal is locked.
+                  </p>
+                )}
               </div>
             ) : (
               <>
@@ -1151,6 +1262,124 @@ export default function StudentDossierPage() {
                   ))}
                 </div>
               </>
+            )}
+
+            {data.viewer.canRecordPayment && (
+              <div className="mt-4 border-t border-[var(--border)] pt-4">
+                {!payOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPayOpen(true);
+                      setPayMsg(null);
+                    }}
+                    className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+                  >
+                    Record a payment
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-[var(--muted)]">
+                      A payment made in cash or by bank transfer. This records it against{" "}
+                      {identity.name.split(" ")[0]}; a tuition payment opens their classes once the
+                      deposit is met.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="block text-xs font-semibold text-[var(--muted)]">
+                        Amount received (₦)
+                        <input
+                          inputMode="numeric"
+                          value={payForm.amount}
+                          onChange={(event) =>
+                            setPayForm((form) => ({
+                              ...form,
+                              amount: event.target.value.replace(/[^0-9]/g, ""),
+                            }))
+                          }
+                          placeholder="e.g. 90000"
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        />
+                      </label>
+                      <label className="block text-xs font-semibold text-[var(--muted)]">
+                        Method
+                        <select
+                          value={payForm.method}
+                          onChange={(event) =>
+                            setPayForm((form) => ({ ...form, method: event.target.value }))
+                          }
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        >
+                          <option value="bank_transfer">Bank transfer</option>
+                          <option value="cash">Cash</option>
+                          <option value="pos">POS / card</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </label>
+                      <label className="block text-xs font-semibold text-[var(--muted)]">
+                        For
+                        <select
+                          value={payForm.kind}
+                          onChange={(event) =>
+                            setPayForm((form) => ({
+                              ...form,
+                              kind: event.target.value === "registration" ? "registration" : "tuition",
+                            }))
+                          }
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        >
+                          <option value="tuition">Tuition</option>
+                          <option value="registration">Registration fee</option>
+                        </select>
+                      </label>
+                      <label className="block text-xs font-semibold text-[var(--muted)]">
+                        Note (optional)
+                        <input
+                          value={payForm.note}
+                          onChange={(event) =>
+                            setPayForm((form) => ({ ...form, note: event.target.value }))
+                          }
+                          placeholder="Teller ref, who paid…"
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        />
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={payBusy}
+                        onClick={() => void recordPayment()}
+                        className="rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        {payBusy ? "Recording…" : "Record payment"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPayOpen(false);
+                          setPayMsg(null);
+                        }}
+                        className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--muted)]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {payMsg && (
+                  <p
+                    className={`mt-3 rounded-xl px-3 py-2 text-sm ${
+                      payMsg.tone === "ok"
+                        ? "bg-emerald-500/10 text-emerald-800"
+                        : payMsg.tone === "warn"
+                          ? "bg-amber-500/10 text-amber-800"
+                          : "bg-red-500/10 text-red-700"
+                    }`}
+                  >
+                    {payMsg.text}
+                  </p>
+                )}
+              </div>
             )}
           </Card>
 
@@ -1517,6 +1746,19 @@ export default function StudentDossierPage() {
               </div>
             )}
 
+            <div className="mt-5 border-t border-[var(--border)] pt-4">
+              <a
+                href={`/api/admin/students/${id}/enrolment-letter`}
+                className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] px-4 py-2 text-xs font-bold uppercase tracking-wide text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+              >
+                Proof-of-enrolment letter
+              </a>
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                For a visa office, embassy, or employer — states their level, pathway and enrolment
+                date, and whether tuition is currently settled.
+              </p>
+            </div>
+
             {engagement.videos.length > 0 && (
               <div className="mt-5 border-t border-[var(--border)] pt-4">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -1851,10 +2093,16 @@ export default function StudentDossierPage() {
                   onChange={(event) => setEditForm((form) => ({ ...form, sessionSlot: event.target.value }))}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                 >
-                  <option value="morning">Morning</option>
-                  <option value="afternoon">Afternoon</option>
-                  <option value="evening">Evening</option>
+                  {(editSlots.length ? editSlots : TIME_SLOTS).map((slot) => (
+                    <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
+                  ))}
                 </select>
+                {editSlots.length > 0 && editSlots.length < TIME_SLOTS.length && (
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Some sessions are switched off for {editForm.level} · {editMode === "physical" ? "on campus" : editMode} on Settings.
+                    Changing Delivery mode or Branch can reveal others (e.g. Weekend).
+                  </span>
+                )}
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Class type</span>
@@ -1866,6 +2114,12 @@ export default function StudentDossierPage() {
                   <option value="group">Group class</option>
                   <option value="private">Private (one-to-one)</option>
                 </select>
+                {editForm.classType === "private" && (
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Private students follow no group timetable — their calendar comes only from sessions booked
+                    on the tutor&apos;s Private classes page.
+                  </span>
+                )}
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Branch</span>
@@ -1879,21 +2133,38 @@ export default function StudentDossierPage() {
                     <option key={branch.id} value={branch.id}>{branch.name}</option>
                   ))}
                 </select>
+                <span className="block text-xs font-normal text-[var(--muted)]">
+                  To move this student fully online, pick the <span className="font-semibold">Online</span> branch —
+                  that sets Delivery mode below automatically.
+                </span>
               </label>
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Delivery mode</span>
-                <select
-                  value={editForm.deliveryMode}
-                  onChange={(event) => setEditForm((form) => ({ ...form, deliveryMode: event.target.value }))}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                >
-                  <option value="physical">On campus only</option>
-                  <option value="hybrid">On campus + live video (hybrid)</option>
-                </select>
-                <span className="block text-xs font-normal text-[var(--muted)]">
-                  Placing them on the Online branch overrides this to online automatically.
-                </span>
+                {editBranchIsOnline ? (
+                  <div className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--muted)]">
+                    Online — set automatically by the Online branch
+                  </div>
+                ) : (
+                  <select
+                    value={editForm.deliveryMode}
+                    onChange={(event) => setEditForm((form) => ({ ...form, deliveryMode: event.target.value }))}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    {(editModes.length ? editModes : (["physical", "hybrid"] as const)).map((mode) => (
+                      <option key={mode} value={mode}>
+                        {mode === "physical" ? "On campus only" : "On campus + live video (hybrid)"}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </label>
+              <SchedulePreview
+                branchId={editForm.branchId}
+                level={editForm.level}
+                sessionSlot={editForm.sessionSlot}
+                classType={editForm.classType}
+                registeredAt={data?.identity.registeredAt}
+              />
               <label className="space-y-2 text-sm">
                 <span className="font-semibold text-[var(--muted)]">Status</span>
                 <select

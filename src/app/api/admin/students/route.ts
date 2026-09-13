@@ -1,5 +1,5 @@
 import bcryptjs from "bcryptjs";
-import { prisma } from "@/lib/prisma";
+import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
@@ -8,6 +8,9 @@ import { churnRiskPreset } from "@/lib/student-risk";
 import { setStudentTutor, setStudentCoTutors } from "@/lib/tutor-pairing";
 import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
 import { isOnlineBranch } from "@/lib/online-branch";
+import { writeAudit } from "@/lib/prisma-guard";
+import { notifyInBackground, KIND } from "@/lib/notify";
+import { slotTitle } from "@/lib/school-settings";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
 import { defaultBatchMonth } from "@/lib/intake-server";
@@ -658,8 +661,72 @@ export async function PATCH(request: Request) {
     if (classType) updateStudent.classType = classType;
     if (sessionSlot) updateStudent.sessionSlot = sessionSlot;
 
+    /**
+     * "YOUR CLASS TIME HAS CHANGED" — the same stamp, audit row and notification
+     * /admin/settings sends when a closed cell auto-migrates a whole cohort (see
+     * that route), fired here too. Moving ONE student's session or attendance
+     * mode from this form used to happen in total silence — no bell, no Becca
+     * card on their next page, no audit trail — even though it is exactly the
+     * same fact about their week as the bulk case.
+     */
+    const sessionSlotChanged = Boolean(sessionSlot && sessionSlot !== student.sessionSlot);
+    const deliveryModeChanged = Boolean(
+      updateStudent.deliveryMode && updateStudent.deliveryMode !== student.deliveryMode,
+    );
+    const stampLevel = level || student.level;
+    if (sessionSlotChanged || deliveryModeChanged) {
+      const admissionForStamp = (updateStudent.admission ?? student.admission ?? {}) as Record<string, unknown>;
+      updateStudent.admission = {
+        ...admissionForStamp,
+        scheduleChange: sessionSlotChanged
+          ? { kind: "slot", level: stampLevel, from: student.sessionSlot, to: sessionSlot, at: new Date().toISOString(), by: "admin" }
+          : {
+              kind: "mode",
+              level: stampLevel,
+              from: student.deliveryMode,
+              to: updateStudent.deliveryMode,
+              at: new Date().toISOString(),
+              by: "admin",
+            },
+      };
+    }
+
     await prisma.user.update({ where: { id: student.userId }, data: updateUser });
     await prisma.student.update({ where: { id: studentId }, data: updateStudent });
+
+    if (sessionSlotChanged || deliveryModeChanged) {
+      await writeAudit(unguardedPrisma, {
+        action: "studentScheduleMoved",
+        model: "Student",
+        recordId: studentId,
+        severity: "notice",
+        summary: `${student.user.name ?? "Student"}: ${
+          sessionSlotChanged ? `session ${student.sessionSlot} to ${sessionSlot}` : ""
+        }${sessionSlotChanged && deliveryModeChanged ? ", " : ""}${
+          deliveryModeChanged ? `delivery ${student.deliveryMode} to ${updateStudent.deliveryMode}` : ""
+        } (manual edit)`,
+        before: { sessionSlot: student.sessionSlot, deliveryMode: student.deliveryMode },
+        after: {
+          sessionSlot: sessionSlot || student.sessionSlot,
+          deliveryMode: updateStudent.deliveryMode || student.deliveryMode,
+        },
+      });
+
+      const attendingAs = (mode?: string) => (mode === "physical" ? "on campus" : mode ?? "");
+      notifyInBackground({
+        to: { studentIds: [studentId] },
+        kind: KIND.classSessionChanged,
+        severity: "warning",
+        title: "Your class time has changed",
+        message: sessionSlotChanged
+          ? `Your ${stampLevel} class has moved to the ${slotTitle(sessionSlot!)} session${
+              deliveryModeChanged ? ` and you are now attending ${attendingAs(updateStudent.deliveryMode)}` : ""
+            }. Your timetable is already updated — open your dashboard for the details.`
+          : `You are now attending your ${stampLevel} class ${attendingAs(updateStudent.deliveryMode)}. Your timetable is already updated — open your dashboard for the details.`,
+        link: "/dashboard",
+        push: true,
+      });
+    }
 
     /**
      * Moving a student ONTO the Travel Package pathway from this form is not
