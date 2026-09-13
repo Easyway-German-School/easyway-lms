@@ -6,6 +6,8 @@ import { parseTimeInput } from "@/lib/school-time";
 import { letterFor } from "@/lib/grading";
 import { isExamBodyLive } from "@/lib/tenant/features";
 import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
+import { verifyBankTransfer, rejectBankTransfer } from "@/lib/exam-payments";
+import { reviewExamDocuments } from "@/lib/exam-documents";
 
 /**
  * Staff view of exams: schedule sittings, manage the roster, enter results.
@@ -42,6 +44,8 @@ export async function GET() {
           select: {
             id: true, studentId: true, seatNumber: true, status: true, paymentStatus: true,
             candidateName: true, candidateEmail: true,
+            paymentMethod: true, transferProofUrl: true, transferReference: true, transferRejectedReason: true,
+            passportPhotoUrl: true, passportDataPageUrl: true, documentStatus: true, documentRejectedReason: true,
             student: { select: { studentCode: true, user: { select: { name: true, email: true } } } },
           },
         },
@@ -171,9 +175,47 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const auth = await requireExamAdmin();
   if (auth instanceof NextResponse) return auth;
+  // requireExamAdmin's non-error branch types as { userId: string }, but its
+  // error branch is typed as the wider `Response` (requireCapability's own
+  // signature), not `NextResponse` specifically — so the instanceof check
+  // above narrows the positive case but can't narrow `Response` out of the
+  // union afterwards. Safe: we only get here once that check has returned.
+  const adminUserId = (auth as { userId: string }).userId;
 
   try {
-    const { examId, published, passThreshold, registrationId, paymentStatus, status, results } = await req.json();
+    const {
+      examId, published, passThreshold, registrationId, paymentStatus, status, results,
+      transferAction, transferRejectReason, documentAction, documentRejectReason,
+    } = await req.json();
+
+    /**
+     * Manual Moniepoint bank-transfer review — see src/lib/exam-payments.ts.
+     * Kept as its own branch (not folded into the generic paymentStatus set
+     * below) because "verify" has to settle the fee the same way Paystack
+     * does (queue a receipt, flip status to confirmed), not just flip a
+     * column.
+     */
+    if (registrationId && transferAction) {
+      if (transferAction === "verify") {
+        const result = await verifyBankTransfer(registrationId, adminUserId);
+        if (!result.ok) return NextResponse.json({ error: result.error }, { status: 404 });
+        return NextResponse.json({ ok: true, alreadySettled: result.alreadySettled });
+      }
+      if (transferAction === "reject") {
+        await rejectBankTransfer(registrationId, String(transferRejectReason || "The transfer could not be confirmed."));
+        return NextResponse.json({ ok: true });
+      }
+      return NextResponse.json({ error: "Unknown transferAction" }, { status: 400 });
+    }
+
+    /** Passport photo / passport data page review — see src/lib/exam-documents.ts. */
+    if (registrationId && documentAction) {
+      if (documentAction !== "approved" && documentAction !== "rejected") {
+        return NextResponse.json({ error: "Unknown documentAction" }, { status: 400 });
+      }
+      await reviewExamDocuments(registrationId, documentAction, documentRejectReason ? String(documentRejectReason) : null);
+      return NextResponse.json({ ok: true });
+    }
 
     if (registrationId && results) {
       for (const skill of SKILLS) {

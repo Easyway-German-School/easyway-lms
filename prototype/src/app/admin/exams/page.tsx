@@ -45,6 +45,14 @@ type Registration = {
   paymentStatus: string;
   candidateName: string | null;
   candidateEmail: string | null;
+  paymentMethod: string | null;
+  transferProofUrl: string | null;
+  transferReference: string | null;
+  transferRejectedReason: string | null;
+  passportPhotoUrl: string | null;
+  passportDataPageUrl: string | null;
+  documentStatus: string;
+  documentRejectedReason: string | null;
   student: { studentCode: string | null; user: { name: string | null; email: string } } | null;
   grade: Grade | null;
 };
@@ -407,36 +415,94 @@ export default function AdminExamsPage() {
                                 Mark paid
                               </button>
                             )}
-                            {isInternal(exam.examBody) && r.studentId && r.status !== "cancelled" && (
-                              <>
-                                {r.grade ? (() => {
-                                  const skills = [r.grade.readingScore, r.grade.listeningScore, r.grade.writingScore, r.grade.speakingScore];
-                                  // Grades entered before per-skill scoring existed have a score but
-                                  // no skill breakdown — showing FAILED for those would be inventing a
-                                  // verdict this record was never given.
-                                  const hasSkills = skills.every((s) => s !== null);
-                                  const passed = hasSkills && skills.every((s) => (s as number) >= exam.passThreshold);
-                                  return (
-                                    <span
-                                      className={`rounded px-2 py-0.5 text-[10px] font-bold ${
-                                        !hasSkills
-                                          ? "bg-[var(--surface-alt)] text-[var(--muted)]"
-                                          : passed
-                                            ? "bg-emerald-100 text-emerald-700"
-                                            : "bg-red-100 text-red-700"
-                                      }`}
-                                    >
-                                      {!hasSkills ? "GRADED" : passed ? "PASSED" : "FAILED"} · {r.grade.score}
-                                    </span>
-                                  );
-                                })() : null}
-                                <button onClick={() => startGrading(r)} className="rounded border px-2 py-1 text-xs font-semibold">
-                                  {r.grade ? "Edit results" : "Enter results"}
-                                </button>
-                              </>
-                            )}
                           </div>
                         </div>
+
+                        {/* Manual Moniepoint transfer awaiting a human look at the bank app. */}
+                        {r.paymentStatus === "pending_verification" && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 p-2">
+                            <span className="text-xs font-semibold text-amber-800">Bank transfer slip uploaded — check it landed:</span>
+                            {r.transferProofUrl && (
+                              <a href={r.transferProofUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-blue-700 underline">
+                                View slip
+                              </a>
+                            )}
+                            {r.transferReference && <span className="text-xs text-[var(--muted)]">Ref: {r.transferReference}</span>}
+                            <button
+                              onClick={() => patch({ registrationId: r.id, transferAction: "verify" })}
+                              disabled={busy}
+                              className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white"
+                            >
+                              Verify &amp; confirm seat
+                            </button>
+                            <button
+                              onClick={() => {
+                                const reason = window.prompt("Why is this transfer being rejected? (shown to the candidate)");
+                                if (reason === null) return;
+                                patch({ registrationId: r.id, transferAction: "reject", transferRejectReason: reason });
+                              }}
+                              disabled={busy}
+                              className="rounded border border-red-300 px-2 py-1 text-xs font-semibold text-red-700"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Passport photo + data page, once both are in. */}
+                        {r.passportPhotoUrl && r.passportDataPageUrl && r.documentStatus === "pending" && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-blue-300 bg-blue-50 p-2">
+                            <span className="text-xs font-semibold text-blue-800">Documents awaiting review:</span>
+                            <a href={r.passportPhotoUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-blue-700 underline">Photo</a>
+                            <a href={r.passportDataPageUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-blue-700 underline">Passport data page</a>
+                            <button
+                              onClick={() => patch({ registrationId: r.id, documentAction: "approved" })}
+                              disabled={busy}
+                              className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => {
+                                const reason = window.prompt("What's wrong with the documents? (shown to the candidate)");
+                                if (reason === null) return;
+                                patch({ registrationId: r.id, documentAction: "rejected", documentRejectReason: reason });
+                              }}
+                              disabled={busy}
+                              className="rounded border border-red-300 px-2 py-1 text-xs font-semibold text-red-700"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
+                        {isInternal(exam.examBody) && r.studentId && r.status !== "cancelled" && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            {r.grade ? (() => {
+                              const skills = [r.grade.readingScore, r.grade.listeningScore, r.grade.writingScore, r.grade.speakingScore];
+                              // Grades entered before per-skill scoring existed have a score but
+                              // no skill breakdown — showing FAILED for those would be inventing a
+                              // verdict this record was never given.
+                              const hasSkills = skills.every((s) => s !== null);
+                              const passed = hasSkills && skills.every((s) => (s as number) >= exam.passThreshold);
+                              return (
+                                <span
+                                  className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                                    !hasSkills
+                                      ? "bg-[var(--surface-alt)] text-[var(--muted)]"
+                                      : passed
+                                        ? "bg-emerald-100 text-emerald-700"
+                                        : "bg-red-100 text-red-700"
+                                  }`}
+                                >
+                                  {!hasSkills ? "GRADED" : passed ? "PASSED" : "FAILED"} · {r.grade.score}
+                                </span>
+                              );
+                            })() : null}
+                            <button onClick={() => startGrading(r)} className="rounded border px-2 py-1 text-xs font-semibold">
+                              {r.grade ? "Edit results" : "Enter results"}
+                            </button>
+                          </div>
+                        )}
 
                         {grading === r.id && (
                           <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-4">

@@ -145,6 +145,20 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * The ÖSD/telc exam-prep upsell drip: +2 days after booking, 7 days and 3
+   * days before the sitting. Separate from "exam-reminders" above, which is
+   * exam-day logistics (arrive early, bring ID) — this is the soft sell into
+   * paid prep classes, which is where the school actually makes its money on
+   * a booking. See src/lib/exam-prep-nurture.ts.
+   */
+  results.push(
+    await run("exam-prep-nurture", async () => {
+      const { sendDueExamPrepNurture } = await import("@/lib/exam-prep-nurture");
+      return sendDueExamPrepNurture();
+    }),
+  );
+
+  /**
    * The class-wide reminder for a mock / pretest sitting, three days out. Fires
    * on a single calendar day so one tick a day is one reminder. See
    * src/lib/pretest-reminders.ts.

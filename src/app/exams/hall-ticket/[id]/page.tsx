@@ -29,6 +29,8 @@ type Ticket = {
   seatNumber: string | null;
   branchName: string | null;
   paymentStatus: string;
+  passportPhotoUrl: string | null;
+  documentStatus: string;
 };
 
 export default function HallTicketPage() {
@@ -111,7 +113,17 @@ export default function HallTicketPage() {
           </span>
         </div>
 
-        <h1 className="mt-6 text-2xl font-extrabold text-[var(--foreground)]">{ticket.examBody === "internal" ? "EasyWay" : ticket.examBody} exam</h1>
+        <div className="mt-6 flex items-start justify-between gap-4">
+          <h1 className="text-2xl font-extrabold text-[var(--foreground)]">{ticket.examBody === "internal" ? "EasyWay" : ticket.examBody} exam</h1>
+          {ticket.passportPhotoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- a printed slip has no need for next/image's runtime optimisation
+            <img
+              src={ticket.passportPhotoUrl}
+              alt=""
+              className="h-20 w-16 shrink-0 rounded-lg border border-[var(--border)] object-cover"
+            />
+          )}
+        </div>
         <p className="text-sm text-[var(--muted)]">{examWhen(ticket.examDate)}</p>
         <p className="mt-1 text-xs font-semibold text-[var(--accent)]">Please arrive 30 minutes early.</p>
 
@@ -146,7 +158,17 @@ export default function HallTicketPage() {
 
         <p className="mt-8 border-t border-[var(--border)] pt-4 text-xs leading-5 text-[var(--muted)]">
           Bring a valid photo ID and this slip to the exam centre. Arrive at least 30 minutes before the sitting time.
+          {ticket.examBody !== "internal" && (
+            <> Your international passport's data page must accompany this slip — the photocopy or scan you uploaded is not enough on its own.</>
+          )}
         </p>
+        {ticket.examBody !== "internal" && ticket.documentStatus !== "approved" && (
+          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 print:hidden">
+            {ticket.documentStatus === "rejected"
+              ? "One of your documents was sent back — sign in and re-upload it before the exam."
+              : "Your documents are still awaiting the office's review."}
+          </p>
+        )}
       </div>
     </main>
   );
