@@ -51,12 +51,51 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ session });
 }
 
+/**
+ * Edits an existing sitting — including just the publish toggle, which used
+ * to be this route's only job. Fixing a typo'd fee or date after candidates
+ * have already booked doesn't change their feeTotal (that was snapshotted
+ * at booking time in ExamBooking.feeTotal on purpose — a school raising its
+ * price mid-registration must never silently reprice someone who already
+ * booked at the old one).
+ */
 export async function PATCH(req: NextRequest) {
   if (!(await isAdminRequest())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { sessionId, published } = await req.json();
-  if (!sessionId || typeof published !== "boolean") {
-    return NextResponse.json({ error: "sessionId and published are required" }, { status: 400 });
+  const b = await req.json();
+  const { sessionId } = b;
+  if (!sessionId) return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
+
+  const data: Record<string, unknown> = {};
+  if (typeof b.published === "boolean") data.published = b.published;
+  if (b.title) data.title = String(b.title);
+  if (b.venueName) data.venueName = String(b.venueName);
+  if (b.venueAddress !== undefined) data.venueAddress = String(b.venueAddress);
+  if (b.level) data.level = String(b.level);
+  if (b.startDate) data.startDate = new Date(b.startDate);
+  if (b.endDate) data.endDate = new Date(b.endDate);
+  if (b.registrationDeadline) data.registrationDeadline = new Date(b.registrationDeadline);
+  if (b.capacity) data.capacity = Number(b.capacity);
+  if (b.feeWholeExam) data.feeWholeExam = Number(b.feeWholeExam);
+
+  if (Object.keys(data).length === 0 && !b.modulePrices) {
+    return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
-  const session = await prisma.examSession.update({ where: { id: sessionId }, data: { published } });
+
+  const session = await prisma.$transaction(async (tx) => {
+    const updated = Object.keys(data).length
+      ? await tx.examSession.update({ where: { id: sessionId }, data })
+      : await tx.examSession.findUniqueOrThrow({ where: { id: sessionId } });
+
+    if (b.modulePrices) {
+      // Replace wholesale rather than diff — simpler, and this only ever
+      // runs from the admin edit form submitting its whole current state.
+      await tx.examModulePrice.deleteMany({ where: { sessionId } });
+      const modulePrices = MODULES.filter((m) => b.modulePrices[m]).map((m) => ({ sessionId, module: m, price: Number(b.modulePrices[m]) }));
+      if (modulePrices.length) await tx.examModulePrice.createMany({ data: modulePrices });
+    }
+
+    return updated;
+  });
+
   return NextResponse.json({ session });
 }

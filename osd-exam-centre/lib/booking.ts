@@ -102,7 +102,7 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
   return { ok: true, referenceCode: booking.referenceCode, feeTotal };
 }
 
-function computeFee(
+export function computeFee(
   session: { feeWholeExam: number; modulePrices: { module: string; price: number }[] },
   modules: string[],
 ): number | null {
@@ -215,6 +215,31 @@ export async function rejectBookingPayment(bookingId: string, reason: string): P
     to: booking.email,
     subject: "We couldn't confirm your payment",
     html: `<p>Hello ${booking.fullName},</p><p>We could not confirm your bank transfer: ${reason}</p><p>Your booking is still held — please try again from your booking page.</p>`,
+  });
+}
+
+/**
+ * An admin cancels a booking — a no-show, a duplicate, a mistake. Marks the
+ * row rather than deleting it, so the reference code stays a dead end
+ * (never reused) and the sitting's history stays intact.
+ *
+ * Known limitation, deliberately not solved here: this does NOT reclaim the
+ * seat number for reassignment. Seats are assigned by COUNTING already-
+ * confirmed bookings (see confirmBookingPayment/seatNumberForIndex), not by
+ * tracking which physical numbers are free — so cancelling seat 23 leaves
+ * seat 23 vacant rather than making it available to the next candidate.
+ * Fine for the volumes this runs at (a handful of cancellations per
+ * sitting); revisit with a real seat-slot table if that stops being true.
+ */
+export async function cancelBooking(bookingId: string, reason: string): Promise<void> {
+  const booking = await prisma.examBooking.update({
+    where: { id: bookingId },
+    data: { status: "cancelled" },
+  });
+  await sendEmail({
+    to: booking.email,
+    subject: `Booking cancelled — ${booking.referenceCode}`,
+    html: `<p>Hello ${booking.fullName},</p><p>Your booking ${booking.referenceCode} has been cancelled: ${reason}</p><p>If this is unexpected, use "Need help?" from <a href="${bookingLink(booking.referenceCode, booking.email)}">your booking page</a>.</p>`,
   });
 }
 

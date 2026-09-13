@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminRequest } from "@/lib/admin-auth";
-import { confirmBookingPayment, rejectBookingPayment, reviewBookingDocuments } from "@/lib/booking";
+import { cancelBooking, confirmBookingPayment, rejectBookingPayment, reviewBookingDocuments } from "@/lib/booking";
 import { jsonRoute } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
 
-/** One admin action per call: verify/reject the transfer, or approve/reject documents. */
+/** One admin action per call: verify/reject the transfer, approve/reject documents, or cancel outright. */
 export const PATCH = jsonRoute(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   if (!(await isAdminRequest())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const { transferAction, transferRejectReason, documentAction, documentRejectReason } = await req.json();
+  const { transferAction, transferRejectReason, documentAction, documentRejectReason, cancelReason } = await req.json();
+
+  if (cancelReason !== undefined) {
+    await cancelBooking(id, String(cancelReason || "Cancelled by the office."));
+    return NextResponse.json({ ok: true });
+  }
 
   if (transferAction === "verify") {
     // Admin identity here is deliberately "the office" (see lib/admin-auth.ts)

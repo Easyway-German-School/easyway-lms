@@ -11,7 +11,9 @@ type Session = {
   level: string;
   title: string;
   venueName: string;
+  venueAddress: string;
   startDate: string;
+  endDate: string;
   registrationDeadline: string;
   capacity: number;
   feeWholeExam: number;
@@ -31,6 +33,7 @@ export default function AdminSessionsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -52,22 +55,49 @@ export default function AdminSessionsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  async function createSession() {
+  function startCreate() {
+    setForm(emptyForm);
+    setEditingId(null);
+    setShowForm(true);
+  }
+
+  function startEdit(s: Session) {
+    setForm({
+      level: s.level,
+      title: s.title,
+      venueName: s.venueName,
+      venueAddress: s.venueAddress,
+      startDate: s.startDate.slice(0, 10),
+      endDate: s.endDate.slice(0, 10),
+      registrationDeadline: s.registrationDeadline.slice(0, 10),
+      capacity: String(s.capacity),
+      feeWholeExam: String(s.feeWholeExam),
+      modulePrices: {
+        reading: "", listening: "", writing: "", speaking: "",
+        ...Object.fromEntries(s.modulePrices.map((m) => [m.module, String(m.price)])),
+      },
+    });
+    setEditingId(s.id);
+    setShowForm(true);
+  }
+
+  async function saveSession() {
     setBusy(true);
     setError("");
     try {
       const res = await fetch("/api/admin/sessions", {
-        method: "POST",
+        method: editingId ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(editingId ? { ...form, sessionId: editingId } : form),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Could not create that sitting");
+      if (!res.ok) throw new Error(data.error ?? `Could not ${editingId ? "update" : "create"} that sitting`);
       setForm(emptyForm);
       setShowForm(false);
+      setEditingId(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create that sitting");
+      setError(e instanceof Error ? e.message : `Could not ${editingId ? "update" : "create"} that sitting`);
     } finally {
       setBusy(false);
     }
@@ -91,7 +121,10 @@ export default function AdminSessionsPage() {
           <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Sittings</h1>
           <div className="flex gap-3">
             <Link href="/admin" className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">← Bookings</Link>
-            <button onClick={() => setShowForm((v) => !v)} className="rounded-sm bg-[var(--navy)] px-4 py-2 text-sm font-semibold text-white">
+            <button
+              onClick={() => { if (showForm) { setShowForm(false); setEditingId(null); } else { startCreate(); } }}
+              className="rounded-sm bg-[var(--navy)] px-4 py-2 text-sm font-semibold text-white"
+            >
               {showForm ? "Cancel" : "New sitting"}
             </button>
           </div>
@@ -119,8 +152,8 @@ export default function AdminSessionsPage() {
                 <F key={m} label={m} type="number" value={form.modulePrices[m]} onChange={(v) => setForm({ ...form, modulePrices: { ...form.modulePrices, [m]: v } })} />
               ))}
             </div>
-            <button onClick={createSession} disabled={busy} className="mt-5 rounded-sm bg-[var(--gold)] px-6 py-2.5 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40">
-              {busy ? "Creating…" : "Create sitting (unpublished)"}
+            <button onClick={saveSession} disabled={busy} className="mt-5 rounded-sm bg-[var(--gold)] px-6 py-2.5 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40">
+              {busy ? "Saving…" : editingId ? "Save changes" : "Create sitting (unpublished)"}
             </button>
           </div>
         )}
@@ -134,12 +167,26 @@ export default function AdminSessionsPage() {
                   {new Date(s.startDate).toLocaleDateString()} · {s.venueName} · {s._count.bookings} booked / {s.capacity} seats · ₦{s.feeWholeExam.toLocaleString()}
                 </p>
               </div>
-              <button
-                onClick={() => togglePublished(s.id, !s.published)}
-                className={`rounded-sm px-3 py-1.5 text-xs font-bold uppercase ${s.published ? "bg-[var(--green-soft)] text-[var(--green)]" : "border border-[var(--line)] text-[var(--ink-soft)]"}`}
-              >
-                {s.published ? "Published" : "Draft"}
-              </button>
+              <div className="flex items-center gap-2">
+                <a
+                  href={`/api/admin/sessions/${s.id}/roster`}
+                  className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)] hover:border-[var(--navy)] hover:text-[var(--navy)]"
+                >
+                  Roster
+                </a>
+                <button
+                  onClick={() => startEdit(s)}
+                  className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)] hover:border-[var(--navy)] hover:text-[var(--navy)]"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => togglePublished(s.id, !s.published)}
+                  className={`rounded-sm px-3 py-1.5 text-xs font-bold uppercase ${s.published ? "bg-[var(--green-soft)] text-[var(--green)]" : "border border-[var(--line)] text-[var(--ink-soft)]"}`}
+                >
+                  {s.published ? "Published" : "Draft"}
+                </button>
+              </div>
             </div>
           ))}
         </div>

@@ -11,6 +11,7 @@ type Booking = {
   email: string;
   feeTotal: number;
   paymentStatus: string;
+  status: string;
   paymentMethod: string | null;
   transferProofUrl: string | null;
   transferReference: string | null;
@@ -111,15 +112,28 @@ export default function AdminDashboard() {
                   <p className="text-xs text-[var(--ink-soft)]">{b.session.title} · {b.email} · ₦{b.feeTotal.toLocaleString()}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`rounded-sm px-2 py-0.5 text-[10px] font-bold uppercase ${b.paymentStatus === "paid" ? "bg-[var(--green-soft)] text-[var(--green)]" : "bg-[var(--red-soft)] text-[var(--red)]"}`}>
-                    {b.paymentStatus}
-                  </span>
+                  {b.status === "cancelled" ? (
+                    <span className="rounded-sm bg-[var(--red-soft)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--red)]">Cancelled</span>
+                  ) : (
+                    <span className={`rounded-sm px-2 py-0.5 text-[10px] font-bold uppercase ${b.paymentStatus === "paid" ? "bg-[var(--green-soft)] text-[var(--green)]" : "bg-[var(--red-soft)] text-[var(--red)]"}`}>
+                      {b.paymentStatus}
+                    </span>
+                  )}
                   {b.paymentMethod && (
                     <span className="rounded-sm border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ink-soft)]">
                       {b.paymentMethod === "card" ? "Intl. card" : "Bank transfer"}
                     </span>
                   )}
                   {b.seatNumber !== null && <span className="rounded-sm bg-[var(--gold-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--navy)]">SEAT {b.seatNumber}</span>}
+                  {b.status !== "cancelled" && (
+                    <button
+                      disabled={busyId === b.id}
+                      onClick={() => { const reason = window.prompt("Why is this booking being cancelled?"); if (reason !== null) act(b.id, { cancelReason: reason }); }}
+                      className="rounded-sm border border-[var(--line)] px-2 py-1 text-[10px] font-semibold text-[var(--ink-soft)] hover:border-[var(--red)] hover:text-[var(--red)]"
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
               </div>
 
