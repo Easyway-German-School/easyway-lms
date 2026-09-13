@@ -3,6 +3,7 @@ import { generateReferenceCode } from "@/lib/reference-code";
 import { seatNumberForIndex } from "@/lib/seat-numbering";
 import { sendEmail } from "@/lib/email";
 import { bookingLink } from "@/lib/config";
+import { verifyCardPayment } from "@/lib/payments";
 
 export const MODULES = ["reading", "listening", "writing", "speaking"] as const;
 export type ExamModule = (typeof MODULES)[number];
@@ -123,13 +124,25 @@ function computeFee(
  */
 export async function confirmBookingPayment(
   bookingId: string,
-  adminId: string,
+  verifiedBy: string,
+  opts?: { paymentMethod?: string; reference?: string; expectedAmount?: number },
 ): Promise<{ ok: true; seatNumber: number; alreadyConfirmed: boolean } | { ok: false; error: string }> {
   return prisma.$transaction(async (tx) => {
     const booking = await tx.examBooking.findUnique({ where: { id: bookingId } });
     if (!booking) return { ok: false, error: "Booking not found" };
     if (booking.seatNumber !== null) {
       return { ok: true, seatNumber: booking.seatNumber, alreadyConfirmed: true };
+    }
+
+    // Only the card path passes this — Flutterwave's own verified amount,
+    // checked against what this booking actually owes before anything is
+    // marked paid. Bank transfer skips it: an admin has already looked at
+    // the slip and the amount by the time confirmBookingPayment runs there.
+    if (opts?.expectedAmount !== undefined && opts.expectedAmount < booking.feeTotal) {
+      return {
+        ok: false,
+        error: `Amount paid (₦${opts.expectedAmount.toLocaleString()}) is less than the ₦${booking.feeTotal.toLocaleString()} fee due.`,
+      };
     }
 
     const session = await tx.examSession.findUnique({ where: { id: booking.sessionId } });
@@ -147,8 +160,10 @@ export async function confirmBookingPayment(
         paymentStatus: "paid",
         status: "confirmed",
         seatNumber,
-        verifiedBy: adminId,
+        verifiedBy,
         verifiedAt: new Date(),
+        ...(opts?.paymentMethod ? { paymentMethod: opts.paymentMethod } : {}),
+        ...(opts?.reference ? { transferReference: opts.reference } : {}),
       },
     });
 
@@ -166,6 +181,29 @@ export async function confirmBookingPayment(
 
     return { ok: true, seatNumber, alreadyConfirmed: false };
   });
+}
+
+/**
+ * The card-payment settlement path: verify with Flutterwave, then run the
+ * exact same confirmation as the admin's manual bank-transfer verify.
+ * Called from both the browser's redirect back and the webhook — safe to
+ * call twice for the same transaction, since confirmBookingPayment is
+ * idempotent on seatNumber.
+ */
+export async function settleCardPayment(
+  transactionId: string,
+): Promise<{ ok: true; bookingId: string; seatNumber: number } | { ok: false; error: string }> {
+  const verified = await verifyCardPayment(transactionId);
+  if (!verified.ok) return verified;
+
+  const result = await confirmBookingPayment(verified.bookingId, "flutterwave", {
+    paymentMethod: "card",
+    reference: transactionId,
+    expectedAmount: verified.amount,
+  });
+  if (!result.ok) return result;
+
+  return { ok: true, bookingId: verified.bookingId, seatNumber: result.seatNumber };
 }
 
 export async function rejectBookingPayment(bookingId: string, reason: string): Promise<void> {

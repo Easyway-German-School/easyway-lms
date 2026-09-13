@@ -45,10 +45,16 @@ component library — deliberately small.
   Without them, uploads silently stop persisting the moment this is deployed
   to Vercel (its filesystem is read-only outside `/tmp`) — set them before
   taking real candidates.
-- **Payment** is manual Moniepoint bank transfer only (`lib/payments.ts`):
+- **Payment** — manual Moniepoint bank transfer is the default (`lib/payments.ts`):
   one static account shown to every candidate, a slip uploaded, an admin
-  confirms it landed. No live Monnify/Paystack/Flutterwave API integration
-  yet — `cardPaymentsEnabled()` exists as the seam to wire one in later.
+  confirms it landed. No live Monnify API integration yet. Alongside it,
+  candidates paying from outside Nigeria can pay by **international card
+  via Flutterwave** — same naira amount, no surcharge added on this end —
+  which settles and assigns a seat automatically (no admin step) via
+  `settleCardPayment()`, fired from both the browser redirect
+  (`/api/card-payment/callback`) and a webhook (`/api/card-payment/webhook`)
+  so a candidate who closes the tab mid-checkout still gets confirmed. Set
+  `FLUTTERWAVE_SECRET_KEY` to turn the card button on.
 - **Seat numbers** (`lib/seat-numbering.ts`) count DOWN in blocks of 50 —
   50→1, then 100→51, then 150→101 — matching the physical room layout Jason
   described, assigned only once a payment is verified (never at raw booking
@@ -80,9 +86,11 @@ at `/admin/login` first) before `/book` has anything to show.
   env vars before this is deployed for real.
 - **No Monnify API integration.** Bank transfer is fully manual — see
   `lib/payments.ts`.
-- **No card payment** — the whole exam fee currently has to go through a
-  Nigerian bank transfer, which excludes diaspora candidates sitting abroad.
-  `cardPaymentsEnabled()` is a stub for wiring up Paystack/Flutterwave later.
+- **No Flutterwave keys yet.** The international-card path (`lib/payments.ts`,
+  `initiateCardPayment`/`verifyCardPayment`) is written and typechecked but
+  has never run against Flutterwave's real API — `FLUTTERWAVE_SECRET_KEY`
+  is a placeholder, and the flow needs an actual test transaction (their
+  sandbox test cards) before it's trusted with a real candidate's money.
 - **The real ÖSD field list never arrived.** Registration collects the
   fields the reference Goethe-Institut confirmation collected (name,
   address, DOB, place of birth, phone, email) — not necessarily everything

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveOwnedBooking } from "@/lib/booking";
-import { bankTransferDetails } from "@/lib/payments";
+import { bankTransferDetails, cardPaymentsEnabled } from "@/lib/payments";
+import { jsonRoute } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ reference: string }> }) {
+export const GET = jsonRoute(async (req: NextRequest, { params }: { params: Promise<{ reference: string }> }) => {
   const { reference } = await params;
   const email = req.nextUrl.searchParams.get("email");
   if (!email) return NextResponse.json({ error: "email is required" }, { status: 400 });
@@ -13,10 +14,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   const booking = await resolveOwnedBooking(reference, email);
   if (!booking) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
 
-  return NextResponse.json({ account: bankTransferDetails(), feeTotal: booking.feeTotal, paymentStatus: booking.paymentStatus });
-}
+  return NextResponse.json({
+    account: bankTransferDetails(),
+    feeTotal: booking.feeTotal,
+    paymentStatus: booking.paymentStatus,
+    cardPaymentsEnabled: cardPaymentsEnabled(),
+  });
+});
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ reference: string }> }) {
+export const POST = jsonRoute(async (req: NextRequest, { params }: { params: Promise<{ reference: string }> }) => {
   const { reference } = await params;
   const { email, transferProofUrl, transferReference } = await req.json();
   if (!email || !transferProofUrl) {
@@ -41,4 +47,4 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ ref
   });
 
   return NextResponse.json({ ok: true });
-}
+});

@@ -1,15 +1,36 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
 
+/**
+ * useSearchParams() opts a page out of static rendering unless it's inside a
+ * Suspense boundary — without this split, `next build` fails prerendering
+ * this page outright rather than just warning.
+ */
 export default function StatusPage() {
+  return (
+    <Suspense>
+      <StatusPageInner />
+    </Suspense>
+  );
+}
+
+function StatusPageInner() {
   const router = useRouter();
+  const params = useSearchParams();
   const [reference, setReference] = useState("");
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
+
+  // Landed here from the Flutterwave card-payment redirect (see
+  // app/api/card-payment/callback/route.ts) — it can't know the reference
+  // code without the candidate typing it in, so it sends them here instead
+  // of failing silently.
+  const paymentCancelled = params.get("paymentCancelled") === "1";
+  const paymentError = params.get("paymentError") === "1";
 
   async function check() {
     setChecking(true);
@@ -35,6 +56,17 @@ export default function StatusPage() {
         <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Check your booking</h1>
         <p className="mt-2 text-sm text-[var(--ink-soft)]">Enter the reference code from your confirmation email, and the email address you booked with.</p>
 
+        {paymentCancelled && (
+          <p className="mt-4 rounded-sm bg-[var(--gold-soft)] px-4 py-3 text-sm text-[var(--navy)]">
+            Your card payment was cancelled — your booking is still held. Look it up below to try again.
+          </p>
+        )}
+        {paymentError && (
+          <p className="mt-4 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">
+            We couldn't confirm that card payment. If you were charged, contact the office with your reference —
+            look it up below and use "Need help?" once you're on your booking page.
+          </p>
+        )}
         {error && <p className="mt-4 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
 
         <div className="mt-6 space-y-4">

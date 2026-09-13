@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createBooking, MODULES } from "@/lib/booking";
+import { jsonRoute } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ const schema = z.object({
   modules: z.array(z.enum([...MODULES, "full"])).min(1),
 });
 
-export async function POST(req: NextRequest) {
+export const POST = jsonRoute(async (req: NextRequest) => {
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
@@ -30,4 +31,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: result.error }, { status });
   }
   return NextResponse.json({ referenceCode: result.referenceCode, feeTotal: result.feeTotal });
-}
+});

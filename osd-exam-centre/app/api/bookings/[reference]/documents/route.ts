@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveOwnedBooking } from "@/lib/booking";
+import { jsonRoute } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ reference: string }> }) {
+export const POST = jsonRoute(async (req: NextRequest, { params }: { params: Promise<{ reference: string }> }) => {
   const { reference } = await params;
   const { email, passportPhotoUrl, passportDataPageUrl } = await req.json();
   if (!email) return NextResponse.json({ error: "email is required" }, { status: 400 });
@@ -27,4 +28,4 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ ref
   });
 
   return NextResponse.json({ ok: true });
-}
+});

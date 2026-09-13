@@ -16,12 +16,115 @@ export function bankTransferDetails(): { bankName: string; accountName: string; 
 }
 
 /**
- * Card payment is a stub. The public booking form only offers bank transfer
- * today; this exists so the "pay by card" button can ship disabled with an
- * honest reason instead of being silently absent, and so wiring up Paystack/
- * Flutterwave later is "fill this in", not "find every place that assumed
- * bank transfer was the only rail".
+ * International card payment, via Flutterwave — for candidates sitting from
+ * outside Nigeria who cannot make a Nigerian bank transfer. Bank transfer
+ * (above) stays the default for everyone else: it's far cheaper (a flat fee
+ * vs. Flutterwave's ~3.9% on international cards), so this is deliberately
+ * the fallback, not a replacement.
+ *
+ * Charges the SAME naira amount as the bank transfer — no card surcharge —
+ * matching the EasyWay LMS's own Flutterwave-international decision (see
+ * that repo's feat/flutterwave-international-payments branch). Flutterwave
+ * settles an international card charge in NGN itself; the surcharge only
+ * shows up on the CANDIDATE's own bank statement as an FX/foreign-currency
+ * fee, which is between them and their card issuer.
  */
+
+const FLW_BASE = "https://api.flutterwave.com/v3";
+
 export function cardPaymentsEnabled(): boolean {
-  return Boolean(process.env.PAYSTACK_SECRET_KEY || process.env.FLUTTERWAVE_SECRET_KEY);
+  return Boolean(process.env.FLUTTERWAVE_SECRET_KEY);
+}
+
+type FlutterwaveInitiateResponse = { status: string; message?: string; data?: { link: string } };
+type FlutterwaveVerifyResponse = {
+  status: string;
+  data?: {
+    status: string;
+    currency: string;
+    amount: number;
+    tx_ref: string;
+    meta?: { bookingId?: string };
+  };
+};
+
+/**
+ * Start a Flutterwave checkout for one booking's fee. Returns the hosted
+ * payment page to send the candidate's browser to.
+ */
+export async function initiateCardPayment(
+  booking: { id: string; referenceCode: string; feeTotal: number; email: string; fullName: string },
+  redirectUrl: string,
+): Promise<{ ok: true; paymentLink: string } | { ok: false; error: string }> {
+  const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+  if (!secretKey) return { ok: false, error: "Card payments are not configured." };
+
+  // bookingId travels in `meta`, not just the tx_ref string, so verification
+  // never has to parse an id back out of a reference — it reads it straight
+  // off Flutterwave's own verified response.
+  const txRef = `osd-${booking.id}-${Date.now()}`;
+
+  const res = await fetch(`${FLW_BASE}/payments`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tx_ref: txRef,
+      // Amount comes from the booking row on the SERVER, never the client —
+      // the same rule as the bank-transfer amount shown on screen.
+      amount: booking.feeTotal,
+      currency: "NGN",
+      redirect_url: redirectUrl,
+      customer: { email: booking.email, name: booking.fullName },
+      meta: { bookingId: booking.id },
+      customizations: {
+        title: "Easyway ÖSD Examination Centre",
+        description: `Exam fee — booking ${booking.referenceCode}`,
+      },
+    }),
+  });
+
+  const data = (await res.json().catch(() => null)) as FlutterwaveInitiateResponse | null;
+  if (!res.ok || data?.status !== "success" || !data.data?.link) {
+    return { ok: false, error: data?.message || "Could not start the card payment." };
+  }
+  return { ok: true, paymentLink: data.data.link };
+}
+
+/**
+ * Verify a transaction Flutterwave says succeeded, and return the booking it
+ * paid for. Called from both the browser redirect and the webhook — either
+ * can settle the booking first; confirmBookingPayment (lib/booking.ts) is
+ * idempotent on `seatNumber`, so whichever runs second is a no-op.
+ */
+export async function verifyCardPayment(
+  transactionId: string,
+): Promise<{ ok: true; bookingId: string; amount: number } | { ok: false; error: string }> {
+  const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+  if (!secretKey) return { ok: false, error: "Card payments are not configured." };
+
+  const res = await fetch(`${FLW_BASE}/transactions/${encodeURIComponent(transactionId)}/verify`, {
+    headers: { Authorization: `Bearer ${secretKey}` },
+  });
+  const data = (await res.json().catch(() => null)) as FlutterwaveVerifyResponse | null;
+
+  const tx = data?.data;
+  if (!res.ok || data?.status !== "success" || !tx || tx.status !== "successful") {
+    return { ok: false, error: "Payment was not successful." };
+  }
+  if (tx.currency !== "NGN") {
+    return { ok: false, error: `Unexpected currency: ${tx.currency}` };
+  }
+  const bookingId = tx.meta?.bookingId;
+  if (!bookingId) {
+    return { ok: false, error: "This transaction is not an ÖSD exam booking." };
+  }
+
+  return { ok: true, bookingId, amount: tx.amount };
+}
+
+/** Flutterwave signs webhooks with a shared secret hash header, not a signature scheme. */
+export function verifyFlutterwaveWebhookSignature(headerValue: string | null): boolean {
+  const expected = process.env.FLUTTERWAVE_WEBHOOK_SECRET_HASH;
+  if (!expected || !headerValue) return false;
+  return headerValue === expected;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
 
@@ -33,6 +33,14 @@ async function uploadFile(file: File, folder: string): Promise<string> {
 }
 
 export default function BookingPage() {
+  return (
+    <Suspense>
+      <BookingPageInner />
+    </Suspense>
+  );
+}
+
+function BookingPageInner() {
   const params = useParams<{ reference: string }>();
   const search = useSearchParams();
   const email = search.get("email") ?? "";
@@ -162,17 +170,42 @@ function ConfirmedTicket({ booking }: { booking: Booking }) {
 
 function PendingBooking({ booking, email, onChange, error, setError }: { booking: Booking; email: string; onChange: () => void; error: string; setError: (s: string) => void }) {
   const [account, setAccount] = useState<{ bankName: string; accountName: string; accountNumber: string } | null>(null);
+  const [cardEnabled, setCardEnabled] = useState(false);
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [reference, setReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [startingCard, setStartingCard] = useState(false);
 
   useEffect(() => {
     if (booking.paymentStatus !== "unpaid") return;
     fetch(`/api/bookings/${booking.referenceCode}/payment?email=${encodeURIComponent(email)}`)
       .then((r) => r.json())
-      .then((d) => setAccount(d.account))
+      .then((d) => {
+        setAccount(d.account);
+        setCardEnabled(Boolean(d.cardPaymentsEnabled));
+      })
       .catch(() => {});
   }, [booking.referenceCode, booking.paymentStatus, email]);
+
+  async function payByCard() {
+    setStartingCard(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/bookings/${booking.referenceCode}/card-payment`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not start the card payment");
+      // Straight to Flutterwave's hosted checkout; the callback route settles
+      // the booking regardless of whether the candidate makes it back here.
+      window.location.href = data.paymentLink;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start the card payment");
+      setStartingCard(false);
+    }
+  }
 
   async function submitSlip() {
     if (!slipFile) return;
@@ -242,6 +275,26 @@ function PendingBooking({ booking, email, onChange, error, setError }: { booking
                 {submitting ? "Submitting…" : "I've paid — submit receipt"}
               </button>
             </>
+          )}
+
+          {cardEnabled && (
+            <div className="mt-6 border-t border-[var(--line)] pt-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
+                Paying from outside Nigeria?
+              </p>
+              <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                If you can't make a Nigerian bank transfer, pay the same ₦{booking.feeTotal.toLocaleString()} by
+                international card instead. Your bank may add its own foreign-transaction fee — that's between
+                you and your card issuer, not an Easyway charge.
+              </p>
+              <button
+                onClick={payByCard}
+                disabled={startingCard}
+                className="mt-3 rounded-sm border border-[var(--navy)] px-5 py-2.5 text-sm font-semibold text-[var(--navy)] disabled:opacity-40"
+              >
+                {startingCard ? "Opening checkout…" : "Pay by international card"}
+              </button>
+            </div>
           )}
         </div>
       )}

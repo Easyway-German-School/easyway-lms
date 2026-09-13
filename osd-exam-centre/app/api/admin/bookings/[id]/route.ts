@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminRequest } from "@/lib/admin-auth";
 import { confirmBookingPayment, rejectBookingPayment, reviewBookingDocuments } from "@/lib/booking";
+import { jsonRoute } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
 
 /** One admin action per call: verify/reject the transfer, or approve/reject documents. */
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const PATCH = jsonRoute(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   if (!(await isAdminRequest())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
   const { transferAction, transferRejectReason, documentAction, documentRejectReason } = await req.json();
@@ -27,4 +28,4 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   return NextResponse.json({ error: "Nothing to do" }, { status: 400 });
-}
+});

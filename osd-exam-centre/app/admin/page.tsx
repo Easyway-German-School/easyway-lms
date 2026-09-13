@@ -11,6 +11,7 @@ type Booking = {
   email: string;
   feeTotal: number;
   paymentStatus: string;
+  paymentMethod: string | null;
   transferProofUrl: string | null;
   transferReference: string | null;
   passportPhotoUrl: string | null;
@@ -112,6 +113,11 @@ export default function AdminDashboard() {
                   <span className={`rounded-sm px-2 py-0.5 text-[10px] font-bold uppercase ${b.paymentStatus === "paid" ? "bg-[var(--green-soft)] text-[var(--green)]" : "bg-[var(--red-soft)] text-[var(--red)]"}`}>
                     {b.paymentStatus}
                   </span>
+                  {b.paymentMethod && (
+                    <span className="rounded-sm border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ink-soft)]">
+                      {b.paymentMethod === "card" ? "Intl. card" : "Bank transfer"}
+                    </span>
+                  )}
                   {b.seatNumber !== null && <span className="rounded-sm bg-[var(--gold-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--navy)]">SEAT {b.seatNumber}</span>}
                 </div>
               </div>

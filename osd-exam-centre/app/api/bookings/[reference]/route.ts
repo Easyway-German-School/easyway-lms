@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { jsonRoute } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
  * too costs the candidate nothing (they typed it at booking) and means a
  * leaked/guessed reference on its own reveals nothing.
  */
-export async function GET(req: NextRequest, { params }: { params: Promise<{ reference: string }> }) {
+export const GET = jsonRoute(async (req: NextRequest, { params }: { params: Promise<{ reference: string }> }) => {
   const { reference } = await params;
   const email = req.nextUrl.searchParams.get("email")?.trim().toLowerCase();
   if (!email) return NextResponse.json({ error: "email is required" }, { status: 400 });
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   }
 
   return NextResponse.json({ booking: shapeBooking(booking) });
-}
+});
 
 export function shapeBooking(booking: NonNullable<Awaited<ReturnType<typeof prisma.examBooking.findUnique>>> & {
   session: NonNullable<Awaited<ReturnType<typeof prisma.examSession.findUnique>>>;
