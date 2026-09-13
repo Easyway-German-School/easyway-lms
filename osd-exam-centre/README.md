@@ -4,6 +4,11 @@ The public booking site for Easyway's ÖSD German-exam sittings: register,
 pay, upload your documents, get your seat automatically reserved, print your
 admission slip. Separate from the [EasyWay LMS](../prototype) on purpose.
 
+**Deploying this for the first time? See [DEPLOY.md](./DEPLOY.md)** — a
+step-by-step checklist (domain, database, Vercel project, env vars, a
+smoke test) for everything that needs a human decision or a credential this
+session can't provide.
+
 ## Why this is a separate app, not a folder inside the LMS
 
 - **Different audience.** A booking candidate is often not an EasyWay
@@ -78,7 +83,7 @@ component library — deliberately small.
 cd osd-exam-centre
 npm install
 cp .env.example .env.local   # fill in DATABASE_URL at minimum
-npm run db:push              # or: npx prisma migrate dev, once real migrations exist
+npx prisma migrate dev       # applies prisma/migrations/ to your local database
 npm run dev
 ```
 

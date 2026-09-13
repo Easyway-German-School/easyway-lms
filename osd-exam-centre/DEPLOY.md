@@ -1,0 +1,95 @@
+# Deploying `osd-exam-centre`
+
+A step-by-step checklist, in order. Nothing here can be done by an AI
+session — each step needs an account, a payment, or a decision only Jason
+can make. Skip a "before real candidates" step and the site still runs;
+skip a "before it's usable at all" step and it won't start.
+
+## 1. Domain (decide, don't need to buy anything)
+
+Recommended: a subdomain of the existing domain — `exams.easywayschoollms.com.ng`
+or `osd.easywayschoollms.com.ng`. A candidate about to bank-transfer real
+money trusts a subdomain of a name they can already verify far more than an
+unfamiliar new domain; this app is organizationally separate (own repo
+folder, own database, own Vercel project) without needing a separate domain
+name too. Revisit only if this ever gets licensed to another school.
+
+## 2. Database — before it's usable at all
+
+1. Create a **new Neon project** (or a new branch on the existing one — but
+   a new project is cleaner isolation from the LMS's production database).
+   Do not point this at the LMS's `DATABASE_URL` — see `README.md` for why
+   they're deliberately separate.
+2. Copy the connection string. That's `DATABASE_URL`.
+3. Migrations run automatically on every Vercel build (see
+   `scripts/vercel-migrate.mjs` — only fires when `VERCEL` is set, so a
+   local `npm run build` never touches a real database). Nothing to run by
+   hand for the first deploy.
+
+## 3. Vercel project — before it's usable at all
+
+1. New Vercel project, same GitHub repo (`easyway-lms`), **Root Directory**
+   set to `osd-exam-centre`. Vercel auto-detects Next.js from there.
+2. Set environment variables (Production, and Preview if you want PR
+   previews to work) — see `.env.example` for the full list with comments.
+   At minimum to boot at all:
+   - `DATABASE_URL` (step 2)
+   - `ADMIN_PASSWORD` — pick a real one, this gates the whole back office
+   - `SITE_URL` — the domain from step 1, e.g. `https://exams.easywayschoollms.com.ng`
+   - `EXAM_BANK_ACCOUNT_NUMBER` (+ `EXAM_BANK_NAME`/`EXAM_BANK_ACCOUNT_NAME`
+     if they differ from the defaults) — without this the bank-transfer
+     panel just tells candidates to "ask the office" for the account number
+3. Attach the domain from step 1 to this Vercel project (Vercel dashboard →
+   Domains). If it's a subdomain of `easywayschoollms.com.ng`, that's a CNAME
+   record wherever that domain's DNS is managed.
+4. Deploy.
+
+## 4. Before real candidates use it — do these before announcing it publicly
+
+- **Object storage** — set `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`,
+  `S3_SECRET_ACCESS_KEY` (Cloudflare R2 or AWS S3). **Without these, every
+  passport photo / passport data page / payment slip a candidate uploads is
+  silently lost** — Vercel's filesystem is read-only outside `/tmp`, so
+  `lib/storage.ts` falls back to writing to local disk, which does not
+  persist between requests on Vercel. This is the single most important
+  thing to set before letting a real candidate book.
+- **Email** — set `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`
+  (Brevo, the same provider the LMS already uses, or any SMTP relay).
+  Without this, booking confirmations, seat-confirmed emails, and the
+  nurture drip are only logged to the server console — nobody receives
+  anything.
+- **Cron** — set `CRON_SECRET` and confirm `vercel.json`'s cron (already
+  configured to hit `/api/cron/nurture` daily) is enabled for this project
+  — Vercel Cron needs to be turned on per-project, it doesn't inherit from
+  the LMS's.
+- **Office notifications** — set `OFFICE_NOTIFICATION_EMAIL` so "Need help?"
+  messages actually reach someone, not just `/admin/support`.
+
+## 5. Optional — add when ready, not blocking
+
+- **Flutterwave** (international card payments for diaspora candidates) —
+  set `FLUTTERWAVE_SECRET_KEY` and `FLUTTERWAVE_WEBHOOK_SECRET_HASH`. The
+  code has never run against Flutterwave's real API (sandbox or live) —
+  test it with a real or sandbox transaction before trusting it with a real
+  candidate's card. Until this is set, the card-payment button simply
+  doesn't show; bank transfer keeps working regardless.
+- **The real ÖSD field list**, if Jason sends one that needs more than the
+  form currently collects (name/email/phone/address/DOB/place of birth —
+  modelled on a real Goethe-Institut confirmation).
+
+## 6. First-deploy smoke test
+
+Once steps 2–3 are done and the site is live:
+
+1. Visit `/admin/login`, sign in with `ADMIN_PASSWORD`.
+2. Create one sitting from `/admin/sessions` (mark it published).
+3. In an incognito window, go through `/book` end to end as a candidate —
+   register, submit a bank transfer (even a fake reference/upload), upload a
+   test photo and data page.
+4. Back in `/admin`, verify the transfer and approve the documents — confirm
+   the candidate's booking page now shows a seat number and a printable
+   admission slip.
+5. Try "Need help?" from the booking page and confirm it shows up at
+   `/admin/support` (and in your inbox, if `OFFICE_NOTIFICATION_EMAIL` is set).
+
+If all five work, the site is genuinely live, not just deployed.
