@@ -264,6 +264,19 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * "You can submit assignments now" — once ever per student, the tick their
+   * portal is both unlocked (deposit or full payment cleared) and there is at
+   * least one assignment sitting there unsubmitted. See
+   * src/lib/assignment-availability-nudge.ts.
+   */
+  results.push(
+    await run("assignment-availability-nudge", async () => {
+      const { nudgeStudentsWithAssignmentsAvailable } = await import("@/lib/assignment-availability-nudge");
+      return nudgeStudentsWithAssignmentsAvailable();
+    }),
+  );
+
+  /**
    * Ask, once a day, whether the backups are still happening.
    *
    * Deliberately runs here rather than as its own schedule. This tick is the

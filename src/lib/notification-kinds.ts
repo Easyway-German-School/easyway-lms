@@ -99,6 +99,8 @@ export const KIND = {
   profileBranchMissing: "profile.branch_missing",
   /** An off-form student (office-added / imported) still has admission gaps — Becca asks for the important few, at most once a week. See src/lib/profile-details-nudge.ts. */
   profileDetailsMissing: "profile.details_missing",
+  /** A student's portal just unlocked and there is work waiting for them — sent once ever. See src/lib/assignment-availability-nudge.ts. */
+  assignmentsAvailable: "assignments.available",
   general: "general",
 } as const;
 
