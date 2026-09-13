@@ -6,6 +6,7 @@ import TutorialOverlay from "@/components/TutorialOverlay";
 import { CrossIcon, PlayIcon } from "@/components/icons";
 import {
   buildTutorials,
+  buildWelcomeTutorial,
   clearTutorialRun,
   onTutorialRunChanged,
   readTutorialRun,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/tutorials";
 import { markTutorialCompleted } from "@/lib/tutorial-progress";
 import { speak, stopSpeaking } from "@/lib/tutorial-speech";
+import { useOnboardingProfile } from "@/lib/use-onboarding";
 import { useStudentAccess } from "@/lib/useStudentAccess";
 
 /**
@@ -37,38 +39,66 @@ export default function TutorialRuntime() {
   const [run, setRun] = useState<TutorialRunState | null>(() => readTutorialRun());
   useEffect(() => onTutorialRunChanged(() => setRun(readTutorialRun())), []);
 
-  const tutorials = buildTutorials({ deliveryMode: access?.deliveryMode, classType: access?.classType });
-  const tutorial = run ? tutorials.find((t) => t.id === run.tutorialId) ?? null : null;
+  // The `welcome` tutorial (WelcomeTour's replacement) needs the full
+  // onboarding profile to personalise itself; every other tutorial only
+  // needs the lighter access hint. Fetched only when actually in a `welcome`
+  // run, so the extra request never happens for the other six.
+  const isWelcomeRun = run?.tutorialId === "welcome";
+  const onboardingQuery = useOnboardingProfile(isWelcomeRun);
+
+  const libraryTutorials = buildTutorials({ deliveryMode: access?.deliveryMode, classType: access?.classType });
+  const tutorial = !run
+    ? null
+    : isWelcomeRun
+      ? onboardingQuery.data
+        ? buildWelcomeTutorial(onboardingQuery.data)
+        : null
+      : libraryTutorials.find((t) => t.id === run.tutorialId) ?? null;
   const step = run && tutorial ? tutorial.steps[run.stepIndex] : undefined;
 
   // A run pointing at a tutorial or step that no longer exists (content
-  // changed under it, or a corrupt value) is worth less than nothing.
+  // changed under it, or a corrupt value) is worth less than nothing — but a
+  // `welcome` run legitimately has no tutorial yet while its profile fetch is
+  // still in flight, so don't judge it until that settles.
   useEffect(() => {
-    if (run && (!tutorial || !step)) clearTutorialRun();
-  }, [run, tutorial, step]);
+    if (!run) return;
+    if (isWelcomeRun && onboardingQuery.isPending) return;
+    if (!tutorial || !step) clearTutorialRun();
+  }, [run, tutorial, step, isWelcomeRun, onboardingQuery.isPending]);
 
   const active = Boolean(run && tutorial && step && run.expectedRoute === pathname);
 
-  const handleExit = useCallback(() => {
+  // The one path out, however it happens — the last step's "Done", or the
+  // Exit/Escape button on any earlier step. Both count as "seen": WelcomeTour
+  // always treated skipping the same as finishing, since a student who
+  // dismissed onboarding should not be walked through it again either.
+  const finishTutorial = useCallback(() => {
     stopSpeaking();
+    if (tutorial) {
+      tutorial.onFinish?.();
+      markTutorialCompleted(tutorial.id);
+    }
     clearTutorialRun();
     window.dispatchEvent(new CustomEvent("easyway:tour-drawer", { detail: { open: false } }));
-  }, []);
+  }, [tutorial]);
+
+  const handleExit = useCallback(() => {
+    finishTutorial();
+  }, [finishTutorial]);
 
   const handleNext = useCallback(() => {
     if (!run || !tutorial) return;
     stopSpeaking();
     const nextIndex = run.stepIndex + 1;
     if (nextIndex >= tutorial.steps.length) {
-      markTutorialCompleted(tutorial.id);
-      handleExit();
+      finishTutorial();
       return;
     }
     const nextStep = tutorial.steps[nextIndex];
     const nextRoute = nextStep.route ?? pathname;
     writeTutorialRun({ tutorialId: run.tutorialId, stepIndex: nextIndex, muted: run.muted, expectedRoute: nextRoute });
     if (nextRoute !== pathname) router.push(nextRoute);
-  }, [run, tutorial, pathname, router, handleExit]);
+  }, [run, tutorial, pathname, router, finishTutorial]);
 
   const handleBack = useCallback(() => {
     if (!run || !tutorial || run.stepIndex === 0) return;

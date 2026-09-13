@@ -2,10 +2,14 @@ import type { MascotMood } from "@/components/Mascot";
 
 /**
  * Replayable, narrated walkthroughs for the student portal — reachable any
- * time from /tutorials, unlike WelcomeTour which is a one-shot onboarding
- * moment. Reuses the same real-DOM spotlight approach WelcomeTour pioneered
- * (`data-tour="nav:<href>"` selectors, never a picture of the sidebar), so a
- * step can never drift out of date with the nav it describes.
+ * time from /tutorials. This is also what plays a brand-new student's first
+ * onboarding walkthrough now (the `"welcome"` tutorial, built by
+ * `buildWelcomeTutorial` below) — it replaces the old, single-page WelcomeTour,
+ * which only pointed at sidebar buttons from the dashboard rather than
+ * actually visiting them. Reuses the same real-DOM spotlight approach that
+ * WelcomeTour pioneered (`data-tour="nav:<href>"` selectors, never a picture
+ * of the sidebar), so a step can never drift out of date with the nav it
+ * describes.
  *
  * Steps can each ask to be on a specific `route`. TutorialRuntime persists
  * progress in sessionStorage and navigates between routes as steps advance,
@@ -38,12 +42,131 @@ export type Tutorial = {
   blurb: string;
   estMinutes: number;
   steps: TutorialStep[];
+  /** Fires once, whenever this tutorial ends — Done or Exit alike, matching
+   *  WelcomeTour's own "skipping counts as seeing it" rule. Used by the
+   *  `welcome` tutorial to mark onboarding seen server-side. */
+  onFinish?: () => void;
 };
 
 export type TutorialAccessHint = {
   deliveryMode?: string;
   classType?: string;
 };
+
+/** What `/api/student/onboarding` returns — enough to personalise the welcome tutorial. */
+export type OnboardingProfile = {
+  firstName: string | null;
+  level: string;
+  branchName: string | null;
+  isOnlineBranch: boolean;
+  deliveryMode?: string;
+  classType?: string;
+  sessionSlot: string;
+  tourSeen: boolean;
+};
+
+/**
+ * A brand-new student's first walkthrough — the direct replacement for
+ * WelcomeTour.tsx. Same copy and mode-branching (online/hybrid/physical,
+ * `canDownload`) as the original `buildSteps()`, reshaped so each topic
+ * actually navigates to its real page instead of only spotlighting from the
+ * dashboard. `onFinish` posts the same completion the original tour did.
+ */
+export function buildWelcomeTutorial(onboarding: OnboardingProfile): Tutorial {
+  const mode = onboarding.deliveryMode ?? (onboarding.isOnlineBranch ? "online" : "physical");
+  const isOnline = mode === "online";
+  const isHybrid = mode === "hybrid";
+  const canDownload = isOnline || isHybrid || onboarding.classType === "private";
+
+  const where = isOnline
+    ? "You study online, so your classroom travels with you."
+    : isHybrid && onboarding.branchName
+      ? `You are at our ${onboarding.branchName} campus, and you can join the same class live over video when you cannot get in.`
+      : onboarding.branchName
+        ? `You are at our ${onboarding.branchName} campus.`
+        : "";
+
+  return {
+    id: "welcome",
+    title: "Welcome to EasyWay",
+    blurb: "Your very first tour — everything you'll actually use, from Becca.",
+    estMinutes: 3,
+    onFinish: () => {
+      void fetch("/api/student/onboarding", { method: "POST" }).catch(() => {});
+    },
+    steps: [
+      {
+        id: "welcome-hello",
+        route: "/dashboard",
+        caption: onboarding.firstName ? `Hallo, ${onboarding.firstName}.` : "Hallo.",
+        narration: `You are starting at ${onboarding.level}. ${where} Give me a minute and I will show you what you will actually use — then you never have to see me again.`,
+        mood: "greeting",
+      },
+      {
+        id: "welcome-classes",
+        route: isOnline ? "/live" : "/calendar",
+        target: isOnline ? '[data-tour="nav:/live"]' : '[data-tour="nav:/calendar"]',
+        inSidebar: true,
+        caption: isOnline ? "Your class opens here" : "Your timetable lives here",
+        narration: isOnline
+          ? `Your ${onboarding.sessionSlot} session runs live over video. Pick your video quality before you join — on mobile data, Data saver keeps the lesson steady instead of frozen.`
+          : isHybrid
+            ? `Your ${onboarding.sessionSlot} session, the topic for each day, and anything your tutor attaches are all on this calendar. Live class, just below, is the same lesson over video.`
+            : `Your ${onboarding.sessionSlot} session, the topic for each day, and anything your tutor attaches are all on this calendar. If a class is postponed it turns pink here with the new date.`,
+        mood: "presenting",
+      },
+      {
+        id: "welcome-catchup",
+        route: "/materials",
+        target: '[data-tour="nav:/materials"]',
+        inSidebar: true,
+        caption: "Every class is recorded",
+        narration: canDownload
+          ? "Recordings land in the Watch tab the same day and pick up exactly where your connection dropped. Install the app and you can download a class to watch later with no signal at all. A written recap of every class waits in My Notes, one tab down."
+          : "Recordings land in the Watch tab the same day and pick up exactly where your connection dropped. A written recap of every class — the new words, what to practise — waits in My Notes, one tab down.",
+        mood: "happy",
+      },
+      {
+        id: "welcome-coach",
+        route: "/games",
+        target: '[data-tour="nav:/games"]',
+        inSidebar: true,
+        caption: "Your AI coach and games",
+        narration:
+          "Talk to the AI coach to drill your speaking out loud, or play a quick round to keep your streak alive. This is what the students who actually finish do on the days there is no class.",
+        mood: "presenting",
+      },
+      {
+        id: "welcome-community",
+        route: "/community",
+        target: '[data-tour="nav:/community"]',
+        inSidebar: true,
+        caption: "Your class is in here",
+        narration:
+          "Your branch and level have their own space. Ask questions between classes and practise with the people sitting the same exam as you.",
+        mood: "happy",
+      },
+      {
+        id: "welcome-payments",
+        route: "/payments",
+        target: '[data-tour="nav:/payments"]',
+        inSidebar: true,
+        caption: "Tuition lives here",
+        narration:
+          "Your balance, what is due and every receipt. Classes and certificates unlock once tuition is settled, and you can pay in parts — no surprises.",
+        mood: "presenting",
+      },
+      {
+        id: "welcome-done",
+        route: "/dashboard",
+        caption: "You are ready.",
+        narration: "Viel Erfolg. If you forget where something is, everything I showed you is in the menu on the left.",
+        mood: "celebrating",
+        autoAdvance: false,
+      },
+    ],
+  };
+}
 
 function buildJoiningClassTutorial(hint: TutorialAccessHint): Tutorial {
   const mode = hint.deliveryMode ?? "physical";
