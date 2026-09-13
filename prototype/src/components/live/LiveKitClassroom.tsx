@@ -674,6 +674,22 @@ export default function LiveKitClassroom({
         joinedAtRef.current = Date.now();
         setStatus("connected");
         bumpAll();
+
+        // The recording starts here too, for the tutor only — see the module
+        // comment on session/start-recording/route.ts for why this moved off
+        // the page-load GET. Fire-and-forget: a slow or failing egress must
+        // never hold up the class the tutor is already in.
+        if (role === "tutor" && liveSessionId) {
+          fetch("/api/live/session/start-recording", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ liveSessionId }),
+          }).catch(() => {
+            /* ensureRecordingStarted already swallows its own errors server-side;
+               a network failure reaching this endpoint at all is the one case
+               left, and it is not the tutor's problem to see. */
+          });
+        }
       })
       .on(RoomEvent.Reconnecting, () => setStatus("reconnecting"))
       .on(RoomEvent.Reconnected, () => setStatus("connected"))

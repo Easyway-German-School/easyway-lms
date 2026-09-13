@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getMergedSchedule, type MergedSession } from "@/lib/class-sessions";
 import { getPrivateSchedule } from "@/lib/private-classes";
 import { nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
+import { TIME_SLOTS } from "@/lib/class-times";
 
 /**
  * Builds the same timetable payload /api/schedule has always returned for a
@@ -82,16 +83,18 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
 
   /**
    * A hybrid or online student attends over video and may join ANY sitting of
-   * their level, whichever time it runs (see `liveSessionForStudent`). Their
-   * own sitting is the calendar above; the other weekday sittings ride along
-   * as a separate list so they can see what else is on and plan to drop in.
-   * Not merged into `months` — the node builder counts one class per day.
+   * their level, whichever time it runs (see `liveSessionForStudent`) — a
+   * weekend student included, since Saturday is just another sitting to this
+   * feature, not a special case. Their own sitting is the calendar above;
+   * every other sitting rides along as a separate list so they can see what
+   * else is on and plan to drop in. Not merged into `months` — the node
+   * builder counts one class per day.
    */
   let alsoJoinable: Array<{ slot: string; sessions: MergedSession[] }> | undefined;
   const attendsOverVideo = student.deliveryMode === "hybrid" || student.deliveryMode === "online";
   if (!viewingNext && attendsOverVideo) {
     const own = (student.sessionSlot ?? "morning").toLowerCase();
-    const otherSlots = (["morning", "afternoon", "evening"] as const).filter((s) => s !== own);
+    const otherSlots = TIME_SLOTS.filter((s) => s !== own);
     const built = await Promise.all(
       otherSlots.map((s) =>
         getMergedSchedule({

@@ -5,7 +5,6 @@ import { prisma } from "@/lib/prisma";
 import { canAttendLive, deriveStudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { isOnlineBranch, initialVideoQualityFor, readOnlineProfile } from "@/lib/online-branch";
-import { ensureRecordingStarted } from "@/lib/class-recorder";
 import { creditGate } from "@/lib/usage/guard";
 import {
   announceLiveSession,
@@ -13,7 +12,6 @@ import {
   announceLiveToVideoStudents,
   liveSessionByCode,
   liveSessionForStudent,
-  liveSessionNamedStudentsWhere,
   mayJoinPrivateRoom,
   openLiveSession,
   recordAttendance,
@@ -334,11 +332,19 @@ export async function GET(request: Request) {
     }
 
     /**
-     * The tutor arriving is what OPENS the class — the same event that starts
-     * the recording. One join does four things: it opens the row, mints the
-     * join code, rings the roster, and starts the capture. Nothing here is a
-     * button, because the one class a tutor forgets to press the button for is
-     * the one a student needed.
+     * The tutor's page loading is what OPENS the class. One request does
+     * three things: it opens the row, mints the join code, and rings the
+     * roster. Nothing here is a button, because the one class a tutor forgets
+     * to press the button for is the one a student needed.
+     *
+     * Recording is deliberately NOT a fourth thing here any more — see the
+     * comment on `ensureRecordingStarted`'s call site in
+     * `session/start-recording/route.ts`. Starting the capture from this GET
+     * (which fires on page-load, before the tutor has even clicked "Start the
+     * class") meant every recording opened on the Lobby's quality picker and
+     * whatever camera/mic fumbling followed, none of which a student needs to
+     * see. The capture is still guaranteed, not optional — it just starts from
+     * the tutor's browser actually connecting to the room instead.
      */
     if (role === "tutor") {
       const opened = await openLiveSession({
@@ -374,11 +380,10 @@ export async function GET(request: Request) {
        */
       if (opened.kind === "cohort" && lecturer) {
         const named = await prisma.student.findMany({
-          where: liveSessionNamedStudentsWhere({
-            lecturerId: lecturer.id,
-            branchId: opened.branchId,
-            level: opened.level,
-          }),
+          where: {
+            deletedAt: null,
+            OR: [{ tutorId: lecturer.id }, { coTutors: { some: { lecturerId: lecturer.id } } }],
+          },
           select: { id: true },
         });
         // Only the ones who could actually answer it — a locked portal (unpaid
@@ -501,40 +506,6 @@ export async function GET(request: Request) {
       // Only a tutor can mute others, remove a participant, or end the class.
       roomAdmin: role === "tutor",
     });
-
-    /**
-     * Deliberately not awaited: a slow or failing egress service must not delay
-     * the tutor's own token by so much as a round trip. `ensureRecordingStarted`
-     * swallows its errors and is idempotent, so a reload does not start a
-     * second capture.
-     *
-     * Private one-to-one classes ARE recorded too, as of the class-notes
-     * feature: this is the tutor's-tutor's-own capture becoming that
-     * student's transcript, vocabulary and personalised recap afterwards —
-     * see [[project-class-notes-pipeline]]. This used to be excluded outright
-     * on consent grounds; the product decision is now to record, on the
-     * understanding that a private session being recorded should be visibly
-     * communicated to both sides, not just true in a database column. The
-     * privacy half of that decision is enforced downstream, not here: a
-     * private `ClassRecording` carries `privateClassId`, its `Material`
-     * never gets `level` set, and `/api/student/videos` only ever surfaces it
-     * to the one enrolled student — see the module comment on
-     * `ClassRecording.privateClassId` in schema.prisma.
-     */
-    if (role === "tutor") {
-      const { currentTenantId } = await import("@/lib/tenant/context");
-      const tenantId = currentTenantId();
-      void ensureRecordingStarted({
-        roomName,
-        tenantId,
-        branchId: branch?.id ?? null,
-        branchName: branch?.name ?? null,
-        level,
-        sessionSlot,
-        startedByUserId: session.user.id,
-        privateClassId: privateClassId ?? null,
-      });
-    }
 
     return NextResponse.json({
       ...context,

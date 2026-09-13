@@ -80,6 +80,12 @@ export function liveWhere(now: Date = new Date()) {
   return { endedAt: null, lastSeenAt: { gte: staleCutoff(now) } };
 }
 
+/** A hybrid or online student may drop into a different live cohort at the same level. */
+export function mayJoinAnyLiveCohort(deliveryMode?: string | null): boolean {
+  const mode = String(deliveryMode ?? "").toLowerCase();
+  return mode === "hybrid" || mode === "online";
+}
+
 export type LiveSessionRow = {
   id: string;
   roomName: string;
@@ -351,20 +357,22 @@ export async function liveSessionForStudent(student: {
   // room, reached through an invite (handled above), never here.
   if (student.classType === "private") return null;
 
-  // A student who attends over video may walk into ANY live sitting of their
-  // branch and level — morning, afternoon or evening. A campus student is held
-  // to their own slot: the morning cohort's room is a different class from the
-  // evening one, and they sit one of them in person.
+  // A student who attends over video — hybrid or online — may walk into ANY
+  // live sitting of their branch and level: morning, afternoon, evening, or
+  // the weekend one. A campus student is held to their own slot: the morning
+  // cohort's room is a different class from the evening one, and they sit
+  // one of them in person.
   const attendsOverVideo =
     canAttendLive(student.deliveryMode, student.classType) ||
     isOnlineBranch(student.branch ?? null);
+  const mayJoinAnyCohortFlag = mayJoinAnyLiveCohort(student.deliveryMode);
 
   const liveCohorts = await prisma.liveClassSession.findMany({
     where: {
       kind: "cohort",
       branchId: student.branchId,
       level: student.level,
-      ...(attendsOverVideo ? {} : { sessionSlot: student.sessionSlot }),
+      ...(attendsOverVideo && mayJoinAnyCohortFlag ? {} : { sessionSlot: student.sessionSlot }),
       ...liveWhere(now),
     },
     include: { lecturer: { select: { user: { select: { name: true } } } } },
