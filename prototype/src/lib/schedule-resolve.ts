@@ -82,17 +82,20 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
   });
 
   /**
-   * A hybrid or online student attends over video and may join ANY sitting of
-   * their level, whichever time it runs (see `liveSessionForStudent`) — a
-   * weekend student included, since Saturday is just another sitting to this
-   * feature, not a special case. Their own sitting is the calendar above;
-   * every other sitting rides along as a separate list so they can see what
-   * else is on and plan to drop in. Not merged into `months` — the node
+   * A hybrid student may join any sitting of their level, whichever time it
+   * runs (see `liveSessionForStudent`) — weekend included, since Saturday is
+   * just another sitting to this feature, not a special case: a weekday
+   * hybrid student can drop into the weekend one and vice versa. An
+   * online-only student stays on the one sitting they signed up for — see
+   * `mayJoinAnyLiveCohort` for why that split holds even though both attend
+   * over video. Their own sitting is the calendar above; every other sitting
+   * a hybrid student can reach rides along as a separate list so they can see
+   * what else is on and plan to drop in. Not merged into `months` — the node
    * builder counts one class per day.
    */
   let alsoJoinable: Array<{ slot: string; sessions: MergedSession[] }> | undefined;
-  const attendsOverVideo = student.deliveryMode === "hybrid" || student.deliveryMode === "online";
-  if (!viewingNext && attendsOverVideo) {
+  const mayJoinAnyCohortFlag = student.deliveryMode === "hybrid";
+  if (!viewingNext && mayJoinAnyCohortFlag) {
     const own = (student.sessionSlot ?? "morning").toLowerCase();
     const otherSlots = TIME_SLOTS.filter((s) => s !== own);
     const built = await Promise.all(

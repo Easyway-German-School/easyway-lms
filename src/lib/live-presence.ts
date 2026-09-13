@@ -80,10 +80,15 @@ export function liveWhere(now: Date = new Date()) {
   return { endedAt: null, lastSeenAt: { gte: staleCutoff(now) } };
 }
 
-/** A hybrid or online student may drop into a different live cohort at the same level. */
+/**
+ * Only a hybrid student may drop into a different live cohort at their level
+ * — weekday or weekend, either is still "any sitting" to them. An online-only
+ * student attends over video too, but stays on the one session they actually
+ * signed up for; see the call site for why that distinction is the one that
+ * matters, not "attends over video" on its own.
+ */
 export function mayJoinAnyLiveCohort(deliveryMode?: string | null): boolean {
-  const mode = String(deliveryMode ?? "").toLowerCase();
-  return mode === "hybrid" || mode === "online";
+  return String(deliveryMode ?? "").toLowerCase() === "hybrid";
 }
 
 export type LiveSessionRow = {
@@ -376,11 +381,16 @@ export async function liveSessionForStudent(student: {
   // room, reached through an invite (handled above), never here.
   if (student.classType === "private") return null;
 
-  // A student who attends over video — hybrid or online — may walk into ANY
-  // live sitting of their branch and level: morning, afternoon, evening, or
-  // the weekend one. A campus student is held to their own slot: the morning
-  // cohort's room is a different class from the evening one, and they sit
-  // one of them in person.
+  // A hybrid student may walk into ANY live sitting of their branch and
+  // level — morning, afternoon, evening, or the weekend one, whichever is
+  // actually running. An online-only student attends over video too, but
+  // stays pinned to the one sitting they signed up for: they chose that slot
+  // deliberately (it is often the only one that fits their day), and letting
+  // them wander is not the same courtesy a campus-registered hybrid student
+  // gets when their usual room happens to be empty. A physical student is
+  // held to their own slot outright: the morning cohort's room is a
+  // different class from the evening one, and they sit one of them in
+  // person.
   const attendsOverVideo =
     canAttendLive(student.deliveryMode, student.classType) ||
     isOnlineBranch(student.branch ?? null);

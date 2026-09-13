@@ -301,7 +301,7 @@ export default function SmartCalendarClient() {
             Also open to you
           </p>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            You attend online or hybrid, so you can join any sitting of {data.currentLevel ?? data.level} live —
+            You attend hybrid, so you can join any sitting of {data.currentLevel ?? data.level} live —
             not just your own. Here is what else is on.
           </p>
           <div className="mt-4 space-y-4">
