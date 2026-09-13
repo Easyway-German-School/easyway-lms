@@ -10,7 +10,7 @@ import TuitionNudge from "@/components/TuitionNudge";
 import PrivateUpgradeNudge from "@/components/PrivateUpgradeNudge";
 import LiveClassBanner from "@/components/live/LiveClassBanner";
 import LevelAdvance from "@/components/LevelAdvance";
-import WelcomeTour from "@/components/WelcomeTour";
+import WelcomeTutorialLauncher from "@/components/WelcomeTutorialLauncher";
 import NotificationInvite from "@/components/NotificationInvite";
 import { ArrowRightIcon, BookOpenIcon, CheckCircleIcon, CompassIcon, FlameIcon, SparklesIcon, StarIcon, TargetIcon, TrendingDownIcon, TrendingUpIcon, UserIcon, VideoIcon } from "@/components/icons";
 import { summarizeGamification } from "@/lib/gamification";
@@ -641,8 +641,10 @@ function DashboardContent() {
         className="dashboard-shell min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(10,124,255,0.08),_transparent_25%),linear-gradient(135deg,_#f8fbff_0%,_#f2f6ff_100%)] text-[var(--foreground)]"
       >
         <div className="mx-auto w-full min-w-0 max-w-7xl overflow-x-clip px-3 py-6 sm:px-6 sm:py-10">
-          {/* Shows once per account, on the very first visit, then never again. */}
-          <WelcomeTour />
+          {/* Shows once per account, on the very first visit, then never again —
+              now via the replayable Tutorial engine (see TutorialRuntime in
+              StudentShell) rather than WelcomeTour's own one-page overlay. */}
+          <WelcomeTutorialLauncher />
           {/* Ranks BELOW the tour in the moment queue, so a new student meets
               the portal before being asked for anything. The queue's two-modal
               cap usually pushes this to their second visit, which is exactly
