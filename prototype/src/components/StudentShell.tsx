@@ -13,6 +13,7 @@ import ExamCampaignMoment from "@/components/moment/ExamCampaignMoment";
 import LoginUpgradeMoment from "@/components/moment/LoginUpgradeMoment";
 import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
 import TravelPackageNotifyNudge from "@/components/moment/TravelPackageNotifyNudge";
+import AssignmentsOpenMoment from "@/components/moment/AssignmentsOpenMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
@@ -568,6 +569,12 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       {/* Lowest-priority nudge: physical students can't download video, but
           they can keep their notes offline if they install the app. */}
       {hasAccess && <InstallForNotesMoment />}
+
+      {/* "You can submit assignments now" — Becca's one-time greeting for the
+          tick a student's portal unlocked with work already waiting. Behind
+          `hasAccess` because the bell notification it mirrors is never sent
+          to a student who is still locked out. See AssignmentsOpenMoment. */}
+      {hasAccess && <AssignmentsOpenMoment />}
 
       {/* Fires on a genuine server-validated completion — see
           celebrateLessonComplete() in LessonCompleteCelebration.tsx. */}

@@ -108,6 +108,7 @@ export type MomentId =
   | "office-reply"
   | "lesson-complete"
   | "exam-campaign"
+  | "assignments-open"
   | "notifications"
   | "notifications-travel"
   | "daily-briefing"
@@ -230,6 +231,20 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Register for the ÖSD exam",
     dockBlurb: "Dates, fees and the free prep class — before registration closes.",
+  },
+  /**
+   * "You can submit assignments now." Fires once ever, the first time a
+   * student's portal is unlocked AND there is work sitting unsubmitted — see
+   * src/lib/assignment-availability-nudge.ts for the server side. Below the
+   * exam campaign (that one has a hard external deadline; this doesn't) but
+   * still above the standing notification ask because it is news about a
+   * capability the student did not know they had.
+   */
+  "assignments-open": {
+    priority: 62,
+    kind: "modal",
+    dockLabel: "Assignments are open",
+    dockBlurb: "You can submit your homework now — see what's waiting.",
   },
   /**
    * Asking for notification permission, and where it sits.

@@ -11,6 +11,7 @@ import {
   deadlineFor,
   isExpired,
 } from "@/lib/assignments";
+import { assignmentVisibleToWhere } from "@/lib/student-assignments";
 
 /**
  * A student's assignments: documents to hand in and timed quizzes.
@@ -32,43 +33,6 @@ async function currentStudent(userId: string | undefined) {
   });
 }
 
-/**
- * Which assignments this student may see.
- *
- * Two conditions live in an explicit AND rather than as sibling keys, because
- * a second top-level `OR` would overwrite the first and quietly widen the
- * query to every branch in the school.
- *
- * The targeting rule: an assignment with NO targets goes to the whole level,
- * which is how every assignment behaved before targeting existed. One or more
- * targets narrows it to exactly those students.
- *
- * The sitting works the same way as the branch: NULL means every sitting, so
- * nothing set before sessions became a boundary changes who it reaches. It
- * matters because one branch runs the same level three times a day under three
- * different tutors, and homework from the morning lesson appearing on the
- * evening class's dashboard is work they were never given.
- */
-function visibleTo(student: {
-  id: string;
-  level: string;
-  branchId: string | null;
-  sessionSlot: string | null;
-}) {
-  return {
-    published: true,
-    level: student.level,
-    AND: [
-      // Branch-specific assignments plus school-wide ones.
-      { OR: [{ branchId: student.branchId }, { branchId: null }] },
-      // This sitting's work plus anything set for the whole level.
-      { OR: [{ sessionSlot: student.sessionSlot }, { sessionSlot: null }] },
-      // Untargeted (everyone) or targeted at me.
-      { OR: [{ targets: { none: {} } }, { targets: { some: { studentId: student.id } } }] },
-    ],
-  };
-}
-
 /** GET — list assignments for this student's level and branch. */
 export async function GET() {
   const session = await requireAuthSession();
@@ -79,7 +43,7 @@ export async function GET() {
   }
 
   const assignments = await prisma.assignment.findMany({
-    where: visibleTo(student),
+    where: assignmentVisibleToWhere(student),
     orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
     include: {
       submissions: { where: { studentId: student.id } },
@@ -149,7 +113,7 @@ export async function POST(req: NextRequest) {
      * including one targeted at somebody else.
      */
     const assignment = await prisma.assignment.findFirst({
-      where: { id: String(assignmentId), ...visibleTo(student) },
+      where: { id: String(assignmentId), ...assignmentVisibleToWhere(student) },
       include: { lecturer: { select: { userId: true } } },
     });
     if (!assignment) {
