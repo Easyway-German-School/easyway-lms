@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { generateReferenceCode } from "@/lib/reference-code";
 import { seatNumberForIndex } from "@/lib/seat-numbering";
 import { sendEmail } from "@/lib/email";
+import { bookingLink } from "@/lib/config";
 
 export const MODULES = ["reading", "listening", "writing", "speaking"] as const;
 export type ExamModule = (typeof MODULES)[number];
@@ -92,7 +93,8 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
       <p>We've received your booking for <strong>${session.title}</strong> at ${session.venueName}.</p>
       <p><strong>Reference:</strong> ${booking.referenceCode}<br/>
          <strong>Amount due:</strong> ₦${feeTotal.toLocaleString()}</p>
-      <p>Your seat is reserved once payment is confirmed — go back to your booking to pay and upload your documents.</p>
+      <p>Your seat is reserved once payment is confirmed.
+         <a href="${bookingLink(booking.referenceCode, booking.email)}">Go to your booking</a> to pay and upload your documents.</p>
     `,
   });
 
@@ -157,7 +159,8 @@ export async function confirmBookingPayment(
         <p>Hello ${booking.fullName},</p>
         <p>Your payment has been confirmed. Your seat has been automatically reserved.</p>
         <p><strong>You are in seat no. ${seatNumber}.</strong></p>
-        <p>Print your admission slip and bring your international passport's data page with you on the day.</p>
+        <p><a href="${bookingLink(booking.referenceCode, booking.email)}">Print your admission slip</a> and bring your
+           international passport's data page with you on the day.</p>
       `,
     });
 
