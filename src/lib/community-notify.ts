@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { sendPushToUsers, spaceMemberIds } from "@/lib/push";
+import { readAssignment } from "@/lib/lecturer-assignment";
 
 /**
  * Telling the room something was said — and the one decision this file exists
@@ -89,6 +90,86 @@ export function previewOf(
 const PUSH_QUIET_MS = 45_000;
 const lastPushByChannel = new Map<string, number>();
 
+export function mergeCommunityRecipientIds(
+  studentIds: string[] | undefined | null,
+  staffIds: string[] | undefined | null,
+  exclude?: string,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const group of [studentIds, staffIds]) {
+    for (const id of group ?? []) {
+      if (!id || id === exclude || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
+
+  return out;
+}
+
+async function staffRecipientIdsForSpace(
+  space: { branchId: string; level: string; sessionSlot: string },
+  exclude?: string,
+): Promise<string[]> {
+  const [admins, lecturers] = await Promise.all([
+    prisma.user.findMany({
+      where: { role: "ADMIN" },
+      select: { id: true },
+    }),
+    prisma.lecturer.findMany({
+      select: {
+        userId: true,
+        branchId: true,
+        level: true,
+        sessionSlot: true,
+        branchIds: true,
+        levels: true,
+        sessionSlots: true,
+        assignmentGroups: true,
+      },
+    }),
+  ]);
+
+  const ids = new Set<string>();
+  for (const user of admins) ids.add(user.id);
+
+  for (const lecturer of lecturers) {
+    const assignment = readAssignment(lecturer);
+
+    const inGroup = assignment.groups.some(
+      (group) =>
+        group.branchId === space.branchId &&
+        group.level.toUpperCase() === space.level.toUpperCase() &&
+        group.sessionSlot.toLowerCase() === space.sessionSlot.toLowerCase(),
+    );
+
+    const inLegacyScope =
+      assignment.branchIds.includes(space.branchId) &&
+      assignment.levels.map((level) => level.toUpperCase()).includes(space.level.toUpperCase()) &&
+      (!assignment.sessionSlots.length ||
+        assignment.sessionSlots.map((slot) => slot.toLowerCase()).includes(space.sessionSlot.toLowerCase()));
+
+    if (inGroup || inLegacyScope) ids.add(lecturer.userId);
+  }
+
+  const out = [...ids];
+  return exclude ? out.filter((id) => id !== exclude) : out;
+}
+
+async function communityRecipientsForSpace(spaceId: string, exclude?: string): Promise<string[]> {
+  const space = await prisma.space.findUnique({
+    where: { id: spaceId },
+    select: { branchId: true, level: true, sessionSlot: true },
+  });
+  if (!space) return [];
+
+  const students = await spaceMemberIds(spaceId, exclude);
+  const staff = await staffRecipientIdsForSpace(space, exclude);
+  return mergeCommunityRecipientIds(students, staff, exclude);
+}
+
 function mayPush(channelId: string): boolean {
   const now = Date.now();
   const last = lastPushByChannel.get(channelId) ?? 0;
@@ -128,7 +209,7 @@ export function announceChatMessage(input: ChatAnnouncement): void {
       if (channel.kind !== "announcement") {
         if (!mayPush(input.channelId)) return;
 
-        const recipients = await spaceMemberIds(input.spaceId, input.authorId);
+        const recipients = await communityRecipientsForSpace(input.spaceId, input.authorId);
         if (recipients.length === 0) return;
 
         await sendPushToUsers(recipients, {
@@ -142,6 +223,8 @@ export function announceChatMessage(input: ChatAnnouncement): void {
       }
 
       const space = channel.space;
+      const recipients = await communityRecipientsForSpace(input.spaceId, input.authorId);
+      if (recipients.length === 0) return;
 
       notifyInBackground({
         /**
@@ -149,14 +232,13 @@ export function announceChatMessage(input: ChatAnnouncement): void {
          * whole point of the session work: an announcement in the morning A1
          * room must not reach the evening A1 class, who have a different tutor
          * and a different lesson.
+         *
+         * Staff and students alike are included here because an announcement is
+         * class-level information and the room is already scoped to that exact
+         * cohort. A tutor or admin who can access the room should receive the
+         * same browser push the students do when they have granted permission.
          */
-        to: {
-          students: {
-            branchId: space.branchId,
-            level: space.level,
-            sessionSlot: space.sessionSlot,
-          },
-        },
+        to: { userIds: recipients },
         kind: KIND.announcement,
         severity: "info",
         title: `${input.authorName} in ${input.channelName}`,
