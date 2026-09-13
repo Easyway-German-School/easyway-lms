@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 /**
  * Manual Moniepoint bank-transfer details shown to every candidate. Same
  * design as the LMS's manualBankTransferDetails() (see EasyWay LMS repo,
@@ -156,5 +158,9 @@ export async function refundCardPayment(
 export function verifyFlutterwaveWebhookSignature(headerValue: string | null): boolean {
   const expected = process.env.FLUTTERWAVE_WEBHOOK_SECRET_HASH;
   if (!expected || !headerValue) return false;
-  return headerValue === expected;
+  // Constant-time: a plain `===` on a secret leaks timing information an
+  // attacker could use to guess it byte by byte.
+  const a = Buffer.from(expected);
+  const b = Buffer.from(headerValue);
+  return a.length === b.length && timingSafeEqual(a, b);
 }

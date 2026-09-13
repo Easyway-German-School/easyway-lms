@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { EXAM_PREP_LINK } from "@/lib/config";
+import { escapeHtml } from "@/lib/html";
 
 /**
  * The soft-sell drip into paid prep classes — the actual business model
@@ -43,7 +44,7 @@ async function sweepDay2(now: Date): Promise<number> {
     await sendEmail({
       to: booking.email,
       subject: "A quick note about your ÖSD exam",
-      html: `<p>Hello ${booking.fullName},</p><p>${booking.session.title} is one of the more learnable exams once you know its format and marking rules — most candidates who fail lose marks to the exam's structure, not the language itself. Worth ten minutes reading up on how it's marked.</p>`,
+      html: `<p>Hello ${escapeHtml(booking.fullName)},</p><p>${booking.session.title} is one of the more learnable exams once you know its format and marking rules — most candidates who fail lose marks to the exam's structure, not the language itself. Worth ten minutes reading up on how it's marked.</p>`,
     });
     await prisma.examBooking.update({ where: { id: booking.id }, data: { nurtureDay2Sent: true } });
   }

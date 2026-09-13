@@ -2,24 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isAdminRequest } from "@/lib/admin-auth";
 import { MODULES } from "@/lib/booking";
+import { jsonRoute } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = jsonRoute(async () => {
   if (!(await isAdminRequest())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  try {
-    const sessions = await prisma.examSession.findMany({
-      orderBy: { startDate: "desc" },
-      include: { modulePrices: true, _count: { select: { bookings: true } } },
-    });
-    return NextResponse.json({ sessions });
-  } catch (error) {
-    console.error("Failed to load sessions:", error);
-    return NextResponse.json({ error: "Unable to load sittings", sessions: [] }, { status: 500 });
-  }
-}
+  const sessions = await prisma.examSession.findMany({
+    orderBy: { startDate: "desc" },
+    include: { modulePrices: true, _count: { select: { bookings: true } } },
+  });
+  return NextResponse.json({ sessions });
+});
 
-export async function POST(req: NextRequest) {
+export const POST = jsonRoute(async (req: NextRequest) => {
   if (!(await isAdminRequest())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json();
 
@@ -49,7 +45,7 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json({ session });
-}
+});
 
 /**
  * Edits an existing sitting — including just the publish toggle, which used
@@ -59,7 +55,7 @@ export async function POST(req: NextRequest) {
  * price mid-registration must never silently reprice someone who already
  * booked at the old one).
  */
-export async function PATCH(req: NextRequest) {
+export const PATCH = jsonRoute(async (req: NextRequest) => {
   if (!(await isAdminRequest())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json();
   const { sessionId } = b;
@@ -74,8 +70,24 @@ export async function PATCH(req: NextRequest) {
   if (b.startDate) data.startDate = new Date(b.startDate);
   if (b.endDate) data.endDate = new Date(b.endDate);
   if (b.registrationDeadline) data.registrationDeadline = new Date(b.registrationDeadline);
-  if (b.capacity) data.capacity = Number(b.capacity);
   if (b.feeWholeExam) data.feeWholeExam = Number(b.feeWholeExam);
+
+  // Capacity needs its own check, not just a blind assignment: dropping it
+  // below the number of seats already confirmed would silently make
+  // seatNumberForIndex() (lib/seat-numbering.ts) hand out a seat number
+  // past the new "capacity" on the next confirmation, or worse, make an
+  // already-seated candidate's seat look like it shouldn't exist.
+  if (b.capacity) {
+    const newCapacity = Number(b.capacity);
+    const taken = await prisma.examBooking.count({ where: { sessionId, seatNumber: { not: null } } });
+    if (newCapacity < taken) {
+      return NextResponse.json(
+        { error: `Can't lower capacity to ${newCapacity} — ${taken} seats are already confirmed for this sitting.` },
+        { status: 400 },
+      );
+    }
+    data.capacity = newCapacity;
+  }
 
   if (Object.keys(data).length === 0 && !b.modulePrices) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
@@ -98,4 +110,4 @@ export async function PATCH(req: NextRequest) {
   });
 
   return NextResponse.json({ session });
-}
+});

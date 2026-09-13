@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
+import { escapeHtml } from "@/lib/html";
 
 /**
  * "Need help?" — a candidate messaging the office directly. Distinct from
@@ -58,7 +59,7 @@ export async function submitSupportMessage(input: SubmitSupportMessageInput): Pr
       to: officeEmail,
       subject: booking ? `Help request — ${booking.referenceCode}` : "Help request — ÖSD Exam Centre",
       html: `
-        <p><strong>${name}</strong> (${email}) needs help${booking ? ` with booking <strong>${booking.referenceCode}</strong> (${booking.session.title})` : ""}:</p>
+        <p><strong>${escapeHtml(name)}</strong> (${escapeHtml(email)}) needs help${booking ? ` with booking <strong>${booking.referenceCode}</strong> (${escapeHtml(booking.session.title)})` : ""}:</p>
         <p>${escapeHtml(message)}</p>
       `,
     });
@@ -69,12 +70,4 @@ export async function submitSupportMessage(input: SubmitSupportMessageInput): Pr
 
 export async function resolveSupportMessage(id: string): Promise<void> {
   await prisma.supportMessage.update({ where: { id }, data: { status: "resolved", resolvedAt: new Date() } });
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br/>");
 }

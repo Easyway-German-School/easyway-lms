@@ -95,6 +95,27 @@ component library — deliberately small.
   registration and certification, timestamped
   (`ExamBooking.consentAcceptedAt`), separate from the rules acknowledgment
   — see `/terms` and `/privacy`.
+- **Admin-side security hardening** — a login-attempt lockout on
+  `/admin/login` (10 failures/IP/15min — `lib/admin-auth.ts`, backed by a
+  `LoginAttempt` table, not just in-memory, since serverless instances don't
+  share memory); constant-time comparison everywhere a secret gets checked
+  (the admin session token, the Flutterwave webhook signature — a plain
+  `===` on either leaks timing information); baseline security headers
+  (`next.config.ts` — `X-Frame-Options`, `X-Content-Type-Options`,
+  `Referrer-Policy`, `Permissions-Policy`); every upload now has to be tied
+  to a real, owned booking and pass a per-folder MIME-type allowlist
+  (a passport photo can never be a PDF) instead of accepting anything with
+  no owner at all; and every candidate-supplied string (a name, a support
+  message) is HTML-escaped before landing in an email body
+  (`lib/html.ts`), not trusted as-is.
+- **Admin refund on cancellation** — cancelling a booking that was already
+  paid by card now attempts a Flutterwave refund automatically too (not
+  just the automatic full-sitting case above), and marking a seated
+  candidate a no-show once there's an actual exam day to do that for.
+- **Session capacity can't be lowered below what's already confirmed** —
+  editing a sitting's capacity down past the number of seated candidates is
+  rejected outright, rather than silently corrupting what
+  `seatNumberForIndex()` hands out next.
 - **Office operations**: editing an existing sitting after creation (not
   just create-once), cancelling a booking, exporting a CSV exam-day roster
   per sitting, adding a booking manually for a phone/walk-in candidate
@@ -134,11 +155,9 @@ at `/admin/login` first) before `/book` has anything to show.
   ÖSD itself requires. Revisit once Jason sends the actual list.
 - **Nothing here has been deployed, browser-tested end to end, or shown to
   Jason.** Typechecked and reviewed only.
-- **No admin-initiated refund.** The automatic refund only fires for the
-  specific "sitting filled up mid-card-payment" case. If an admin cancels a
-  booking that was already paid by card for an ordinary reason (a genuine
-  cancellation request, a duplicate), nothing refunds it automatically —
-  that still has to be done by hand, same as it would with a bank transfer.
-- **`no_show` is a documented status with no admin action to set it yet.**
-  Worth adding once there's an actual exam day to mark attendance for —
-  premature before then.
+- **No production database has ever run the login-lockout check.** The
+  logic is reviewed and matches the same tested pattern as the booking/
+  support rate limits, but the exact "10 failures locks out" threshold has
+  only been confirmed to degrade gracefully (no crash) against an
+  unreachable placeholder database, not verified end-to-end against a real
+  one — there's been nothing real to lock out yet.

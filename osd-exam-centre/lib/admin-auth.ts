@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
+import { prisma } from "@/lib/prisma";
 
 /**
  * Deliberately minimal: one shared admin password (ADMIN_PASSWORD), no user
@@ -43,7 +44,13 @@ export function createSessionToken(): string {
 function verifySessionToken(token: string): boolean {
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return false;
-  if (sign(payload) !== signature) return false;
+  const expected = sign(payload);
+  // Constant-time, same reason as checkAdminPassword above — a plain `!==`
+  // on a secret comparison leaks timing information an attacker can use to
+  // guess it one byte at a time, however impractically slowly.
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
   const [, expiresRaw] = payload.split(":");
   const expires = Number(expiresRaw);
   return Number.isFinite(expires) && Date.now() < expires;
@@ -56,3 +63,44 @@ export async function isAdminRequest(): Promise<boolean> {
 }
 
 export const ADMIN_COOKIE_NAME = COOKIE_NAME;
+
+// ---------------------------------------------------------------------------
+// Login-attempt lockout
+// ---------------------------------------------------------------------------
+// ADMIN_PASSWORD is the entire authentication story for this app's back
+// office (see the module comment above) — a single guessable password with
+// no rate limit is a real way in, not a theoretical one. Ten wrong attempts
+// from one IP within fifteen minutes locks that IP out for the rest of the
+// window; a genuine admin who mistyped it a few times just waits.
+//
+// Trade-off worth knowing about: before this, /admin/login needed nothing
+// but ADMIN_PASSWORD itself — no database call at all. Checking the lockout
+// means every login attempt now reads LoginAttempt first, so a database
+// outage means nobody can sign in, even with the correct password, instead
+// of only "nobody can see live bookings". That's the right failure mode —
+// failing closed on a security check beats failing open — but it is a new
+// dependency this route didn't have before, confirmed while testing this
+// against an unreachable database: every attempt returned a generic 500
+// rather than ever reaching the "wrong password" check.
+
+const LOCKOUT_MAX_FAILURES = 10;
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+
+export function clientIp(req: Request): string {
+  // Vercel (and most proxies) set this; the first entry is the original
+  // client. Falls back to a shared bucket in local dev, where there is no
+  // proxy setting it at all — still better than no limit than none.
+  const forwarded = req.headers.get("x-forwarded-for");
+  return forwarded?.split(",")[0]?.trim() || "unknown";
+}
+
+export async function isLockedOut(ip: string): Promise<boolean> {
+  const recentFailures = await prisma.loginAttempt.count({
+    where: { ip, success: false, createdAt: { gte: new Date(Date.now() - LOCKOUT_WINDOW_MS) } },
+  });
+  return recentFailures >= LOCKOUT_MAX_FAILURES;
+}
+
+export async function recordLoginAttempt(ip: string, success: boolean): Promise<void> {
+  await prisma.loginAttempt.create({ data: { ip, success } });
+}

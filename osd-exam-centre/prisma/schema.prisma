@@ -183,3 +183,16 @@ model SupportMessage {
   @@index([status, createdAt])
   @@index([bookingId])
 }
+
+/// Every /admin/login attempt, success or failure — the only thing standing
+/// between the internet and the admin back office is ADMIN_PASSWORD (see
+/// lib/admin-auth.ts), so brute-forcing it is a real attack surface, not a
+/// theoretical one. See lib/admin-auth.ts recordLoginAttempt/isLockedOut.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([ip, createdAt])
+}

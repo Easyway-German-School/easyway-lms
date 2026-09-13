@@ -30,10 +30,17 @@ type Booking = {
   session: { title: string; level: string; venueName: string; venueAddress: string; startDate: string; endDate: string };
 };
 
-async function uploadFile(file: File, folder: string): Promise<string> {
+/**
+ * Every upload is tied to the booking it belongs to — the endpoint verifies
+ * `reference`+`email` own a real booking before accepting anything, closing
+ * off /api/upload as an anonymous file-drop unrelated to any booking.
+ */
+async function uploadFile(file: File, folder: string, reference: string, email: string): Promise<string> {
   const form = new FormData();
   form.append("file", file);
   form.append("folder", folder);
+  form.append("reference", reference);
+  form.append("email", email);
   const res = await fetch("/api/upload", { method: "POST", body: form });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "Upload failed");
@@ -234,7 +241,7 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
     setSubmitting(true);
     setError("");
     try {
-      const url = await uploadFile(slipFile, "slips");
+      const url = await uploadFile(slipFile, "slips", booking.referenceCode, email);
       const res = await fetch(`/api/bookings/${booking.referenceCode}/payment`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -356,7 +363,7 @@ function DocumentsPanel({ booking, email, onChange }: { booking: Booking; email:
     setBusy(kind);
     setError("");
     try {
-      const url = await uploadFile(file, kind === "photo" ? "photos" : "documents");
+      const url = await uploadFile(file, kind === "photo" ? "photos" : "documents", booking.referenceCode, email);
       const res = await fetch(`/api/bookings/${booking.referenceCode}/documents`, {
         method: "POST",
         headers: { "content-type": "application/json" },

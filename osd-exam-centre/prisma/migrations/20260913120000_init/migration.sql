@@ -85,6 +85,16 @@ CREATE TABLE "SupportMessage" (
     CONSTRAINT "SupportMessage_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "LoginAttempt" (
+    "id" TEXT NOT NULL,
+    "ip" TEXT NOT NULL,
+    "success" BOOLEAN NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "LoginAttempt_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE INDEX "ExamSession_published_startDate_idx" ON "ExamSession"("published", "startDate");
 
@@ -108,6 +118,9 @@ CREATE INDEX "SupportMessage_status_createdAt_idx" ON "SupportMessage"("status",
 
 -- CreateIndex
 CREATE INDEX "SupportMessage_bookingId_idx" ON "SupportMessage"("bookingId");
+
+-- CreateIndex
+CREATE INDEX "LoginAttempt_ip_createdAt_idx" ON "LoginAttempt"("ip", "createdAt");
 
 -- AddForeignKey
 ALTER TABLE "ExamModulePrice" ADD CONSTRAINT "ExamModulePrice_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "ExamSession"("id") ON DELETE CASCADE ON UPDATE CASCADE;

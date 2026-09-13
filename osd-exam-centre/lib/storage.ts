@@ -26,7 +26,13 @@ function s3Configured(): boolean {
 }
 
 export async function storeUpload(buffer: Buffer, opts: { folder: string; filename: string; contentType: string }): Promise<StoredFile> {
-  const ext = path.extname(opts.filename) || guessExtension(opts.contentType);
+  // The extension comes from the (now server-validated — see
+  // app/api/upload/route.ts) content type, never from the client-supplied
+  // filename. Trusting the filename's extension would let someone upload
+  // content typed "image/jpeg" but named "whatever.exe" and have it land in
+  // the bucket with a .exe extension — a content-type/extension mismatch
+  // that serves no purpose except confusing whatever opens it later.
+  const ext = guessExtension(opts.contentType);
   const key = `${opts.folder}/${randomUUID()}${ext}`;
 
   if (s3Configured()) {
@@ -63,6 +69,7 @@ async function storeToS3(buffer: Buffer, key: string, contentType: string): Prom
 function guessExtension(contentType: string): string {
   if (contentType.includes("png")) return ".png";
   if (contentType.includes("webp")) return ".webp";
+  if (contentType.includes("heic") || contentType.includes("heif")) return ".heic";
   if (contentType.includes("pdf")) return ".pdf";
   return ".jpg";
 }

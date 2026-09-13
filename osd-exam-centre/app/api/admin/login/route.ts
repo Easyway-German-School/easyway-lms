@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { checkAdminPassword, createSessionToken, ADMIN_COOKIE_NAME } from "@/lib/admin-auth";
+import { checkAdminPassword, clientIp, createSessionToken, isLockedOut, recordLoginAttempt, ADMIN_COOKIE_NAME } from "@/lib/admin-auth";
+import { jsonRoute } from "@/lib/api-route";
 
-export async function POST(req: NextRequest) {
+export const POST = jsonRoute(async (req: NextRequest) => {
   const { password } = await req.json().catch(() => ({ password: "" }));
   if (!process.env.ADMIN_PASSWORD) {
     return NextResponse.json({ error: "ADMIN_PASSWORD is not configured on the server." }, { status: 503 });
   }
-  if (!checkAdminPassword(String(password || ""))) {
+
+  const ip = clientIp(req);
+  if (await isLockedOut(ip)) {
+    return NextResponse.json({ error: "Too many failed attempts — try again later." }, { status: 429 });
+  }
+
+  const correct = checkAdminPassword(String(password || ""));
+  await recordLoginAttempt(ip, correct);
+  if (!correct) {
     return NextResponse.json({ error: "Wrong password" }, { status: 401 });
   }
 
@@ -19,4 +28,4 @@ export async function POST(req: NextRequest) {
     maxAge: 60 * 60 * 12,
   });
   return res;
-}
+});

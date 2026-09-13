@@ -4,6 +4,7 @@ import { seatNumberForIndex } from "@/lib/seat-numbering";
 import { sendEmail } from "@/lib/email";
 import { bookingLink } from "@/lib/config";
 import { refundCardPayment, verifyCardPayment } from "@/lib/payments";
+import { escapeHtml } from "@/lib/html";
 
 export const MODULES = ["reading", "listening", "writing", "speaking"] as const;
 export type ExamModule = (typeof MODULES)[number];
@@ -184,7 +185,7 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
     to: booking.email,
     subject: `Booking received — ${session.title}`,
     html: `
-      <p>Hello ${booking.fullName},</p>
+      <p>Hello ${escapeHtml(booking.fullName)},</p>
       <p>We've received your booking for <strong>${session.title}</strong> at ${session.venueName}.</p>
       <p><strong>Reference:</strong> ${booking.referenceCode}<br/>
          <strong>Amount due:</strong> ₦${feeTotal.toLocaleString()}</p>
@@ -342,7 +343,7 @@ export async function confirmBookingPayment(
       to: booking.email,
       subject: `Seat confirmed — ${session?.title ?? "your ÖSD exam"}`,
       html: `
-        <p>Hello ${booking.fullName},</p>
+        <p>Hello ${escapeHtml(booking.fullName)},</p>
         <p>Your payment has been confirmed. Your seat has been automatically reserved.</p>
         <p><strong>You are in seat no. ${seatNumber}.</strong></p>
         <p><a href="${bookingLink(booking.referenceCode, booking.email)}">Print your admission slip</a> and bring your
@@ -405,7 +406,7 @@ async function refundFilledSittingCharge(bookingId: string, transactionId: strin
     to: booking.email,
     subject: "Your seat could not be reserved — refund in progress",
     html: `
-      <p>Hello ${booking.fullName},</p>
+      <p>Hello ${escapeHtml(booking.fullName)},</p>
       <p>Your card was charged ₦${amount.toLocaleString()} for booking ${booking.referenceCode}, but the sitting filled up
          in the moments before your payment was confirmed — we're sorry for that.</p>
       <p>${refund.ok
@@ -429,7 +430,7 @@ export async function rejectBookingPayment(bookingId: string, reason: string): P
   await sendEmail({
     to: booking.email,
     subject: "We couldn't confirm your payment",
-    html: `<p>Hello ${booking.fullName},</p><p>We could not confirm your bank transfer: ${reason}</p><p>Your booking is still held — please try again from your booking page.</p>`,
+    html: `<p>Hello ${escapeHtml(booking.fullName)},</p><p>We could not confirm your bank transfer: ${escapeHtml(reason)}</p><p>Your booking is still held — please try again from your booking page.</p>`,
   });
 }
 
@@ -446,16 +447,60 @@ export async function rejectBookingPayment(bookingId: string, reason: string): P
  * Fine for the volumes this runs at (a handful of cancellations per
  * sitting); revisit with a real seat-slot table if that stops being true.
  */
-export async function cancelBooking(bookingId: string, reason: string): Promise<void> {
+/**
+ * An admin cancels a booking that had already been paid by card — a genuine
+ * cancellation request, a duplicate, or a mistake. Distinct from the
+ * automatic refund in settleCardPayment(), which only fires for one
+ * specific case (a sitting filling up mid-payment); this is the general
+ * "an admin decided to cancel a paid booking" path. Bank-transfer refunds
+ * are never automated here — that money never touched this app's payment
+ * processor, so there is nothing for it to refund through an API.
+ */
+export async function cancelBooking(bookingId: string, reason: string): Promise<{ refundAttempted: boolean; refundOk: boolean }> {
+  const before = await prisma.examBooking.findUnique({ where: { id: bookingId } });
+  if (!before) return { refundAttempted: false, refundOk: false };
+
+  const shouldRefund = Boolean(before.paymentStatus === "paid" && before.paymentMethod === "card" && before.transferReference);
+  let refundOk = false;
+
+  if (shouldRefund) {
+    const refund = await refundCardPayment(before.transferReference!, before.feeTotal);
+    refundOk = refund.ok;
+  }
+
   const booking = await prisma.examBooking.update({
     where: { id: bookingId },
-    data: { status: "cancelled" },
+    data: {
+      status: "cancelled",
+      ...(shouldRefund ? { paymentStatus: refundOk ? "refund_pending" : "refund_failed", ...(refundOk ? { refundRequestedAt: new Date() } : {}) } : {}),
+    },
   });
+
   await sendEmail({
     to: booking.email,
     subject: `Booking cancelled — ${booking.referenceCode}`,
-    html: `<p>Hello ${booking.fullName},</p><p>Your booking ${booking.referenceCode} has been cancelled: ${reason}</p><p>If this is unexpected, use "Need help?" from <a href="${bookingLink(booking.referenceCode, booking.email)}">your booking page</a>.</p>`,
+    html: `
+      <p>Hello ${escapeHtml(booking.fullName)},</p>
+      <p>Your booking ${booking.referenceCode} has been cancelled: ${escapeHtml(reason)}</p>
+      ${shouldRefund
+        ? refundOk
+          ? `<p>Your ₦${booking.feeTotal.toLocaleString()} card payment has been refunded — it can take a few business days to reflect.</p>`
+          : `<p>Your ₦${booking.feeTotal.toLocaleString()} card payment could not be refunded automatically — the office has been notified and will refund you directly.</p>`
+        : ""}
+      <p>If this is unexpected, use "Need help?" from <a href="${bookingLink(booking.referenceCode, booking.email)}">your booking page</a>.</p>
+    `,
   });
+
+  if (shouldRefund && !refundOk) {
+    console.error(`AUTOMATIC REFUND FAILED on admin cancellation for booking ${bookingId}. Manual refund required.`);
+  }
+
+  return { refundAttempted: shouldRefund, refundOk };
+}
+
+/** Exam day: mark a seated candidate as not having shown up. */
+export async function markNoShow(bookingId: string): Promise<void> {
+  await prisma.examBooking.update({ where: { id: bookingId }, data: { status: "no_show" } });
 }
 
 export async function reviewBookingDocuments(
@@ -474,6 +519,6 @@ export async function reviewBookingDocuments(
   await sendEmail({
     to: booking.email,
     subject: "Please re-upload a document",
-    html: `<p>Hello ${booking.fullName},</p><p>We couldn't accept one of your documents: ${reason ?? "please re-upload a clearer copy."}</p><p>Go back to your booking to try again.</p>`,
+    html: `<p>Hello ${escapeHtml(booking.fullName)},</p><p>We couldn't accept one of your documents: ${escapeHtml(reason ?? "please re-upload a clearer copy.")}</p><p>Go back to your booking to try again.</p>`,
   });
 }

@@ -33,7 +33,11 @@ name too. Revisit only if this ever gets licensed to another school.
 2. Set environment variables (Production, and Preview if you want PR
    previews to work) — see `.env.example` for the full list with comments.
    At minimum to boot at all:
-   - `DATABASE_URL` (step 2)
+   - `DATABASE_URL` (step 2) — note this now gates `/admin/login` itself, not
+     just the dashboard behind it: checking the login-attempt lockout needs
+     a database read, so a database outage means nobody can sign in at all
+     (even with the right password) rather than only "can't see bookings".
+     A deliberate fail-closed trade-off — see `lib/admin-auth.ts`.
    - `ADMIN_PASSWORD` — pick a real one, this gates the whole back office
    - `SITE_URL` — the domain from step 1, e.g. `https://exams.easywayschoollms.com.ng`
    - `EXAM_BANK_ACCOUNT_NUMBER` (+ `EXAM_BANK_NAME`/`EXAM_BANK_ACCOUNT_NAME`
