@@ -40,7 +40,6 @@ export async function nudgeStudentsWithAssignmentsAvailable() {
   const students = await prisma.student.findMany({
     where: {
       status: "active",
-      userId: { not: null },
     },
     orderBy: { createdAt: "asc" },
     take: SCAN_LIMIT,
