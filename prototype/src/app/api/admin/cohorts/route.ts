@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { batchFromAdmission, monthNameToIndex, MONTH_NAMES } from "@/lib/batch";
+import { classifyRoster } from "@/lib/cohort-classify-server";
 import { readCurrentIntake } from "@/lib/intake-server";
 
 /**
@@ -65,6 +66,8 @@ export async function GET() {
         status: true,
         studentCode: true,
         classesStartedAt: true,
+        levelCompletedFor: true,
+        createdAt: true,
         admission: true,
         branch: { select: { name: true } },
         user: { select: { name: true, email: true } },
@@ -115,14 +118,34 @@ export async function GET() {
       byId[id] = rest;
     }
 
+    const currentIntake = await readCurrentIntake(tenantId);
+
+    // The read-only half: is each of these starting a batch or mid-course, and
+    // does their stored batch month agree with the evidence? No writes — the
+    // office reads this, eyeballs it, and fixes anything wrong by hand with the
+    // existing "move to month" control.
+    const { byId: classifications, tally: classTally } = await classifyRoster(
+      students.map((s) => ({
+        id: s.id,
+        level: s.level,
+        admission: s.admission,
+        createdAt: s.createdAt,
+        classesStartedAt: s.classesStartedAt,
+        levelCompletedFor: s.levelCompletedFor,
+      })),
+      currentIntake,
+    );
+
     return NextResponse.json({
       groups: groupList,
       students: byId,
       total: rows.length,
       truncated: rows.length >= MAX_STUDENTS,
       noBatch: rows.filter((r) => !r.batch).length,
-      currentIntake: await readCurrentIntake(tenantId),
+      currentIntake,
       months: MONTH_NAMES,
+      classifications,
+      classTally,
     });
   } catch (error) {
     console.error("Failed to load cohorts:", error);

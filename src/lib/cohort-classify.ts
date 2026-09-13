@@ -162,7 +162,10 @@ export function classifyCohortStatus(signals: CohortSignals): CohortClassificati
       : null;
     const setAt = toDate(override.setAt);
     const suggestedStartedAt = startedOn ? startedOn.toISOString() : null;
-    const confirmedBy = override.by === "student" ? "Confirmed by you" : "Confirmed by the office";
+    // This evidence line is read by an admin on /admin/cohorts, never by the
+    // student — "by the office" covers an admin name too, so "you" here would
+    // mean the admin, not the student who actually answered.
+    const confirmedBy = override.by === "student" ? "Confirmed by the student" : "Confirmed by the office";
 
     const suggestedBatch = midCourse
       ? signals.currentEnrolmentBatchMonth ??
