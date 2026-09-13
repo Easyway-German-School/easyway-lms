@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { secureCompare } from "@/lib/secure-compare";
 
 /**
  * Deliberately minimal: one shared admin password (ADMIN_PASSWORD), no user
@@ -30,9 +31,7 @@ function sign(payload: string): string {
 export function checkAdminPassword(candidate: string): boolean {
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected) return false;
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(expected);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  return secureCompare(candidate, expected);
 }
 
 export function createSessionToken(): string {
@@ -48,9 +47,7 @@ function verifySessionToken(token: string): boolean {
   // Constant-time, same reason as checkAdminPassword above — a plain `!==`
   // on a secret comparison leaks timing information an attacker can use to
   // guess it one byte at a time, however impractically slowly.
-  const a = Buffer.from(expected);
-  const b = Buffer.from(signature);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  if (!secureCompare(expected, signature)) return false;
   const [, expiresRaw] = payload.split(":");
   const expires = Number(expiresRaw);
   return Number.isFinite(expires) && Date.now() < expires;

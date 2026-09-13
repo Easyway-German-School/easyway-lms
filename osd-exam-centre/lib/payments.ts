@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { secureCompare } from "@/lib/secure-compare";
 
 /**
  * Manual Moniepoint bank-transfer details shown to every candidate. Same
@@ -160,7 +160,5 @@ export function verifyFlutterwaveWebhookSignature(headerValue: string | null): b
   if (!expected || !headerValue) return false;
   // Constant-time: a plain `===` on a secret leaks timing information an
   // attacker could use to guess it byte by byte.
-  const a = Buffer.from(expected);
-  const b = Buffer.from(headerValue);
-  return a.length === b.length && timingSafeEqual(a, b);
+  return secureCompare(expected, headerValue);
 }

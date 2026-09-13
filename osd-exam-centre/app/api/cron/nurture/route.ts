@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runNurtureSweep } from "@/lib/nurture";
 import { jsonRoute } from "@/lib/api-route";
+import { secureCompare } from "@/lib/secure-compare";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,8 @@ export const dynamic = "force-dynamic";
  */
 export const GET = jsonRoute(async (req: NextRequest) => {
   const secret = process.env.CRON_SECRET;
-  if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
+  const provided = req.headers.get("authorization") ?? "";
+  if (!secret || !secureCompare(provided, `Bearer ${secret}`)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const result = await runNurtureSweep();
