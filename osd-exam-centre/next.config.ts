@@ -45,6 +45,15 @@ const nextConfig: NextConfig = {
           // a third-party site a candidate clicks through to.
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+          // Once a browser has seen this over HTTPS once, refuse to ever
+          // load it over plain HTTP again — closes off a downgrade/
+          // man-in-the-middle window for a site taking real payments. Scoped
+          // to whatever host actually serves this response (a subdomain like
+          // exams.easywayschoollms.com.ng), so it can't affect sibling
+          // subdomains or the main domain. No `preload` — that's a much
+          // harder commitment (submission to browsers' built-in preload
+          // list) that isn't this session's call to make.
+          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
         ],
       },
     ];
