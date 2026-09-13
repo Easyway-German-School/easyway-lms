@@ -22,6 +22,8 @@ import MomentDock from "@/components/MomentDock";
 import GameTurnToast from "@/components/GameTurnToast";
 import DailyBriefing from "@/components/DailyBriefing";
 import LessonCompleteCelebration from "@/components/LessonCompleteCelebration";
+import TutorialRuntime from "@/components/TutorialRuntime";
+import TutorialsPromoMoment from "@/components/moment/TutorialsPromoMoment";
 import BetaFeedbackPrompt from "@/components/BetaFeedbackPrompt";
 import StudentUsageTracker from "@/components/StudentUsageTracker";
 import NotificationCenter from "@/components/NotificationCenter";
@@ -575,6 +577,11 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           `hasAccess` because the bell notification it mirrors is never sent
           to a student who is still locked out. See AssignmentsOpenMoment. */}
       {hasAccess && <AssignmentsOpenMoment />}
+
+      {/* "Come see the new Tutorials page" — a one-time advert for every
+          already-unlocked student, aimed at anyone finding the LMS hard to
+          navigate. See TutorialsPromoMoment. */}
+      {hasAccess && <TutorialsPromoMoment />}
 
       {/* Fires on a genuine server-validated completion — see
           celebrateLessonComplete() in LessonCompleteCelebration.tsx. */}

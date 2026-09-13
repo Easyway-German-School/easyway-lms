@@ -116,7 +116,8 @@ export type MomentId =
   | "poster"
   | "game-turn"
   | "profile-details"
-  | "install-offline-notes";
+  | "install-offline-notes"
+  | "tutorials-promo";
 
 type Kind = "toast" | "modal";
 
@@ -336,6 +337,18 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Notes in your pocket",
     dockBlurb: "Install the app to read your class notes with no signal.",
+  },
+  /**
+   * "Come see the new Tutorials page." A one-time feature advert for every
+   * already-unlocked student, not orientation-critical — priority sits just
+   * above the offline-notes upsell, the other "soft advert" on this list, and
+   * well below anything logistics-related.
+   */
+  "tutorials-promo": {
+    priority: 38,
+    kind: "modal",
+    dockLabel: "Watch a tutorial",
+    dockBlurb: "Becca recorded short tours of the portal, if you want a hand finding your way around.",
   },
 };
 
