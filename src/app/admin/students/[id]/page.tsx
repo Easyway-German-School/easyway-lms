@@ -56,7 +56,7 @@ import SchedulePreview from "@/components/admin/SchedulePreview";
 
 type Dossier = {
   generatedAt: string;
-  viewer: { adminRole: string; canSeeMoney: boolean; canRecordPayment: boolean };
+  viewer: { adminRole: string; canSeeMoney: boolean; canRecordPayment: boolean; sharedStudentsEnabled: boolean };
   identity: {
     id: string;
     studentCode: string | null;
@@ -74,6 +74,7 @@ type Dossier = {
     examReadiness: number;
     branch: { id: string; name: string; mode: string; location: string | null } | null;
     tutor: { id: string; name: string; email: string | null; status: string } | null;
+    coTutors: Array<{ id: string; name: string; email: string | null }>;
     registeredAt: string;
     updatedAt: string;
     daysEnrolled: number;
@@ -397,6 +398,98 @@ function TutorField({
           This tutor is {current.status.replace("_", " ")}.
         </p>
       ) : null}
+      {problem ? <p className="mt-1 text-[11px] font-semibold text-red-600">{problem}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * Extra tutors beyond the primary one — same rule as the roster page's Add/Edit
+ * form (see lib/tenant/features.ts): only when this school has turned sharing
+ * on, and only for an online/hybrid student. Saves immediately, like TutorField
+ * above, rather than waiting for the bigger "Edit details" modal.
+ */
+function CoTutorsField({
+  studentId,
+  primaryTutorId,
+  current,
+  onChanged,
+}: {
+  studentId: string;
+  primaryTutorId: string | null;
+  current: Array<{ id: string; name: string }>;
+  onChanged: () => void;
+}) {
+  const [tutors, setTutors] = useState<Array<{ id: string; name: string }>>([]);
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const response = await fetch("/api/admin/lecturers", { cache: "no-store" });
+      if (!response.ok || cancelled) return;
+      const payload = await response.json().catch(() => ({}));
+      if (cancelled) return;
+      setTutors(
+        (payload.lecturers || []).map((tutor: { id: string; user: { name: string | null; email: string } }) => ({
+          id: tutor.id,
+          name: tutor.user.name || tutor.user.email,
+        })),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function toggle(lecturerId: string, checked: boolean) {
+    const next = checked
+      ? [...current.map((c) => c.id), lecturerId]
+      : current.map((c) => c.id).filter((id) => id !== lecturerId);
+    setSaving(true);
+    setProblem("");
+    try {
+      const response = await fetch("/api/admin/students", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId, coTutorIds: next }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Could not change this student's extra tutors");
+      }
+      onChanged();
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "Could not change this student's extra tutors");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const currentIds = new Set(current.map((c) => c.id));
+  const options = tutors.filter((tutor) => tutor.id !== primaryTutorId);
+
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Additional tutors</p>
+      <div className="mt-1 max-h-32 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--background)] p-2">
+        {options.length === 0 ? (
+          <p className="px-1 py-1 text-xs text-[var(--muted)]">No other tutors to add.</p>
+        ) : (
+          options.map((tutor) => (
+            <label key={tutor.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm">
+              <input
+                type="checkbox"
+                checked={currentIds.has(tutor.id)}
+                disabled={saving}
+                onChange={(event) => void toggle(tutor.id, event.target.checked)}
+              />
+              <span>{tutor.name}</span>
+            </label>
+          ))
+        )}
+      </div>
       {problem ? <p className="mt-1 text-[11px] font-semibold text-red-600">{problem}</p> : null}
     </div>
   );
@@ -1169,6 +1262,15 @@ export default function StudentDossierPage() {
                 }
                 onChanged={() => void load(false)}
               />
+              {data.viewer.sharedStudentsEnabled &&
+              (identity.deliveryMode === "hybrid" || identity.deliveryMode === "online") ? (
+                <CoTutorsField
+                  studentId={identity.id}
+                  primaryTutorId={identity.tutor?.id ?? null}
+                  current={identity.coTutors}
+                  onChanged={() => void load(false)}
+                />
+              ) : null}
               <Field label="Exam readiness" value={`${identity.examReadiness}%`} />
               <Field label="Registered" value={when(identity.registeredAt)} />
               <Field label="Graduated" value={when(identity.graduationDate)} />
