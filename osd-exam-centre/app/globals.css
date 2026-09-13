@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+/**
+ * Deliberately NOT the LMS's playful, gamified look (Becca, journey maps,
+ * teal/orange). An exam-registration authority reads as serious: navy, gold,
+ * a lot of quiet whitespace, a serif for anything official-sounding. Think
+ * "government portal that happens to have good typography", not "app".
+ */
+:root {
+  --ink: #10203f;
+  --ink-soft: #3c4a68;
+  --paper: #fbfaf6;
+  --paper-raised: #ffffff;
+  --line: #dcdcd2;
+  --navy: #0b1f3a;
+  --navy-deep: #071328;
+  --gold: #b8912f;
+  --gold-soft: #f4ecd8;
+  --red: #9b2226;
+  --red-soft: #fbeceb;
+  --green: #1f6f4a;
+  --green-soft: #e9f5ee;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-navy: var(--navy);
+  --color-gold: var(--gold);
+  --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.font-serif-display {
+  font-family: var(--font-serif);
+}
+
+.seal-border {
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(11, 31, 58, 0.04);
+}
+
+.step-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--line);
+}
+.step-dot[data-active="true"] {
+  background: var(--gold);
+}
+.step-dot[data-done="true"] {
+  background: var(--navy);
+}
+
+/* A printed admission slip should look like a document, not a webpage. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-ticket,
+  #printable-ticket * {
+    visibility: visible;
+  }
+  #printable-ticket {
+    position: absolute;
+    inset: 0;
+    box-shadow: none;
+  }
+}
