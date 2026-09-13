@@ -37,30 +37,51 @@ needed for a real production deploy:
    migration was already applied by hand from this session, so Vercel's
    first build will find it a no-op and move on.
 
-## 3. Vercel project — before it's usable at all
+## 3. Vercel project — DONE (2026-09-13)
 
-1. New Vercel project, same GitHub repo (`easyway-lms`), **Root Directory**
-   set to `osd-exam-centre`. Vercel auto-detects Next.js from there.
-2. Set environment variables (Production, and Preview if you want PR
-   previews to work) — see `.env.example` for the full list with comments.
-   At minimum to boot at all:
-   - `DATABASE_URL` and `DIRECT_DATABASE_URL` (step 2 — Neon's connection
-     page gives you both; the pooled one has "-pooler" in the hostname, use
-     that for `DATABASE_URL`) — note `DATABASE_URL` now gates `/admin/login`
-     itself, not just the dashboard behind it: checking the login-attempt
-     lockout needs a database read, so a database outage means nobody can
-     sign in at all (even with the right password) rather than only "can't
-     see bookings". A deliberate fail-closed trade-off — see
-     `lib/admin-auth.ts`.
-   - `ADMIN_PASSWORD` — pick a real one, this gates the whole back office
-   - `SITE_URL` — the domain from step 1, e.g. `https://exams.easywayschoollms.com.ng`
-   - `EXAM_BANK_ACCOUNT_NUMBER` (+ `EXAM_BANK_NAME`/`EXAM_BANK_ACCOUNT_NAME`
-     if they differ from the defaults) — without this the bank-transfer
-     panel just tells candidates to "ask the office" for the account number
-3. Attach the domain from step 1 to this Vercel project (Vercel dashboard →
-   Domains). If it's a subdomain of `easywayschoollms.com.ng`, that's a CNAME
-   record wherever that domain's DNS is managed.
-4. Deploy.
+~~New Vercel project~~ — done: `easyway-osd-exam-centre`
+(`prj_gMofUcjuAF8gdIkEB1ZqDkO12RTy`, team `jaysmithstrategist-2324's
+projects`), linked to the same GitHub repo, **Root Directory**
+`osd-exam-centre`, function region `fra1` (matches the Neon database's
+`eu-central-1`, for latency). Env vars set for the `production` target:
+`DATABASE_URL`, `DIRECT_DATABASE_URL` (step 2's real values),
+`ADMIN_PASSWORD` and `ADMIN_SESSION_SECRET` (freshly generated, not a
+placeholder — the password is `53kUIpQUEuOoKKAe`, change it in Vercel's
+project settings any time you want a different one), `CRON_SECRET`
+(generated), and `SITE_URL` (temporarily the Vercel-assigned domain until
+step 1's real domain is attached — **update this once the domain is live**,
+since it drives every link in every email this app sends). Not yet set:
+`EXAM_BANK_ACCOUNT_NUMBER`/`EXAM_BANK_NAME`/`EXAM_BANK_ACCOUNT_NAME` (no
+real account number handed over yet — until then the bank-transfer panel
+tells candidates to "ask the office"), and the object-storage/email/
+Flutterwave vars covered in section 4 below. Preview-target env vars were
+deliberately left unset — this project has only one Neon database so far,
+and a PR-preview deployment writing test data into that same database
+would be a real problem; set up a second Neon branch first if PR previews
+need to work end to end.
+
+**Deployment protection disabled on purpose.** Vercel's team-wide default
+("Deployment Protection: all except custom domains") would have kept the
+`*.vercel.app` URL behind a Vercel-login wall — fine for the LMS's internal
+tool, wrong for a public booking site that needs to be reachable by anyone
+before a custom domain even exists. Turned off (`ssoProtection: null`) for
+this project specifically; the LMS's own project setting was untouched.
+
+**Verified live, not just "build succeeded"**: deployed the
+`feat/osd-exam-centre` branch directly as this project's production build
+(the only branch with the app's code, since PR #74 hasn't merged to `main`
+yet — merge it whenever you're ready to review, and future pushes to
+`main` will auto-deploy the normal way). Confirmed against the actual
+deployed URL: `/`, `/book` both 200; `/api/sessions` returns real JSON
+from the real database (`{"sessions":[]}`, matching the clean state from
+step 2); admin login with the generated password works and returns a real
+(empty) bookings list; all five security headers present with the exact
+values this app's `next.config.ts` sets (not Vercel's platform defaults);
+the daily nurture cron auto-registered from `vercel.json`.
+
+Once the real domain (step 1) is ready: attach it in Vercel dashboard →
+Domains (a CNAME record wherever `easywayschoollms.com.ng`'s DNS is
+managed), then update `SITE_URL` to match.
 
 ## 4. Before real candidates use it — do these before announcing it publicly
 
