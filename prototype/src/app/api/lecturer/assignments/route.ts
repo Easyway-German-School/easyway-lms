@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { parseQuestions, totalPoints, type Question } from "@/lib/assignments";
 import { readAssignment, studentWhereForLecturerScope } from "@/lib/lecturer-assignment";
+import { notify, KIND } from "@/lib/notify";
 
 /** Tutors create and review assignments for a level (optionally one branch). */
 
@@ -187,6 +188,10 @@ export async function POST(req: NextRequest) {
       auth.lecturerId,
     );
 
+    const resolvedSessionSlot = ["morning", "afternoon", "evening", "weekend"].includes(String(sessionSlot))
+      ? String(sessionSlot)
+      : null;
+
     const created = await prisma.assignment.create({
       data: {
         title: String(title).trim(),
@@ -199,9 +204,7 @@ export async function POST(req: NextRequest) {
          * morning A1 class can now set homework for the morning A1 class,
          * rather than for three cohorts taught by three different people.
          */
-        sessionSlot: ["morning", "afternoon", "evening", "weekend"].includes(String(sessionSlot))
-          ? String(sessionSlot)
-          : null,
+        sessionSlot: resolvedSessionSlot,
         type: kind,
         timeLimitMinutes: kind === "quiz" && timeLimitMinutes ? Number(timeLimitMinutes) : null,
         questions: kind === "quiz" ? (parsed as object[]) : undefined,
@@ -210,6 +213,38 @@ export async function POST(req: NextRequest) {
         targets: targetIds.length ? { create: targetIds.map((studentId) => ({ studentId })) } : undefined,
       },
     });
+
+    if (created.published) {
+      const dueLine = created.dueAt ? ` Due ${created.dueAt.toLocaleDateString()}.` : "";
+      const notifyPayload = {
+        kind: KIND.assignmentDue,
+        severity: "info" as const,
+        title: kind === "quiz" ? "New quiz to take" : "New assignment to submit",
+        message: `"${created.title}" was just set for you.${dueLine} Go to Assignments in the portal to submit it.`,
+        link: "/assignment",
+        dedupeKey: `assignment-created:${created.id}`,
+        push: true,
+      };
+
+      // Named students get it directly; an untargeted assignment reaches
+      // everyone at the level (and branch/sitting, if the tutor narrowed it) —
+      // the exact same audience `visibleTo()` in /api/student/assignments
+      // will show it to.
+      await notify(
+        targetIds.length
+          ? { ...notifyPayload, to: { studentIds: targetIds } }
+          : {
+              ...notifyPayload,
+              to: {
+                students: {
+                  level: normalizedLevel,
+                  branchId: branchId || null,
+                  sessionSlot: resolvedSessionSlot,
+                },
+              },
+            },
+      ).catch((error) => console.error("Assignment-created notification failed", error));
+    }
 
     return NextResponse.json({ assignment: created, targeted: targetIds.length });
   } catch (error) {
