@@ -64,6 +64,13 @@ component library — deliberately small.
   (practise nudges with a link to prep classes). Point a scheduler (Vercel
   Cron via `vercel.json`, or any cron) at it daily with
   `Authorization: Bearer $CRON_SECRET`.
+- **"Need help?"** (`lib/support.ts`, `/admin/support`) — a plain contact-the-
+  office form, deliberately separate from the nurture drip's prep-class
+  link. On the booking page (prefilled), the printed slip's "what to
+  bring" section, and the site footer for anyone who hasn't booked yet.
+  Saved to the database either way; emailed to `OFFICE_NOTIFICATION_EMAIL`
+  when it's set — there's no in-app admin notification system in an app
+  this small, so email is the actual inbox.
 
 ## Local setup
 

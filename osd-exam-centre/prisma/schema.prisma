@@ -85,8 +85,8 @@ model ExamBooking {
   feeTotal Int
 
   // ----- payment -----
-  /// bank_transfer | card — card is a stub (see lib/payments.ts) until
-  /// Paystack/Flutterwave keys are wired up for this app specifically.
+  /// bank_transfer | card — bank_transfer is manual (an admin verifies a
+  /// slip); card settles automatically via Flutterwave. See lib/payments.ts.
   paymentMethod          String?
   /// unpaid | pending_verification | paid | rejected
   paymentStatus          String    @default("unpaid")
@@ -119,7 +119,32 @@ model ExamBooking {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  supportMessages SupportMessage[]
+
   @@index([sessionId])
   @@index([email])
   @@index([paymentStatus])
+}
+
+/// "Need help?" — a candidate messaging the office directly, distinct from
+/// the nurture drip's prep-class upsell link (see lib/nurture.ts). Tied to
+/// a booking when the candidate has one, but not required: someone with a
+/// question before they've registered can still reach the office.
+model SupportMessage {
+  id         String       @id @default(cuid())
+  bookingId  String?
+  booking    ExamBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  name    String
+  email   String
+  message String
+
+  /// open | resolved
+  status     String    @default("open")
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt])
+  @@index([bookingId])
 }

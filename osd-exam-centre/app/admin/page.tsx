@@ -81,6 +81,7 @@ export default function AdminDashboard() {
         <div className="flex items-center justify-between">
           <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Bookings</h1>
           <div className="flex gap-3">
+            <Link href="/admin/support" className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">Help requests</Link>
             <Link href="/admin/sessions" className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">Manage sittings</Link>
             <button onClick={logout} className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)]">Sign out</button>
           </div>

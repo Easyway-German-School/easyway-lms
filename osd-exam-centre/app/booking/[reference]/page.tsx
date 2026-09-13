@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
+import NeedHelp from "@/components/NeedHelp";
 
 type Booking = {
   referenceCode: string;
@@ -44,6 +45,7 @@ function BookingPageInner() {
   const params = useParams<{ reference: string }>();
   const search = useSearchParams();
   const email = search.get("email") ?? "";
+  const justBooked = search.get("justBooked") === "1";
 
   const [booking, setBooking] = useState<Booking | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
@@ -80,7 +82,7 @@ function BookingPageInner() {
         {booking.seatNumber !== null ? (
           <ConfirmedTicket booking={booking} />
         ) : (
-          <PendingBooking booking={booking} email={email} onChange={load} error={error} setError={setError} />
+          <PendingBooking booking={booking} email={email} onChange={load} error={error} setError={setError} justBooked={justBooked} />
         )}
 
         <DocumentsPanel booking={booking} email={email} onChange={load} />
@@ -155,6 +157,19 @@ function ConfirmedTicket({ booking }: { booking: Booking }) {
         </p>
       </div>
 
+      <div className="mt-8 rounded-sm border border-[var(--line)] p-5 print:hidden">
+        <p className="text-sm font-semibold text-[var(--navy)]">What to bring, and what not to do</p>
+        <ul className="mt-2 space-y-1.5 text-sm text-[var(--ink-soft)]">
+          <li>• This admission slip, printed, and your international passport's data page.</li>
+          <li>• A normal ballpoint pen — no pencils, no correction fluid.</li>
+          <li>• Arrive 30 minutes early. Latecomers may not be admitted.</li>
+          <li>• Phones and smart watches off and out of reach for the whole exam.</li>
+        </ul>
+        <div className="mt-4">
+          <NeedHelp bookingReference={booking.referenceCode} defaultName={booking.fullName} defaultEmail={booking.email} />
+        </div>
+      </div>
+
       <div className="mt-8 rounded-sm border border-[var(--line)] bg-[var(--gold-soft)]/30 p-5 print:hidden">
         <p className="text-sm font-semibold text-[var(--navy)]">Ready to prepare?</p>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">
@@ -168,7 +183,7 @@ function ConfirmedTicket({ booking }: { booking: Booking }) {
   );
 }
 
-function PendingBooking({ booking, email, onChange, error, setError }: { booking: Booking; email: string; onChange: () => void; error: string; setError: (s: string) => void }) {
+function PendingBooking({ booking, email, onChange, error, setError, justBooked }: { booking: Booking; email: string; onChange: () => void; error: string; setError: (s: string) => void; justBooked?: boolean }) {
   const [account, setAccount] = useState<{ bankName: string; accountName: string; accountNumber: string } | null>(null);
   const [cardEnabled, setCardEnabled] = useState(false);
   const [slipFile, setSlipFile] = useState<File | null>(null);
@@ -230,6 +245,14 @@ function PendingBooking({ booking, email, onChange, error, setError }: { booking
 
   return (
     <div>
+      {justBooked && (
+        <div className="mb-6 rounded-sm border border-[var(--gold)] bg-[var(--gold-soft)] px-5 py-4">
+          <p className="font-serif-display text-lg font-semibold text-[var(--navy)]">Congratulations on your booking!</p>
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">
+            We've emailed your reference code to {booking.email}. Complete payment below to reserve your seat.
+          </p>
+        </div>
+      )}
       <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">{booking.session.title}</h1>
       <p className="mt-1 text-sm text-[var(--ink-soft)]">Reference: <span className="font-mono">{booking.referenceCode}</span></p>
 
@@ -298,6 +321,10 @@ function PendingBooking({ booking, email, onChange, error, setError }: { booking
           )}
         </div>
       )}
+
+      <div className="mt-6">
+        <NeedHelp bookingReference={booking.referenceCode} defaultName={booking.fullName} defaultEmail={booking.email} />
+      </div>
     </div>
   );
 }

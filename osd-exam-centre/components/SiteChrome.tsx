@@ -1,4 +1,5 @@
 import Link from "next/link";
+import NeedHelp from "@/components/NeedHelp";
 
 export function SiteHeader() {
   return (
@@ -30,6 +31,9 @@ export function SiteFooter() {
         Prep classes and student portal at{" "}
         <a href="https://easywayschoollms.com.ng" className="underline">easywayschoollms.com.ng</a>
       </p>
+      <div className="mt-4 flex justify-center">
+        <NeedHelp />
+      </div>
     </footer>
   );
 }

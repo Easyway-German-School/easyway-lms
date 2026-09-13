@@ -101,7 +101,7 @@ export default function BookPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not complete that booking");
-      router.push(`/booking/${data.referenceCode}?email=${encodeURIComponent(form.email)}`);
+      router.push(`/booking/${data.referenceCode}?email=${encodeURIComponent(form.email)}&justBooked=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not complete that booking");
     } finally {
@@ -225,10 +225,22 @@ export default function BookPage() {
               <Row label="Email" value={form.email} />
               <Row label="Modules" value={selection === "full" ? "Whole exam" : Array.from(modules).map((m) => MODULE_LABEL[m]).join(", ")} />
               <Row label="Amount due" value={`₦${feeTotal.toLocaleString()}`} strong />
+
+              <div className="rounded-sm bg-[var(--gold-soft)]/30 p-4">
+                <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Examination rules</p>
+                <ul className="mt-2 space-y-1 text-xs text-[var(--ink-soft)]">
+                  <li>• Do not arrive late — latecomers may not be admitted.</li>
+                  <li>• Bring a normal ballpoint pen. No pencils, no correction fluid.</li>
+                  <li>• Bring your passport's data page and your printed admission slip.</li>
+                  <li>• Phones and smart watches off and out of reach for the whole exam.</li>
+                </ul>
+              </div>
+
               <label className="mt-4 flex items-start gap-3 rounded-sm border border-[var(--line)] p-4">
                 <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
                 <span className="text-xs text-[var(--ink-soft)]">
-                  I understand this booking is <strong>not reversible or refundable</strong> once payment is confirmed, and that I
+                  I have read the examination rules above, and I understand this booking is{" "}
+                  <strong>not reversible or refundable</strong> once payment is confirmed, and that I
                   must pay from a commercial bank account, not a wallet app.
                 </span>
               </label>
