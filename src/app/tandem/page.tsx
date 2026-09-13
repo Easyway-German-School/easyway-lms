@@ -1,13 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import GenericTandemChat from "@/components/tandem/GenericTandemChat";
-import VisualNovelStory from "@/components/tandem/VisualNovelStory";
+import ComingSoonLock from "@/components/ComingSoonLock";
 import { ArrowLeftIcon } from "@/components/icons";
-import type { StoryAccessState } from "@/lib/story-progress";
-
-type StoryResponse = { access: StoryAccessState };
 
 /**
  * A fixed way out. Tandem renders no portal sidebar and its inner views fill
@@ -25,35 +20,13 @@ function BackToDashboard() {
 }
 
 export default function TandemPartner() {
-  const [story, setStory] = useState<StoryResponse | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/student/story", { credentials: "include", cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : { access: { state: "unavailable" } }))
-      .then((data: StoryResponse) => { if (!cancelled) setStory(data); })
-      .catch(() => { if (!cancelled) setStory({ access: { state: "unavailable" } }); });
-    return () => { cancelled = true; };
-  }, []);
-
-  // Nothing personalized yet for this student — including the loading
-  // instant itself, since a flash of the wrong experience is worse than a
-  // brief delay. Every goal without a story series falls through here.
-  // VisualNovelStory itself renders the playable/locked/season-complete
-  // states — this component's only job is the top-level available/not switch.
-  if (!story || story.access.state === "unavailable") {
-    return (
-      <>
-        <BackToDashboard />
-        <GenericTandemChat />
-      </>
-    );
-  }
-
   return (
-    <>
+    <div className="flex min-h-screen items-center justify-center px-6 py-14">
       <BackToDashboard />
-      <VisualNovelStory initialAccess={story.access} />
-    </>
+      <ComingSoonLock
+        title="AI Tandem Partner"
+        description="Conversation practice with your AI partner is on the way. Check back soon."
+      />
+    </div>
   );
 }

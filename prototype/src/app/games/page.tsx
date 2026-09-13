@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import StudentShell from "@/components/StudentShell";
-import AICoachPanel from "@/components/AICoachPanel";
+import ComingSoonLock from "@/components/ComingSoonLock";
 import StoryTour from "@/components/StoryTour";
 import { AlertIcon, ChainIcon, ClockIcon, PlusIcon, SparklesIcon } from "@/components/icons";
 
@@ -147,7 +147,7 @@ export default function GamesPage() {
           <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
             {tab === "games"
               ? "Your class writes a story together, one sentence each. You get a turn, you write one line in German, and it passes on. No rush — take your turn whenever you pick up your phone."
-              : "Practice your pronunciation and get a study plan built around where you actually are, not a generic curriculum."}
+              : "We're still building this one out."}
           </p>
         </header>
 
@@ -169,7 +169,10 @@ export default function GamesPage() {
         </div>
 
         {tab === "coach" ? (
-          <AICoachPanel />
+          <ComingSoonLock
+            title="AI Coach"
+            description="Pronunciation practice and a personalized study plan are on the way. Check back soon."
+          />
         ) : (
         <>
         {error ? (
