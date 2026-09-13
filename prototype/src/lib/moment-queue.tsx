@@ -109,6 +109,7 @@ export type MomentId =
   | "office-reply"
   | "class-schedule-changed"
   | "lesson-complete"
+  | "assignments-open"
   | "notifications"
   | "daily-briefing"
   | "journey"
@@ -218,6 +219,20 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Nice work",
     dockBlurb: "You finished something — come see.",
+  },
+  /**
+   * "You can submit assignments now." Fires once ever, the first time a
+   * student's portal is unlocked AND there is work sitting unsubmitted — see
+   * src/lib/assignment-availability-nudge.ts for the server side. Above the
+   * notification ask because this is news about a capability the student did
+   * not know they had, and below a just-finished lesson because that is about
+   * something they themselves just did.
+   */
+  "assignments-open": {
+    priority: 63,
+    kind: "modal",
+    dockLabel: "Assignments are open",
+    dockBlurb: "You can submit your homework now — see what's waiting.",
   },
   /**
    * Asking for notification permission, and where it sits.

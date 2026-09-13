@@ -11,6 +11,7 @@ import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import OfficeReplyMoment from "@/components/moment/OfficeReplyMoment";
 import ScheduleChangeMoment from "@/components/moment/ScheduleChangeMoment";
 import CohortCheckMoment from "@/components/moment/CohortCheckMoment";
+import AssignmentsOpenMoment from "@/components/moment/AssignmentsOpenMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
 import BrandLogo from "@/components/BrandLogo";
@@ -19,6 +20,7 @@ import MomentDock from "@/components/MomentDock";
 import GameTurnToast from "@/components/GameTurnToast";
 import DailyBriefing from "@/components/DailyBriefing";
 import LessonCompleteCelebration from "@/components/LessonCompleteCelebration";
+import TutorialRuntime from "@/components/TutorialRuntime";
 import BetaFeedbackPrompt from "@/components/BetaFeedbackPrompt";
 import StudentUsageTracker from "@/components/StudentUsageTracker";
 import NotificationCenter from "@/components/NotificationCenter";
@@ -49,6 +51,7 @@ import {
   MenuIcon,
   PaymentIcon,
   PencilIcon,
+  PlayIcon,
   ProfileIcon,
   QuizIcon,
   ResultsIcon,
@@ -68,6 +71,10 @@ type NavItem = {
 // in there anybody used — lives in the corner of every page.
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
+  // Rewatchable, narrated walkthroughs — sits right after Dashboard since
+  // it's the answer to "I don't know how to use this", the single most
+  // common reason a student never finds the rest of the sidebar.
+  { label: "Tutorials", href: "/tutorials", icon: <PlayIcon /> },
   { label: "Classes", href: "/calendar", icon: <CalendarIcon /> },
   { label: "Live class", href: "/live", icon: <BroadcastIcon /> },
   { label: "Assignment", href: "/assignment", icon: <AssignmentIcon /> },
@@ -560,6 +567,12 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           launcher and the theme switch already own the other corner. */}
       <MomentDock />
 
+      {/* A replayable /tutorials walkthrough, if one is in progress — not
+          moment-queue-managed, since it's student-initiated and repeatable
+          rather than a one-time "did you see this yet" interruption. See
+          TutorialRuntime for how its progress survives page navigation. */}
+      <TutorialRuntime />
+
       {/* The old dashboard "waiting on you" games card, now a queued nudge
           instead of a permanent section — see lib/moment-queue.tsx. */}
       <GameTurnToast />
@@ -574,6 +587,12 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       {/* Lowest-priority nudge: physical students can't download video, but
           they can keep their notes offline if they install the app. */}
       {hasAccess && <InstallForNotesMoment />}
+
+      {/* "You can submit assignments now" — Becca's one-time greeting for the
+          tick a student's portal unlocked with work already waiting. Behind
+          `hasAccess` because the bell notification it mirrors is never sent
+          to a student who is still locked out. See AssignmentsOpenMoment. */}
+      {hasAccess && <AssignmentsOpenMoment />}
 
       {/* Fires on a genuine server-validated completion — see
           celebrateLessonComplete() in LessonCompleteCelebration.tsx. */}

@@ -91,6 +91,8 @@ export const KIND = {
   profilePhotoMissing: "profile.photo_missing",
   /** A student has no branch set — Becca asks them to place themselves, at most once a week. See src/lib/branch-nudge.ts. */
   profileBranchMissing: "profile.branch_missing",
+  /** A student's portal just unlocked and there is work waiting for them — sent once ever. See src/lib/assignment-availability-nudge.ts. */
+  assignmentsAvailable: "assignments.available",
   general: "general",
 } as const;
 
