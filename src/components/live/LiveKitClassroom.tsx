@@ -31,7 +31,7 @@ import {
   ReactionLayer,
 } from "./ClassroomInteractions";
 import { FloorLight, HandFlag, SpeakingWave } from "./SpeakingIndicators";
-import LiveMaterialsPanel from "./LiveMaterialsPanel";
+import LiveMaterialsPanel, { PresentedMaterialBanner } from "./LiveMaterialsPanel";
 import { useAudioLevels, type AudioLevelStore } from "./useAudioLevels";
 import { useRouter } from "next/navigation";
 
@@ -1575,6 +1575,14 @@ export default function LiveKitClassroom({
               />
             ) : null}
 
+            {!focusMode ? (
+              <PresentedMaterialBanner
+                presented={interactions.presented}
+                role={role}
+                onStopPresenting={() => interactions.presentMaterial(null)}
+              />
+            ) : null}
+
             {stageParticipant ? (
               <div className="relative">
                 {/*
@@ -1709,7 +1717,11 @@ export default function LiveKitClassroom({
               </div>
 
               {panel === "materials" ? (
-                <LiveMaterialsPanel role={role} />
+                <LiveMaterialsPanel
+                  role={role}
+                  presented={interactions.presented}
+                  onPresent={interactions.presentMaterial}
+                />
               ) : panel === "hands" ? (
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
                   {role === "tutor" ? <ModeSwitch mode={interactions.mode} onChange={interactions.setMode} /> : null}
