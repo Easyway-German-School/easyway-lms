@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import bcryptjs from "bcryptjs";
 
-import { requireCapability } from "@/lib/admin-roles";
+import { requireCapabilityOrLecturer } from "@/lib/admin-roles";
 async function isLecturer(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return false;
@@ -10,7 +10,7 @@ async function isLecturer(userId: string) {
 }
 
 export async function POST(request: NextRequest) {
-  const gate = await requireCapability("students");
+  const gate = await requireCapabilityOrLecturer("students");
   if (!gate.ok) return gate.response;
   const session = gate.session;
 
