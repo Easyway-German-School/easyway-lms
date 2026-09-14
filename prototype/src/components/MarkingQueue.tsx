@@ -23,19 +23,27 @@ type ToMark = {
   answer: string;
 };
 
+type DocumentWork = {
+  text: string | null;
+  filePath: string | null;
+  fileName: string | null;
+};
+
 type Pending = {
   id: string;
   submittedAt: string | null;
   student: { name: string | null; studentCode: string | null; level: string };
-  assignment: { id: string; title: string };
+  assignment: { id: string; title: string; type: string };
   toMark: ToMark[];
   autoEarned: number;
+  document: DocumentWork | null;
 };
 
 export default function MarkingQueue({ assignmentId }: { assignmentId?: string }) {
   const [pending, setPending] = useState<Pending[]>([]);
   const [loading, setLoading] = useState(true);
   const [marks, setMarks] = useState<Record<string, Record<number, string>>>({});
+  const [docScores, setDocScores] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -62,7 +70,10 @@ export default function MarkingQueue({ assignmentId }: { assignmentId?: string }
   async function release(submission: Pending) {
     setBusy(submission.id);
     try {
+      const isDocument = submission.assignment.type !== "quiz";
+
       // Positional, matching the question order the server graded against.
+      // Meaningless for a document, which has no questions at all.
       const positioned: (number | null)[] = [];
       for (const item of submission.toMark) {
         positioned[item.index] = Number(marks[submission.id]?.[item.index] ?? 0);
@@ -73,7 +84,7 @@ export default function MarkingQueue({ assignmentId }: { assignmentId?: string }
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           submissionId: submission.id,
-          marks: positioned,
+          ...(isDocument ? { score: Number(docScores[submission.id] ?? 0) } : { marks: positioned }),
           feedback: feedback[submission.id] ?? "",
         }),
       });
@@ -111,6 +122,7 @@ export default function MarkingQueue({ assignmentId }: { assignmentId?: string }
       </p>
 
       {pending.map((submission) => {
+        const isDocument = submission.assignment.type !== "quiz";
         const outstanding = submission.toMark.reduce((sum, item) => sum + item.points, 0);
         const awarded = submission.toMark.reduce(
           (sum, item) => sum + (Number(marks[submission.id]?.[item.index]) || 0),
@@ -127,49 +139,93 @@ export default function MarkingQueue({ assignmentId }: { assignmentId?: string }
                   {submission.student.studentCode ? ` · ${submission.student.studentCode}` : ""}
                 </p>
               </div>
-              <div className="text-right text-xs text-[var(--muted)]">
-                <p>{submission.autoEarned} marks auto-scored</p>
-                <p className="font-semibold text-[var(--foreground)]">
-                  {awarded} / {outstanding} being awarded here
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-4">
-              {submission.toMark.map((item) => (
-                <div key={item.index} className="rounded-xl bg-[var(--surface-alt)] p-4">
-                  <p className="text-sm font-semibold">{item.prompt}</p>
-
-                  {item.guidance && (
-                    <p className="mt-1 text-[11px] italic text-[var(--muted)]">
-                      Your note: {item.guidance}
-                    </p>
-                  )}
-
-                  <div className="mt-3 whitespace-pre-wrap rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm leading-6">
-                    {item.answer.trim() || <span className="text-[var(--muted)]">— left blank —</span>}
-                  </div>
-
-                  <label className="mt-3 flex items-center gap-2 text-xs">
-                    <span className="text-[var(--muted)]">Marks</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={item.points}
-                      value={marks[submission.id]?.[item.index] ?? ""}
-                      onChange={(event) =>
-                        setMarks((prev) => ({
-                          ...prev,
-                          [submission.id]: { ...prev[submission.id], [item.index]: event.target.value },
-                        }))
-                      }
-                      className="w-16 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-center"
-                    />
-                    <span className="text-[var(--muted)]">out of {item.points}</span>
-                  </label>
+              {!isDocument && (
+                <div className="text-right text-xs text-[var(--muted)]">
+                  <p>{submission.autoEarned} marks auto-scored</p>
+                  <p className="font-semibold text-[var(--foreground)]">
+                    {awarded} / {outstanding} being awarded here
+                  </p>
                 </div>
-              ))}
+              )}
             </div>
+
+            {isDocument ? (
+              <div className="mt-4 space-y-3">
+                {submission.document?.text ? (
+                  <div className="whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-sm leading-6">
+                    {submission.document.text}
+                  </div>
+                ) : (
+                  !submission.document?.filePath && (
+                    <p className="rounded-xl bg-[var(--surface-alt)] p-4 text-sm text-[var(--muted)]">
+                      No written text — check the attached file.
+                    </p>
+                  )
+                )}
+
+                {submission.document?.filePath && (
+                  <a
+                    href={submission.document.filePath}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5 text-sm font-semibold text-[var(--accent)] hover:bg-[var(--surface)]"
+                  >
+                    Open {submission.document.fileName ?? "attached file"}
+                  </a>
+                )}
+
+                <label className="flex items-center gap-2 text-xs">
+                  <span className="text-[var(--muted)]">Score</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={docScores[submission.id] ?? ""}
+                    onChange={(event) =>
+                      setDocScores((prev) => ({ ...prev, [submission.id]: event.target.value }))
+                    }
+                    className="w-16 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-center"
+                  />
+                  <span className="text-[var(--muted)]">out of 100</span>
+                </label>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                {submission.toMark.map((item) => (
+                  <div key={item.index} className="rounded-xl bg-[var(--surface-alt)] p-4">
+                    <p className="text-sm font-semibold">{item.prompt}</p>
+
+                    {item.guidance && (
+                      <p className="mt-1 text-[11px] italic text-[var(--muted)]">
+                        Your note: {item.guidance}
+                      </p>
+                    )}
+
+                    <div className="mt-3 whitespace-pre-wrap rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm leading-6">
+                      {item.answer.trim() || <span className="text-[var(--muted)]">— left blank —</span>}
+                    </div>
+
+                    <label className="mt-3 flex items-center gap-2 text-xs">
+                      <span className="text-[var(--muted)]">Marks</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={item.points}
+                        value={marks[submission.id]?.[item.index] ?? ""}
+                        onChange={(event) =>
+                          setMarks((prev) => ({
+                            ...prev,
+                            [submission.id]: { ...prev[submission.id], [item.index]: event.target.value },
+                          }))
+                        }
+                        className="w-16 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-center"
+                      />
+                      <span className="text-[var(--muted)]">out of {item.points}</span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <textarea
               value={feedback[submission.id] ?? ""}
