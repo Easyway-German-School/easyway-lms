@@ -25,6 +25,7 @@ import {
   handRaisedAt,
   roleOfMetadata,
   type LiveMessage,
+  type PresentedMaterial,
   type ReactionKind,
   type RoomMode,
 } from "@/lib/live-room-protocol";
@@ -69,10 +70,14 @@ export type RoomInteractions = {
   toggleHand: () => void;
   sendChat: (text: string) => void;
   markChatRead: () => void;
+  /** What the tutor is currently presenting from Materials, or null. */
+  presented: PresentedMaterial;
   /** Tutor only — the UI hides these, the sender ignores them, receivers drop them. */
   setMode: (mode: RoomMode) => void;
   grantFloor: (identity: string | null) => void;
   clearHands: () => void;
+  /** Tutor only. Pass null to stop presenting. */
+  presentMaterial: (material: PresentedMaterial) => void;
   /**
    * Tutor only. Awaited by the caller before disconnecting: the data channel
    * goes down with the connection, so a fire-and-forget send here would be a
@@ -88,6 +93,7 @@ function displayName(participant: Participant): string {
 export function useRoomInteractions(room: Room | null, role: RoomRole, revision: number): RoomInteractions {
   const [mode, setModeState] = useState<RoomMode>("open");
   const [floor, setFloorState] = useState<string | null>(null);
+  const [presented, setPresentedState] = useState<PresentedMaterial>(null);
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const [chat, setChat] = useState<ChatLine[]>([]);
   const [unreadChat, setUnreadChat] = useState(0);
@@ -98,12 +104,16 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
   // handler and must not re-subscribe every time either value changes.
   const modeRef = useRef<RoomMode>("open");
   const floorRef = useRef<string | null>(null);
+  const presentedRef = useRef<PresentedMaterial>(null);
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
   useEffect(() => {
     floorRef.current = floor;
   }, [floor]);
+  useEffect(() => {
+    presentedRef.current = presented;
+  }, [presented]);
 
   const publish = useCallback(
     (message: LiveMessage): Promise<void> => {
@@ -219,6 +229,11 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
         case "state":
           setModeState(message.mode);
           setFloorState(message.floor);
+          setPresentedState(message.present);
+          break;
+
+        case "present":
+          setPresentedState(message.material);
           break;
 
         case "ended":
@@ -246,7 +261,7 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
 
     function onJoin() {
       window.setTimeout(() => {
-        publish({ t: "state", mode: modeRef.current, floor: floorRef.current });
+        publish({ t: "state", mode: modeRef.current, floor: floorRef.current, present: presentedRef.current });
       }, 1200);
     }
 
@@ -371,6 +386,15 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
     await publish({ t: "ended" });
   }, [role, publish]);
 
+  const presentMaterial = useCallback(
+    (material: PresentedMaterial) => {
+      if (role !== "tutor") return;
+      setPresentedState(material);
+      publish({ t: "present", material });
+    },
+    [role, publish],
+  );
+
   return {
     mode,
     floor,
@@ -381,6 +405,7 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
     chat,
     unreadChat,
     ended,
+    presented,
     react,
     toggleHand,
     sendChat,
@@ -388,6 +413,7 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
     setMode,
     grantFloor,
     clearHands,
+    presentMaterial,
     announceEnd,
   };
 }
