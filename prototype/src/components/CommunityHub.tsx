@@ -1316,10 +1316,12 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
             when there is nothing to show. */}
         {!compact && !isDm ? <CommunityWins spaceId={activeSpace?.id ?? null} /> : null}
 
-        {/* The pinned ÖSD exam-campaign strip — the "community announcement" the
-            office wants everyone to see. Hides itself when the campaign is off
-            or the student has marked themselves registered. */}
-        {!compact ? <ExamCampaignBanner variant="pinned" /> : null}
+        {/* The pinned ÖSD exam-campaign strip — a nudge AT students, from the
+            office. Staff already know the campaign exists; showing them their
+            own "have you registered?" banner inside every room they moderate
+            is just clutter, and the office monitoring a room is not the
+            audience it is written for. */}
+        {!compact && !isStaff ? <ExamCampaignBanner variant="pinned" /> : null}
 
         <div
           ref={scrollRef}
