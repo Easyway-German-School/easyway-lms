@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { liveWhere } from "@/lib/live-presence";
+import { isObserverIdentity } from "@/lib/live-classroom";
 import { roomServiceClient } from "@/lib/live-moderation";
 import { TrackSource } from "livekit-server-sdk";
 
@@ -28,12 +29,17 @@ export const dynamic = "force-dynamic";
  * One honest gap, said here rather than glossed over: LiveKit does not expose
  * per-participant CONNECTION QUALITY over this server API at all — that is a
  * client-side signal (`RoomEvent.ConnectionQualityChanged`), only visible to
- * somebody actually connected to the room. Reaching it would mean the admin
- * silently joining every live class as a hidden participant, which changes
- * what "who's in this room" means and is not a call this file makes on its
- * own. What LiveKit's server API DOES give us — identity, join time, and
- * whether a camera/mic is actually publishing and muted — is what this route
- * reports instead, under its own honest name.
+ * somebody actually connected to the room. What LiveKit's server API DOES give
+ * us — identity, join time, and whether a camera/mic is actually publishing and
+ * muted — is what this route reports instead, under its own honest name.
+ *
+ * Actually joining the room to see and hear the lesson IS now a thing the
+ * office can do — deliberately, as a separate, audited feature: see
+ * `/api/admin/live/observe`, which mints a `hidden` subscribe-only token so the
+ * class is never told. This route stays a pure metadata read; it just filters
+ * those observers out of the headcount and the participant table
+ * (`isObserverIdentity`) so a supervisor watching does not read as a phantom
+ * student to the next admin looking at this page.
  */
 
 type SessionSummary = {
@@ -53,17 +59,24 @@ type SessionSummary = {
   declined: number;
   /** null when LiveKit could not be reached, or the room has nobody in it yet. */
   participantCount: number | null;
+  /** Office supervisors silently watching this class right now — see /api/admin/live/observe. */
+  observers: number;
 };
 
-async function participantCount(client: ReturnType<typeof roomServiceClient>, roomName: string): Promise<number | null> {
-  if (!client) return null;
+async function headcount(
+  client: ReturnType<typeof roomServiceClient>,
+  roomName: string,
+): Promise<{ participantCount: number | null; observers: number }> {
+  if (!client) return { participantCount: null, observers: 0 };
   try {
     const participants = await client.listParticipants(roomName);
-    return participants.length;
+    const observers = participants.filter((p) => isObserverIdentity(p.identity)).length;
+    // The class's own headcount never includes a hidden supervisor.
+    return { participantCount: participants.length - observers, observers };
   } catch {
     // LiveKit 404s an empty/never-opened room rather than returning [] — that
     // is "nobody connected", not a failure worth surfacing as one.
-    return 0;
+    return { participantCount: 0, observers: 0 };
   }
 }
 
@@ -93,7 +106,12 @@ export async function GET(request: NextRequest) {
     try {
       const participants = await client.listParticipants(room);
       return NextResponse.json({
-        participants: participants.map((participant) => {
+        // A hidden supervisor (see /api/admin/live/observe) is filtered out:
+        // the class never sees them, and neither should the next admin reading
+        // this table — one would otherwise show up as a nameless "student".
+        participants: participants
+          .filter((participant) => !isObserverIdentity(participant.identity))
+          .map((participant) => {
           let role = "student";
           try {
             role = JSON.parse(participant.metadata || "{}")?.role === "tutor" ? "tutor" : "student";
@@ -148,7 +166,7 @@ export async function GET(request: NextRequest) {
       invited: session.invites.length,
       joined: session.invites.filter((i) => i.status === "joined").length,
       declined: session.invites.filter((i) => i.status === "declined").length,
-      participantCount: await participantCount(client, session.roomName),
+      ...(await headcount(client, session.roomName)),
     })),
   );
 

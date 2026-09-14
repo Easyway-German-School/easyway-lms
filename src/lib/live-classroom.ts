@@ -231,3 +231,28 @@ export function initialQualityFor(role: RoomRole, preferred: QualityMode): Quali
  * minted, not in the UI — a hidden button is not a permission.
  */
 export type RoomRole = "tutor" | "student";
+
+/**
+ * SILENT SUPERVISION.
+ *
+ * An office admin can drop into any live class to watch it, without the room
+ * being told. The token for that is minted `hidden` (see
+ * `/api/admin/live/observe`): LiveKit never announces the join, the observer
+ * publishes nothing and cannot send chat or reactions, so the tutor and their
+ * students see exactly the room they would have seen anyway.
+ *
+ * The identity is namespaced so the two places that must agree can both spot an
+ * observer: the route that mints the token, and the "who is connected right
+ * now" dashboard, which uses this to keep observers out of the headcount it
+ * shows (and out of the participant table, where one would otherwise read as a
+ * phantom student).
+ */
+export const OBSERVER_IDENTITY_PREFIX = "observer:";
+
+export function observerIdentity(userId: string): string {
+  return `${OBSERVER_IDENTITY_PREFIX}${userId}`;
+}
+
+export function isObserverIdentity(identity: string | null | undefined): boolean {
+  return typeof identity === "string" && identity.startsWith(OBSERVER_IDENTITY_PREFIX);
+}
