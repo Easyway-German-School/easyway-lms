@@ -19,11 +19,12 @@
  * the lesson exactly where you were.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import {
   AudioIcon,
+  BroadcastIcon,
   CrossIcon,
   DocumentIcon,
   DownloadIcon,
@@ -36,12 +37,13 @@ import {
 import { useLightbox } from "@/components/ImageLightbox";
 import { parseAudioLink, parseEmbed } from "@/lib/media-embed";
 import type { RoomRole } from "@/lib/live-classroom";
+import type { PresentedMaterial } from "@/lib/live-room-protocol";
 
 type RawMaterial = Record<string, unknown>;
 
-type Kind = "image" | "pdf" | "video" | "audio" | "embed-video" | "embed-audio" | "doc";
+export type Kind = "image" | "pdf" | "video" | "audio" | "embed-video" | "embed-audio" | "doc";
 
-type Material = {
+export type Material = {
   id: string;
   title: string;
   description: string | null;
@@ -107,7 +109,17 @@ const KIND_META: Record<Kind, { label: string; Icon: typeof DocumentIcon }> = {
   doc: { label: "File", Icon: PackageIcon },
 };
 
-export default function LiveMaterialsPanel({ role }: { role: RoomRole }) {
+export default function LiveMaterialsPanel({
+  role,
+  presented,
+  onPresent,
+}: {
+  role: RoomRole;
+  /** What's currently pushed to the whole class, or null. Tutor's own state. */
+  presented: PresentedMaterial;
+  /** Tutor only — pass null to stop presenting. */
+  onPresent: (material: PresentedMaterial) => void;
+}) {
   const { open: openImage } = useLightbox();
   const [materials, setMaterials] = useState<Material[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -177,7 +189,11 @@ export default function LiveMaterialsPanel({ role }: { role: RoomRole }) {
           className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder:text-slate-500 focus:outline-none"
         />
       </div>
-      <p className="mb-2 px-1 text-[11px] text-slate-500">Only you can see what you open here.</p>
+      <p className="mb-2 px-1 text-[11px] text-slate-500">
+        {role === "tutor"
+          ? "Only you see what you open — the broadcast icon shows one to the whole class instead."
+          : "Only you can see what you open here."}
+      </p>
 
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
         {error ? (
@@ -193,24 +209,52 @@ export default function LiveMaterialsPanel({ role }: { role: RoomRole }) {
         ) : (
           filtered.map((material) => {
             const { label, Icon } = KIND_META[material.kind];
+            const isPresenting = presented?.id === material.id;
             return (
-              <button
+              <div
                 key={material.id}
-                type="button"
-                onClick={() => onOpen(material)}
-                className="flex w-full items-start gap-3 rounded-xl bg-white/5 px-3 py-2.5 text-left transition hover:bg-white/10"
+                className={`flex items-start gap-1.5 rounded-xl px-1.5 py-1.5 transition ${
+                  isPresenting ? "bg-[var(--accent)]/20" : "bg-white/5 hover:bg-white/10"
+                }`}
               >
-                <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-slate-200">
-                  <Icon className="h-4 w-4" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold text-white">{material.title}</span>
-                  <span className="mt-0.5 block truncate text-[11px] text-slate-400">
-                    {label}
-                    {material.course ? ` · ${material.course}` : ""}
+                <button
+                  type="button"
+                  onClick={() => onOpen(material)}
+                  className="flex min-w-0 flex-1 items-start gap-3 rounded-lg px-1.5 py-1 text-left"
+                >
+                  <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-slate-200">
+                    <Icon className="h-4 w-4" />
                   </span>
-                </span>
-              </button>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-white">{material.title}</span>
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-400">
+                      {isPresenting ? "Presenting to the class" : label}
+                      {material.course ? ` · ${material.course}` : ""}
+                    </span>
+                  </span>
+                </button>
+                {role === "tutor" ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onPresent(
+                        isPresenting
+                          ? null
+                          : { id: material.id, title: material.title, kind: material.kind, url: material.url, course: material.course },
+                      )
+                    }
+                    title={isPresenting ? "Stop presenting to the class" : "Present to the class"}
+                    aria-label={isPresenting ? "Stop presenting to the class" : "Present to the class"}
+                    className={`mt-0.5 shrink-0 rounded-lg p-2 transition ${
+                      isPresenting
+                        ? "bg-[var(--accent)] text-white hover:brightness-110"
+                        : "text-slate-400 hover:bg-white/15 hover:text-white"
+                    }`}
+                  >
+                    <BroadcastIcon className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
             );
           })
         )}
@@ -364,5 +408,102 @@ function ReaderBody({ material }: { material: Material }) {
         <p className="text-[11px] text-slate-500">Your class keeps running while it is open.</p>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * WHAT REPLACES SCREEN-SHARING A TEXTBOOK PAGE.
+ *
+ * Rendered unconditionally in the class, not inside the Materials tab — a
+ * presented material has to reach a student who is looking at Chat or Hands
+ * or nothing at all, the same way a shared screen would. It opens itself the
+ * instant `presented` changes to a new item (no click required, because the
+ * whole point is to stand in for a screen share that also just appears), and
+ * stays reachable afterward through this banner in case someone closes it.
+ *
+ * Images skip the reader and go straight to the shared lightbox — it already
+ * has zoom, download and a proper close, and duplicating that here would be
+ * a worse version of it.
+ */
+export function PresentedMaterialBanner({
+  presented,
+  role,
+  onStopPresenting,
+}: {
+  presented: PresentedMaterial;
+  role: RoomRole;
+  onStopPresenting: () => void;
+}) {
+  const { open: openImage } = useLightbox();
+  const [readerOpen, setReaderOpen] = useState(false);
+  const autoOpenedIdRef = useRef<string | null>(null);
+
+  const material: Material | null = presented
+    ? {
+        id: presented.id,
+        title: presented.title,
+        description: null,
+        url: presented.url,
+        type: "",
+        kind: presented.kind as Kind,
+        course: presented.course,
+      }
+    : null;
+
+  function view(target: Material) {
+    if (target.kind === "image") {
+      openImage({ src: target.url, alt: target.title, caption: target.course ?? undefined });
+    } else {
+      setReaderOpen(true);
+    }
+  }
+
+  useEffect(() => {
+    if (!material || autoOpenedIdRef.current === material.id) return;
+    autoOpenedIdRef.current = material.id;
+    view(material);
+    // `view` closes over state setters only — safe to omit, and including it
+    // would re-run this on every render since it is a new function each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [material?.id]);
+
+  useEffect(() => {
+    if (!presented) setReaderOpen(false);
+  }, [presented]);
+
+  if (!material) return null;
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent)]/15 px-5 py-3 text-sm text-white">
+        <BroadcastIcon className="h-5 w-5 shrink-0" />
+        <p className="min-w-0 flex-1 truncate leading-6">
+          {role === "tutor" ? "You are showing the class " : "Your tutor is showing "}
+          <span className="font-semibold">{material.title}</span>
+        </p>
+        <button
+          type="button"
+          onClick={() => view(material)}
+          className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+        >
+          View
+        </button>
+        {role === "tutor" ? (
+          <button
+            type="button"
+            onClick={onStopPresenting}
+            className="shrink-0 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[var(--accent)] transition hover:brightness-95"
+          >
+            Stop presenting
+          </button>
+        ) : null}
+      </div>
+
+      {readerOpen && material.kind !== "image" ? (
+        <MaterialReader material={material} onClose={() => setReaderOpen(false)} />
+      ) : null}
+    </>
   );
 }

@@ -152,6 +152,34 @@ export function handRaisedAt(attributes: Record<string, string> | undefined): nu
 
 export const MAX_CHAT_LENGTH = 500;
 
+/**
+ * What the tutor is presenting from their Materials shelf, or null for
+ * nothing. Carried in full rather than by id: the tutor's own material feed
+ * (`/api/lecturer/materials`) and a student's (`/api/student/materials`) are
+ * fetched separately, and a receiver still negotiating its own list request
+ * must not fail to render this for want of a row it hasn't loaded yet.
+ */
+export type PresentedMaterial = {
+  id: string;
+  title: string;
+  kind: string;
+  url: string;
+  course: string | null;
+} | null;
+
+export function isPresentedMaterial(value: unknown): value is PresentedMaterial {
+  if (value === null) return true;
+  if (!value || typeof value !== "object") return false;
+  const m = value as Record<string, unknown>;
+  return (
+    typeof m.id === "string" &&
+    typeof m.title === "string" &&
+    typeof m.kind === "string" &&
+    typeof m.url === "string" &&
+    (m.course === null || typeof m.course === "string")
+  );
+}
+
 export type LiveMessage =
   | { t: "reaction"; kind: ReactionKind }
   | { t: "chat"; text: string }
@@ -161,6 +189,8 @@ export type LiveMessage =
   | { t: "mode"; mode: RoomMode }
   /** Tutor only: put every hand down at once. */
   | { t: "handsCleared" }
+  /** Tutor only. `null` means the tutor stopped presenting. */
+  | { t: "present"; material: PresentedMaterial }
   /**
    * Tutor only: the lesson is over.
    *
@@ -182,7 +212,7 @@ export type LiveMessage =
    * currently are. Cheap, and it converges even if a message is dropped,
    * because the next arrival triggers another one.
    */
-  | { t: "state"; mode: RoomMode; floor: string | null };
+  | { t: "state"; mode: RoomMode; floor: string | null; present: PresentedMaterial };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -251,7 +281,14 @@ export function decodeMessage(payload: Uint8Array, senderRole: RoomRole): LiveMe
     case "state":
       if (!tutorOnly || !isRoomMode(message.mode)) return null;
       if (message.floor !== null && typeof message.floor !== "string") return null;
-      return { t: "state", mode: message.mode, floor: message.floor };
+      if (!isPresentedMaterial(message.present)) return null;
+      return { t: "state", mode: message.mode, floor: message.floor, present: message.present };
+
+    // Guarded like every other tutor-only message: a student who could forge
+    // this would be able to push arbitrary content into every classmate's
+    // material reader.
+    case "present":
+      return tutorOnly && isPresentedMaterial(message.material) ? { t: "present", material: message.material } : null;
 
     default:
       return null;
