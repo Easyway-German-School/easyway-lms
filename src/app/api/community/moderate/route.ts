@@ -64,7 +64,8 @@ export async function POST(request: Request) {
        * The room is TOLD, same as a mute — but only on pin. Unpinning is
        * cleanup, not news, and mirrors how unmute stays silent above.
        */
-      if (pinning) {
+      // A DM has no room to tell — it is already the only two people in it.
+      if (pinning && message.channel.space) {
         const space = message.channel.space;
         const pinnedByName = session.user.name ?? "A moderator";
         notifyInBackground({

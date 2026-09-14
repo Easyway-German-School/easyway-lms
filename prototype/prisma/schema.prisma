@@ -128,6 +128,8 @@ model User {
   messageReactions      MessageReaction[]
   communityMute         CommunityMute?           @relation("MutedMember")
   mutesIssued           CommunityMute[]          @relation("MuteAuthor")
+  /// A student's one private thread with the office. Null until an admin opens it.
+  dmChannel             Channel?                 @relation("StudentDmChannel")
   channelReads          ChannelRead[]
   typingPings           TypingPing[]
   pushSubs              PushSubscription[]
@@ -2664,8 +2666,13 @@ model Space {
 
 model Channel {
   id          String   @id @default(cuid())
-  spaceId     String
-  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  /**
+   * Null for a DM channel (kind "dm") — a private thread is not a room in
+   * anyone's cohort, so it has no Space to belong to. Every other channel
+   * still requires one.
+   */
+  spaceId     String?
+  space       Space?   @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   slug        String
   name        String
   description String?
@@ -2677,6 +2684,17 @@ model Channel {
   messages    Message[]
   reads       ChannelRead[]
   typingPings TypingPing[]
+
+  /**
+   * Set only on a kind="dm" channel: which student this private thread is
+   * with. Unique because there is exactly one — every admin who opens it
+   * lands in the same thread, tagged "Office", the same way a room post
+   * already reads as coming from the office rather than one named admin.
+   * onDelete: Cascade — a deleted student's private thread has no reason
+   * to survive them.
+   */
+  dmStudentId String? @unique
+  dmStudent   User?   @relation("StudentDmChannel", fields: [dmStudentId], references: [id], onDelete: Cascade)
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
