@@ -22,6 +22,7 @@ import MomentDock from "@/components/MomentDock";
 import GameTurnToast from "@/components/GameTurnToast";
 import DailyBriefing from "@/components/DailyBriefing";
 import LessonCompleteCelebration from "@/components/LessonCompleteCelebration";
+import TutorialRuntime from "@/components/TutorialRuntime";
 import BetaFeedbackPrompt from "@/components/BetaFeedbackPrompt";
 import StudentUsageTracker from "@/components/StudentUsageTracker";
 import NotificationCenter from "@/components/NotificationCenter";

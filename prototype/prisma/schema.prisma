@@ -555,6 +555,14 @@ model Student {
    */
   storyTourSeenAt DateTime?
 
+  /**
+   * When this already-unlocked student saw the one-time "come see the new
+   * Tutorials page" popup. Same reasoning as welcomeTourSeenAt — a property
+   * of the person, shown exactly once, ever, regardless of which device they
+   * next open the portal on.
+   */
+  tutorialsPromoSeenAt DateTime?
+
   // ---------------------------------------------------------------------
   // The journey to Germany. See src/lib/germany-journey.ts.
   // ---------------------------------------------------------------------
