@@ -38,6 +38,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  AudioPresets,
   ConnectionQuality,
   DisconnectReason,
   LocalParticipant,
@@ -516,6 +517,15 @@ export default function LiveKitClassroom({
   const roomRef = useRef<Room | null>(null);
   const [status, setStatus] = useState<Status>("connecting");
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Bumped to force the connect effect below to run again from scratch.
+   *
+   * A first-connect failure on a Nigerian mobile link is very often a single
+   * bad round of ICE gathering, not a dead network — the same join usually
+   * succeeds a few seconds later. Before this, the only way out of "Could not
+   * join the classroom" was reloading the whole page; now it's one tap.
+   */
+  const [retryKey, setRetryKey] = useState(0);
   const [mode, setMode] = useState<QualityMode>(initialQuality);
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(qualitySpec(initialQuality).publishesVideo);
@@ -673,6 +683,21 @@ export default function LiveKitClassroom({
         // needs to see pores.
         resolution: VideoPresets.h360.resolution,
       },
+      /**
+       * Explicit rather than relying on the browser's own defaults, which
+       * vary by device and by Android's own audio HAL more than anyone
+       * building for Nigerian mobile can afford to gamble on. All three
+       * matter for a language class specifically: echo cancellation because
+       * a phone's tiny speaker-to-mic distance means a class without it is a
+       * class hearing its own echo, and gain control because "the student
+       * sounded fine but the tutor could barely hear them" is far more often
+       * an under-driven phone mic than a bad link.
+       */
+      audioCaptureDefaults: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
       publishDefaults: {
         simulcast: true,
         // Two layers, not three. Three costs the publisher upload bandwidth
@@ -685,6 +710,16 @@ export default function LiveKitClassroom({
         // redundant packets so speech survives heavy loss.
         dtx: true,
         red: true,
+        /**
+         * The default preset spends bandwidth this class does not have to
+         * spare. Voice needs to survive congestion far more than it needs
+         * music-grade fidelity — `speech` asks for a fraction of the bitrate,
+         * which under real Nigerian mobile congestion is the difference
+         * between "occasionally choppy" and "the bandwidth estimator starves
+         * audio to keep video alive." Video is disposable in a language
+         * class; a dropped word is not.
+         */
+        audioPreset: AudioPresets.speech,
       },
       disconnectOnPageLeave: true,
     });
@@ -842,7 +877,7 @@ export default function LiveKitClassroom({
       room.disconnect();
       roomRef.current = null;
     };
-  }, [url, token, initialQuality, bump, bumpAll]);
+  }, [url, token, initialQuality, bump, bumpAll, retryKey]);
 
   // Switching mode re-negotiates what the server sends us. Video publications
   // are disabled outright in audio mode; in every other mode the tile size
@@ -1560,6 +1595,19 @@ export default function LiveKitClassroom({
         <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-6 text-sm text-rose-200">
           <p className="font-semibold">Could not join the classroom</p>
           <p className="mt-2">{error}</p>
+          <p className="mt-1 text-rose-300/80">
+            This is usually a single bad moment on the connection, not a dead one — worth trying again before assuming the worst.
+          </p>
+          <button
+            onClick={() => {
+              setError(null);
+              setStatus("connecting");
+              setRetryKey((key) => key + 1);
+            }}
+            className="mt-4 rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-rose-600 transition hover:brightness-95"
+          >
+            Try again
+          </button>
         </div>
       ) : status === "connecting" ? (
         <div className="grid aspect-video w-full place-items-center rounded-3xl bg-slate-900">
