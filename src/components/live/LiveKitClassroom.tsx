@@ -1,12 +1,15 @@
 "use client";
 
 import {
+  BookOpenIcon,
   CameraIcon,
   CommunityIcon,
   DeviceIcon,
   DotsVerticalIcon,
   ExitIcon,
   ExpandIcon,
+  EyeIcon,
+  EyeOffIcon,
   QuizIcon,
   HandIcon,
   MicIcon,
@@ -28,6 +31,7 @@ import {
   ReactionLayer,
 } from "./ClassroomInteractions";
 import { FloorLight, HandFlag, SpeakingWave } from "./SpeakingIndicators";
+import LiveMaterialsPanel from "./LiveMaterialsPanel";
 import { useAudioLevels, type AudioLevelStore } from "./useAudioLevels";
 import { useRouter } from "next/navigation";
 
@@ -209,9 +213,21 @@ function ParticipantTile({
     function attach() {
       const cameraPub = participant.getTrackPublication(Track.Source.Camera);
       const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
-      // A shared screen is what the class is looking at, so it wins over the
-      // tutor's face whenever both are live.
-      const videoPub = screenPub?.track ? screenPub : cameraPub;
+      /**
+       * A shared screen is what the class is looking at, so it wins over the
+       * tutor's face whenever both are live — EXCEPT on the sharer's own
+       * tile. Looping a person's own screen-share capture back into a video
+       * element that sits on that same screen is a hall of mirrors: the
+       * captured frame now contains a smaller copy of itself, which gets
+       * captured again next frame, nesting for as many generations as the
+       * encoder can keep up with. That is the cascade of shrinking browser
+       * windows tutors have been screenshotting — nothing to do with the
+       * network, and it reproduces every time regardless of connection
+       * quality. The sharer doesn't need to watch their own screen anyway,
+       * so their own tile just shows the plain "You" placeholder instead.
+       */
+      const isLocal = participant instanceof LocalParticipant;
+      const videoPub = screenPub?.track && !isLocal ? screenPub : cameraPub;
 
       if (videoEl && showVideo && videoPub?.track) {
         videoPub.track.attach(videoEl);
@@ -516,7 +532,18 @@ export default function LiveKitClassroom({
   /** Which tile the travelling green light is parked on. */
   const [lightIdentity, setLightIdentity] = useState<string | null>(null);
   const [immersive, setImmersive] = useState(false);
-  const [panel, setPanel] = useState<"hands" | "chat" | "switch" | null>(null);
+  /**
+   * Bold view: strips away everything but the stage itself — header, roster
+   * strip, side panel, control bar all gone. Built for a phone watching a
+   * shared screen, where every one of those bars is stolen space on a
+   * material the tutor needs full-width and legible.
+   *
+   * A lone reveal button survives the wipe (rendered over the stage,
+   * pointer-events on while the rest of the overlay ignores clicks) — the
+   * whole feature is worthless if turning it on is a one-way door.
+   */
+  const [focusMode, setFocusMode] = useState(false);
+  const [panel, setPanel] = useState<"hands" | "chat" | "switch" | "materials" | null>(null);
   /**
    * A quiz the tutor has unlocked for this cohort, or null.
    *
@@ -1076,6 +1103,7 @@ export default function LiveKitClassroom({
   const toggleImmersive = useCallback(() => {
     const next = !immersive;
     setImmersive(next);
+    if (!next) setFocusMode(false);
 
     if (next) {
       shellRef.current?.requestFullscreen?.().catch(() => {});
@@ -1088,11 +1116,32 @@ export default function LiveKitClassroom({
   // has to follow the browser rather than the other way round.
   useEffect(() => {
     function onFullscreenChange() {
-      if (!document.fullscreenElement) setImmersive(false);
+      if (!document.fullscreenElement) {
+        setImmersive(false);
+        setFocusMode(false);
+      }
     }
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
   }, []);
+
+  /**
+   * Bold view rides on top of immersive rather than replacing it — a phone
+   * asking for the material "full-width, no buttons" also wants the browser
+   * chrome gone, which is what immersive already does. Turning it on brings
+   * immersive with it if it wasn't already active; turning it off just drops
+   * the chrome-hiding and leaves fullscreen exactly as the viewer left it.
+   */
+  const toggleFocusMode = useCallback(() => {
+    setFocusMode((current) => {
+      const next = !current;
+      if (next && !immersive) {
+        setImmersive(true);
+        shellRef.current?.requestFullscreen?.().catch(() => {});
+      }
+      return next;
+    });
+  }, [immersive]);
 
   // Opening chat clears its badge; leaving it open keeps it clear.
   useEffect(() => {
@@ -1105,10 +1154,14 @@ export default function LiveKitClassroom({
     : [];
   const speakingIds = new Set((room?.activeSpeakers ?? []).map((participant) => participant.identity));
 
-  // Who goes on the main stage: whoever is talking, else the tutor, else the
-  // first person in the room. A language class is a conversation, so following
-  // the speaker is right far more often than a fixed grid.
+  // Who goes on the main stage: a live screen share first — that's what the
+  // class needs to see, and a student answering a question out loud must
+  // never yank the stage away from it — else whoever is talking, else the
+  // tutor, else the first person in the room. A language class is a
+  // conversation, so following the speaker is right far more often than a
+  // fixed grid, but only once nobody is sharing their screen.
   const liveStage =
+    participants.find((participant) => participant.getTrackPublication(Track.Source.ScreenShare)?.track) ??
     participants.find((participant) => speakingIds.has(participant.identity) && participants.length > 1) ??
     participants.find((participant) => isTutor(participant)) ??
     participants[0];
@@ -1350,6 +1403,7 @@ export default function LiveKitClassroom({
           : "space-y-4"
       }
     >
+      {!focusMode ? (
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900/90 px-5 py-3 text-white">
         <div className="flex min-w-0 items-center gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1368,6 +1422,14 @@ export default function LiveKitClassroom({
               Reconnecting…
             </span>
           ) : null}
+          <button
+            onClick={toggleFocusMode}
+            aria-label="Bold view — hide everything but the class"
+            title="Bold view — hide everything but the class, best for watching a shared screen on a phone"
+            className="rounded-xl bg-white/10 p-2 text-white transition hover:bg-white/20"
+          >
+            <EyeOffIcon className="h-4 w-4" />
+          </button>
           <button
             onClick={toggleImmersive}
             aria-label={immersive ? "Leave full screen" : "Full screen"}
@@ -1388,6 +1450,7 @@ export default function LiveKitClassroom({
           ) : null}
         </div>
       </div>
+      ) : null}
 
       {/*
         A tutor-unlocked quiz, surfaced right where a student's attention
@@ -1396,7 +1459,7 @@ export default function LiveKitClassroom({
         this banner can only ever appear for a game the student's own tutor
         started for their own class.
       */}
-      {role === "student" && quizGame && quizGame.phase !== "ended" && !quizDismissed ? (
+      {!focusMode && role === "student" && quizGame && quizGame.phase !== "ended" && !quizDismissed ? (
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent)]/15 px-5 py-3 text-sm text-white">
           <QuizIcon className="h-5 w-5 shrink-0" />
           <p className="min-w-0 flex-1 leading-6">
@@ -1434,7 +1497,7 @@ export default function LiveKitClassroom({
         </button>
       ) : null}
 
-      {deviceNotice ? (
+      {!focusMode && deviceNotice ? (
         <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-5 py-3 text-sm text-amber-200">
           <p className="min-w-0 flex-1 leading-6">{deviceNotice}</p>
           <button
@@ -1446,7 +1509,7 @@ export default function LiveKitClassroom({
         </div>
       ) : null}
 
-      {autoNotice ? (
+      {!focusMode && autoNotice ? (
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-5 py-3 text-sm text-amber-200">
           <p className="min-w-0 flex-1 leading-6">
             Your connection was struggling, so we moved you from{" "}
@@ -1487,9 +1550,9 @@ export default function LiveKitClassroom({
           <BrandLoader size="md" title="Klassenzimmer wird geöffnet…" message="Connecting you to your class." />
         </div>
       ) : (
-        <div className={`flex min-h-0 flex-1 gap-3 ${panel ? "lg:flex-row" : ""} flex-col`}>
+        <div className={`flex min-h-0 flex-1 gap-3 ${panel && !focusMode ? "lg:flex-row" : ""} flex-col`}>
           <div className="flex min-w-0 flex-1 flex-col gap-3">
-            {interactions.floor && interactions.floorName ? (
+            {!focusMode && interactions.floor && interactions.floorName ? (
               <FloorBanner
                 name={interactions.floorName}
                 isMe={interactions.floor === room?.localParticipant.identity}
@@ -1533,10 +1596,28 @@ export default function LiveKitClassroom({
 
                 {/* Over the video, so the tutor catches them without looking away. */}
                 <ReactionLayer reactions={interactions.reactions} />
+
+                {/*
+                  The one door out of bold view. Everything else on the stage
+                  ignores clicks (see ReactionLayer above); this button does
+                  not, so it has to sit in its own layer rather than inside
+                  one that is pointer-events-none.
+                */}
+                {focusMode ? (
+                  <button
+                    onClick={toggleFocusMode}
+                    aria-label="Show controls"
+                    title="Show controls"
+                    className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition hover:bg-black/70"
+                  >
+                    <EyeIcon className="h-3.5 w-3.5" />
+                    Show controls
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
-            {others.length > 0 ? (
+            {focusMode ? null : others.length > 0 ? (
               <div className="flex gap-3 overflow-x-auto pb-1">
                 {others.map((participant) => (
                   <div key={participant.identity} className="shrink-0">
@@ -1563,12 +1644,16 @@ export default function LiveKitClassroom({
             )}
           </div>
 
-          {panel ? (
-            <aside className="flex max-h-[26rem] min-h-0 w-full shrink-0 flex-col rounded-2xl bg-slate-900/90 p-3 lg:max-h-none lg:w-80">
+          {panel && !focusMode ? (
+            <aside
+              className={`flex max-h-[26rem] min-h-0 w-full shrink-0 flex-col rounded-2xl bg-slate-900/90 p-3 lg:max-h-none ${
+                panel === "materials" ? "lg:w-96" : "lg:w-80"
+              }`}
+            >
               <div className="mb-2 flex items-center gap-1 rounded-xl bg-white/5 p-1">
                 <button
                   onClick={() => setPanel("hands")}
-                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
                     panel === "hands" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
                   }`}
                 >
@@ -1576,15 +1661,23 @@ export default function LiveKitClassroom({
                 </button>
                 <button
                   onClick={() => setPanel("chat")}
-                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
                     panel === "chat" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
                   }`}
                 >
                   Chat
                 </button>
                 <button
+                  onClick={() => setPanel("materials")}
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
+                    panel === "materials" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Materials
+                </button>
+                <button
                   onClick={() => setPanel("switch")}
-                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
                     panel === "switch" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
                   }`}
                 >
@@ -1599,7 +1692,9 @@ export default function LiveKitClassroom({
                 </button>
               </div>
 
-              {panel === "hands" ? (
+              {panel === "materials" ? (
+                <LiveMaterialsPanel role={role} />
+              ) : panel === "hands" ? (
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
                   {role === "tutor" ? <ModeSwitch mode={interactions.mode} onChange={interactions.setMode} /> : null}
                   <HandQueue
@@ -1628,7 +1723,11 @@ export default function LiveKitClassroom({
         Only applied in immersive mode: outside it the PAGE scrolls, not this
         div, so `sticky` would pin it against the browser viewport instead
         and could overlap footer content that has nothing to do with class.
+
+        Gone entirely in bold view — the stage's own "Show controls" button
+        is the only way back, by design.
       */}
+      {!focusMode ? (
       <div
         className={`flex flex-wrap items-center gap-2 rounded-2xl bg-slate-900/90 p-3 ${
           immersive ? "sticky bottom-0 z-20 shadow-[0_-8px_24px_rgba(0,0,0,0.35)]" : ""
@@ -1689,6 +1788,17 @@ export default function LiveKitClassroom({
               {interactions.unreadChat}
             </span>
           ) : null}
+        </button>
+
+        <button
+          onClick={() => setPanel(panel === "materials" ? null : "materials")}
+          title="Open your course materials beside the class — only you see what you open."
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+            panel === "materials" ? "bg-white/20 text-white" : "bg-white/10 text-white hover:bg-white/20"
+          }`}
+        >
+          <BookOpenIcon className="h-4 w-4" />
+          Materials
         </button>
 
         <button
@@ -1776,13 +1886,15 @@ export default function LiveKitClassroom({
           </button>
         </div>
       </div>
+      ) : null}
 
       {/*
         The reaction bar gets its own row rather than joining the crowded
         control strip. These are the buttons a student presses most often
         during a lesson — and on a phone they must not be the ones that wrap
-        off the end of a line.
+        off the end of a line. Hidden along with everything else in bold view.
       */}
+      {!focusMode ? (
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900/90 p-3">
         <ReactionBar
           onReact={interactions.react}
@@ -1794,7 +1906,9 @@ export default function LiveKitClassroom({
           {ROOM_MODE_COPY[interactions.mode][role === "tutor" ? "tutor" : "student"]}
         </span>
       </div>
+      ) : null}
 
+      {!focusMode ? (
       <p className={`rounded-2xl bg-slate-900/60 px-5 py-3 text-xs leading-5 text-slate-400 ${immersive ? "hidden sm:block" : ""}`}>
         <span className="font-semibold text-slate-200">{qualitySpec(mode).label}:</span> {qualitySpec(mode).description} Roughly{" "}
         {qualitySpec(mode).dataHint.replace("~", "")}.{" "}
@@ -1803,6 +1917,7 @@ export default function LiveKitClassroom({
           : "If your connection struggles we drop a level for you automatically — you can always put it back."}{" "}
         Audio stays full quality at every setting, and the class recording is always in your video library afterwards.
       </p>
+      ) : null}
     </div>
   );
 }
