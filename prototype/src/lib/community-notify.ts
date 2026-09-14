@@ -38,7 +38,8 @@ import { readAssignment } from "@/lib/lecturer-assignment";
 export type ChatAnnouncement = {
   channelId: string;
   channelName: string;
-  spaceId: string;
+  /** Null for a DM channel — it belongs to no cohort's Space. */
+  spaceId: string | null;
   messageId: string;
   authorId: string;
   authorName: string;
@@ -191,9 +192,37 @@ export function announceChatMessage(input: ChatAnnouncement): void {
     try {
       const channel = await prisma.channel.findUnique({
         where: { id: input.channelId },
-        select: { kind: true, space: { select: { branchId: true, level: true, sessionSlot: true } } },
+        select: {
+          kind: true,
+          dmStudentId: true,
+          space: { select: { branchId: true, level: true, sessionSlot: true } },
+        },
       });
       if (!channel) return;
+
+      /**
+       * A DM: the only recipient is ever the student on the other end of it.
+       * There is no room-wide push list to build — an admin sent this, the
+       * student is who has to hear about it. When the student replies, the
+       * office finds it the same way it finds everything else here: open on
+       * the Community page, polling like any other room.
+       */
+      if (channel.kind === "dm") {
+        if (!channel.dmStudentId || channel.dmStudentId === input.authorId) return;
+        if (!mayPush(input.channelId)) return;
+
+        await sendPushToUsers([channel.dmStudentId], {
+          title: `${input.authorName} · Office`,
+          body: previewOf(input.body, input.hasAttachment, input.attachmentType),
+          url: `/community?channel=${input.channelId}&message=${input.messageId}`,
+          tag: `community:${input.channelId}`,
+        });
+        return;
+      }
+
+      // Every non-DM channel has a Space; this is here for TypeScript, not
+      // because it is expected to trigger.
+      if (!input.spaceId) return;
 
       /**
        * ORDINARY CHAT: a push, and no database row.

@@ -380,8 +380,16 @@ export async function authorizeChannel(viewer: Viewer, channelId: string) {
   });
   if (!channel) return null;
 
+  // A DM channel belongs to no Space, and is scoped to exactly two people:
+  // any admin (the office, collectively) and the one student it is with.
+  // Never the space-membership check below — that would let every tutor and
+  // every other student in, which is the one thing this thread must not do.
+  if (channel.kind === "dm") {
+    return isAdminRole(viewer.role) || channel.dmStudentId === viewer.userId ? channel : null;
+  }
+
   const scope = await resolveSpaceScope(viewer);
-  return scope.spaceIds.includes(channel.spaceId) ? channel : null;
+  return channel.spaceId && scope.spaceIds.includes(channel.spaceId) ? channel : null;
 }
 
 /** Confirm a message sits inside a channel the viewer may access. */
@@ -392,6 +400,102 @@ export async function authorizeMessage(viewer: Viewer, messageId: string) {
   });
   if (!message) return null;
 
+  if (message.channel.kind === "dm") {
+    return isAdminRole(viewer.role) || message.channel.dmStudentId === viewer.userId ? message : null;
+  }
+
   const scope = await resolveSpaceScope(viewer);
-  return scope.spaceIds.includes(message.channel.spaceId) ? message : null;
+  return message.channel.spaceId && scope.spaceIds.includes(message.channel.spaceId) ? message : null;
+}
+
+/**
+ * A student's private thread with the office — the whole reason it exists is
+ * "click a student, message them privately", so only an admin may create one.
+ * Idempotent: the second admin to message the same student lands in the
+ * thread the first one already opened, never a second copy.
+ */
+export async function getOrCreateDmChannel(studentUserId: string) {
+  const existing = await prisma.channel.findUnique({ where: { dmStudentId: studentUserId } });
+  if (existing) return existing;
+
+  const student = await prisma.user.findUnique({
+    where: { id: studentUserId },
+    select: { id: true, role: true, tenantId: true, name: true },
+  });
+  if (!student || normalizeRole(student.role) !== "student") return null;
+
+  return prisma.channel.upsert({
+    where: { dmStudentId: studentUserId },
+    update: {},
+    create: {
+      dmStudentId: studentUserId,
+      slug: "dm",
+      name: student.name ?? "Student",
+      kind: "dm",
+      tenantId: student.tenantId ?? null,
+    },
+  });
+}
+
+/**
+ * The DM thread(s) a viewer may see, shaped like a `Space` so the sidebar that
+ * already groups rooms by space can render this section for free. An admin
+ * gets every thread in the school, tagged "Office" the same way a staff post
+ * in an ordinary room is — no single admin owns a thread. A student gets their
+ * own thread once an admin has opened it, and nothing before that: only the
+ * office may start one. A tutor gets nothing; this is deliberately not a
+ * capability they have, per [[project-community-group-chat]] design and the
+ * explicit instruction that tutors moderate rooms, not private student lines.
+ */
+export async function listDmSpaceForViewer(viewer: Viewer) {
+  if (isAdminRole(viewer.role)) {
+    const channels = await prisma.channel.findMany({
+      where: { kind: "dm" },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        description: true,
+        kind: true,
+        dmStudent: { select: { name: true } },
+        _count: { select: { messages: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+    if (channels.length === 0) return null;
+    return {
+      id: "__dm__",
+      name: "Direct messages",
+      level: "",
+      sessionSlot: "",
+      description: "Private threads with one student, visible only to the office.",
+      branch: { id: "__dm__", name: "" },
+      channels: channels.map((c) => ({
+        id: c.id,
+        slug: c.slug,
+        name: c.dmStudent?.name ?? c.name,
+        description: c.description,
+        kind: c.kind,
+        _count: c._count,
+      })),
+    };
+  }
+
+  if (isStaffRole(viewer.role)) return null; // tutors: no DM access at all.
+
+  const own = await prisma.channel.findUnique({
+    where: { dmStudentId: viewer.userId },
+    select: { id: true, slug: true, name: true, description: true, kind: true, _count: { select: { messages: true } } },
+  });
+  if (!own) return null;
+
+  return {
+    id: "__dm__",
+    name: "Direct messages",
+    level: "",
+    sessionSlot: "",
+    description: null,
+    branch: { id: "__dm__", name: "" },
+    channels: [{ ...own, name: "The office" }],
+  };
 }

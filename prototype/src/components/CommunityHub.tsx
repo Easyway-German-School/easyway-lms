@@ -402,6 +402,9 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
     () => spaces.find((space) => space.channels.some((c) => c.id === activeId)) ?? null,
     [spaces, activeId],
   );
+  const isDm = active?.kind === "dm";
+  /** Opening a private thread from scratch — busy while the request is out. */
+  const [openingDm, setOpeningDm] = useState(false);
 
   /* ---------------------------------------------------------------- spaces */
 
@@ -431,6 +434,36 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   useEffect(() => {
     void loadSpaces();
   }, [loadSpaces]);
+
+  /**
+   * Admin only: open (or create) the private thread with one student, from
+   * wherever their name appears in a room. Idempotent server-side — a second
+   * click, or a second admin doing the same thing, lands in the one thread
+   * that already exists rather than a new one.
+   */
+  const openDm = useCallback(
+    async (studentId: string) => {
+      if (openingDm) return;
+      setOpeningDm(true);
+      try {
+        const res = await fetch("/api/community/dms", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ studentId }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Could not open that conversation");
+        await loadSpaces();
+        setActiveId(data.channelId);
+        setShowRail(false);
+      } catch (dmError) {
+        setError(dmError instanceof Error ? dmError.message : "Could not open that conversation");
+      } finally {
+        setOpeningDm(false);
+      }
+    },
+    [openingDm, loadSpaces],
+  );
 
   /* -------------------------------------------------------------- messages */
 
@@ -1117,54 +1150,62 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
         } w-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface-alt)] sm:flex sm:w-64`}
       >
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          {spaces.map((space) => (
-            <div key={space.id} className="mb-3">
-              <div className="px-2 py-1.5">
-                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">
-                  <BranchIcon className="h-3 w-3" />
-                  {space.branch?.name}
-                </p>
-                {/*
-                  The sitting is on the label, not implied. Three A1 rooms that
-                  differ only in the time of day are indistinguishable without
-                  it — which is the confusion this whole change exists to end.
-                */}
-                <p className="mt-0.5 text-sm font-semibold text-[var(--foreground)]">
-                  {space.level} · {SLOT_LABEL[space.sessionSlot] ?? space.sessionSlot}
-                </p>
-              </div>
+          {spaces.map((space) => {
+            const isDmGroup = space.id === "__dm__";
+            return (
+              <div key={space.id} className="mb-3">
+                <div className="px-2 py-1.5">
+                  <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">
+                    <BranchIcon className="h-3 w-3" />
+                    {isDmGroup ? "Direct messages" : space.branch?.name}
+                  </p>
+                  {/*
+                    The sitting is on the label, not implied. Three A1 rooms that
+                    differ only in the time of day are indistinguishable without
+                    it — which is the confusion this whole change exists to end.
+                    The DM group has no sitting, so it skips this second line.
+                  */}
+                  {!isDmGroup ? (
+                    <p className="mt-0.5 text-sm font-semibold text-[var(--foreground)]">
+                      {space.level} · {SLOT_LABEL[space.sessionSlot] ?? space.sessionSlot}
+                    </p>
+                  ) : null}
+                </div>
 
-              {space.channels.map((channel) => {
-                const selected = channel.id === activeId;
-                return (
-                  <button
-                    key={channel.id}
-                    onClick={() => {
-                      setActiveId(channel.id);
-                      // Picking a room takes you INTO it on a narrow screen.
-                      // This used to fire only in the compact embed, so on the
-                      // full page a phone tapped a channel and stayed staring
-                      // at the list.
-                      setShowRail(false);
-                    }}
-                    className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition ${
-                      selected
-                        ? "bg-[var(--accent)] font-semibold text-white"
-                        : "text-[var(--foreground)] hover:bg-[var(--surface)]"
-                    }`}
-                  >
-                    <span className={selected ? "text-white/70" : "text-[var(--muted)]"}>#</span>
-                    <span className="min-w-0 flex-1 truncate">{channel.name}</span>
-                    {channel.unreadCount > 0 && !selected ? (
-                      <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold text-white">
-                        {channel.unreadCount > 99 ? "99+" : channel.unreadCount}
+                {space.channels.map((channel) => {
+                  const selected = channel.id === activeId;
+                  return (
+                    <button
+                      key={channel.id}
+                      onClick={() => {
+                        setActiveId(channel.id);
+                        // Picking a room takes you INTO it on a narrow screen.
+                        // This used to fire only in the compact embed, so on the
+                        // full page a phone tapped a channel and stayed staring
+                        // at the list.
+                        setShowRail(false);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition ${
+                        selected
+                          ? "bg-[var(--accent)] font-semibold text-white"
+                          : "text-[var(--foreground)] hover:bg-[var(--surface)]"
+                      }`}
+                    >
+                      <span className={selected ? "text-white/70" : "text-[var(--muted)]"}>
+                        {isDmGroup ? "@" : "#"}
                       </span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+                      <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+                      {channel.unreadCount > 0 && !selected ? (
+                        <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold text-white">
+                          {channel.unreadCount > 99 ? "99+" : channel.unreadCount}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
 
         <button
@@ -1198,14 +1239,16 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           </button>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-[var(--foreground)]">
-              # {active?.name ?? "Community"}
+              {isDm ? "@" : "#"} {active?.name ?? "Community"}
             </p>
             <p className="truncate text-xs text-[var(--muted)]">
-              {activeSpace
-                ? `${activeSpace.branch?.name} · ${activeSpace.level} · ${
-                    SLOT_LABEL[activeSpace.sessionSlot] ?? activeSpace.sessionSlot
-                  }`
-                : active?.description}
+              {isDm
+                ? "Private — visible only to the office and this student"
+                : activeSpace
+                  ? `${activeSpace.branch?.name} · ${activeSpace.level} · ${
+                      SLOT_LABEL[activeSpace.sessionSlot] ?? activeSpace.sessionSlot
+                    }`
+                  : active?.description}
             </p>
           </div>
 
@@ -1270,7 +1313,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
         {/* A thin band of good news from this cohort — finished stories,
             certificates, levels passed. Ambient and dismissible; hides itself
             when there is nothing to show. */}
-        {!compact ? <CommunityWins spaceId={activeSpace?.id ?? null} /> : null}
+        {!compact && !isDm ? <CommunityWins spaceId={activeSpace?.id ?? null} /> : null}
 
         <div
           ref={scrollRef}
@@ -1339,7 +1382,25 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                     <div className={`max-w-[78%] min-w-0 ${message.mine ? "items-end" : ""}`}>
                       {!grouped && !message.mine ? (
                         <p className="mb-0.5 flex items-center gap-1.5 text-xs font-semibold">
-                          <span className={colourFor(message.author.id)}>{message.author.name}</span>
+                          {/*
+                            Admin-only: the exact "click a student and message
+                            them privately" entry point. Only ever on a
+                            student's name — a tutor's or another admin's name
+                            is not a private-message target here.
+                          */}
+                          {isStaff && message.author.role === "student" && !isDm ? (
+                            <button
+                              type="button"
+                              onClick={() => void openDm(message.author.id)}
+                              disabled={openingDm}
+                              title={`Message ${message.author.name} privately`}
+                              className={`${colourFor(message.author.id)} underline decoration-dotted underline-offset-2 hover:opacity-80 disabled:opacity-50`}
+                            >
+                              {message.author.name}
+                            </button>
+                          ) : (
+                            <span className={colourFor(message.author.id)}>{message.author.name}</span>
+                          )}
                           {message.author.role === "lecturer" || message.author.role === "admin" ? (
                             <span className="rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
                               {message.author.role === "admin" ? "Office" : "Tutor"}
@@ -1846,17 +1907,20 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
               >
                 <StickerGlyph className="h-5 w-5" />
               </button>
-              <button
-                onClick={openGamesTray}
-                aria-label="Play a game"
-                aria-expanded={gamesTrayOpen}
-                title="Play a game"
-                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition hover:bg-[var(--surface-alt)] ${
-                  gamesTrayOpen ? "bg-[var(--surface-alt)] text-[var(--accent)]" : "text-[var(--muted)]"
-                }`}
-              >
-                <GameControllerIcon className="h-5 w-5" />
-              </button>
+              {/* No games in a private thread — a story needs a whole cohort. */}
+              {!isDm ? (
+                <button
+                  onClick={openGamesTray}
+                  aria-label="Play a game"
+                  aria-expanded={gamesTrayOpen}
+                  title="Play a game"
+                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition hover:bg-[var(--surface-alt)] ${
+                    gamesTrayOpen ? "bg-[var(--surface-alt)] text-[var(--accent)]" : "text-[var(--muted)]"
+                  }`}
+                >
+                  <GameControllerIcon className="h-5 w-5" />
+                </button>
+              ) : null}
               <textarea
                 ref={composerRef}
                 value={draft}
