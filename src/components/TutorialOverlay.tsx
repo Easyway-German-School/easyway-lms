@@ -125,7 +125,7 @@ export default function TutorialOverlay({
                 />
               ))}
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={onToggleMute}
@@ -137,10 +137,11 @@ export default function TutorialOverlay({
               <button
                 type="button"
                 onClick={onExit}
-                aria-label="Exit tutorial"
-                className="rounded-full p-1.5 text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
+                aria-label="Skip tutorial"
+                className="flex items-center gap-1 rounded-full border-2 border-[var(--foreground)] px-3 py-1.5 text-xs font-extrabold uppercase tracking-wide text-[var(--foreground)] transition hover:bg-[var(--foreground)] hover:text-[var(--surface)]"
               >
-                <CrossIcon className="h-4 w-4" />
+                <CrossIcon className="h-3.5 w-3.5" strokeWidth={3} />
+                Skip
               </button>
             </div>
           </div>
