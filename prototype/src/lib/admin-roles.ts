@@ -323,6 +323,64 @@ export async function requireCapability(
   return { ok: true, admin, session };
 }
 
+/**
+ * Like `requireCapability`, but also admits a signed-in lecturer.
+ *
+ * A handful of routes under `/api/admin/course*`, `/api/admin/module`,
+ * `/api/admin/lesson*` and `/api/admin/courses` are shared between the admin
+ * course editor and a tutor's own course/module/lesson/materials tooling —
+ * each one already has its own `isLecturer()` check for exactly that reason.
+ * But `resolveAdmin` only ever resolves a `role: "admin"` user, so every one
+ * of those routes was gated with plain `requireCapability` first, which
+ * refused a lecturer's session with 403 before their `isLecturer` check ever
+ * ran. In practice this meant no tutor could list, create or edit a course,
+ * a module or a lesson, or even see one to attach a material to — the
+ * lecturer branch of every one of those routes was dead code.
+ */
+export async function requireCapabilityOrLecturer(
+  capability: Capability,
+): Promise<{ ok: true; admin: AdminContext | null; session: Session } | { ok: false; response: Response }> {
+  beginRequestScope();
+  beginAuditScope();
+
+  const { requireAuthSession } = await import("@/lib/auth");
+  const { NextResponse } = await import("next/server");
+
+  const session = await requireAuthSession();
+  if (!session) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+
+  if (session.user.role?.toLowerCase() === "lecturer") {
+    return { ok: true, admin: null, session };
+  }
+
+  const admin = await resolveAdmin(session.user.id);
+  await nameAuditActor(admin);
+
+  if (!admin) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Admin access required" }, { status: 403 }),
+    };
+  }
+
+  if (!admin.can(capability)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: `Your admin role does not cover ${capability}` },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return { ok: true, admin, session };
+}
+
 export async function requireAdmin(): Promise<
   | { ok: true; admin: AdminContext; session: Session }
   | { ok: false; response: Response }

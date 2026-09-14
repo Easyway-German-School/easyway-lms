@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 
-import { requireCapability } from "@/lib/admin-roles";
+import { requireCapabilityOrLecturer } from "@/lib/admin-roles";
 async function isLecturer(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return false;
@@ -9,7 +9,7 @@ async function isLecturer(userId: string) {
 }
 
 export async function POST(request: NextRequest) {
-  const gate = await requireCapability("materials");
+  const gate = await requireCapabilityOrLecturer("materials");
   if (!gate.ok) return gate.response;
   const session = gate.session;
 
