@@ -68,37 +68,72 @@ type NavItem = {
   icon: ReactNode;
 };
 
+type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
 // These were box-drawing characters — ▤ ◷ ◉ ◈ — sitting next to three real
 // SVGs, which is why the sidebar looked half-finished.
 //
 // There is no Settings entry. Everything it held is either on Profile or is a
 // school decision a student cannot make, and the theme switch — the one thing
 // in there anybody used — lives in the corner of every page.
-const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
-  // Rewatchable, narrated walkthroughs — sits right after Dashboard since
-  // it's the answer to "I don't know how to use this", the single most
-  // common reason a student never finds the rest of the sidebar.
-  { label: "Tutorials", href: "/tutorials", icon: <PlayIcon /> },
-  { label: "Classes", href: "/calendar", icon: <CalendarIcon /> },
-  { label: "Live class", href: "/live", icon: <BroadcastIcon /> },
-  { label: "Assignment", href: "/assignment", icon: <AssignmentIcon /> },
-  // NOT under the live-class gate. This is played in a branch classroom on
-  // the phone in the student's hand, so a campus student is the intended
-  // player rather than the exception.
-  { label: "Quiz game", href: "/play", icon: <QuizIcon /> },
-  { label: "AI Coach & Games", href: "/games", icon: <ChainIcon /> },
-  { label: "Materials", href: "/materials", icon: <BookOpenIcon /> },
-  { label: "My Notes", href: "/notes", icon: <PencilIcon /> },
-  { label: "Community", href: "/community", icon: <CommunityIcon /> },
-  { label: "Results", href: "/results", icon: <ResultsIcon /> },
-  { label: "Exam centre", href: "/exam-centre", icon: <ExamCentreIcon /> },
-  { label: "Attendance", href: "/attendance", icon: <AttendanceIcon /> },
-  { label: "Certificates", href: "/certificates", icon: <CertificateIcon /> },
-  { label: "Notifications", href: "/notifications", icon: <BellIcon /> },
-  { label: "Payments", href: "/payments", icon: <PaymentIcon /> },
-  { label: "Profile", href: "/profile", icon: <ProfileIcon /> },
+//
+// Grouped into labeled sections rather than one flat 17-item list — a student
+// scanning for "where do I submit an assignment" was choosing from 17 equally
+// weighted rows every single time. The groups mirror what a student is
+// actually trying to do: learn, attend/talk to people, check standing, manage
+// the account.
+const navGroups: NavGroup[] = [
+  {
+    label: "Learn",
+    items: [
+      { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
+      // Rewatchable, narrated walkthroughs — sits right after Dashboard
+      // since it's the answer to "I don't know how to use this", the single
+      // most common reason a student never finds the rest of the sidebar.
+      { label: "Tutorials", href: "/tutorials", icon: <PlayIcon /> },
+      { label: "Materials", href: "/materials", icon: <BookOpenIcon /> },
+      { label: "My Notes", href: "/notes", icon: <PencilIcon /> },
+      { label: "AI Coach & Games", href: "/games", icon: <ChainIcon /> },
+    ],
+  },
+  {
+    label: "Live & community",
+    items: [
+      { label: "Classes", href: "/calendar", icon: <CalendarIcon /> },
+      { label: "Live class", href: "/live", icon: <BroadcastIcon /> },
+      { label: "Community", href: "/community", icon: <CommunityIcon /> },
+    ],
+  },
+  {
+    label: "Progress",
+    items: [
+      { label: "Assignment", href: "/assignment", icon: <AssignmentIcon /> },
+      // NOT under the live-class gate. This is played in a branch classroom
+      // on the phone in the student's hand, so a campus student is the
+      // intended player rather than the exception.
+      { label: "Quiz game", href: "/play", icon: <QuizIcon /> },
+      { label: "Results", href: "/results", icon: <ResultsIcon /> },
+      { label: "Attendance", href: "/attendance", icon: <AttendanceIcon /> },
+      { label: "Certificates", href: "/certificates", icon: <CertificateIcon /> },
+      { label: "Exam centre", href: "/exam-centre", icon: <ExamCentreIcon /> },
+    ],
+  },
+  {
+    label: "Account",
+    items: [
+      { label: "Notifications", href: "/notifications", icon: <BellIcon /> },
+      { label: "Payments", href: "/payments", icon: <PaymentIcon /> },
+      { label: "Profile", href: "/profile", icon: <ProfileIcon /> },
+    ],
+  },
 ];
+
+// Flattened once for the lookups below that don't care about grouping
+// (locating the active item's label, filtering by href).
+const navItems: NavItem[] = navGroups.flatMap((group) => group.items);
 
 /**
  * The provider is OUTSIDE the shell body, not inside it.
@@ -192,7 +227,12 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
    * hide the room from the one student whose tutor had booked it.
    */
   const showsLiveClass = canAttendLive(access?.deliveryMode, access?.classType);
-  const visibleNavItems = navItems.filter((item) => showsLiveClass || !isLiveOnlyRoute(item.href));
+  const visibleNavGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => showsLiveClass || !isLiveOnlyRoute(item.href)),
+    }))
+    .filter((group) => group.items.length > 0);
 
   // Navigating is the end of the drawer's job.
   useEffect(() => {
@@ -360,8 +400,17 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 overflow-y-auto p-3">
-          <div className="space-y-1">
-            {visibleNavItems.map((item) => {
+          {visibleNavGroups.map((group, groupIndex) => (
+            <div key={group.label} className={groupIndex > 0 ? "mt-5" : ""}>
+              <p
+                className={`px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]/70 ${
+                  collapsed ? "lg:hidden" : ""
+                }`}
+              >
+                {group.label}
+              </p>
+              <div className="space-y-1">
+                {group.items.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
               // Locked items stay clickable on purpose: tapping Classes and
               // meeting the padlock explains the paywall far better than a
@@ -426,8 +475,10 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
                   {!collapsed && locked && !isLiveNow && <LockIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]/70" strokeWidth={2.2} />}
                 </button>
               );
-            })}
-          </div>
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* The way out. Phones get shared and cybercafé machines get walked away
