@@ -174,6 +174,13 @@ export async function POST(req: NextRequest) {
         feedback = needsReview
           ? `${ranOut}${result.earned} of ${result.possible - result.results.filter((r) => r.needsReview).reduce((sum, r) => sum + r.possible, 0)} on the questions marked automatically. Your written ${result.awaitingReview === 1 ? "answer is" : "answers are"} with your tutor.`
           : `${ranOut}${result.earned} of ${result.possible} marks.`;
+      } else {
+        // A document has no auto-markable part at all — the whole thing
+        // waits for a human. Without this, a handed-in essay sat with
+        // `needsReview: false` and `score: null` forever: invisible to the
+        // marking queue, which filters on `needsReview`, so nobody ever saw
+        // it arrive.
+        needsReview = true;
       }
 
       const saved = await prisma.assignmentSubmission.upsert({
