@@ -213,9 +213,21 @@ function ParticipantTile({
     function attach() {
       const cameraPub = participant.getTrackPublication(Track.Source.Camera);
       const screenPub = participant.getTrackPublication(Track.Source.ScreenShare);
-      // A shared screen is what the class is looking at, so it wins over the
-      // tutor's face whenever both are live.
-      const videoPub = screenPub?.track ? screenPub : cameraPub;
+      /**
+       * A shared screen is what the class is looking at, so it wins over the
+       * tutor's face whenever both are live — EXCEPT on the sharer's own
+       * tile. Looping a person's own screen-share capture back into a video
+       * element that sits on that same screen is a hall of mirrors: the
+       * captured frame now contains a smaller copy of itself, which gets
+       * captured again next frame, nesting for as many generations as the
+       * encoder can keep up with. That is the cascade of shrinking browser
+       * windows tutors have been screenshotting — nothing to do with the
+       * network, and it reproduces every time regardless of connection
+       * quality. The sharer doesn't need to watch their own screen anyway,
+       * so their own tile just shows the plain "You" placeholder instead.
+       */
+      const isLocal = participant instanceof LocalParticipant;
+      const videoPub = screenPub?.track && !isLocal ? screenPub : cameraPub;
 
       if (videoEl && showVideo && videoPub?.track) {
         videoPub.track.attach(videoEl);
