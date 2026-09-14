@@ -109,12 +109,15 @@ export type MomentId =
   | "office-reply"
   | "class-schedule-changed"
   | "lesson-complete"
+  | "exam-campaign"
   | "assignments-open"
   | "notifications"
+  | "notifications-travel"
   | "daily-briefing"
   | "journey"
   | "poster"
   | "game-turn"
+  | "profile-details"
   | "install-offline-notes";
 
 type Kind = "toast" | "modal";
@@ -209,6 +212,23 @@ const MOMENTS: Record<MomentId, Definition> = {
     dockBlurb: "Your session moved — here is where to now.",
   },
   /**
+   * "Turn on notifications so your Travel Package updates reach you."
+   *
+   * Raised only right after a reply to a marketing-page enquiry (see
+   * TravelPackageNotifyNudge). Sits just under "office-reply" so the answer
+   * they asked for is read first and this follows as its consequence, and
+   * above the generic "notifications" ask because the reason here is concrete
+   * and time-boxed — a document, a payment step, a deadline — rather than the
+   * standing "hear about class" one. Same snooze / ask-cap memory as the
+   * generic invite, so "don't ask again" anywhere silences both.
+   */
+  "notifications-travel": {
+    priority: 66,
+    kind: "modal",
+    dockLabel: "Turn on updates",
+    dockBlurb: "So your Travel Package news reaches you in time.",
+  },
+  /**
    * A single lesson finished, not a whole level — smaller news, so it sits
    * below level-advance. Still above the notification ask and the journey
    * moment: this is earned, happened just now, and is why the student is
@@ -221,15 +241,31 @@ const MOMENTS: Record<MomentId, Definition> = {
     dockBlurb: "You finished something — come see.",
   },
   /**
+   * "The ÖSD exam is now in Lagos — register before it closes." A time-boxed
+   * campaign with a hard external deadline, shown once a calendar day while it
+   * runs, to every student who has not marked themselves registered. It sits
+   * below a finished lesson / level and the office reply — news about THEM
+   * always wins — but above the standing notification ask and Becca's daily
+   * hello, so on an ordinary day it takes the first slot and only docks behind
+   * genuine earned-news. Counts against the two-modal cap like any other modal;
+   * the bell, the pinned banner and the 3×/week reminder carry it when it docks.
+   */
+  "exam-campaign": {
+    priority: 63,
+    kind: "modal",
+    dockLabel: "Register for the ÖSD exam",
+    dockBlurb: "Dates, fees and the free prep class — before registration closes.",
+  },
+  /**
    * "You can submit assignments now." Fires once ever, the first time a
    * student's portal is unlocked AND there is work sitting unsubmitted — see
-   * src/lib/assignment-availability-nudge.ts for the server side. Above the
-   * notification ask because this is news about a capability the student did
-   * not know they had, and below a just-finished lesson because that is about
-   * something they themselves just did.
+   * src/lib/assignment-availability-nudge.ts for the server side. Below the
+   * exam campaign (that one has a hard external deadline; this doesn't) but
+   * still above the standing notification ask because it is news about a
+   * capability the student did not know they had.
    */
   "assignments-open": {
-    priority: 63,
+    priority: 62,
     kind: "modal",
     dockLabel: "Assignments are open",
     dockBlurb: "You can submit your homework now — see what's waiting.",
@@ -295,6 +331,22 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Your turn is waiting",
     dockBlurb: "Your class is writing a story and it's your turn to add a line.",
+  },
+  /**
+   * "Becca needs a few sign-up details." Only ever due for a student the
+   * office onboarded by hand, whose admission record still has gaps. It is a
+   * chore we are asking of them, not news or a gift, and it is entirely
+   * optional — the /profile card and a weekly nudge carry it regardless — so
+   * it sits low and the two-modal cap will usually send it to the dock. Above
+   * the poster and the install advert because it is at least a real request
+   * with an answer the school needs; below the game turn because a classmate
+   * is actually waiting on that one.
+   */
+  "profile-details": {
+    priority: 38,
+    kind: "modal",
+    dockLabel: "Finish your profile",
+    dockBlurb: "A few sign-up details the office didn't get to ask you.",
   },
   /**
    * "Install the app to keep your notes offline." A soft upsell shown only to

@@ -9,6 +9,7 @@ import AdminShell from "@/components/AdminShell";
 import {
   AlertIcon,
   AttendanceIcon,
+  CameraIcon,
   CertificateIcon,
   CheckCircleIcon,
   ClockIcon,
@@ -87,6 +88,9 @@ type Dossier = {
     accountCreatedAt: string | null;
     welcomeTourSeenAt: string | null;
     lastJourneySeenAt: string | null;
+    loginIsTemporary: boolean;
+    loginUpgradedByStudentAt: string | null;
+    loginUpgradedFrom: string | null;
   };
   origin: { source: string; status: string; enquiredAt: string; notes: string | null } | null;
   money: {
@@ -1000,6 +1004,15 @@ export default function StudentDossierPage() {
   const { identity, money, attendance, academics, journey, engagement, account, origin, email } = data;
   const failedEmail = email.log.filter((entry) => entry.status !== "sent").length;
 
+  /**
+   * No photo on file → the student's portal is walled off from every class page
+   * (lib/access.ts isPhotoGatedRoute / PhotoLockScreen), independently of the
+   * payment gate. `identity.photoUrl` is the very field `hasProfilePhoto`
+   * checks, so this is the same question the lock itself asks. Only meaningful
+   * for an active student — a dropped/graduated record is not being chased.
+   */
+  const photoLocked = identity.status === "active" && !identity.photoUrl;
+
   return (
     <AdminShell>
       <div className="flex flex-col gap-6">
@@ -1123,6 +1136,23 @@ export default function StudentDossierPage() {
                 {identity.email}
                 {identity.phone ? ` · ${identity.phone}` : ""}
               </p>
+              {account.loginUpgradedByStudentAt ? (
+                <p className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-400/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
+                  Login set by student
+                  <span className="font-normal text-emerald-200/70">
+                    {new Date(account.loginUpgradedByStudentAt).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                    {account.loginUpgradedFrom ? ` · was ${account.loginUpgradedFrom}` : ""}
+                  </span>
+                </p>
+              ) : account.loginIsTemporary ? (
+                <p className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-2.5 py-1 text-[11px] font-semibold text-amber-200">
+                  Temporary login — student prompted to set their own
+                </p>
+              ) : null}
               <div className="mt-4 flex flex-wrap gap-2">
                 {[
                   identity.level,
@@ -1141,21 +1171,49 @@ export default function StudentDossierPage() {
               </div>
             </div>
 
-            {/* The padlock. Shown to every admin, priced only for some. */}
+            {/*
+              The padlock. Shown to every admin, priced only for some.
+
+              TWO INDEPENDENT LOCKS FEED IT. The payment gate is the one this
+              badge has always shown; the photo lock (no photo on file → every
+              class page walled off, see lib/access.ts) is the second, and
+              leaving it out made this read "Portal open" for a student who is
+              in fact shut out of everything but their profile.
+            */}
             <div
               className={`rounded-2xl border px-5 py-4 ${
-                money.lockedOut ? "border-red-400/40 bg-red-500/10" : "border-emerald-400/40 bg-emerald-500/10"
+                money.lockedOut
+                  ? "border-red-400/40 bg-red-500/10"
+                  : photoLocked
+                    ? "border-amber-400/40 bg-amber-500/10"
+                    : "border-emerald-400/40 bg-emerald-500/10"
               }`}
             >
               <div className="flex items-center gap-2">
-                <span className={money.lockedOut ? "text-red-300" : "text-emerald-300"}>
-                  {money.lockedOut ? <LockIcon /> : <UnlockIcon />}
+                <span
+                  className={
+                    money.lockedOut ? "text-red-300" : photoLocked ? "text-amber-300" : "text-emerald-300"
+                  }
+                >
+                  {money.lockedOut || photoLocked ? <LockIcon /> : <UnlockIcon />}
                 </span>
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/70">
-                  {money.lockedOut ? "Portal locked" : "Portal open"}
+                  {money.lockedOut || photoLocked ? "Portal locked" : "Portal open"}
                 </p>
               </div>
-              <p className="mt-2 text-sm font-bold">{PAYWALL_LABEL[money.paywall]}</p>
+              <p className="mt-2 text-sm font-bold">
+                {money.lockedOut
+                  ? PAYWALL_LABEL[money.paywall]
+                  : photoLocked
+                    ? "No photo on file"
+                    : PAYWALL_LABEL[money.paywall]}
+              </p>
+              {!money.lockedOut && photoLocked && (
+                <p className="mt-0.5 text-xs text-amber-200/90">Class pages walled off until a photo is added</p>
+              )}
+              {money.lockedOut && photoLocked && (
+                <p className="mt-0.5 text-xs text-amber-200/90">Also: no photo on file</p>
+              )}
               {data.viewer.canSeeMoney && money.owed !== undefined && (
                 <p className="mt-0.5 text-xs text-white/60">
                   {money.owed > 0 ? `${naira(money.owed)} outstanding` : "Nothing outstanding"}
@@ -1220,6 +1278,31 @@ export default function StudentDossierPage() {
             tone={!journey.classesStartedAt && identity.daysEnrolled > 21 ? "warn" : "neutral"}
           />
         </div>
+
+        {/*
+          Photo lock, because a "Portal open / Paid in full" header otherwise
+          hides it completely. The upload is a ten-second job the student does
+          from their own profile; Becca chases it weekly on her own
+          (lib/profile-photo-nudge.ts), and the office can set one directly
+          from this student's row on /admin/students.
+        */}
+        {photoLocked && (
+          <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
+            <span className="text-amber-600">
+              <CameraIcon />
+            </span>
+            <p className="min-w-0">
+              <strong>No photo on file — this student&rsquo;s portal is photo-locked.</strong>{" "}
+              They can still reach their profile, notifications and payments, but every class page shows an
+              &ldquo;add your photo&rdquo; wall until one is uploaded. Becca nudges them once a week
+              automatically; you can also set a photo from their <strong>Edit</strong> form on the{" "}
+              <Link href="/admin/students" className="font-semibold underline">
+                students list
+              </Link>
+              .
+            </p>
+          </div>
+        )}
 
         {/* Deliverability warning, because this is the failure nobody sees. */}
         {(failedEmail > 0 || email.queued > 0) && (

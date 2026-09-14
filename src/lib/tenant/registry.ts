@@ -134,6 +134,13 @@ export const TENANT_OWNED_MODELS = [
   "ConstraintDeck",
   "MissionProgress",
   "DailyMission",
+  /**
+   * One student's "I've registered" / "I enquired" standing with the exam
+   * campaign (currently ÖSD October 2026). Names a student and is read as
+   * "have I dealt with this", so it is one school's row and no other tenant's
+   * to see. See src/lib/exam-campaign.ts.
+   */
+  "ExamCampaignResponse",
   "MaterialQuestAttempt",
   "PersonalizedPlan",
   "JourneyEvent",

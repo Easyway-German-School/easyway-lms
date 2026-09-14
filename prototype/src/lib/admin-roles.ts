@@ -41,6 +41,9 @@ export const CAPABILITIES = [
    * because taking a walk-in's cash has always been their job.
    */
   "enrolment",
+  "contact",      // see student phone numbers and email addresses in bulk —
+                  // the assistant's cohort export. Viewing one profile is
+                  // covered by `students`; this gates the list.
   "attendance",
   "classes",      // timetables, sittings, postponements — coordinating classes
   "exams",        // exams and exam registrations
@@ -90,8 +93,19 @@ const GRANTS: Record<AdminRole, Capability[] | "all"> = {
   // hand-granted for now (see docs/WORK_DRIVE.md open questions). `enrolment`
   // because a walk-in paying cash at the desk, and that payment opening their
   // classes, has always been this job — it is not the fee book (see the note
-  // on the capability above).
-  secretary: ["students", "enrolment", "attendance", "classes", "exams", "materials", "branches", "events"],
+  // on the capability above). `contact` carried over from before the
+  // Customer Care role existed — the front desk already had it.
+  secretary: [
+    "students",
+    "enrolment",
+    "contact",
+    "attendance",
+    "classes",
+    "exams",
+    "materials",
+    "branches",
+    "events",
+  ],
 
   /**
    * Customer Care — the desk a student reaches when something is wrong.

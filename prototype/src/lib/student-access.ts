@@ -9,8 +9,9 @@ import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
  * i.e. have they cleared the 60% deposit and not fallen behind on the balance
  * past the 30-day grace — the exact computation `/api/student/access` runs to
  * decide whether to show the payment lock screen. Pulled into one function so
- * other routes that need the same answer (the live-class poll, say) do not
- * each re-derive it slightly differently and drift.
+ * other routes that need the same answer (the live-class poll, the
+ * assignment-availability nudge, say) do not each re-derive it slightly
+ * differently and drift.
  *
  * Deliberately NOT the photo lock: that is a separate gate with its own
  * screen, and "you have no profile photo" is not a reason to hide from a

@@ -126,6 +126,17 @@ export default function ImportStudentsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sendState, setSendState] = useState<"idle" | "sending" | "done">("idle");
+  // Recovery: reset + resend logins for students already imported in a past run
+  // (the results screen that held their passwords was closed before sending).
+  const [resendState, setResendState] = useState<"idle" | "sending" | "done">("idle");
+  const [resendResult, setResendResult] = useState<{
+    text: string;
+    notFound: string[];
+    selfReg: string[];
+  } | null>(null);
+  // "One person says they never got theirs" — a targeted re-send, one email
+  // per line, that forces a fresh password only for those addresses.
+  const [retryEmails, setRetryEmails] = useState("");
 
   const rows = useMemo(() => parseCsv(csv), [csv]);
 
@@ -188,6 +199,68 @@ export default function ImportStudentsPage() {
       setResults((rows) => rows.map((row) => (emailedByAddress.has(row.email) ? { ...row, emailed: true } : row)));
     } finally {
       setSendState("done");
+    }
+  }
+
+  /**
+   * "I imported these people days ago and never sent their logins."
+   *
+   * The temp passwords only ever lived in this page's memory, so once it was
+   * closed there is nothing to resend — the server mints a fresh one per
+   * account and emails it. Keyed off the emails in the file that resolved to a
+   * real account (created OR skipped OR updated), skipping the placeholder and
+   * error rows. The server itself only touches office-imported accounts, so a
+   * student in this file who signed up on their own is left alone.
+   */
+  async function resendLoginsFromFile(opts?: { emails?: string[]; force?: boolean }) {
+    const emails =
+      opts?.emails ??
+      Array.from(
+        new Set(
+          results
+            .filter(
+              (r) => r.email && !r.placeholderEmail && r.status !== "error" && r.status !== "review",
+            )
+            .map((r) => r.email.trim().toLowerCase()),
+        ),
+      );
+    if (emails.length === 0) return;
+    if (
+      !opts?.force &&
+      !window.confirm(
+        `Set a fresh temporary password for the office-imported students in this file and email each one their login?\n\n` +
+          `${emails.length} row(s) will be checked. Students who signed up themselves are left untouched, ` +
+          `and anyone a login was already sent to is left alone — use the box below to force a re-send.`,
+      )
+    )
+      return;
+    setResendState("sending");
+    setResendResult(null);
+    try {
+      const res = await fetch("/api/admin/students/send-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emails, ...(opts?.force ? { force: true } : {}) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResendResult({ text: data.error || "Could not send.", notFound: [], selfReg: [] });
+      } else {
+        setResendResult({
+          text:
+            `${data.sent ?? 0} emailed` +
+            (data.alreadySent ? `, ${data.alreadySent} already sent earlier` : "") +
+            (data.skipped ? `, ${data.skipped} self-registered (left alone)` : "") +
+            (data.notFound ? `, ${data.notFound} not found` : "") +
+            ".",
+          notFound: Array.isArray(data.notFoundEmails) ? data.notFoundEmails : [],
+          selfReg: Array.isArray(data.skippedEmails) ? data.skippedEmails : [],
+        });
+      }
+    } catch {
+      setResendResult({ text: "Could not send.", notFound: [], selfReg: [] });
+    } finally {
+      setResendState("done");
     }
   }
 
@@ -384,6 +457,93 @@ export default function ImportStudentsPage() {
                     </span>
                   ) : null}
                 </div>
+              </div>
+            ) : null}
+
+            {results.some(
+              (r) => r.email && !r.placeholderEmail && r.status !== "error" && r.status !== "review",
+            ) ? (
+              <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                <p className="font-semibold">Already imported these students and still need to send their logins?</p>
+                <p className="mt-1">
+                  Use this if the results page was closed before the logins went out. It sets a{" "}
+                  <strong>new</strong> temporary password for every <strong>office-imported</strong> student in this
+                  file and emails them their login. Students who signed up themselves are skipped.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => void resendLoginsFromFile()}
+                    disabled={resendState === "sending"}
+                    className="rounded-full bg-sky-600 px-5 py-2 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
+                  >
+                    {resendState === "sending"
+                      ? "Sending…"
+                      : resendState === "done"
+                        ? "Send again"
+                        : "Email logins to imported students in this file"}
+                  </button>
+                  {resendResult ? <span className="text-xs text-sky-800">{resendResult.text}</span> : null}
+                </div>
+
+                {resendResult && resendResult.notFound.length > 0 ? (
+                  <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+                    <p className="font-semibold">
+                      No student account under {resendResult.notFound.length}{" "}
+                      {resendResult.notFound.length === 1 ? "address" : "addresses"} — these people have no login. Add
+                      them from “Add student”, or check the email is right:
+                    </p>
+                    <p className="mt-1 break-words font-mono">{resendResult.notFound.join(", ")}</p>
+                  </div>
+                ) : null}
+
+                {resendResult && resendResult.selfReg.length > 0 ? (
+                  <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] p-3 text-xs text-[var(--muted)]">
+                    <p className="font-semibold">
+                      Signed up themselves — password left as they set it:
+                    </p>
+                    <p className="mt-1 break-words font-mono">{resendResult.selfReg.join(", ")}</p>
+                  </div>
+                ) : null}
+
+                <details className="mt-3 text-xs">
+                  <summary className="cursor-pointer font-semibold text-sky-800">
+                    Someone says theirs never arrived? Re-send to specific people
+                  </summary>
+                  <p className="mt-2 text-sky-900">
+                    One email per line. This forces a <strong>new</strong> password for just these addresses — use it
+                    only when the first email really did not get through.
+                  </p>
+                  <textarea
+                    value={retryEmails}
+                    onChange={(event) => setRetryEmails(event.target.value)}
+                    placeholder={"someone@example.com\nanother@example.com"}
+                    className="mt-2 min-h-[70px] w-full rounded-lg border border-sky-300 bg-white p-2 font-mono text-xs text-[var(--foreground)]"
+                  />
+                  <button
+                    onClick={() => {
+                      const list = Array.from(
+                        new Set(
+                          retryEmails
+                            .split(/[\s,;]+/)
+                            .map((value) => value.trim().toLowerCase())
+                            .filter((value) => value.includes("@")),
+                        ),
+                      );
+                      if (list.length === 0) return;
+                      if (
+                        window.confirm(
+                          `Force a fresh password and re-send the login email to ${list.length} ` +
+                            `${list.length === 1 ? "person" : "people"}? Any password they were already sent stops working.`,
+                        )
+                      )
+                        void resendLoginsFromFile({ emails: list, force: true });
+                    }}
+                    disabled={resendState === "sending"}
+                    className="mt-2 rounded-full border border-sky-600 px-4 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                  >
+                    Reset &amp; re-send to these
+                  </button>
+                </details>
               </div>
             ) : null}
 

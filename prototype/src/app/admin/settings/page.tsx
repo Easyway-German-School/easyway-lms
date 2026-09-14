@@ -37,6 +37,9 @@ export default function SettingsPage() {
   const [message, setMessage] = useState("");
   const [pendingImpact, setPendingImpact] = useState<ImpactResponse | null>(null);
 
+  // The school's current intake — the month a new student joins by default
+  // when the sign-up form, the Add-student form or the CSV import did not
+  // carry one. See lib/intake.ts.
   const [intake, setIntake] = useState<CurrentIntake>(() => defaultCurrentIntake());
   const [intakeSaving, setIntakeSaving] = useState(false);
   const [intakeMsg, setIntakeMsg] = useState("");

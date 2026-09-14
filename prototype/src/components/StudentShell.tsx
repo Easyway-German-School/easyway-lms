@@ -11,6 +11,10 @@ import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
 import OfficeReplyMoment from "@/components/moment/OfficeReplyMoment";
 import ScheduleChangeMoment from "@/components/moment/ScheduleChangeMoment";
 import CohortCheckMoment from "@/components/moment/CohortCheckMoment";
+import ExamCampaignMoment from "@/components/moment/ExamCampaignMoment";
+import LoginUpgradeMoment from "@/components/moment/LoginUpgradeMoment";
+import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
+import TravelPackageNotifyNudge from "@/components/moment/TravelPackageNotifyNudge";
 import AssignmentsOpenMoment from "@/components/moment/AssignmentsOpenMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
@@ -27,6 +31,7 @@ import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
 import PhotoLockScreen from "@/components/PhotoLockScreen";
+import PhotoUnlockGuide from "@/components/PhotoUnlockGuide";
 import SignOutButton from "@/components/SignOutButton";
 import { MomentQueueProvider } from "@/lib/moment-queue";
 import { canAttendLive, isLiveOnlyRoute, isPhotoGatedRoute, isTuitionGatedRoute } from "@/lib/access";
@@ -533,6 +538,14 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       <HelpLauncher />
 
       {/*
+        Becca walks a paid, photo-less student to the camera control that
+        unlocks their portal. A hard render-gate over the plain lock screen,
+        NOT a queued moment — it self-gates on the access query and has no
+        dismiss. See PhotoUnlockGuide.
+      */}
+      <PhotoUnlockGuide />
+
+      {/*
         The answer to something they asked. Not behind `hasAccess` for the same
         reason HelpLauncher is not — a student stuck outside the paywall is the
         one most likely to have an open question — and queue-managed so it never
@@ -555,6 +568,43 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         See CohortCheckMoment.
       */}
       <CohortCheckMoment />
+
+      {/*
+        Only fires for a student signed in with a temporary login the office
+        built for them (their phone number at a school subdomain, or an
+        importer placeholder). Not behind `hasAccess` — a student stuck outside
+        the paywall still owns their account and should be able to claim it.
+        Queue-managed, so it waits its turn behind the tour. See
+        LoginUpgradeMoment.
+      */}
+      <LoginUpgradeMoment />
+
+      {/*
+        "The ÖSD exam is now in Lagos — register before it closes." A daily
+        campaign popup, once a calendar day, for every student until they mark
+        themselves registered. Ungated by `hasAccess` on purpose — the office
+        wants it in front of everyone, paid or not — and queue-ranked at 63 so
+        it never preempts earned news. See components/moment/ExamCampaignMoment.tsx.
+      */}
+      <ExamCampaignMoment />
+
+      {/*
+        Becca recreating the important parts of the sign-up form for a student
+        the office onboarded by hand. Low priority in the queue and entirely
+        optional — the /profile card and a weekly nudge carry it too. See
+        components/moment/ProfileDetailsMoment.tsx.
+      */}
+      <ProfileDetailsMoment />
+
+      {/*
+        Right after that reply, for the Travel Package / marketing enquirers
+        only: the one notification-permission ask worth spending on people who
+        do not live in the portal yet. Ungated by `hasAccess` for the same
+        reason — these are pre-tuition students — and queue-ranked just under
+        the reply so it follows it rather than fights it. See
+        TravelPackageNotifyNudge.
+      */}
+      <TravelPackageNotifyNudge />
 
       {/*
         Message popups, mounted once per shell so they follow the reader onto

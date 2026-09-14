@@ -150,6 +150,7 @@ export async function GET() {
 const CAPABILITY_LABELS: Record<Capability, string> = {
   students: "Students - enrol, edit, move, graduate",
   enrolment: "Record a student's cash / transfer payment and unlock their classes (no fee book)",
+  contact: "Student contact details - phone and email in the assistant's cohort export",
   attendance: "Attendance registers",
   classes: "Class coordination - timetables, sittings, postponements",
   exams: "Exams and exam registrations",

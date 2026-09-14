@@ -12,10 +12,11 @@
 # live database. If the restore does not work, it fails loudly while there is
 # still a working system to fix it from — the only useful time to find out.
 #
-# It reads the SAME artifact that backup-database.yml produces: an encrypted
-# `*.dump.enc` kept as a GitHub Actions artifact (AES-256-CBC / PBKDF2 under
-# BACKUP_PASSPHRASE). If that workflow is ever upgraded to a restic repository,
-# swap the "Fetch" step for a `restic restore latest`.
+# It reads whichever source backup-database.yml is writing to, decided the same
+# way that workflow decides it: a restic snapshot when RESTIC_REPOSITORY and
+# RESTIC_PASSWORD are both set, and otherwise the encrypted `*.dump.enc` kept as
+# a GitHub Actions artifact (AES-256-CBC / PBKDF2 under BACKUP_PASSPHRASE). The
+# "Fetch" step below handles both; everything after it is source-agnostic.
 #
 # The scratch database is a service container, so the drill needs no second
 # database anywhere and cannot possibly write to production. The only thing it
@@ -66,17 +67,62 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          sudo apt-get install -y --no-install-recommends postgresql-client-18 restic
           # /usr/bin/pg_restore stays pinned to the runner's preinstalled
           # client 16 even with 18 installed; call the versioned binary.
           echo "PG_BIN=/usr/lib/postgresql/18/bin" >> "$GITHUB_ENV"
 
-      - name: Fetch and decrypt the newest backup artifact
+      - name: Fetch and decrypt the newest backup
         id: fetch
         env:
           GH_TOKEN: ${{ github.token }}
+          RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
         run: |
           set -euo pipefail
+          mkdir -p restored
+
+          # -------------------------------------------------------------------
+          # Two possible sources, and this must match backup-database.yml's own
+          # choice exactly: it writes a restic snapshot when RESTIC_REPOSITORY
+          # and RESTIC_PASSWORD are both set, and an encrypted GitHub artifact
+          # otherwise. If the drill guessed wrong it would "fail" on a backup
+          # that is in fact fine, sitting in the other place.
+          # -------------------------------------------------------------------
+          if [ -n "${RESTIC_REPOSITORY:-}" ] && [ -n "${RESTIC_PASSWORD:-}" ]; then
+            echo "Source: restic repository ${RESTIC_REPOSITORY}"
+
+            LATEST_JSON="$(restic snapshots latest --tag database --json)"
+            if [ "$(echo "$LATEST_JSON" | jq 'length')" -eq 0 ]; then
+              echo "::error::restic has no snapshot tagged 'database'. Has 'Backup database' run since restic was configured?"
+              exit 1
+            fi
+            SNAP_TIME="$(echo "$LATEST_JSON" | jq -r '.[-1].time')"
+            SNAP_ID="$(echo "$LATEST_JSON" | jq -r '.[-1].short_id')"
+            echo "Newest snapshot ${SNAP_ID} at ${SNAP_TIME}"
+
+            AGE_DAYS=$(( ( $(date -u +%s) - $(date -u -d "$SNAP_TIME" +%s) ) / 86400 ))
+            if [ "$AGE_DAYS" -gt 2 ]; then
+              echo "::error::Newest snapshot is ${AGE_DAYS} days old — the backup job is not running."
+              exit 1
+            fi
+
+            restic restore latest --tag database --target restored
+            DUMP="$(find restored -name '*.dump' | head -1)"
+            if [ -z "$DUMP" ]; then
+              echo "::error::Snapshot ${SNAP_ID} contains no *.dump file."
+              exit 1
+            fi
+
+            "$PG_BIN/pg_restore" --list "$DUMP" > /dev/null
+            echo "dump=${DUMP}" >> "$GITHUB_OUTPUT"
+            echo "snapshot_id=${SNAP_ID}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Source: encrypted GitHub Actions artifact (restic not configured)"
 
           if [ -z "${{ secrets.BACKUP_PASSPHRASE }}" ]; then
             echo "::error::BACKUP_PASSPHRASE is not set — cannot decrypt the backup artifact."

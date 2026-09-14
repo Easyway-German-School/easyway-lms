@@ -276,17 +276,20 @@ export async function POST(request: Request) {
 
   const hashedPassword = await bcryptjs.hash(password, 10);
 
-  const admissionBlob =
-    phone || batch || city || stateRegion || country || photoUrl
-      ? {
-          ...(phone ? { phone } : {}),
-          ...(batch ? { batch } : {}),
-          ...(city ? { city } : {}),
-          ...(stateRegion ? { state: stateRegion } : {}),
-          ...(country ? { country } : {}),
-          ...(photoUrl ? { photoUrl } : {}),
-        }
-      : undefined;
+  const admissionBlob = {
+    // `onboardedVia` is the invisible mark that switches on Becca's
+    // "finish your profile" prompt — an office-added student never saw
+    // the long sign-up form. See src/lib/profile-backfill.ts. Stamped
+    // whether this is a fresh add or a revived tombstone: neither one
+    // came through signup.
+    onboardedVia: "manual-add",
+    ...(phone ? { phone } : {}),
+    ...(batch ? { batch } : {}),
+    ...(city ? { city } : {}),
+    ...(stateRegion ? { state: stateRegion } : {}),
+    ...(country ? { country } : {}),
+    ...(photoUrl ? { photoUrl } : {}),
+  };
   // The typed twin of the admission blob — see lib/student-profile.ts. Reads
   // the same request body (with the already-sanitized `photoUrl`), so anything
   // this form collects lands in both places at once.

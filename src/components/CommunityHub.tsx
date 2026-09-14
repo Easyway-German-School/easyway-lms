@@ -7,6 +7,7 @@ import { uploadFile } from "@/lib/upload";
 import { ALLOWED_REACTIONS, type ReactionSummary } from "@/lib/community-reactions";
 import { STICKERS, StickerArt, stickerById } from "@/lib/community-stickers";
 import CommunityWins from "@/components/CommunityWins";
+import ExamCampaignBanner from "@/components/ExamCampaignBanner";
 import StoryTour from "@/components/StoryTour";
 import {
   CHAT_THEMES,
@@ -1270,6 +1271,11 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
             certificates, levels passed. Ambient and dismissible; hides itself
             when there is nothing to show. */}
         {!compact ? <CommunityWins spaceId={activeSpace?.id ?? null} /> : null}
+
+        {/* The pinned ÖSD exam-campaign strip — the "community announcement" the
+            office wants everyone to see. Hides itself when the campaign is off
+            or the student has marked themselves registered. */}
+        {!compact ? <ExamCampaignBanner variant="pinned" /> : null}
 
         <div
           ref={scrollRef}

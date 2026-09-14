@@ -131,6 +131,21 @@ export type BrainStatus = {
 const CLAUDE_MODEL = process.env.ANTHROPIC_ASSISTANT_MODEL || "claude-opus-5";
 
 /**
+ * Does this model take `thinking: {type:"adaptive"}` + `output_config.effort`?
+ *
+ * Those are Opus-5 / Sonnet-5 / Fable-5 / Opus-4.6+ features. Haiku 4.5 rejects
+ * BOTH with a 400 — the error reads "adaptive thinking is not supported on this
+ * model", the whole turn fails, and the office sees "the assistant refused that
+ * request". That is exactly what happened when ANTHROPIC_ASSISTANT_MODEL was
+ * pointed at `claude-haiku-4-5` for cost: every question that engaged thinking
+ * died. Haiku (and anything older) needs an explicit `budget_tokens` instead.
+ * See the claude-api skill's Thinking & Effort table.
+ */
+const MODEL_TAKES_ADAPTIVE_THINKING = /(opus-5|sonnet-5|fable-5|opus-4-[678]|sonnet-4-6)/.test(
+  CLAUDE_MODEL,
+);
+
+/**
  * Ceiling on one reply.
  *
  * On Claude this covers thinking AND the answer together, which is the trap
@@ -407,21 +422,27 @@ async function claudeTurn(
       model: CLAUDE_MODEL,
       max_tokens: MAX_TOKENS,
       /**
-       * Adaptive rather than disabled, and low effort rather than high.
+       * Thinking stays ON, low, whichever model this is.
        *
-       * Disabling thinking on this model is the tempting move for a latency-
-       * sensitive page and it is the wrong one: with thinking off it will
-       * occasionally write a tool call into its visible text instead of
-       * emitting a real tool call. The turn then SUCCEEDS, the lookup never
-       * runs, and the admin reads a confident answer built on nothing. Low
-       * effort costs a fraction of a second and removes that failure entirely.
+       * Disabling it is the tempting move for a latency-sensitive page and it is
+       * the wrong one: with thinking off the model occasionally writes a tool
+       * call into its visible text instead of emitting a real tool call. The
+       * turn then SUCCEEDS, the lookup never runs, and the admin reads a
+       * confident answer built on nothing.
        *
-       * Note there is no `temperature` here. This model rejects it outright —
-       * the Ollama path sets temperature 0 and that parameter simply does not
-       * cross over.
+       * How you ask for "a little thinking" is model-specific, and getting it
+       * wrong is a hard 400, not a downgrade: Opus-5 / Sonnet-5 take
+       * `{type:"adaptive"}` + `output_config.effort`; Haiku 4.5 rejects both and
+       * needs `{type:"enabled", budget_tokens}` (min 1024, under max_tokens).
+       * See MODEL_TAKES_ADAPTIVE_THINKING.
+       *
+       * Note there is no `temperature` here. These models reject it outright —
+       * the Ollama path sets temperature 0 and that parameter does not cross
+       * over.
        */
-      thinking: { type: "adaptive" },
-      output_config: { effort: "low" },
+      ...(MODEL_TAKES_ADAPTIVE_THINKING
+        ? { thinking: { type: "adaptive" as const }, output_config: { effort: "low" as const } }
+        : { thinking: { type: "enabled" as const, budget_tokens: 1_024 } }),
       system,
       messages: turns,
       ...(tools.length > 0 ? { tools: toAnthropicTools(tools) } : {}),
