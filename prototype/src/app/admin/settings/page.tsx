@@ -16,6 +16,7 @@ import {
 } from "@/lib/school-settings";
 import { MONTH_NAMES } from "@/lib/batch";
 import { defaultCurrentIntake, type CurrentIntake } from "@/lib/intake";
+import { emptySchedulePatternSettings, type SchedulePatternSettings, type SchedulePatternGrid } from "@/lib/schedule-pattern";
 
 type MovePreview = { level: string; mode: ModeSlot; from: string; to: string; count: number };
 type StrandPreview = { level: string; mode: ModeSlot; slot: string; count: number };
@@ -41,10 +42,103 @@ export default function SettingsPage() {
   const [intakeSaving, setIntakeSaving] = useState(false);
   const [intakeMsg, setIntakeMsg] = useState("");
 
+  const [pattern, setPattern] = useState<SchedulePatternSettings>(() => emptySchedulePatternSettings());
+  const [patternSaving, setPatternSaving] = useState(false);
+  const [patternMsg, setPatternMsg] = useState("");
+
   useEffect(() => {
     loadSettings();
     loadIntake();
+    loadPattern();
   }, []);
+
+  async function loadPattern() {
+    try {
+      const res = await fetch("/api/admin/settings/schedule-pattern", { cache: "no-store" });
+      if (res.ok) setPattern(await res.json());
+    } catch (error) {
+      console.error("Failed to load the weekly pattern:", error);
+    }
+  }
+
+  async function savePattern() {
+    setPatternSaving(true);
+    setPatternMsg("");
+    try {
+      const res = await fetch("/api/admin/settings/schedule-pattern", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pattern),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPatternMsg("Saved. New calendar days follow this pattern from here.");
+        setTimeout(() => setPatternMsg(""), 4000);
+      } else {
+        setPatternMsg(data.error || "Failed to save the weekly pattern");
+      }
+    } catch (error) {
+      console.error("Failed to save the weekly pattern:", error);
+      setPatternMsg("Failed to save the weekly pattern");
+    } finally {
+      setPatternSaving(false);
+    }
+  }
+
+  /** Mon → Sun for display; the stored day numbers stay JS's 0=Sun convention. */
+  const PATTERN_WEEKDAYS: { day: number; label: string }[] = [
+    { day: 1, label: "Mon" },
+    { day: 2, label: "Tue" },
+    { day: 3, label: "Wed" },
+    { day: 4, label: "Thu" },
+    { day: 5, label: "Fri" },
+    { day: 6, label: "Sat" },
+    { day: 0, label: "Sun" },
+  ];
+
+  function gridFor(level: string): SchedulePatternGrid {
+    return pattern.levels.find((r) => r.level === level)?.grid ?? {};
+  }
+
+  function cellDays(level: string, slot: SessionSlot): number[] | null {
+    return gridFor(level)[slot] ?? null;
+  }
+
+  function defaultStartingDays(slot: SessionSlot): number[] {
+    return slot === "weekend" ? [6] : [1, 5, 6];
+  }
+
+  /** Immutable, keyed by level then slot. An empty day list reverts the cell to Auto. */
+  function setCellDays(level: string, slot: SessionSlot, days: number[] | null) {
+    setPattern((prev) => {
+      const rows = prev.levels.some((r) => r.level === level)
+        ? prev.levels
+        : [...prev.levels, { level, grid: {} }];
+      return {
+        levels: rows.map((row) => {
+          if (row.level !== level) return row;
+          const grid = { ...row.grid };
+          if (!days || days.length === 0) delete grid[slot];
+          else grid[slot] = days;
+          return { ...row, grid };
+        }),
+      };
+    });
+  }
+
+  function toggleCustom(level: string, slot: SessionSlot, on: boolean) {
+    setCellDays(level, slot, on ? defaultStartingDays(slot) : null);
+  }
+
+  function toggleDay(level: string, slot: SessionSlot, day: number) {
+    const current = cellDays(level, slot) ?? defaultStartingDays(slot);
+    const next = current.includes(day) ? current.filter((d) => d !== day) : [...current, day];
+    setCellDays(level, slot, next);
+  }
+
+  function autoHint(slot: SessionSlot): string {
+    return slot === "weekend" ? "Auto — Saturday" : "Auto — alternates by batch (Mon·Fri·Sat or Tue·Wed·Thu)";
+  }
 
   async function loadIntake() {
     try {
@@ -320,6 +414,86 @@ export default function SettingsPage() {
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        {/* Weekly pattern */}
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+          <h2 className="mb-2 text-lg font-bold text-[var(--foreground)]">Weekly pattern</h2>
+          <p className="mb-6 text-sm text-[var(--muted)]">
+            Which weekdays each level&apos;s sessions actually meet. Left on Auto, a sitting
+            alternates Mon·Fri·Sat and Tue·Wed·Thu between consecutive batches and Weekend means
+            Saturday only — the rule this school has always run on. Switch a session to Custom to
+            pin it to specific days instead, for when a batch&apos;s timetable no longer follows
+            that rule. Changing this only affects days generated from here on — it does not touch
+            classes already on the calendar.
+          </p>
+
+          <div className="space-y-8">
+            {LEVELS.map((level) => (
+              <div key={level} className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4 sm:p-6">
+                <h3 className="mb-3 text-base font-bold text-[var(--foreground)]">{level}</h3>
+                <div className="space-y-3">
+                  {SESSIONS.map((slot) => {
+                    const days = cellDays(level, slot);
+                    const custom = days !== null;
+                    return (
+                      <div
+                        key={slot}
+                        className="flex flex-wrap items-center gap-3 border-t border-[var(--border)] pt-3 first:border-t-0 first:pt-0"
+                      >
+                        <span className="w-24 shrink-0 font-medium text-[var(--foreground)]">{slotTitle(slot)}</span>
+                        <label className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-[var(--muted)]">
+                          <input
+                            type="checkbox"
+                            checked={custom}
+                            onChange={(e) => toggleCustom(level, slot, e.target.checked)}
+                            className="h-4 w-4 rounded border-[var(--border)] accent-[var(--accent)]"
+                          />
+                          Custom
+                        </label>
+                        {custom ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {PATTERN_WEEKDAYS.map(({ day, label }) => (
+                              <button
+                                key={day}
+                                type="button"
+                                onClick={() => toggleDay(level, slot, day)}
+                                aria-label={`${level} ${slotTitle(slot)} ${label}`}
+                                className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                                  days!.includes(day)
+                                    ? "bg-[var(--accent)] text-white"
+                                    : "bg-[var(--surface-alt)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[var(--muted)]">{autoHint(slot)}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 flex items-center justify-end gap-3">
+            {patternMsg && (
+              <p className={`text-sm font-medium ${patternMsg.startsWith("Saved") ? "text-emerald-700" : "text-red-700"}`}>
+                {patternMsg}
+              </p>
+            )}
+            <button
+              onClick={savePattern}
+              disabled={patternSaving}
+              className="rounded-lg bg-[var(--accent)] px-6 py-2.5 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+            >
+              {patternSaving ? "Saving..." : "Save weekly pattern"}
+            </button>
           </div>
         </div>
 

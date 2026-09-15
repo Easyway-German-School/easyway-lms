@@ -3,6 +3,7 @@ import { generatePersonalizedSchedule, type ScheduleMonth } from "@/lib/schedule
 import { SLOT_DEFAULTS, normalizeSlot, isWeekendSlot, type TimeSlot } from "@/lib/class-times";
 import { sessionDurationMonths } from "@/lib/levels";
 import { SCHOOL_TIMEZONE, zonedDateKey } from "@/lib/school-time";
+import { readSchedulePatternSettings } from "@/lib/schedule-pattern-server";
 
 /**
  * Merges the generated timetable skeleton with the ClassSession overrides a
@@ -149,6 +150,7 @@ export async function getMergedSchedule(args: {
   months?: number;
 }): Promise<{ level: string; batchMonth: string; batchYear: number; sessionSlot: TimeSlot; months: MergedMonth[] }> {
   const slot = normalizeSlot(args.sessionSlot);
+  const patternSettings = await readSchedulePatternSettings();
 
   const generated = generatePersonalizedSchedule({
     level: args.level,
@@ -157,6 +159,7 @@ export async function getMergedSchedule(args: {
     now: args.now,
     months: args.months ?? sessionDurationMonths(slot),
     sessionSlot: slot,
+    patternSettings,
   });
 
   const allDates = generated.months.flatMap((m) => m.sessions.map((s) => dayKey(s.date)));
