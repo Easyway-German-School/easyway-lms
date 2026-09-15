@@ -1,0 +1,67 @@
+# The gate every PR actually runs through before merge.
+#
+# Background: until this file existed, NOTHING automated ran typecheck, lint,
+# or the test suite on a pull request — only Vercel's own build (which just
+# checks that the code compiles, not that it's correct) and GitHub's default
+# code scanning. Two payment-gate regressions (2026-09-14, 2026-09-15) shipped
+# straight to production because of it: a route reimplemented the tuition
+# paywall instead of calling the one function that knows the rule, and nothing
+# caught it before a student did. See project-dossier-paywall-drift-fix.
+#
+# `check:payment-gate` (scripts/check-payment-gate-drift.mjs) is the specific
+# guard for that bug class; typecheck/lint/test are the general net under it.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: prototype
+    env:
+      # `prisma generate` reads the schema to emit client types; it does not
+      # need a reachable database, but recent Prisma versions want the env var
+      # present even so. Never a real credential — see guard-prod-db-url.yml
+      # for what actually protects the production connection string.
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+          cache: "npm"
+          cache-dependency-path: prototype/package-lock.json
+
+      - name: Install dependencies
+        run: npm install --include=dev --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        # Informational, not blocking: the first real run of this surfaced 49
+        # pre-existing react-hooks errors across files this PR never touched
+        # (moment-queue.tsx, use-push.ts, useLiveClass.tsx, …) — nobody had
+        # ever run `npm run lint` in CI before. Failing the build on a legacy
+        # backlog no PR caused is how a new CI gate gets disabled by the next
+        # person it blocks, which defeats the point of adding one. Still runs,
+        # still visible in the log, just does not fail the job — clean that
+        # backlog up in its own PR and flip this back to blocking.
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Payment-gate drift check
+        run: npm run check:payment-gate
+
+      - name: Unit tests
+        run: npm run test

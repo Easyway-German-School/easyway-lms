@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check:payment-gate": "node scripts/check-payment-gate-drift.mjs",
+    "ci": "npm run typecheck && npm run lint && npm run check:payment-gate && npm run test",
     "db:push": "node scripts/guard-not-prod.mjs && prisma db push",
     "db:reset": "node scripts/guard-not-prod.mjs && prisma migrate reset",
     "db:migrate": "prisma migrate deploy",

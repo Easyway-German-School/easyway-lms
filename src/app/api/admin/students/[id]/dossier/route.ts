@@ -1,17 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-roles";
-import {
-  isReceivedPayment,
-  isRegistrationFeePayment,
-  isTravelPackagePathway,
-  requiredDepositFor,
-  tuitionFeeFor,
-} from "@/lib/payment";
+import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { BEHIND_TUITION_MIN_DAYS } from "@/lib/finance/receivables";
-import { deriveStudentAccess } from "@/lib/access";
+import { accessFromStudent } from "@/lib/student-access";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
-import { isOnlineBranch } from "@/lib/online-branch";
 import { computeChurnRisk } from "@/lib/student-risk";
 import { deriveSegments } from "@/lib/student-segments";
 import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
@@ -34,10 +27,16 @@ import { isTemporaryLogin } from "@/lib/login-upgrade";
  * The fields are DROPPED rather than zeroed, so there is nothing for the page
  * to render by mistake.
  *
- * NOTHING HERE IS DERIVED IN THE BROWSER. The paywall state, the attendance
- * rate and the balance are computed here off the same helpers the rest of the
- * app uses, so the file cannot disagree with the dashboard about whether
- * somebody has paid.
+ * NOTHING HERE IS DERIVED IN THE BROWSER — and, as of the fix below, nothing
+ * here is derived a SECOND TIME either. The paywall state, the attendance
+ * rate and the balance are computed here off `accessFromStudent`
+ * (lib/student-access.ts), the exact function the student's own portal gate
+ * and the admin remote view call, so this file cannot disagree with either
+ * about whether somebody has paid. It used to: this route ran its own
+ * `paid >= fee` arithmetic against the flat per-pathway price, which ignored
+ * the per-level tuition ledger and any active payment plan — a Travel
+ * Package student's balance, or a promoted student's already-settled level,
+ * came out wrong here specifically. See project-dossier-paywall-drift-fix.
  */
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -105,6 +104,13 @@ export async function GET(
       tags: true,
       profile: true,
       branch: { select: { id: true, name: true, mode: true, location: true } },
+      // The per-level tuition ledger — same rows `accessFromStudent` reads, so
+      // the padlock here resolves to the exact figure the student's own
+      // portal and the admin remote view show. See lib/finance/ledger.ts.
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+      },
       // A Lecturer carries no name of its own — it hangs off the User row.
       tutor: {
         select: {
@@ -135,15 +141,6 @@ export async function GET(
       convertedFromLead: {
         select: { source: true, status: true, createdAt: true, notes: true },
       },
-      // The per-level tuition ledger — see lib/access.ts. Read here so this
-      // dossier's padlock resolves through the exact same deriveStudentAccess
-      // call as /api/admin/students/[id]/remote and the student's own
-      // /api/student/access, instead of a thinner re-derivation that can only
-      // ever agree with them by coincidence.
-      tuitionCharges: {
-        where: { deletedAt: null },
-        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
-      },
     },
   });
 
@@ -167,6 +164,7 @@ export async function GET(
     emailLog,
     queuedEmail,
     enrolments,
+    planStatus,
   ] = await Promise.all([
     prisma.payment.findMany({
       where: { studentId: id },
@@ -247,9 +245,16 @@ export async function GET(
      * "I never got anything"; the office has a template, a send button and no
      * evidence either way. EmailLog has recorded every attempt and its failure
      * reason all along — it simply had no reader.
+     *
+     * The `recipientEmail` half of the OR is skipped entirely when the student
+     * has no email on file, rather than falling back to a sentinel value —
+     * a stray literal NUL character used to sit here as that sentinel, which
+     * Postgres rejects outright in a text parameter on some drivers.
      */
     prisma.emailLog.findMany({
-      where: { OR: [{ studentId: id }, { recipientEmail: student.user?.email ?? " " }] },
+      where: student.user?.email
+        ? { OR: [{ studentId: id }, { recipientEmail: student.user.email }] }
+        : { studentId: id },
       orderBy: { createdAt: "desc" },
       take: 20,
       select: { id: true, type: true, subject: true, status: true, errorMessage: true, createdAt: true },
@@ -284,79 +289,51 @@ export async function GET(
         tutor: { select: { user: { select: { name: true } } } },
       },
     }),
+    // An on-track tuition payment plan holds the balance lock back, exactly
+    // like admin grace — see accessFromStudent below.
+    planStatusForStudent(id),
   ]);
 
-  // ---- Money ------------------------------------------------------------
-  // `pathway` MUST be in the lookup: a Travel Package student prices at the
-  // flat ₦980,000, not the per-level ladder fee. Without it this route quoted
-  // a Travel Package A1 student ₦150,000, their first big payment cleared it
-  // with change, and the dossier header called them "Paid in full / portal
-  // open" while every other finance surface (the Travel Package roster, the
-  // student's own portal) correctly showed a large balance still owing.
-  const feeLookup = {
-    level: student.level,
-    branch: student.branch?.name ?? null,
-    classType: student.classType,
-    pathway: student.pathway,
-  };
-  const fee = tuitionFeeFor(feeLookup);
-  const deposit = requiredDepositFor(feeLookup);
-  // Tuition only — the ₦5,000 registration fee is its own Payment row and must
-  // not net down the balance or move the student across the paywall.
-  const paid = payments
-    .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
-    .reduce((sum, payment) => sum + payment.amount, 0);
+  // ---- Money --------------------------------------------------------------
+  // Same computation the student's own portal gate (`/api/student/access`)
+  // and the admin remote view run — see lib/student-access.ts. `payments`
+  // here is fetched separately above (this route needs every payment, not
+  // just the received/non-registration ones `STUDENT_ACCESS_SELECT` would
+  // filter to), so it is re-filtered the same way before being handed in.
+  const receivedTuitionPayments = payments.filter(
+    (payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description),
+  );
+  const accessInput = { ...student, payments: receivedTuitionPayments };
+  const access = accessFromStudent(accessInput, planSuppressesLock(planStatus?.adherence ?? null));
 
-  /**
-   * The SAME access derivation the remote-view mirror and the student's own
-   * /api/student/access read — per-level tuition ledger, payment-plan
-   * adherence, admin grace and the Travel Package flat deposit all included.
-   *
-   * This dossier used to run its own `paid >= fee` arithmetic against the
-   * flat pathway price. For a ledger-driven student (or a Travel Package
-   * student whose per-level charges are far below the ₦980,000 sticker
-   * price) that arithmetic and the ledger's real answer are two different
-   * numbers, so this header could say "locked, ₦X outstanding" while Remote
-   * View — reading the ledger — correctly said "open, nothing outstanding".
-   * Calling the shared function instead of re-deriving means the two screens
-   * are structurally unable to disagree again.
-   */
-  const deliveryModeForAccess = isOnlineBranch(student.branch) ? "online" : student.deliveryMode;
-  const planStatus = await planStatusForStudent(student.id);
-  const access = deriveStudentAccess({
-    totalPaid: paid,
-    tuitionFee: fee,
-    requiredDeposit: deposit,
-    deliveryMode: deliveryModeForAccess,
-    classType: student.classType,
-    level: student.level,
-    charges: student.tuitionCharges,
-    flatDeposit: isTravelPackagePathway(student.pathway),
-    classesStartedAt: student.classesStartedAt,
-    enrolledAt: student.createdAt,
-    paymentGraceUntil: student.paymentGraceUntil,
-    paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
-    now,
-  });
+  const fee = access.tuitionFee;
+  const deposit = access.requiredDeposit;
+  const paid = access.totalPaid;
+  const owed = access.outstandingBalance;
 
   /**
    * Which side of the padlock they are on. Named the same four ways the
    * overview names them so the two screens cannot drift apart, and computed
    * for EVERY admin — a secretary is not shown the amounts but absolutely
    * needs to know that the student in front of them is locked out.
+   *
+   * Deposit progress and full-payment progress both come straight off the
+   * ledger-aware `access` object now (`progressPercent`/`outstandingBalance`)
+   * instead of a flat `paid >= fee` comparison against the static sticker
+   * price — see the module comment for what that flat comparison got wrong.
    */
-  const fullyPaid = access.outstandingBalance <= 0;
-  const depositCleared = access.lockReason !== "unpaid_deposit";
-  const paywall =
-    paid <= 0 ? "unpaid" : fullyPaid ? "fullPaid" : depositCleared ? "depositPaid" : "registeredOnly";
-  const lockedOut = !access.hasAccess;
+  const depositMet = access.progressPercent >= 100;
+  const fullyPaid = owed <= 0;
+  const paywall = paid <= 0 ? "unpaid" : fullyPaid ? "fullPaid" : depositMet ? "depositPaid" : "registeredOnly";
+  const lockedOut = !depositMet;
 
-  // Part-payment balance lock — deposit in, fee not. Read straight off
-  // `access` rather than re-deriving the clock or the grace check.
-  const isPartPayer = depositCleared && !fullyPaid;
-  const graceDate = student.paymentGraceUntil ?? null;
+  // Part-payment balance lock — deposit in, fee not, 30 days after classes
+  // started (falling back to enrolment), unless an admin grace date or an
+  // on-track payment plan holds it back. `access` already ran this clock.
+  const isPartPayer = depositMet && !fullyPaid;
+  const graceDate = access.graceUntil ? new Date(access.graceUntil) : null;
   const balanceLockAt = access.lockAt ? new Date(access.lockAt) : null;
-  const balanceLockActive = access.lockReason === "unsettled_balance";
+  const balanceLockActive = !access.hasAccess && access.lockReason === "unsettled_balance";
 
   // ---- Attendance -------------------------------------------------------
   const attended = attendance.filter(
@@ -493,10 +470,7 @@ export async function GET(
             fee,
             deposit,
             paid,
-            // Ledger-driven go-forward balance, not `fee - paid` against the
-            // flat pathway price — see the comment above `access` for why
-            // those two numbers can disagree.
-            owed: access.outstandingBalance,
+            owed,
             feeProgressPercent: access.feeProgressPercent,
             reminderStages: (student.feeRemindersScheduled ?? {}) as Record<string, boolean>,
             payments: payments.map((payment) => ({
@@ -633,7 +607,7 @@ export async function GET(
         finance: {
           behindOnTuition:
             lockedOut && Math.floor((now.getTime() - student.createdAt.getTime()) / DAY) >= BEHIND_TUITION_MIN_DAYS,
-          owed: access.outstandingBalance,
+          owed,
           progressPercent: 0,
         },
         risk,
