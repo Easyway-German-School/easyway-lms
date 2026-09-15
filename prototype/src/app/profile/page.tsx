@@ -242,6 +242,18 @@ export default function ProfilePage() {
   // The record photo is taken with the live camera only — never a file the
   // student picks — so nobody can set a stranger's face or a random image.
   const [showCamera, setShowCamera] = useState(false);
+  // PhotoUnlockGuide's spotlight+card only make sense before this sheet
+  // opens — they exist to get the student TO the camera button. Once it's
+  // open, its own z-60 modal sits under the guide's z-132 overlay, so the
+  // guide's now-redundant "Tap the camera" card and stale spotlight (still
+  // aimed at the avatar behind the sheet) end up sitting on top of the real
+  // shutter button and face-guide oval, blocking them. See PhotoUnlockGuide.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("easyway:photo-capture-open", { detail: { open: showCamera } }));
+    return () => {
+      window.dispatchEvent(new CustomEvent("easyway:photo-capture-open", { detail: { open: false } }));
+    };
+  }, [showCamera]);
   /** ?setup=details — Becca's "finish your profile" nudge links here. */
   const [detailsAutoOpen, setDetailsAutoOpen] = useState(false);
   const { game } = useGamification();
