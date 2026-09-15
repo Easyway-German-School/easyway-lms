@@ -8,7 +8,7 @@ import {
   readAssignment,
   studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment, isTravelPackagePathway } from "@/lib/payment";
 import { setStudentTutor } from "@/lib/tutor-pairing";
 
 /**
@@ -61,9 +61,16 @@ const STUDENT_SHAPE = {
   studentCode: true,
   admission: true,
   tutorId: true,
+  classesStartedAt: true,
+  createdAt: true,
+  paymentGraceUntil: true,
   user: { select: { name: true, email: true } },
   branch: { select: { name: true } },
   payments: { select: { amount: true, status: true, description: true } },
+  tuitionCharges: {
+    where: { deletedAt: null },
+    select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+  },
   tutor: { select: { id: true, user: { select: { name: true, email: true } } } },
 } as const;
 
@@ -76,9 +83,21 @@ type RawStudent = {
   deliveryMode: string;
   studentCode: string | null;
   tutorId: string | null;
+  classesStartedAt: Date | null;
+  createdAt: Date;
+  paymentGraceUntil: Date | null;
   user: { name: string | null; email: string };
   branch: { name: string } | null;
   payments: Array<{ amount: number; status: string; description?: string | null }>;
+  tuitionCharges: Array<{
+    id: string;
+    level: string;
+    amount: number;
+    waivedAmount: number;
+    legacyArrears: boolean;
+    createdAt: Date;
+    settledAt: Date | null;
+  }>;
   tutor: { id: string; user: { name: string | null; email: string } } | null;
 };
 
@@ -93,10 +112,19 @@ function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
     classType: student.classType,
     pathway: student.pathway,
   };
+  // Same ledger-aware fields the student's own portal and the admin remote
+  // view feed in — omitting them is what let this tag disagree with whether
+  // the student could actually get into class.
   const access = deriveStudentAccess({
     totalPaid,
     tuitionFee: tuitionFeeFor(feeLookup),
     requiredDeposit: requiredDepositFor(feeLookup),
+    level: student.level,
+    charges: student.tuitionCharges,
+    flatDeposit: isTravelPackagePathway(student.pathway),
+    classesStartedAt: student.classesStartedAt,
+    enrolledAt: student.createdAt,
+    paymentGraceUntil: student.paymentGraceUntil,
   });
 
   return {

@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canAttendLive, deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { canAttendLive } from "@/lib/access";
+import { getStudentAccess } from "@/lib/student-access";
 import { isOnlineBranch, initialVideoQualityFor, readOnlineProfile } from "@/lib/online-branch";
 import { creditGate } from "@/lib/usage/guard";
 import {
@@ -200,18 +200,15 @@ export async function GET(request: Request) {
         );
       }
 
-      const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-      const totalPaid = student.payments
-        .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
-        .reduce((sum, payment) => sum + payment.amount, 0);
-      const access = deriveStudentAccess({
-        totalPaid,
-        tuitionFee: tuitionFeeFor(feeLookup),
-        requiredDeposit: requiredDepositFor(feeLookup),
-        classesStartedAt: student.classesStartedAt,
-        enrolledAt: student.createdAt,
-        paymentGraceUntil: student.paymentGraceUntil,
-      });
+      // Same ledger-aware computation the portal itself uses to decide "PORTAL
+      // OPEN" — not a hand-rolled copy. A raw-sum fallback here (no `charges`,
+      // no payment-plan grace) is what let students the portal already
+      // admitted get walled out of the room specifically.
+      const access = await getStudentAccess(student.id);
+
+      if (!access) {
+        return NextResponse.json({ error: "No class profile found for this account" }, { status: 404 });
+      }
 
       if (!access.hasAccess) {
         return NextResponse.json(

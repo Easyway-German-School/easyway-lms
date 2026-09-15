@@ -1,28 +1,27 @@
 import { prisma } from "@/lib/prisma";
-import { deriveStudentAccess } from "@/lib/access";
+import { deriveStudentAccess, type StudentAccess } from "@/lib/access";
 import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter, isTravelPackagePathway } from "@/lib/payment";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 
 /**
- * Does this student's portal still open?
- *
- * i.e. have they cleared the 60% deposit and not fallen behind on the balance
- * past the 30-day grace — the exact computation `/api/student/access` runs to
+ * The full access verdict for a student — deposit, ledger, grace, payment
+ * plan, all of it. The exact computation `/api/student/access` runs to
  * decide whether to show the payment lock screen. Pulled into one function so
  * other routes that need the same answer (the live-class poll, say) do not
- * each re-derive it slightly differently and drift.
- *
- * Deliberately NOT the photo lock: that is a separate gate with its own
- * screen, and "you have no profile photo" is not a reason to hide from a
- * student that their class has started.
+ * each re-derive it slightly differently and drift — which is exactly what
+ * happened when `/api/live/session` hand-rolled a `deriveStudentAccess` call
+ * without `charges`, `flatDeposit`, or `paymentPlanOnTrack`: a student the
+ * ledger (promotions, waivers, an on-track payment plan) says is fine got
+ * walled out of the room the portal itself showed as open.
  */
-export async function studentHasPortalAccess(studentId: string): Promise<boolean> {
+export async function getStudentAccess(studentId: string): Promise<StudentAccess | null> {
   const student = await prisma.student.findUnique({
     where: { id: studentId },
     select: {
       level: true,
       classType: true,
       pathway: true,
+      deliveryMode: true,
       classesStartedAt: true,
       createdAt: true,
       paymentGraceUntil: true,
@@ -42,7 +41,7 @@ export async function studentHasPortalAccess(studentId: string): Promise<boolean
       },
     },
   });
-  if (!student) return false;
+  if (!student) return null;
 
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
   const feeLookup = {
@@ -57,6 +56,8 @@ export async function studentHasPortalAccess(studentId: string): Promise<boolean
     totalPaid,
     tuitionFee: tuitionFeeFor(feeLookup),
     requiredDeposit: requiredDepositFor(feeLookup),
+    deliveryMode: student.deliveryMode,
+    classType: student.classType,
     level: student.level,
     charges: student.tuitionCharges,
     flatDeposit: isTravelPackagePathway(student.pathway),
@@ -64,5 +65,18 @@ export async function studentHasPortalAccess(studentId: string): Promise<boolean
     enrolledAt: student.createdAt,
     paymentGraceUntil: student.paymentGraceUntil,
     paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
-  }).hasAccess;
+  });
+}
+
+/**
+ * Does this student's portal still open? Same computation as
+ * `getStudentAccess`, collapsed to the one boolean most callers need.
+ *
+ * Deliberately NOT the photo lock: that is a separate gate with its own
+ * screen, and "you have no profile photo" is not a reason to hide from a
+ * student that their class has started.
+ */
+export async function studentHasPortalAccess(studentId: string): Promise<boolean> {
+  const access = await getStudentAccess(studentId);
+  return access?.hasAccess ?? false;
 }
