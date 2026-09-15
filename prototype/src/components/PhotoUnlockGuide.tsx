@@ -88,8 +88,25 @@ export default function PhotoUnlockGuide() {
 
   const active = photoless && (onGatedPage || onProfile);
 
-  // Stand the moment queue down for as long as this owns the screen,
-  // including the brief "you're in" celebration beat — see the module
+  /**
+   * Whether this guide MIGHT need the screen but doesn't know yet.
+   *
+   * `access` starts `null` and `/api/student/access` is a real network call,
+   * so on a first load there's a window — sometimes a couple of seconds on a
+   * slow connection — where nobody can say yet whether this student is
+   * paid-but-photoless. A queue-managed popup (the cohort-check ask, the
+   * hybrid-sittings picker) doesn't wait: it has its own faster fetch and
+   * happily takes a turn in that window. By the time `access` resolves and
+   * this preempts, that popup had already rendered long enough to be caught
+   * mid-transition — stacked underneath Becca's card, which is exactly the
+   * bug a student reported. `onGatedPage || onProfile` is synchronous (pure
+   * route math), so this is knowable on the very first render — no need to
+   * wait for anything async to decide whether to hold the queue back.
+   */
+  const maybeNeedsScreen = access == null && (onGatedPage || onProfile);
+
+  // Stand the moment queue down for as long as this owns the screen, or might
+  // — including the brief "you're in" celebration beat — see the module
   // comment and MOMENT_PREEMPT_EVENT. The cleanup matters more than the set:
   // unmounting without releasing would silence the queue permanently.
   useEffect(() => {
@@ -98,9 +115,9 @@ export default function PhotoUnlockGuide() {
         new CustomEvent(MOMENT_PREEMPT_EVENT, { detail: { active: wantsActive, source: "photo-unlock" } }),
       );
     };
-    dispatch(active || celebrating);
+    dispatch(active || celebrating || maybeNeedsScreen);
     return () => dispatch(false);
-  }, [active, celebrating]);
+  }, [active, celebrating, maybeNeedsScreen]);
 
   // Lock the page scroll only for the full-screen LOCK card. On /profile the
   // student needs to reach the control, and the fallback button, by scrolling.

@@ -78,17 +78,29 @@ export default function TutorialRuntime() {
 
   const active = Boolean(run && tutorial && step && run.expectedRoute === pathname);
 
+  /**
+   * A `welcome` run is known synchronously (sessionStorage) on the very first
+   * render, but `tutorial` for it stays null until the onboarding fetch
+   * resolves — same shape of race as PhotoUnlockGuide's `maybeNeedsScreen`
+   * (see that module's comment): a queue-managed popup could take a turn in
+   * that gap and be caught mid-transition once this preempts a beat later.
+   * Held only while a run genuinely matches the current route, so an
+   * unrelated stale run elsewhere can't hold the queue hostage.
+   */
+  const pendingOnRoute = Boolean(run && !active && run.expectedRoute === pathname);
+
   // See the module comment: stand the queue down for exactly as long as a
-  // step is genuinely rendered, so nothing else can open mid-walkthrough.
+  // step is genuinely rendered, or might be about to be, so nothing else can
+  // open mid-walkthrough.
   useEffect(() => {
     const dispatch = (wantsActive: boolean) => {
       window.dispatchEvent(
         new CustomEvent(MOMENT_PREEMPT_EVENT, { detail: { active: wantsActive, source: "tutorial" } }),
       );
     };
-    dispatch(active);
+    dispatch(active || pendingOnRoute);
     return () => dispatch(false);
-  }, [active]);
+  }, [active, pendingOnRoute]);
 
   // The one path out, however it happens — the last step's "Done", or the
   // Exit/Escape button on any earlier step. Both count as "seen": WelcomeTour
