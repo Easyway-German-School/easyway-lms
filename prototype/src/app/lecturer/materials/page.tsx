@@ -10,21 +10,13 @@ import { uploadFile } from '@/lib/upload';
 import { parseAudioLink, parseEmbed } from '@/lib/media-embed';
 import LecturerQuestReview from '@/components/materials/LecturerQuestReview';
 
-interface Course {
-  id: string;
-  title: string;
-  description: string;
-  level: string;
-  duration: number;
-  published: boolean;
-}
-
 interface Material {
   id: string;
   title: string;
   description: string;
   courseId: string;
   courseName: string;
+  level: string | null;
   filePath: string;
   fileName: string;
   fileSize: number;
@@ -36,8 +28,6 @@ export default function LecturerMaterials() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [materials, setMaterials] = useState<Material[]>([]);
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [selectedCourseId, setSelectedCourseId] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -56,7 +46,6 @@ export default function LecturerMaterials() {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    courseId: '',
     file: null as File | null,
     sourceUrl: '',
     // Video-library fields. A class recording is filed by level and date; a
@@ -110,26 +99,8 @@ export default function LecturerMaterials() {
 
     if (status === 'authenticated') {
       fetchMaterials();
-      fetchCourses();
     }
   }, [status, router]);
-
-  async function fetchCourses() {
-    try {
-      const res = await fetch('/api/admin/courses');
-      if (!res.ok) {
-        throw new Error('Failed to load courses');
-      }
-      const data = await res.json();
-      const loadedCourses = data.courses || [];
-      setCourses(loadedCourses);
-      if (loadedCourses.length > 0 && !selectedCourseId) {
-        setSelectedCourseId(loadedCourses[0].id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  }
 
   async function fetchMaterials() {
     try {
@@ -153,7 +124,6 @@ export default function LecturerMaterials() {
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
-    const courseId = formData.courseId || selectedCourseId;
     if (!formData.title) {
       setError('Please add a title');
       return;
@@ -166,10 +136,8 @@ export default function LecturerMaterials() {
       setError('Paste a video link (YouTube, Vimeo, Loom, Drive) or an audio link (SoundCloud, Spotify, or a direct .mp4 / .mp3 URL).');
       return;
     }
-    // A recording is filed by level rather than course, so the two have
-    // different required fields.
-    if (formData.isRecording ? !formData.level : !courseId) {
-      setError(formData.isRecording ? 'Please choose the level this recording is for' : 'Please choose a course');
+    if (!formData.level) {
+      setError('Please choose the level this material is for');
       return;
     }
 
@@ -190,7 +158,6 @@ export default function LecturerMaterials() {
         body: JSON.stringify({
           title: formData.title,
           description: formData.description,
-          courseId: formData.isRecording ? '' : courseId,
           ...(uploaded
             ? {
                 fileUrl: uploaded.url,
@@ -220,7 +187,6 @@ export default function LecturerMaterials() {
       setFormData({
         title: '',
         description: '',
-        courseId: '',
         file: null,
         sourceUrl: '',
         isRecording: false,
@@ -279,7 +245,7 @@ export default function LecturerMaterials() {
             <div className="mb-6 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
               <h2 className="text-lg font-bold text-[var(--foreground)] mb-1">Upload New Material</h2>
               <p className="mb-4 text-sm text-[var(--muted)]">
-                Students at this course&apos;s level get it in their Materials library and see it flagged as
+                Students at this level get it in their Materials library and see it flagged as
                 newly added on their dashboard. To tie it to one class day instead, attach it from
                 the Timetable page.
               </p>
@@ -310,28 +276,22 @@ export default function LecturerMaterials() {
                   />
                 </div>
 
-                {!formData.isRecording && (
-                  <div>
-                    <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
-                      Course
-                    </label>
-                    <select
-                      value={formData.courseId || selectedCourseId}
-                      onChange={(e) => setFormData({ ...formData, courseId: e.target.value })}
-                      className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
-                    >
-                      <option value="">Select a course...</option>
-                      {courses.map((course) => (
-                        <option key={course.id} value={course.id}>
-                          {course.title} ({course.level})
-                        </option>
-                      ))}
-                    </select>
-                    {courses.length === 0 && (
-                      <p className="mt-2 text-sm text-[var(--muted)]">No courses available yet. Create a course first in your lecturer dashboard.</p>
-                    )}
-                  </div>
-                )}
+                <div>
+                  <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
+                    Level
+                  </label>
+                  <select
+                    value={formData.level}
+                    onChange={(e) => setFormData({ ...formData, level: e.target.value })}
+                    className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
+                    required
+                  >
+                    <option value="">Select a level...</option>
+                    {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((level) => (
+                      <option key={level} value={level}>{level}</option>
+                    ))}
+                  </select>
+                </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
@@ -447,35 +407,17 @@ export default function LecturerMaterials() {
                       </div>
                     </div>
 
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
-                          Level {formData.isRecording ? '(required)' : '(optional)'}
-                        </label>
-                        <select
-                          value={formData.level}
-                          onChange={(e) => setFormData({ ...formData, level: e.target.value })}
-                          className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
-                        >
-                          <option value="">Take the level from the course</option>
-                          {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((level) => (
-                            <option key={level} value={level}>{level}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
-                          {formData.isRecording ? 'Date of the class' : 'Publish date (optional)'}
-                        </label>
-                        <input
-                          type="date"
-                          value={formData.recordedAt}
-                          onChange={(e) => setFormData({ ...formData, recordedAt: e.target.value })}
-                          className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
-                        />
-                        <p className="text-xs text-[var(--muted)] mt-1">Leave blank for today.</p>
-                      </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
+                        {formData.isRecording ? 'Date of the class' : 'Publish date (optional)'}
+                      </label>
+                      <input
+                        type="date"
+                        value={formData.recordedAt}
+                        onChange={(e) => setFormData({ ...formData, recordedAt: e.target.value })}
+                        className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)]"
+                      />
+                      <p className="text-xs text-[var(--muted)] mt-1">Leave blank for today.</p>
                     </div>
 
                     {!formData.isRecording && (
@@ -544,7 +486,7 @@ export default function LecturerMaterials() {
                         <DocumentIcon className="h-6 w-6 shrink-0 text-[var(--accent)]" />
                         <div>
                           <h3 className="font-semibold text-[var(--foreground)]">{material.title}</h3>
-                          <p className="text-sm text-[var(--muted)]">{material.courseName}</p>
+                          <p className="text-sm text-[var(--muted)]">{material.courseName || (material.level ? `Level ${material.level}` : null)}</p>
                         </div>
                       </div>
                       <p className="text-sm text-[var(--muted)] mt-2">{material.description}</p>
