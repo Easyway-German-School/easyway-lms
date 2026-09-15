@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildEnrolmentLetterPdf } from "@/lib/enrolment-letter-pdf";
-import { isReceivedPayment, isRegistrationFeePayment, tuitionFeeFor } from "@/lib/payment";
+import { getStudentAccess } from "@/lib/student-access";
 
 /**
  * A student's own downloadable proof-of-enrolment letter — for a visa
@@ -27,16 +27,18 @@ export async function GET() {
       classesStartedAt: true,
       branch: { select: { name: true } },
       user: { select: { name: true, tenant: { select: { brandName: true } } } },
-      payments: { where: { status: { in: ["completed", "partial"] } }, select: { amount: true, status: true, description: true } },
     },
   });
   if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
 
-  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-  const totalPaid = student.payments
-    .filter((p) => isReceivedPayment(p.status) && !isRegistrationFeePayment(p.description))
-    .reduce((sum, p) => sum + p.amount, 0);
-  const tuitionSettled = totalPaid >= tuitionFeeFor(feeLookup);
+  // Same ledger-aware computation the portal itself uses. This used to
+  // compare lifetime totalPaid against the flat current-level fee — which
+  // reads a promoted student's already-settled earlier level as unpaid
+  // progress toward the new one, or a lifetime total that happens to exceed
+  // one level's fee as "settled" when the ledger says otherwise. Wrong either
+  // way on a document a visa office or employer may rely on.
+  const access = await getStudentAccess(student.id);
+  const tuitionSettled = (access?.outstandingBalance ?? Infinity) <= 0;
 
   const pdf = await buildEnrolmentLetterPdf({
     schoolName: student.user?.tenant?.brandName ?? undefined,

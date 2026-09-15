@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { getStudentAccess } from "@/lib/student-access";
 import { toPlayableUrl } from "@/lib/video-library";
 
 export async function GET() {
@@ -16,8 +16,6 @@ export async function GET() {
     const student = await prisma.student.findUnique({
       where: { userId: session.user.id },
       include: {
-        payments: true,
-        branch: { select: { name: true } },
         coTutors: { select: { lecturerId: true, role: true } },
       },
     });
@@ -26,15 +24,19 @@ export async function GET() {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-    const tuitionFee = tuitionFeeFor(feeLookup);
-    const totalPaid = student.payments
-      .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
-      .reduce((sum, payment) => sum + payment.amount, 0);
-    const requiredDeposit = requiredDepositFor(feeLookup);
-    const canUnlockMaterials = totalPaid >= requiredDeposit;
+    // Same ledger-aware computation the portal itself uses — not a hand-rolled
+    // `totalPaid >= requiredDeposit` that ignores the per-level ledger, the
+    // Travel Package flat-deposit floor, admin grace, and payment-plan
+    // adherence. This route ran that raw comparison directly and disagreed
+    // with `/api/student/access` for exactly the students most likely to hit
+    // it — promoted, waived, or on a payment plan.
+    const access = await getStudentAccess(student.id);
+    if (!access) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
+    const { tuitionFee, totalPaid, requiredDeposit } = access;
 
-    if (!canUnlockMaterials) {
+    if (!access.hasAccess) {
       return NextResponse.json(
         {
           materials: [],
@@ -42,7 +44,10 @@ export async function GET() {
           requiredDeposit,
           tuitionFee,
           totalPaid,
-          message: `Pay the deposit of ${requiredDeposit.toLocaleString()} NGN (${Math.round((requiredDeposit / tuitionFee) * 100)}%) to unlock course materials.`,
+          message:
+            access.lockReason === "unsettled_balance"
+              ? `Settle your tuition balance of ${access.outstandingBalance.toLocaleString()} NGN to unlock course materials.`
+              : `Pay the deposit of ${requiredDeposit.toLocaleString()} NGN (${Math.round((requiredDeposit / tuitionFee) * 100)}%) to unlock course materials.`,
         },
         { status: 403 }
       );
