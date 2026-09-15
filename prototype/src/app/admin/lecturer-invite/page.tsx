@@ -7,7 +7,7 @@ import PasswordInput from "@/components/PasswordInput";
 import PhotoCapture from "@/components/PhotoCapture";
 import AssignmentPicker from "@/components/admin/AssignmentPicker";
 import { uploadImage } from "@/lib/upload";
-import { ArrowLeftIcon, LecturerIcon, UsersIcon } from "@/components/icons";
+import { ArrowLeftIcon, BroadcastMessageIcon, LecturerIcon, MailIcon, UsersIcon } from "@/components/icons";
 import {
   BATCHES,
   CLASS_TYPES,
@@ -502,6 +502,209 @@ function StudentLine({
 }
 
 /**
+ * Opened from the "N students" badge on a tutor's card. Read-first, unlike
+ * ClassRoster below it — this is not where pairings change, it is where the
+ * office reaches the people already in them: one message to everybody in the
+ * class, or a private note to one student, without leaving the tutor list.
+ */
+function TutorRosterPanel({
+  lecturerId,
+  tutorName,
+  onClose,
+}: {
+  lecturerId: string;
+  tutorName: string;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [roster, setRoster] = useState<RosterStudent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [title, setTitle] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [dmBusyId, setDmBusyId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(
+          `/api/admin/lecturers/students?lecturerId=${encodeURIComponent(lecturerId)}`,
+          { cache: "no-store" },
+        );
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        const list: RosterStudent[] = data.roster || [];
+        setRoster(list);
+        setSelected(new Set(list.map((student) => student.id)));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lecturerId]);
+
+  function toggle(studentId: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(studentId)) next.delete(studentId);
+      else next.add(studentId);
+      return next;
+    });
+  }
+
+  async function sendBroadcast() {
+    if (!title.trim() || !message.trim() || selected.size === 0) return;
+    setSending(true);
+    setNotice("");
+    try {
+      const res = await fetch("/api/admin/lecturers/announce", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lecturerId, studentIds: [...selected], title, message }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not send that message");
+      setNotice(`Sent to ${data.sentTo} student${data.sentTo === 1 ? "" : "s"}.`);
+      setTitle("");
+      setMessage("");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not send that message");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function messagePrivately(student: RosterStudent) {
+    setDmBusyId(student.id);
+    setNotice("");
+    try {
+      const res = await fetch("/api/community/dms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: student.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not open that conversation");
+      router.push(`/admin/community?channel=${encodeURIComponent(data.channelId)}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not open that conversation");
+      setDmBusyId("");
+    }
+  }
+
+  const allSelected = roster.length > 0 && selected.size === roster.length;
+
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[var(--foreground)]">{tutorName}&apos;s students</p>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            Message the whole class at once, or open a private chat with one student.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)]"
+        >
+          Close
+        </button>
+      </div>
+
+      {loading ? <p className="mt-3 text-xs text-[var(--muted)]">Loading…</p> : null}
+      {!loading && roster.length === 0 ? (
+        <p className="mt-3 rounded-xl bg-amber-500/10 px-4 py-2.5 text-xs text-amber-800">
+          This tutor has no students yet.
+        </p>
+      ) : null}
+
+      {notice ? (
+        <p className="mt-3 rounded-xl bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-800">{notice}</p>
+      ) : null}
+
+      {roster.length ? (
+        <>
+          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="flex items-center gap-2">
+              <BroadcastMessageIcon className="h-4 w-4 text-[var(--accent)]" />
+              <p className="text-sm font-semibold text-[var(--foreground)]">Message the class</p>
+            </div>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Title"
+              className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
+            />
+            <textarea
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              rows={3}
+              placeholder="What do you want to tell them?"
+              className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
+            />
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setSelected(allSelected ? new Set() : new Set(roster.map((s) => s.id)))}
+                className="text-xs font-semibold text-[var(--accent)]"
+              >
+                {allSelected ? "Deselect all" : "Select all"}
+              </button>
+              <button
+                type="button"
+                onClick={sendBroadcast}
+                disabled={sending || !title.trim() || !message.trim() || selected.size === 0}
+                className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+              >
+                {sending
+                  ? "Sending…"
+                  : `Send to ${selected.size} student${selected.size === 1 ? "" : "s"}`}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {roster.map((student) => (
+              <StudentLine
+                key={student.id}
+                student={student}
+                right={
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Include ${student.name} in the class message`}
+                      checked={selected.has(student.id)}
+                      onChange={() => toggle(student.id)}
+                      className="h-4 w-4"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => messagePrivately(student)}
+                      disabled={dmBusyId === student.id}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)] disabled:opacity-60"
+                    >
+                      <MailIcon className="h-3.5 w-3.5" />
+                      {dmBusyId === student.id ? "Opening…" : "Message"}
+                    </button>
+                  </div>
+                }
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Who this tutor teaches, and the one place to change it.
  *
  * REPLACES A PRIVATE-ONLY PANEL THAT WAS HIDDEN MOST OF THE TIME. The old
@@ -730,6 +933,9 @@ export default function AdminTutorsPage() {
    */
   const [statusFilter, setStatusFilter] = useState<LecturerStatus | "all" | "current">("current");
   const [selectedTutorIds, setSelectedTutorIds] = useState<Set<string>>(new Set());
+
+  /** Which tutor's student list is open, from clicking their "N students" badge. */
+  const [rosterPanelId, setRosterPanelId] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -1032,10 +1238,14 @@ export default function AdminTutorsPage() {
                     </div>
 
                     <div className="flex flex-col items-end gap-2">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]">
+                      <button
+                        type="button"
+                        onClick={() => setRosterPanelId(rosterPanelId === tutor.id ? "" : tutor.id)}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)] transition hover:brightness-95"
+                      >
                         <UsersIcon className="h-3.5 w-3.5" />
                         {tutor.studentCount} student{tutor.studentCount === 1 ? "" : "s"}
-                      </span>
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
@@ -1137,6 +1347,16 @@ export default function AdminTutorsPage() {
                           Cancel
                         </button>
                       </div>
+                    </div>
+                  ) : null}
+
+                  {rosterPanelId === tutor.id ? (
+                    <div className="mt-5 border-t border-[var(--border)] pt-5">
+                      <TutorRosterPanel
+                        lecturerId={tutor.id}
+                        tutorName={tutor.user.name || tutor.user.email}
+                        onClose={() => setRosterPanelId("")}
+                      />
                     </div>
                   ) : null}
                 </div>
