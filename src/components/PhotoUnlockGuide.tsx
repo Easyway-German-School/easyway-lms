@@ -198,7 +198,13 @@ export default function PhotoUnlockGuide() {
       : Math.max(-90, Math.min(90, rawAngle));
 
     return (
-      <div className="fixed inset-0 z-[132]" role="dialog" aria-modal="true" aria-label="Add your profile photo">
+      // `pointer-events-none` on the wrapper is load-bearing: the mask and
+      // arrow are already pointer-events-none, but this div's own transparent
+      // area still hit-tests as "auto" by default and was eating every tap
+      // over the spotlighted hole — the student could never actually reach
+      // the real camera button Becca was pointing at. The card and the
+      // fallback dim re-enable pointer-events on themselves below.
+      <div className="pointer-events-none fixed inset-0 z-[132]" role="dialog" aria-modal="true" aria-label="Add your profile photo">
         {hole && !targetMissing && (
           <>
             <SpotlightMask hole={hole} zIndex={0} />
@@ -215,10 +221,12 @@ export default function PhotoUnlockGuide() {
           </>
         )}
 
-        {(!hole || targetMissing) && <div className="fixed inset-0 bg-[rgb(2_6_23_/_0.55)]" />}
+        {(!hole || targetMissing) && <div className="pointer-events-auto fixed inset-0 bg-[rgb(2_6_23_/_0.55)]" />}
 
-        {/* Instruction card — bottom sheet on mobile, floating panel on desktop. */}
-        <div className="fixed inset-x-0 bottom-0 z-20 flex justify-center p-4 sm:bottom-6">
+        {/* Instruction card — bottom sheet on mobile, floating panel on desktop.
+            pointer-events-auto: re-enables taps for its own buttons against the
+            now pointer-events-none wrapper above. */}
+        <div className="pointer-events-auto fixed inset-x-0 bottom-0 z-20 flex justify-center p-4 sm:bottom-6">
           <div className="w-full max-w-sm rounded-3xl bg-[var(--surface)] p-5 text-center shadow-2xl">
             <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
               One step left
