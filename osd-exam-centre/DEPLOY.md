@@ -110,11 +110,16 @@ to match.
   the real bucket, an unauthenticated request to read it back got 401, an
   admin-session request got the exact bytes back. Env vars set on both
   `.env.local` and the Vercel project's production environment.
-- **Email** — set `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`
-  (Brevo, the same provider the LMS already uses, or any SMTP relay).
-  Without this, booking confirmations, seat-confirmed emails, and the
-  nurture drip are only logged to the server console — nobody receives
-  anything.
+- **Email — DONE (2026-09-15).** Real Brevo SMTP, the same Brevo account
+  the LMS uses (`b4b33b001@smtp-brevo.com`), a dedicated SMTP key generated
+  for this app. `SMTP_FROM` is temporarily
+  `no-reply@easywayschoollms.com.ng` (the LMS's already-verified sending
+  domain) until `easywaygermanexamregistration.com` is registered and
+  verified in Brevo — update it then. Verified with a real send, not just
+  an auth check: sent an actual email, Brevo accepted it
+  (`accepted: [...]`, got back a real `messageId`). Env vars set on both
+  `.env.local` and Vercel's production environment (no redeploy needed —
+  Vercel injects env var changes into serverless functions at runtime).
 - **Cron** — set `CRON_SECRET` and confirm `vercel.json`'s cron (already
   configured to hit `/api/cron/nurture` daily) is enabled for this project
   — Vercel Cron needs to be turned on per-project, it doesn't inherit from
