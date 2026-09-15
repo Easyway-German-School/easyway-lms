@@ -52,42 +52,23 @@ export type ScheduleMonth = {
 };
 
 import { MONTH_NAMES, monthNameToIndex, resolveBatchAbsolute } from "@/lib/batch";
+import { normalizeSlot } from "@/lib/class-times";
+import {
+  resolvePatternDays,
+  patternLabel,
+  WEEKDAY_SHORT,
+  type SchedulePatternSettings,
+} from "@/lib/schedule-pattern";
 
 // Re-exported: `monthNameToIndex` used to live here, and several modules
 // import it from this path.
 export { monthNameToIndex };
 
-const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-// The two weekday patterns (JS getDay(): 0=Sun … 6=Sat).
-const PATTERN_MFS = [1, 5, 6]; // Mon, Fri, Sat
-const PATTERN_TWT = [2, 3, 4]; // Tue, Wed, Thu
-// The weekend sitting meets once a week, not three times — there is no
-// alternation to pick between, so this bypasses `patternForBatch` entirely.
-const PATTERN_WEEKEND = [6]; // Sat only
-
-/**
- * The pattern a batch teaches on, for every month of its course.
- *
- * Chosen from the batch's OWN starting month so that consecutive intakes
- * alternate — June Mon/Fri/Sat, July Tue/Wed/Thu, August Mon/Fri/Sat — and
- * then held constant, because the argument is the batch's, not the month's.
- *
- * Keyed on the month index rather than on the absolute month so the answer for
- * "the August batch" is the same in every year. (Those are in fact the same
- * parity — a year is twelve months, which is even — but saying it in terms of
- * the month index is saying what is meant.)
- *
- * Month indices are 0-based, so June is 5 and July is 6: an ODD index gets
- * Mon/Fri/Sat, which is what the school's June, August and October intakes run.
- */
-function patternForBatch(batchMonthIndex: number): number[] {
-  return batchMonthIndex % 2 === 1 ? PATTERN_MFS : PATTERN_TWT;
-}
-
-function patternLabel(days: number[]): string {
-  return days.map((d) => WEEKDAY_SHORT[d]).join(" · ");
-}
+// The days a batch actually meets on now come from resolvePatternDays() in
+// schedule-pattern.ts — the built-in Mon/Fri/Sat ↔ Tue/Wed/Thu alternation by
+// default, an explicit admin override when the office has set one on
+// /admin/settings. See that file for why the alternation is keyed on the
+// batch's own starting month rather than the calendar month.
 
 // Level-aware session focus so the timetable reads like a real curriculum
 // rather than repeating the same label. Keyed by weekday + CEFR level band.
@@ -151,6 +132,8 @@ export type GenerateScheduleArgs = {
   months?: number;
   /** "weekend" meets Saturdays only and skips the Mon/Fri/Sat vs Tue/Wed/Thu alternation. */
   sessionSlot?: string | null;
+  /** The office's weekday overrides from /admin/settings, when the caller has read them. Omit to use the built-in alternation. */
+  patternSettings?: SchedulePatternSettings | null;
 };
 
 export function generatePersonalizedSchedule({
@@ -160,6 +143,7 @@ export function generatePersonalizedSchedule({
   now = new Date(),
   months = 2,
   sessionSlot = null,
+  patternSettings = null,
 }: GenerateScheduleArgs): { level: string; batchMonth: string; batchYear: number; months: ScheduleMonth[] } {
   const normalizedLevel = (typeof level === "string" && level.trim() ? level : "A1").toUpperCase();
 
@@ -186,7 +170,7 @@ export function generatePersonalizedSchedule({
   // Fixed for the whole course. Read once, outside the loop, so it is not even
   // possible for a later edit to make it depend on the month being generated.
   const isWeekend = String(sessionSlot ?? "").toLowerCase() === "weekend";
-  const patternDays = isWeekend ? PATTERN_WEEKEND : patternForBatch(batchMonthIndex);
+  const patternDays = resolvePatternDays(patternSettings, normalizedLevel, normalizeSlot(sessionSlot), batchMonthIndex);
 
   const out: ScheduleMonth[] = [];
   // Counts Saturdays across the whole course (not reset per month), so a
