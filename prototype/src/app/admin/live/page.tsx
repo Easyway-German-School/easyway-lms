@@ -7,7 +7,8 @@ import AdminShell from "@/components/AdminShell";
 import BrandLoader from "@/components/BrandLoader";
 import AdminObserver from "@/components/live/AdminObserver";
 import ClassNotesHealth from "@/components/admin/ClassNotesHealth";
-import { PulseIcon, VideoIcon, ChevronRightIcon, EyeIcon } from "@/components/icons";
+import LiveClassHistory from "@/components/admin/LiveClassHistory";
+import { PulseIcon, VideoIcon, ChevronRightIcon, EyeIcon, ClockIcon } from "@/components/icons";
 
 /**
  * WHO IS LIVE RIGHT NOW — the school's own version of the dashboard LiveKit
@@ -80,6 +81,7 @@ export default function AdminLivePage() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [participantsError, setParticipantsError] = useState("");
   const [participantsBusy, setParticipantsBusy] = useState(false);
+  const [tab, setTab] = useState<"live" | "history">("live");
 
   const load = useCallback(async () => {
     try {
@@ -150,9 +152,37 @@ export default function AdminLivePage() {
               and who's actually connected. Open one to watch it silently: the tutor and students are not told, and
               you are not in their participant list.
             </p>
+
+            <div className="mt-4 inline-flex rounded-full border border-[var(--border)] bg-[var(--surface)] p-1">
+              <button
+                onClick={() => setTab("live")}
+                className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                  tab === "live" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                <PulseIcon className="h-4 w-4" /> Live now
+              </button>
+              <button
+                onClick={() => setTab("history")}
+                className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                  tab === "history" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                <ClockIcon className="h-4 w-4" /> History
+              </button>
+            </div>
           </div>
         </div>
 
+        {tab === "history" ? (
+          <div className="mx-auto max-w-5xl p-6">
+            <p className="mb-4 text-sm text-[var(--muted)]">
+              Every past live class — when it actually started against when its session was due, and when it ended.
+              Use this to check whether a tutor is consistently late, not just whether one is live now.
+            </p>
+            <LiveClassHistory />
+          </div>
+        ) : (
         <div className="mx-auto max-w-5xl space-y-4 p-6">
           {error ? (
             <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>
@@ -272,6 +302,7 @@ export default function AdminLivePage() {
             ))
           )}
         </div>
+        )}
       </div>
 
       {observing ? (
