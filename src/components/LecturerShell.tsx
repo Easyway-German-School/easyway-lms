@@ -45,46 +45,83 @@ type NavItem = {
   icon: ReactNode;
 };
 
+type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
 // One icon per destination, no repeats. Four entries used to share the same
 // pair-of-people glyph and three shared the same sheet-of-paper, which made
 // the sidebar useless to scan — you had to read every label.
-const navItems: NavItem[] = [
-  { label: 'Dashboard', href: '/lecturer/dashboard', icon: <DashboardIcon /> },
-  { label: 'Live classroom', href: '/live', icon: <BroadcastIcon /> },
-  // Not "customise" any more: a tutor does not choose their class, the office
-  // does. This page shows them what they were given and their roster.
-  { label: 'My classes', href: '/lecturer/classes', icon: <CustomiseIcon /> },
-  { label: 'My students', href: '/lecturer/students', icon: <UsersIcon /> },
-  { label: 'Timetable', href: '/lecturer/timetable', icon: <TimetableIcon /> },
-  { label: 'Private classes', href: '/lecturer/private-classes', icon: <PrivateClassIcon /> },
-  { label: 'Assignments', href: '/lecturer/assignments', icon: <AssignmentIcon /> },
-  // Sits with Assignments because that is where its questions come from: a
-  // game is a quiz the tutor already wrote, put on the projector instead of
-  // set as homework.
-  { label: 'Quiz game', href: '/lecturer/live-quiz', icon: <QuizIcon /> },
-  // Next to the quiz game because both are "a game my class plays", but it is
-  // the opposite format: nobody has to be anywhere, and it runs for a week.
-  { label: 'Story chain', href: '/lecturer/stories', icon: <ChainIcon /> },
-  { label: 'Materials', href: '/lecturer/materials', icon: <BookOpenIcon /> },
-  // Tutors had no way to watch back a class they taught. The students have had
-  // the shelf-style library since it was built; this is the same library,
-  // scoped to the classes this tutor actually takes.
-  { label: 'Recordings', href: '/lecturer/recordings', icon: <FilmIcon /> },
-  { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon /> },
-  { label: 'Exam/Test', href: '/lecturer/grades', icon: <ExamIcon /> },
-  // Tutors already had access to every space server-side (isStaffRole in
-  // lib/community-spaces), but no way to reach one — the entry simply was not
-  // in this sidebar, so the answering-questions-between-classes half of the
-  // community never happened.
-  { label: 'Community', href: '/community', icon: <CommunityIcon /> },
-  // These two pages existed but were reachable from nowhere, so nobody used
-  // them. They belong in the sidebar with everything else.
-  { label: 'Gradebook', href: '/lecturer/gradebook', icon: <GradebookIcon /> },
-  { label: 'Lesson builder', href: '/lecturer/lesson-builder', icon: <LessonBuilderIcon /> },
-  { label: 'Messages', href: '/lecturer/messages', icon: <MailIcon /> },
-  { label: 'Announcements', href: '/lecturer/announcements', icon: <BroadcastMessageIcon /> },
-  { label: 'Settings', href: '/lecturer/settings', icon: <SettingsIcon /> },
+//
+// Grouped into labeled sections rather than one flat 19-item list, the same
+// treatment StudentShell got — a tutor scanning for "where do I mark
+// attendance" was choosing from 19 equally weighted rows every time.
+const navGroups: NavGroup[] = [
+  {
+    label: 'Teaching',
+    items: [
+      { label: 'Dashboard', href: '/lecturer/dashboard', icon: <DashboardIcon /> },
+      { label: 'Live classroom', href: '/live', icon: <BroadcastIcon /> },
+      // Not "customise" any more: a tutor does not choose their class, the
+      // office does. This page shows them what they were given and their
+      // roster.
+      { label: 'My classes', href: '/lecturer/classes', icon: <CustomiseIcon /> },
+      { label: 'My students', href: '/lecturer/students', icon: <UsersIcon /> },
+      { label: 'Timetable', href: '/lecturer/timetable', icon: <TimetableIcon /> },
+      { label: 'Private classes', href: '/lecturer/private-classes', icon: <PrivateClassIcon /> },
+    ],
+  },
+  {
+    label: 'Classroom tools',
+    items: [
+      { label: 'Assignments', href: '/lecturer/assignments', icon: <AssignmentIcon /> },
+      // Sits with Assignments because that is where its questions come from:
+      // a game is a quiz the tutor already wrote, put on the projector
+      // instead of set as homework.
+      { label: 'Quiz game', href: '/lecturer/live-quiz', icon: <QuizIcon /> },
+      // Next to the quiz game because both are "a game my class plays", but
+      // it is the opposite format: nobody has to be anywhere, and it runs
+      // for a week.
+      { label: 'Story chain', href: '/lecturer/stories', icon: <ChainIcon /> },
+      { label: 'Materials', href: '/lecturer/materials', icon: <BookOpenIcon /> },
+      // Tutors had no way to watch back a class they taught. The students
+      // have had the shelf-style library since it was built; this is the
+      // same library, scoped to the classes this tutor actually takes.
+      { label: 'Recordings', href: '/lecturer/recordings', icon: <FilmIcon /> },
+      { label: 'Lesson builder', href: '/lecturer/lesson-builder', icon: <LessonBuilderIcon /> },
+    ],
+  },
+  {
+    label: 'Tracking',
+    items: [
+      { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon /> },
+      { label: 'Exam/Test', href: '/lecturer/grades', icon: <ExamIcon /> },
+      { label: 'Gradebook', href: '/lecturer/gradebook', icon: <GradebookIcon /> },
+    ],
+  },
+  {
+    label: 'Communication',
+    items: [
+      // Tutors already had access to every space server-side (isStaffRole in
+      // lib/community-spaces), but no way to reach one — the entry simply
+      // was not in this sidebar, so the answering-questions-between-classes
+      // half of the community never happened.
+      { label: 'Community', href: '/community', icon: <CommunityIcon /> },
+      { label: 'Messages', href: '/lecturer/messages', icon: <MailIcon /> },
+      { label: 'Announcements', href: '/lecturer/announcements', icon: <BroadcastMessageIcon /> },
+    ],
+  },
+  {
+    label: 'Account',
+    items: [
+      { label: 'Settings', href: '/lecturer/settings', icon: <SettingsIcon /> },
+    ],
+  },
 ];
+
+// Flattened once for the lookups below that don't care about grouping.
+const navItems: NavItem[] = navGroups.flatMap((group) => group.items);
 
 export default function LecturerShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -296,8 +333,20 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
         </div>
 
         <nav className="flex-1 overflow-y-auto p-3">
-          <div className="space-y-1">
-            {navItems.filter(visibleToThisTutor).map((item) => {
+          {navGroups
+            .map((group) => ({ ...group, items: group.items.filter(visibleToThisTutor) }))
+            .filter((group) => group.items.length > 0)
+            .map((group, groupIndex) => (
+              <div key={group.label} className={groupIndex > 0 ? 'mt-5' : ''}>
+                <p
+                  className={`px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--muted)]/70 ${
+                    collapsed ? 'lg:hidden' : ''
+                  }`}
+                >
+                  {group.label}
+                </p>
+                <div className="space-y-1">
+                  {group.items.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + '/');
               const communityBadge =
                 item.href === '/community' && !active ? unreadCommunity : 0;
@@ -328,8 +377,10 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
                   )}
                 </button>
               );
-            })}
-          </div>
+                  })}
+                </div>
+              </div>
+            ))}
         </nav>
 
         <div className="border-t border-[var(--border)] p-3">
