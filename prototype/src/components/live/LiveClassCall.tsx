@@ -147,10 +147,11 @@ export default function LiveClassCall() {
 
   // Tell the moment queue to stand down while this is up, and hand the screen
   // back when it goes. The cleanup matters more than the set: a call that
-  // unmounts without releasing would silence the tour permanently.
+  // unmounts without releasing would silence the tour permanently. `source`
+  // keeps this seat separate from any other preemptor — see MOMENT_PREEMPT_EVENT.
   useEffect(() => {
     const dispatch = (active: boolean) => {
-      window.dispatchEvent(new CustomEvent(MOMENT_PREEMPT_EVENT, { detail: { active } }));
+      window.dispatchEvent(new CustomEvent(MOMENT_PREEMPT_EVENT, { detail: { active, source: "live-class" } }));
     };
     dispatch(ringing);
     return () => dispatch(false);

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import Mascot from "@/components/Mascot";
 import { SpotlightArrow, SpotlightMask, inflate, useTargetRect } from "@/components/Spotlight";
 import { isPhotoGatedRoute } from "@/lib/access";
+import { MOMENT_PREEMPT_EVENT } from "@/lib/moment-queue";
 import { useStudentAccess } from "@/lib/useStudentAccess";
 
 /**
@@ -25,6 +26,12 @@ import { useStudentAccess } from "@/lib/useStudentAccess";
  * has no dismiss: no close button, no backdrop click, no Escape. Wriggle out
  * (reload, back button, another tab) and it re-arms, because nothing about it
  * is a one-shot flag.
+ *
+ * Being outside the queue does not mean sharing the screen with it. This
+ * still preempts the queue (see MOMENT_PREEMPT_EVENT) exactly like a ringing
+ * live class does, so a dismissible popup like the cohort-check ask can never
+ * render underneath Becca's card — that was precisely the "everything pops up
+ * at once" bug photo-less students were meeting on their first visit.
  *
  * Three states, decided by route:
  *   LOCK   on a photo-gated page — a full-screen Becca card over the lock
@@ -80,6 +87,20 @@ export default function PhotoUnlockGuide() {
   }, []);
 
   const active = photoless && (onGatedPage || onProfile);
+
+  // Stand the moment queue down for as long as this owns the screen,
+  // including the brief "you're in" celebration beat — see the module
+  // comment and MOMENT_PREEMPT_EVENT. The cleanup matters more than the set:
+  // unmounting without releasing would silence the queue permanently.
+  useEffect(() => {
+    const dispatch = (wantsActive: boolean) => {
+      window.dispatchEvent(
+        new CustomEvent(MOMENT_PREEMPT_EVENT, { detail: { active: wantsActive, source: "photo-unlock" } }),
+      );
+    };
+    dispatch(active || celebrating);
+    return () => dispatch(false);
+  }, [active, celebrating]);
 
   // Lock the page scroll only for the full-screen LOCK card. On /profile the
   // student needs to reach the control, and the fallback button, by scrolling.
@@ -177,7 +198,13 @@ export default function PhotoUnlockGuide() {
       : Math.max(-90, Math.min(90, rawAngle));
 
     return (
-      <div className="fixed inset-0 z-[132]" role="dialog" aria-modal="true" aria-label="Add your profile photo">
+      // `pointer-events-none` on the wrapper is load-bearing: the mask and
+      // arrow are already pointer-events-none, but this div's own transparent
+      // area still hit-tests as "auto" by default and was eating every tap
+      // over the spotlighted hole — the student could never actually reach
+      // the real camera button Becca was pointing at. The card and the
+      // fallback dim re-enable pointer-events on themselves below.
+      <div className="pointer-events-none fixed inset-0 z-[132]" role="dialog" aria-modal="true" aria-label="Add your profile photo">
         {hole && !targetMissing && (
           <>
             <SpotlightMask hole={hole} zIndex={0} />
@@ -194,10 +221,12 @@ export default function PhotoUnlockGuide() {
           </>
         )}
 
-        {(!hole || targetMissing) && <div className="fixed inset-0 bg-[rgb(2_6_23_/_0.55)]" />}
+        {(!hole || targetMissing) && <div className="pointer-events-auto fixed inset-0 bg-[rgb(2_6_23_/_0.55)]" />}
 
-        {/* Instruction card — bottom sheet on mobile, floating panel on desktop. */}
-        <div className="fixed inset-x-0 bottom-0 z-20 flex justify-center p-4 sm:bottom-6">
+        {/* Instruction card — bottom sheet on mobile, floating panel on desktop.
+            pointer-events-auto: re-enables taps for its own buttons against the
+            now pointer-events-none wrapper above. */}
+        <div className="pointer-events-auto fixed inset-x-0 bottom-0 z-20 flex justify-center p-4 sm:bottom-6">
           <div className="w-full max-w-sm rounded-3xl bg-[var(--surface)] p-5 text-center shadow-2xl">
             <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
               One step left

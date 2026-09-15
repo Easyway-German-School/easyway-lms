@@ -404,10 +404,16 @@ const SETTLE_MS = 450;
 const SETTLE_CEILING_MS = 2600;
 
 /**
- * Fired by anything that must own the screen outright — today, only an incoming
- * live class. `detail.active` true silences the queue; false hands it back.
- * An event rather than a context method so a component rendered ALONGSIDE the
- * provider (not inside it) can still say so.
+ * Fired by anything that must own the screen outright — an incoming live
+ * class, the paid-but-no-photo guide, a tutorial walkthrough mid-navigation.
+ * `detail.active` true silences the queue on `detail.source`'s behalf; false
+ * hands its share back. `source` matters because more than one of these can
+ * be true at once (the tour can be running while a live class rings) — a
+ * plain last-write-wins boolean let whichever one's effect happened to fire
+ * last clear a preempt the other still needed, which is exactly how the
+ * photo-upload guide ended up sharing the screen with the cohort-check
+ * popup instead of blocking it. An event rather than a context method so a
+ * component rendered ALONGSIDE the provider (not inside it) can still say so.
  */
 export const MOMENT_PREEMPT_EVENT = "easyway:moment-preempt";
 
@@ -440,10 +446,12 @@ type State = {
   active: MomentId | null;
   /** Everything that was due and did not get a turn. */
   deferred: Array<{ id: MomentId } & Definition>;
+  /** See MOMENT_PREEMPT_EVENT. True while something outside the queue owns the screen. */
+  preempted: boolean;
 };
 
 const ActionsContext = createContext<Actions | null>(null);
-const StateContext = createContext<State>({ active: null, deferred: [] });
+const StateContext = createContext<State>({ active: null, deferred: [], preempted: false });
 
 export function MomentQueueProvider({ children }: { children: ReactNode }) {
   const [claimed, setClaimed] = useState<Set<MomentId>>(() => new Set());
@@ -555,15 +563,30 @@ export function MomentQueueProvider({ children }: { children: ReactNode }) {
    *
    * Not `holding`: holding is the handover gap and expires on a timer. This one
    * clears only when the call does.
+   *
+   * A SET, NOT A BOOLEAN, because more than one preemptor can be up at once.
+   * Each keeps its own seat by `source`; the queue stays preempted as long as
+   * the set isn't empty, so one preemptor clearing its own flag can never
+   * cancel another's.
    */
-  const [preempted, setPreempted] = useState(false);
+  const [preemptedBy, setPreemptedBy] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     const onPreempt = (event: Event) => {
-      setPreempted(Boolean((event as CustomEvent<{ active?: boolean }>).detail?.active));
+      const detail = (event as CustomEvent<{ active?: boolean; source?: string }>).detail;
+      const source = detail?.source ?? "unknown";
+      const wantsActive = Boolean(detail?.active);
+      setPreemptedBy((current) => {
+        if (current.has(source) === wantsActive) return current;
+        const next = new Set(current);
+        if (wantsActive) next.add(source);
+        else next.delete(source);
+        return next;
+      });
     };
     window.addEventListener(MOMENT_PREEMPT_EVENT, onPreempt);
     return () => window.removeEventListener(MOMENT_PREEMPT_EVENT, onPreempt);
   }, []);
+  const preempted = preemptedBy.size > 0;
 
   /** Whose turn it is. */
   useEffect(() => {
@@ -607,7 +630,7 @@ export function MomentQueueProvider({ children }: { children: ReactNode }) {
     () => ({ claim, withdraw, release, summon }),
     [claim, withdraw, release, summon],
   );
-  const state = useMemo<State>(() => ({ active, deferred }), [active, deferred]);
+  const state = useMemo<State>(() => ({ active, deferred, preempted }), [active, deferred, preempted]);
 
   return (
     <ActionsContext.Provider value={actions}>
@@ -636,7 +659,7 @@ export function MomentQueueProvider({ children }: { children: ReactNode }) {
  */
 export function useMoment(id: MomentId, due: boolean): { open: boolean; close: () => void } {
   const actions = useContext(ActionsContext);
-  const { active } = useContext(StateContext);
+  const { active, preempted } = useContext(StateContext);
 
   useEffect(() => {
     if (!actions) return;
@@ -661,7 +684,14 @@ export function useMoment(id: MomentId, due: boolean): { open: boolean; close: (
   }, [actions, id]);
 
   if (!actions) return { open: due, close: () => {} };
-  return { open: due && active === id, close };
+  // A moment already granted its turn still yields the screen the instant a
+  // preemptor shows up — that turn was already spent, so this hides rather
+  // than releases: nothing is lost, it just waits for the preemptor to clear
+  // and reappears where it left off (the same reason a claim survives here
+  // instead of ping-ponging withdraw/claim). Without this a moment that was
+  // already on screen when PhotoUnlockGuide or a tutorial step preempted kept
+  // rendering underneath it — the exact stacking this queue exists to stop.
+  return { open: due && active === id && !preempted, close };
 }
 
 /** For the dock, and for anything that needs to hand over to a named moment. */
