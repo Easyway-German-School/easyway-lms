@@ -182,39 +182,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'A title and either a file or a video link are required' }, { status: 400 });
     }
 
-    // A recording belongs to a level, not a course. Everything else still
-    // needs a course so it lands somewhere students can find it.
+    // Tutors teach German classes by level, not a course catalogue — level is
+    // the only thing that has to be chosen for a material to reach students.
     const kind = isRecording ? 'recording' : deriveMaterialKind(fileType);
-    if (kind !== 'recording' && !courseId) {
-      return NextResponse.json({ error: 'Please choose a course for this material' }, { status: 400 });
-    }
-    if (kind === 'recording' && !level) {
-      return NextResponse.json({ error: 'Please choose the level this recording is for' }, { status: 400 });
-    }
-
-    /**
-     * THE LEVEL IS ALWAYS STAMPED ON THE ROW, even when it came from a course.
-     *
-     * Students are found by level, and the row carried one only when the tutor
-     * was uploading a recording — for a document it stayed null and visibility
-     * rested entirely on the join to `course.level`. One denormalised column
-     * left empty meant a material's reachability depended on a course row
-     * staying correct forever, and there are already forty-odd courses here
-     * with near-duplicate names for a tutor to choose wrongly between.
-     *
-     * Copying it down at write time makes the material self-describing: it says
-     * which level it is for, and the student query can match it directly.
-     */
-    let resolvedLevel = level || null;
-    if (courseId) {
-      const course = await prisma.course.findUnique({
-        where: { id: courseId },
-        select: { level: true },
-      });
-      if (!course) {
-        return NextResponse.json({ error: 'Course not found' }, { status: 404 });
-      }
-      resolvedLevel = resolvedLevel || (course.level ? String(course.level).toUpperCase() : null);
+    if (!level) {
+      return NextResponse.json({ error: 'Please choose the level this material is for' }, { status: 400 });
     }
 
     const material = await prisma.material.create({
@@ -228,7 +200,7 @@ export async function POST(req: NextRequest) {
         fileType,
         fileSize,
         kind,
-        level: resolvedLevel,
+        level,
         series: series || null,
         episodeNumber: episodeRaw ? Number(episodeRaw) || null : null,
         durationSeconds: durationRaw ? Number(durationRaw) || null : null,
