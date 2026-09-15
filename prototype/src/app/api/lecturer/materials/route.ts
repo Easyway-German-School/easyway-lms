@@ -8,24 +8,29 @@ import { deriveMaterialKind } from '@/lib/video-library';
 import { AUDIO_EMBED_FILE_TYPE, EMBED_FILE_TYPE, parseAudioLink, parseEmbed } from '@/lib/media-embed';
 import { generateForMaterial } from '@/lib/material-ai';
 
-function serialise(material: {
-  id: string;
-  title: string;
-  description: string | null;
-  courseId: string | null;
-  course: { title: string } | null;
-  filePath: string;
-  fileName: string;
-  fileSize: number;
-  kind: string;
-  level: string | null;
-  series: string | null;
-  episodeNumber: number | null;
-  durationSeconds: number | null;
-  recordedAt: Date | null;
-  createdAt: Date;
-  aiState: string;
-}) {
+function serialise(
+  material: {
+    id: string;
+    title: string;
+    description: string | null;
+    courseId: string | null;
+    course: { title: string } | null;
+    filePath: string;
+    fileName: string;
+    fileSize: number;
+    kind: string;
+    level: string | null;
+    series: string | null;
+    episodeNumber: number | null;
+    durationSeconds: number | null;
+    recordedAt: Date | null;
+    createdAt: Date;
+    aiState: string;
+    lecturerId: string | null;
+    uploadedBy: string | null;
+  },
+  lecturerId: string,
+) {
   return {
     id: material.id,
     aiState: material.aiState,
@@ -45,6 +50,11 @@ function serialise(material: {
     durationSeconds: material.durationSeconds,
     recordedAt: material.recordedAt,
     uploadedAt: material.createdAt,
+    // Whether THIS tutor uploaded it, vs. an office cohort upload landing on
+    // their portal because it matches their assignment — the UI needs this to
+    // label "From the office" and to decide when "Send to my class" applies.
+    mine: material.lecturerId === lecturerId,
+    fromOffice: !material.lecturerId && Boolean(material.uploadedBy),
   };
 }
 
@@ -107,7 +117,7 @@ export async function GET(req: NextRequest) {
       return allowedBatches.includes(material.batch.toLowerCase());
     });
 
-    return NextResponse.json(materials.map(serialise));
+    return NextResponse.json(materials.map((material) => serialise(material, lecturerId)));
   } catch (error) {
     console.error('Materials GET error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -268,7 +278,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json(serialise(material));
+    return NextResponse.json(serialise(material, lecturerId));
   } catch (error) {
     console.error('Materials POST error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

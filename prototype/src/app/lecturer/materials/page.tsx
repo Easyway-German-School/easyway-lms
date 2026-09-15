@@ -22,6 +22,8 @@ interface Material {
   fileSize: number;
   uploadedAt: string;
   aiState: string;
+  mine: boolean;
+  fromOffice: boolean;
 }
 
 export default function LecturerMaterials() {
@@ -32,6 +34,8 @@ export default function LecturerMaterials() {
   const [error, setError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [sendResults, setSendResults] = useState<Record<string, string>>({});
 
   /**
    * Upload a file, or point at one somebody else is already hosting.
@@ -202,6 +206,38 @@ export default function LecturerMaterials() {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setIsUploading(false);
+    }
+  }
+
+  /**
+   * "Send to my class" — pushes this material to the tutor's roster as it
+   * stands right now, so a student named onto this tutor after the material
+   * first went out (or reassigned into their class later) actually gets it,
+   * instead of it sitting visible-but-unannounced in the portal.
+   */
+  async function sendToClass(materialId: string) {
+    setSendingId(materialId);
+    setSendResults((current) => ({ ...current, [materialId]: '' }));
+    try {
+      const res = await fetch(`/api/lecturer/materials/${materialId}/send`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not send this to your class');
+      const sent = data.sentTo as number;
+      const already = data.alreadyHadIt as number;
+      setSendResults((current) => ({
+        ...current,
+        [materialId]:
+          sent > 0
+            ? `Sent to ${sent} student${sent === 1 ? '' : 's'}${already ? ` (${already} already had it today)` : ''}.`
+            : 'Everyone on your roster already got this today.',
+      }));
+    } catch (err) {
+      setSendResults((current) => ({
+        ...current,
+        [materialId]: err instanceof Error ? err.message : 'Could not send this to your class',
+      }));
+    } finally {
+      setSendingId(null);
     }
   }
 
@@ -485,7 +521,14 @@ export default function LecturerMaterials() {
                       <div className="flex items-center gap-3">
                         <DocumentIcon className="h-6 w-6 shrink-0 text-[var(--accent)]" />
                         <div>
-                          <h3 className="font-semibold text-[var(--foreground)]">{material.title}</h3>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-semibold text-[var(--foreground)]">{material.title}</h3>
+                            {material.fromOffice && (
+                              <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+                                From the office
+                              </span>
+                            )}
+                          </div>
                           <p className="text-sm text-[var(--muted)]">{material.courseName || (material.level ? `Level ${material.level}` : null)}</p>
                         </div>
                       </div>
@@ -494,13 +537,26 @@ export default function LecturerMaterials() {
                         <span className="inline-flex items-center gap-1.5"><PackageIcon className="h-3.5 w-3.5" /> {(material.fileSize / 1024 / 1024).toFixed(2)} MB</span>
                         <span className="inline-flex items-center gap-1.5"><CalendarIcon className="h-3.5 w-3.5" /> {new Date(material.uploadedAt).toLocaleDateString()}</span>
                       </div>
+                      {sendResults[material.id] && (
+                        <p className="mt-2 text-xs text-[var(--accent)]">{sendResults[material.id]}</p>
+                      )}
                     </div>
-                    <button
-                      onClick={() => window.open(material.filePath, '_blank')}
-                      className="ml-4 px-3 py-1 bg-[var(--accent)] text-white text-sm rounded hover:opacity-90 transition-opacity"
-                    >
-                      Download
-                    </button>
+                    <div className="ml-4 flex shrink-0 flex-col items-end gap-2">
+                      <button
+                        onClick={() => window.open(material.filePath, '_blank')}
+                        className="px-3 py-1 bg-[var(--accent)] text-white text-sm rounded hover:opacity-90 transition-opacity"
+                      >
+                        Download
+                      </button>
+                      <button
+                        onClick={() => sendToClass(material.id)}
+                        disabled={sendingId === material.id}
+                        title="Push this to the students on your roster right now — catches anyone added to your class since this was last sent."
+                        className="px-3 py-1 border border-[var(--border)] text-[var(--foreground)] text-sm rounded hover:bg-[var(--surface-alt)] transition-colors disabled:opacity-50"
+                      >
+                        {sendingId === material.id ? 'Sending…' : 'Send to my class'}
+                      </button>
+                    </div>
                   </div>
 
                   {material.aiState === 'ready' && <LecturerQuestReview materialId={material.id} />}

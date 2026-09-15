@@ -265,6 +265,18 @@ async function handleGET(request: NextRequest) {
   );
 
   /**
+   * Tutors with office-uploaded materials matching their class sitting still
+   * sitting unsent get a once-a-week nudge from Becca to open Materials and
+   * push them out. See src/lib/material-send-nudge.ts.
+   */
+  results.push(
+    await run("material-send-nudge", async () => {
+      const { nudgeTutorsWithUnsentMaterials } = await import("@/lib/material-send-nudge");
+      return nudgeTutorsWithUnsentMaterials();
+    }),
+  );
+
+  /**
    * "You can submit assignments now" — once ever per student, the tick their
    * portal is both unlocked (deposit or full payment cleared) and there is at
    * least one assignment sitting there unsubmitted. See
