@@ -56,7 +56,7 @@ export const HYBRID_COMBOS: readonly HybridCombo[] = [
     id: "other",
     physicalSlot: null,
     onlineSlot: null,
-    label: "Other — I'll contact the office",
+    label: "Not sure yet — start me on a sitting",
   },
 ] as const;
 
@@ -65,6 +65,28 @@ export const HYBRID_COMBO_IDS = HYBRID_COMBOS.map((combo) => combo.id) as Hybrid
 export function findHybridCombo(id: unknown): HybridCombo | null {
   const key = String(id ?? "").trim();
   return HYBRID_COMBOS.find((combo) => combo.id === key) ?? null;
+}
+
+/**
+ * The combo used for a student who picked "Other" (or nothing) — a
+ * genuinely unsure student still needs a real tutor from day one, so this is
+ * NOT a "leave them unassigned" escape hatch. It's the same rule-based match
+ * everyone else gets, just against a picked-for-them default: the first
+ * curated combo whose both halves still run for their level, or the first
+ * combo outright if the settings can't be read. The student is flagged (see
+ * `Student.admission.hybridComboWasDefaulted`) so the office and
+ * HybridComboMoment both know to offer them a real choice, but that flag
+ * never blocks assignment — it only prompts a later correction.
+ */
+export function fallbackHybridCombo(
+  isSlotOpen: (level: string | null | undefined, slot: string, mode: "hybrid" | "online") => boolean,
+  level: string | null | undefined,
+): HybridCombo {
+  const real = HYBRID_COMBOS.filter((combo) => combo.id !== "other");
+  const open = real.find(
+    (combo) => isSlotOpen(level, combo.physicalSlot!, "hybrid") && isSlotOpen(level, combo.onlineSlot!, "online"),
+  );
+  return open ?? real[0];
 }
 
 /** The combo a student's stored slots correspond to, for re-showing their choice. */

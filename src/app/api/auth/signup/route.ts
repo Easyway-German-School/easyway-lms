@@ -24,7 +24,7 @@ import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
 import { normalizeProfileInput } from "@/lib/student-profile";
 import { openEnrolment } from "@/lib/student-enrolment";
 import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
-import { findHybridCombo } from "@/lib/hybrid-combo";
+import { findHybridCombo, fallbackHybridCombo } from "@/lib/hybrid-combo";
 import { autoAssignTutor } from "@/lib/tutor-auto-assign";
 
 /**
@@ -246,27 +246,36 @@ export async function POST(request: NextRequest) {
         ? "hybrid"
         : "physical";
 
+    // Read once, ahead of the hybrid combo fallback below AND the boundary
+    // check further down, rather than fetching this JSON row twice.
+    const sessionSettingsForSignup =
+      normalizedRole === "STUDENT" ? await readSessionSettings(currentTenantId()) : null;
+    const isSlotOpen = (level: string | null | undefined, slot: string, mode: "hybrid" | "online") =>
+      isCellEnabled(sessionSettingsForSignup, level, slot, mode);
+
     /**
      * A hybrid student picks ONE of the curated combos in lib/hybrid-combo.ts
      * — which physical sitting they attend on campus, and which online
      * sitting they drop into over video — rather than a vague "hybrid" mode
      * that let a student appear in any online sitting of their level to
      * whichever tutor's coverage happened to catch them. "Other" (or no
-     * combo at all) means the physical slot above still applies, but there
-     * is no online half yet: the student is flagged for the office to set
-     * up by hand, and HybridComboMoment will ask them again once they are on
-     * the portal, same as an existing hybrid student mid-migration.
+     * combo at all) does NOT skip assignment: an unsure student still gets
+     * the same rule-based match everyone else does, against a sensible
+     * default combo — they are flagged (`hybridComboWasDefaulted`) so the
+     * office and HybridComboMoment both know to offer them a real choice
+     * later, but nobody is left waiting on a human to place them first.
      */
     let normalizedHybridOnlineSlot: string | null = null;
-    let hybridNeedsOfficeSetup = false;
+    let hybridComboWasDefaulted = false;
     if (normalizedDeliveryMode === "hybrid") {
       const combo = findHybridCombo(hybridCombo);
-      if (combo && combo.id !== "other" && combo.physicalSlot && combo.onlineSlot) {
-        normalizedSessionSlot = combo.physicalSlot;
-        normalizedHybridOnlineSlot = combo.onlineSlot;
-      } else {
-        hybridNeedsOfficeSetup = true;
-      }
+      const resolved =
+        combo && combo.id !== "other" && combo.physicalSlot && combo.onlineSlot
+          ? combo
+          : fallbackHybridCombo(isSlotOpen, normalizedLevel);
+      normalizedSessionSlot = resolved.physicalSlot!;
+      normalizedHybridOnlineSlot = resolved.onlineSlot!;
+      hybridComboWasDefaulted = !combo || combo.id === "other";
     }
 
     // Only present on an online signup. Left undefined for a campus student so
@@ -329,11 +338,11 @@ export async function POST(request: NextRequest) {
       // than flattened so `readOnlineProfile` has one place to look and these
       // keys can never collide with an admission field added later.
       online: normalizedOnlineProfile,
-      // Set when a hybrid student picked "Other" (or skipped the combo
-      // picker entirely) — no online sitting/tutor could be auto-assigned,
-      // so the office needs to set one up by hand. Cleared once HybridComboMoment
-      // (or the office) fills in a real combo. See lib/hybrid-combo.ts.
-      hybridNeedsOfficeSetup: hybridNeedsOfficeSetup || undefined,
+      // Set when a hybrid student was auto-defaulted onto a combo because
+      // they picked "Other" (or skipped the picker) — they ARE assigned a
+      // real tutor immediately, this just flags the office/HybridComboMoment
+      // to offer them a genuine choice later. See lib/hybrid-combo.ts.
+      hybridComboWasDefaulted: hybridComboWasDefaulted || undefined,
     };
 
     if (!normalizedEmail || !normalizedPassword || !normalizedName) {
@@ -478,7 +487,7 @@ export async function POST(request: NextRequest) {
      * runs. Same defence-in-depth as the level check above.
      */
     if (normalizedRole === "STUDENT") {
-      const sessionSettings = await readSessionSettings(currentTenantId());
+      const sessionSettings = sessionSettingsForSignup;
       if (!isModeEnabled(sessionSettings, normalizedLevel, normalizedDeliveryMode)) {
         return NextResponse.json(
           { error: `${normalizedLevel} is not offered ${normalizedDeliveryMode === "physical" ? "on campus" : normalizedDeliveryMode} right now. Please choose another level or branch.` },

@@ -26,6 +26,8 @@ export const KIND = {
   studentRegistered: "student.registered",
   studentImported: "student.imported",
   paymentReceived: "payment.received",
+  /** A tutor was matched to a student — the admin feed version fires immediately at signup; the student-facing one waits for tutor-reveal.ts to release it once payment clears. */
+  tutorAssigned: "tutor.assigned",
   paymentFailed: "payment.failed",
   paymentPending: "payment.pending",
   gatewayError: "gateway.error",

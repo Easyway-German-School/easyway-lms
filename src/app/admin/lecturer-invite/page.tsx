@@ -7,12 +7,13 @@ import PasswordInput from "@/components/PasswordInput";
 import PhotoCapture from "@/components/PhotoCapture";
 import AssignmentPicker from "@/components/admin/AssignmentPicker";
 import { uploadImage } from "@/lib/upload";
-import { ArrowLeftIcon, LecturerIcon, UsersIcon } from "@/components/icons";
+import { ArrowLeftIcon, BroadcastMessageIcon, LecturerIcon, MailIcon, UsersIcon } from "@/components/icons";
 import {
   BATCHES,
   CLASS_TYPES,
   COURSE_LEVELS,
   SESSION_SLOTS,
+  assignmentBatches,
   type LecturerAssignment,
 } from "@/lib/lecturer-assignment";
 import {
@@ -101,6 +102,18 @@ function naira(amount: number) {
 }
 
 /**
+ * Whether this tutor's coverage reaches a delivery mode — the same "empty or
+ * every class type = no restriction" rule `studentWhereForAssignment` uses
+ * server-side, kept in sync here so the directory filter agrees with the
+ * roster it is filtering.
+ */
+function tutorCoversMode(tutor: Tutor, mode: "physical" | "online" | "private"): boolean {
+  const types = tutor.assignment.classTypes.map((t) => t.toLowerCase());
+  if (!types.length || types.length >= CLASS_TYPES.length) return true;
+  return types.includes(mode);
+}
+
+/**
  * Remove a teaching group AND re-derive the flat levels/sessionSlots mirrors
  * from what is left.
  *
@@ -136,10 +149,32 @@ function AssignmentFields({
   const [groupBranch, setGroupBranch] = useState(value.branchIds[0] ?? "");
   const [groupLevel, setGroupLevel] = useState(value.levels[0] ?? "A1");
   const [groupSlot, setGroupSlot] = useState(value.sessionSlots[0] ?? "morning");
+  // "" means this level/sitting runs for every intake — the same as leaving the
+  // standalone batch picker below untouched.
+  const [groupBatch, setGroupBatch] = useState("");
 
   function addGroup() {
-    if (!groupBranch || value.groups.some((group) => group.branchId === groupBranch && group.level === groupLevel && group.sessionSlot === groupSlot)) return;
-    onChange({ ...value, groups: [...value.groups, { branchId: groupBranch, level: groupLevel, sessionSlot: groupSlot }], branchIds: [...new Set([...value.branchIds, groupBranch])], levels: [...new Set([...value.levels, groupLevel])], sessionSlots: [...new Set([...value.sessionSlots, groupSlot])] });
+    if (
+      !groupBranch ||
+      value.groups.some(
+        (group) =>
+          group.branchId === groupBranch &&
+          group.level === groupLevel &&
+          group.sessionSlot === groupSlot &&
+          (group.batch ?? "") === groupBatch,
+      )
+    )
+      return;
+    const nextGroup = groupBatch
+      ? { branchId: groupBranch, level: groupLevel, sessionSlot: groupSlot, batch: groupBatch }
+      : { branchId: groupBranch, level: groupLevel, sessionSlot: groupSlot };
+    onChange({
+      ...value,
+      groups: [...value.groups, nextGroup],
+      branchIds: [...new Set([...value.branchIds, groupBranch])],
+      levels: [...new Set([...value.levels, groupLevel])],
+      sessionSlots: [...new Set([...value.sessionSlots, groupSlot])],
+    });
   }
 
   return (
@@ -158,14 +193,15 @@ function AssignmentFields({
 
       <div className="rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4">
         <p className="text-sm font-bold text-[var(--foreground)]">Teaching groups</p>
-        <p className="mt-1 text-xs text-[var(--muted)]">Pair each level with its own sitting. A tutor can teach A1 in the morning and B2 in the afternoon.</p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_0.7fr_1fr_auto]">
+        <p className="mt-1 text-xs text-[var(--muted)]">Pair each level with its own sitting, and — if it matters — the one intake month it runs for. A tutor can teach the September A1 morning class and the August B2 afternoon class without August touching the A1 group. Leave the month on <em>Any</em> for a level/sitting that runs every intake.</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_0.7fr_0.9fr_0.9fr_auto]">
           <select value={groupBranch} onChange={(event) => setGroupBranch(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"><option value="">Choose branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
           <select value={groupLevel} onChange={(event) => setGroupLevel(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">{COURSE_LEVELS.map((level) => <option key={level}>{level}</option>)}</select>
           <select value={groupSlot} onChange={(event) => setGroupSlot(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">{SESSION_SLOTS.map((slot) => <option key={slot} value={slot}>{slot.charAt(0).toUpperCase() + slot.slice(1)}</option>)}</select>
+          <select value={groupBatch} onChange={(event) => setGroupBatch(event.target.value)} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"><option value="">Any month</option>{BATCHES.map((batch) => <option key={batch} value={batch}>{batch.slice(0, 3)}</option>)}</select>
           <button type="button" onClick={addGroup} className="rounded-xl bg-[var(--accent-strong)] px-4 py-2 text-sm font-bold text-white">Add</button>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">{value.groups.map((group) => <button key={`${group.branchId}-${group.level}-${group.sessionSlot}`} type="button" onClick={() => onChange(pruneGroup(value, group))} className="rounded-full border border-[var(--accent)]/40 bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)]">{branches.find((branch) => branch.id === group.branchId)?.name ?? "Branch"} · {group.level} · {group.sessionSlot} ×</button>)}</div>
+        <div className="mt-3 flex flex-wrap gap-2">{value.groups.map((group) => <button key={`${group.branchId}-${group.level}-${group.sessionSlot}-${group.batch ?? "any"}`} type="button" onClick={() => onChange(pruneGroup(value, group))} className="rounded-full border border-[var(--accent)]/40 bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)]">{branches.find((branch) => branch.id === group.branchId)?.name ?? "Branch"} · {group.level} · {group.sessionSlot}{group.batch ? ` · ${group.batch}` : ""} ×</button>)}</div>
       </div>
 
       <AssignmentPicker
@@ -478,6 +514,209 @@ function StudentLine({
 }
 
 /**
+ * Opened from the "N students" badge on a tutor's card. Read-first, unlike
+ * ClassRoster below it — this is not where pairings change, it is where the
+ * office reaches the people already in them: one message to everybody in the
+ * class, or a private note to one student, without leaving the tutor list.
+ */
+function TutorRosterPanel({
+  lecturerId,
+  tutorName,
+  onClose,
+}: {
+  lecturerId: string;
+  tutorName: string;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [roster, setRoster] = useState<RosterStudent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [title, setTitle] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [dmBusyId, setDmBusyId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(
+          `/api/admin/lecturers/students?lecturerId=${encodeURIComponent(lecturerId)}`,
+          { cache: "no-store" },
+        );
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        const list: RosterStudent[] = data.roster || [];
+        setRoster(list);
+        setSelected(new Set(list.map((student) => student.id)));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lecturerId]);
+
+  function toggle(studentId: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(studentId)) next.delete(studentId);
+      else next.add(studentId);
+      return next;
+    });
+  }
+
+  async function sendBroadcast() {
+    if (!title.trim() || !message.trim() || selected.size === 0) return;
+    setSending(true);
+    setNotice("");
+    try {
+      const res = await fetch("/api/admin/lecturers/announce", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lecturerId, studentIds: [...selected], title, message }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not send that message");
+      setNotice(`Sent to ${data.sentTo} student${data.sentTo === 1 ? "" : "s"}.`);
+      setTitle("");
+      setMessage("");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not send that message");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function messagePrivately(student: RosterStudent) {
+    setDmBusyId(student.id);
+    setNotice("");
+    try {
+      const res = await fetch("/api/community/dms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: student.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not open that conversation");
+      router.push(`/admin/community?channel=${encodeURIComponent(data.channelId)}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not open that conversation");
+      setDmBusyId("");
+    }
+  }
+
+  const allSelected = roster.length > 0 && selected.size === roster.length;
+
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[var(--foreground)]">{tutorName}&apos;s students</p>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            Message the whole class at once, or open a private chat with one student.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)]"
+        >
+          Close
+        </button>
+      </div>
+
+      {loading ? <p className="mt-3 text-xs text-[var(--muted)]">Loading…</p> : null}
+      {!loading && roster.length === 0 ? (
+        <p className="mt-3 rounded-xl bg-amber-500/10 px-4 py-2.5 text-xs text-amber-800">
+          This tutor has no students yet.
+        </p>
+      ) : null}
+
+      {notice ? (
+        <p className="mt-3 rounded-xl bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-800">{notice}</p>
+      ) : null}
+
+      {roster.length ? (
+        <>
+          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="flex items-center gap-2">
+              <BroadcastMessageIcon className="h-4 w-4 text-[var(--accent)]" />
+              <p className="text-sm font-semibold text-[var(--foreground)]">Message the class</p>
+            </div>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Title"
+              className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
+            />
+            <textarea
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              rows={3}
+              placeholder="What do you want to tell them?"
+              className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
+            />
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setSelected(allSelected ? new Set() : new Set(roster.map((s) => s.id)))}
+                className="text-xs font-semibold text-[var(--accent)]"
+              >
+                {allSelected ? "Deselect all" : "Select all"}
+              </button>
+              <button
+                type="button"
+                onClick={sendBroadcast}
+                disabled={sending || !title.trim() || !message.trim() || selected.size === 0}
+                className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+              >
+                {sending
+                  ? "Sending…"
+                  : `Send to ${selected.size} student${selected.size === 1 ? "" : "s"}`}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {roster.map((student) => (
+              <StudentLine
+                key={student.id}
+                student={student}
+                right={
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Include ${student.name} in the class message`}
+                      checked={selected.has(student.id)}
+                      onChange={() => toggle(student.id)}
+                      className="h-4 w-4"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => messagePrivately(student)}
+                      disabled={dmBusyId === student.id}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)] disabled:opacity-60"
+                    >
+                      <MailIcon className="h-3.5 w-3.5" />
+                      {dmBusyId === student.id ? "Opening…" : "Message"}
+                    </button>
+                  </div>
+                }
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Who this tutor teaches, and the one place to change it.
  *
  * REPLACES A PRIVATE-ONLY PANEL THAT WAS HIDDEN MOST OF THE TIME. The old
@@ -697,6 +936,14 @@ export default function AdminTutorsPage() {
   const [editAssignment, setEditAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
   const [editFeatures, setEditFeatures] = useState<string[]>([...LECTURER_FEATURES]);
   const [savingEdit, setSavingEdit] = useState(false);
+  /**
+   * A save that would cover a lot of ground — several levels, or a lot of
+   * students — gets one extra click instead of going straight through. This
+   * is what would have caught the coverage pattern that swept in the entire
+   * A1-B2 online/hybrid cohort onto one tutor before it ever saved.
+   */
+  const [coveragePreview, setCoveragePreview] = useState<{ count: number; levels: string[] } | null>(null);
+  const [checkingCoverage, setCheckingCoverage] = useState(false);
 
   /**
    * Defaults to the people who currently teach. Somebody who left two years
@@ -705,7 +952,19 @@ export default function AdminTutorsPage() {
    * of a status is that the record survives.
    */
   const [statusFilter, setStatusFilter] = useState<LecturerStatus | "all" | "current">("current");
+  /**
+   * A campus and an online tutor can look identical in a flat list — same
+   * level, same "Currently teaching" status — which is exactly the kind of
+   * mix-up that let one tutor's coverage silently swallow every online AND
+   * hybrid student for their level. This narrows the directory to one
+   * delivery mode at a time so campus and online rosters are never read
+   * side by side by mistake.
+   */
+  const [modeFilter, setModeFilter] = useState<"all" | "physical" | "online" | "private">("all");
   const [selectedTutorIds, setSelectedTutorIds] = useState<Set<string>>(new Set());
+
+  /** Which tutor's student list is open, from clicking their "N students" badge. */
+  const [rosterPanelId, setRosterPanelId] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -732,9 +991,23 @@ export default function AdminTutorsPage() {
   const editingTutor = useMemo(() => tutors.find((tutor) => tutor.id === editingId) ?? null, [tutors, editingId]);
 
   const visibleTutors = useMemo(() => {
-    if (statusFilter === "all") return tutors;
-    if (statusFilter === "current") return tutors.filter((tutor) => tutor.status !== "inactive");
-    return tutors.filter((tutor) => tutor.status === statusFilter);
+    const byStatus =
+      statusFilter === "all"
+        ? tutors
+        : statusFilter === "current"
+          ? tutors.filter((tutor) => tutor.status !== "inactive")
+          : tutors.filter((tutor) => tutor.status === statusFilter);
+    if (modeFilter === "all") return byStatus;
+    return byStatus.filter((tutor) => tutorCoversMode(tutor, modeFilter));
+  }, [tutors, statusFilter, modeFilter]);
+
+  const modeCounts = useMemo(() => {
+    const base = statusFilter === "current" ? tutors.filter((tutor) => tutor.status !== "inactive") : tutors;
+    return {
+      physical: base.filter((tutor) => tutorCoversMode(tutor, "physical")).length,
+      online: base.filter((tutor) => tutorCoversMode(tutor, "online")).length,
+      private: base.filter((tutor) => tutorCoversMode(tutor, "private")).length,
+    };
   }, [tutors, statusFilter]);
 
   const statusCounts = useMemo(() => {
@@ -841,6 +1114,36 @@ export default function AdminTutorsPage() {
       setError(createError instanceof Error ? createError.message : "Could not create the tutor account");
     } finally {
       setCreating(false);
+    }
+  }
+
+  const BROAD_COVERAGE_LEVELS = 2;
+  const BROAD_COVERAGE_STUDENTS = 25;
+
+  /** Runs on every "Save assignment" click — a broad-looking pattern stops here for a confirm click instead of saving straight away. */
+  async function checkCoverageThenSave() {
+    if (!editingId) return;
+    setError("");
+    setCoveragePreview(null);
+    setCheckingCoverage(true);
+    try {
+      const res = await fetch("/api/admin/lecturers/coverage-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...editAssignment, assignmentGroups: editAssignment.groups }),
+      });
+      const data = await res.json().catch(() => ({ count: 0, levels: [] }));
+      const broad = (data.levels?.length ?? 0) >= BROAD_COVERAGE_LEVELS || (data.count ?? 0) >= BROAD_COVERAGE_STUDENTS;
+      if (broad) {
+        setCoveragePreview({ count: data.count ?? 0, levels: data.levels ?? [] });
+        return;
+      }
+      await saveAssignment();
+    } catch {
+      // A failed preview must not block a genuine save — fall through.
+      await saveAssignment();
+    } finally {
+      setCheckingCoverage(false);
     }
   }
 
@@ -953,6 +1256,34 @@ export default function AdminTutorsPage() {
             })}
           </div>
 
+          {/* Physical and online coverage read identically in a flat list —
+              same level, same "Currently teaching" badge — which is exactly
+              what let one tutor's coverage silently absorb every online AND
+              hybrid student at their level. This filter keeps the two apart. */}
+          <div className="mt-2 flex flex-wrap gap-2">
+            {(
+              [
+                { key: "all" as const, label: "All modes", count: tutors.length },
+                { key: "physical" as const, label: "Physical", count: modeCounts.physical },
+                { key: "online" as const, label: "Online", count: modeCounts.online },
+                { key: "private" as const, label: "Private", count: modeCounts.private },
+              ]
+            ).map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setModeFilter(option.key)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                  modeFilter === option.key
+                    ? "bg-[var(--foreground)] text-[var(--surface)]"
+                    : "border border-dashed border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {option.label} ({option.count})
+              </button>
+            ))}
+          </div>
+
           <div className="mt-5 space-y-3">
             {selectedTutorIds.size > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -1000,22 +1331,29 @@ export default function AdminTutorsPage() {
                           Class types: {tutor.assignment.classTypes.map((type) => CLASS_TYPE_LABELS[type] ?? type).join(", ")}
                         </p>
                       ) : null}
-                      {tutor.assignment.batches.length ? (
-                        <p className="mt-1 text-xs text-[var(--muted)]">Batches: {tutor.assignment.batches.join(", ")}</p>
+                      {assignmentBatches(tutor.assignment).length ? (
+                        <p className="mt-1 text-xs text-[var(--muted)]">
+                          Batches: {assignmentBatches(tutor.assignment).join(", ")}
+                        </p>
                       ) : null}
                     </div>
 
                     <div className="flex flex-col items-end gap-2">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]">
+                      <button
+                        type="button"
+                        onClick={() => setRosterPanelId(rosterPanelId === tutor.id ? "" : tutor.id)}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)] transition hover:brightness-95"
+                      >
                         <UsersIcon className="h-3.5 w-3.5" />
                         {tutor.studentCount} student{tutor.studentCount === 1 ? "" : "s"}
-                      </span>
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
                           setEditingId(isEditing ? "" : tutor.id);
                           setEditAssignment(tutor.assignment);
                           setEditFeatures(tutor.features ?? [...LECTURER_FEATURES]);
+                          setCoveragePreview(null);
                         }}
                         className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold text-[var(--foreground)]"
                       >
@@ -1078,7 +1416,14 @@ export default function AdminTutorsPage() {
                         ) : null}
                       </div>
 
-                      <AssignmentFields branches={branches} value={editAssignment} onChange={setEditAssignment} />
+                      <AssignmentFields
+                        branches={branches}
+                        value={editAssignment}
+                        onChange={(next) => {
+                          setEditAssignment(next);
+                          setCoveragePreview(null);
+                        }}
+                      />
 
                       <div className="mt-5">
                         <PortalAccessFields value={editFeatures} onChange={setEditFeatures} />
@@ -1094,23 +1439,66 @@ export default function AdminTutorsPage() {
                         onChanged={load}
                       />
 
+                      {coveragePreview ? (
+                        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                          <p className="font-semibold">
+                            This covers {coveragePreview.count} student{coveragePreview.count === 1 ? "" : "s"}
+                            {coveragePreview.levels.length ? ` across ${coveragePreview.levels.join(", ")}` : ""}.
+                          </p>
+                          <p className="mt-1 text-xs text-amber-800">
+                            That is a lot of ground for one tutor's coverage — double-check the levels, sessions and
+                            class type above before confirming.
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={saveAssignment}
+                              disabled={savingEdit}
+                              className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                            >
+                              {savingEdit ? "Saving…" : `Confirm — cover ${coveragePreview.count} students`}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCoveragePreview(null)}
+                              className="rounded-lg border border-amber-400 px-4 py-2 text-xs font-semibold text-amber-900"
+                            >
+                              Let me adjust it
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
                       <div className="flex flex-wrap gap-3">
                         <button
                           type="button"
-                          onClick={saveAssignment}
-                          disabled={savingEdit}
+                          onClick={checkCoverageThenSave}
+                          disabled={savingEdit || checkingCoverage}
                           className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                         >
-                          {savingEdit ? "Saving…" : "Save assignment"}
+                          {checkingCoverage ? "Checking…" : savingEdit ? "Saving…" : "Save assignment"}
                         </button>
                         <button
                           type="button"
-                          onClick={() => setEditingId("")}
+                          onClick={() => {
+                            setEditingId("");
+                            setCoveragePreview(null);
+                          }}
                           className="rounded-lg border border-[var(--border)] px-5 py-2.5 text-sm font-semibold"
                         >
                           Cancel
                         </button>
                       </div>
+                    </div>
+                  ) : null}
+
+                  {rosterPanelId === tutor.id ? (
+                    <div className="mt-5 border-t border-[var(--border)] pt-5">
+                      <TutorRosterPanel
+                        lecturerId={tutor.id}
+                        tutorName={tutor.user.name || tutor.user.email}
+                        onClose={() => setRosterPanelId("")}
+                      />
                     </div>
                   ) : null}
                 </div>

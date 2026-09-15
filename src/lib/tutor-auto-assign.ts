@@ -98,7 +98,7 @@ function lecturerMatchesAttempt(
 }
 
 type MatchOutcome =
-  | { status: "matched"; lecturerId: string }
+  | { status: "matched"; lecturerId: string; lecturerName: string }
   | { status: "no-match" }
   | { status: "ambiguous"; lecturerIds: string[] };
 
@@ -120,6 +120,7 @@ async function findMatch(
       assignmentGroups: true,
       classTypes: true,
       batches: true,
+      user: { select: { name: true, email: true } },
     },
   });
 
@@ -127,7 +128,8 @@ async function findMatch(
 
   if (matches.length === 0) return { status: "no-match" };
   if (matches.length > 1) return { status: "ambiguous", lecturerIds: matches.map((lecturer) => lecturer.id) };
-  return { status: "matched", lecturerId: matches[0].id };
+  const matched = matches[0];
+  return { status: "matched", lecturerId: matched.id, lecturerName: matched.user.name || matched.user.email };
 }
 
 async function alertAdmin(reason: string, detail: string): Promise<void> {
@@ -140,6 +142,25 @@ async function alertAdmin(reason: string, detail: string): Promise<void> {
     link: "/admin/lecturer-invite",
     push: true,
   }).catch((error) => console.error("Auto-assign admin alert failed", error));
+}
+
+/**
+ * The success-path counterpart to `alertAdmin` — one line per match, so the
+ * office sees a scannable feed of who signed up for what and who they landed
+ * on, before the student themselves is told (that reveal waits for payment,
+ * see lib/tutor-reveal.ts). Not pushed: this is a log to skim, not an
+ * interrupt — a school doing a normal morning of signups should not get a
+ * phone buzz per student.
+ */
+async function notifyAdminAssigned(detail: string): Promise<void> {
+  await notify({
+    to: { audience: "admin", capability: "students" },
+    kind: KIND.tutorAssigned,
+    severity: "info",
+    title: "Tutor auto-assigned",
+    message: detail,
+    link: "/admin/lecturer-invite",
+  }).catch((error) => console.error("Auto-assign admin notify failed", error));
 }
 
 export type AutoAssignInput = {
@@ -166,6 +187,9 @@ async function assignSingleMode(input: AutoAssignInput, classType: MatchClassTyp
 
   if (outcome.status === "matched") {
     await setStudentTutor({ studentId: input.studentId, lecturerId: outcome.lecturerId, quiet: true });
+    await notifyAdminAssigned(
+      `${input.studentName} signed up for ${input.level} — ${classType === "physical" ? "on campus" : "online"}, ${input.sessionSlot} — and was auto-assigned to ${outcome.lecturerName}.`,
+    );
     return;
   }
   await alertAdmin(
@@ -191,6 +215,9 @@ async function assignHybrid(input: AutoAssignInput): Promise<void> {
 
   if (physicalOutcome.status === "matched") {
     await setStudentTutor({ studentId: input.studentId, lecturerId: physicalOutcome.lecturerId, quiet: true });
+    await notifyAdminAssigned(
+      `${input.studentName} signed up for ${input.level} hybrid (campus ${input.sessionSlot}) and was auto-assigned ${physicalOutcome.lecturerName} as their campus tutor.`,
+    );
   } else {
     await alertAdmin(
       physicalOutcome.status === "no-match" ? "no physical tutor found for hybrid student" : "more than one physical tutor matched a hybrid student",
@@ -229,6 +256,9 @@ async function assignHybrid(input: AutoAssignInput): Promise<void> {
     roles: { [onlineOutcome.lecturerId]: "online" },
     quiet: true,
   });
+  await notifyAdminAssigned(
+    `${input.studentName} signed up for ${input.level} hybrid (online ${input.hybridOnlineSlot}) and was auto-assigned ${onlineOutcome.lecturerName} as their online tutor.`,
+  );
 }
 
 /** Entry point — routes to the single-mode or hybrid matcher and writes the result. */

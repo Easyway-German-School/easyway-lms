@@ -102,6 +102,18 @@ function naira(amount: number) {
 }
 
 /**
+ * Whether this tutor's coverage reaches a delivery mode — the same "empty or
+ * every class type = no restriction" rule `studentWhereForAssignment` uses
+ * server-side, kept in sync here so the directory filter agrees with the
+ * roster it is filtering.
+ */
+function tutorCoversMode(tutor: Tutor, mode: "physical" | "online" | "private"): boolean {
+  const types = tutor.assignment.classTypes.map((t) => t.toLowerCase());
+  if (!types.length || types.length >= CLASS_TYPES.length) return true;
+  return types.includes(mode);
+}
+
+/**
  * Remove a teaching group AND re-derive the flat levels/sessionSlots mirrors
  * from what is left.
  *
@@ -924,6 +936,14 @@ export default function AdminTutorsPage() {
   const [editAssignment, setEditAssignment] = useState<LecturerAssignment>(EMPTY_ASSIGNMENT);
   const [editFeatures, setEditFeatures] = useState<string[]>([...LECTURER_FEATURES]);
   const [savingEdit, setSavingEdit] = useState(false);
+  /**
+   * A save that would cover a lot of ground — several levels, or a lot of
+   * students — gets one extra click instead of going straight through. This
+   * is what would have caught the coverage pattern that swept in the entire
+   * A1-B2 online/hybrid cohort onto one tutor before it ever saved.
+   */
+  const [coveragePreview, setCoveragePreview] = useState<{ count: number; levels: string[] } | null>(null);
+  const [checkingCoverage, setCheckingCoverage] = useState(false);
 
   /**
    * Defaults to the people who currently teach. Somebody who left two years
@@ -932,6 +952,15 @@ export default function AdminTutorsPage() {
    * of a status is that the record survives.
    */
   const [statusFilter, setStatusFilter] = useState<LecturerStatus | "all" | "current">("current");
+  /**
+   * A campus and an online tutor can look identical in a flat list — same
+   * level, same "Currently teaching" status — which is exactly the kind of
+   * mix-up that let one tutor's coverage silently swallow every online AND
+   * hybrid student for their level. This narrows the directory to one
+   * delivery mode at a time so campus and online rosters are never read
+   * side by side by mistake.
+   */
+  const [modeFilter, setModeFilter] = useState<"all" | "physical" | "online" | "private">("all");
   const [selectedTutorIds, setSelectedTutorIds] = useState<Set<string>>(new Set());
 
   /** Which tutor's student list is open, from clicking their "N students" badge. */
@@ -962,9 +991,23 @@ export default function AdminTutorsPage() {
   const editingTutor = useMemo(() => tutors.find((tutor) => tutor.id === editingId) ?? null, [tutors, editingId]);
 
   const visibleTutors = useMemo(() => {
-    if (statusFilter === "all") return tutors;
-    if (statusFilter === "current") return tutors.filter((tutor) => tutor.status !== "inactive");
-    return tutors.filter((tutor) => tutor.status === statusFilter);
+    const byStatus =
+      statusFilter === "all"
+        ? tutors
+        : statusFilter === "current"
+          ? tutors.filter((tutor) => tutor.status !== "inactive")
+          : tutors.filter((tutor) => tutor.status === statusFilter);
+    if (modeFilter === "all") return byStatus;
+    return byStatus.filter((tutor) => tutorCoversMode(tutor, modeFilter));
+  }, [tutors, statusFilter, modeFilter]);
+
+  const modeCounts = useMemo(() => {
+    const base = statusFilter === "current" ? tutors.filter((tutor) => tutor.status !== "inactive") : tutors;
+    return {
+      physical: base.filter((tutor) => tutorCoversMode(tutor, "physical")).length,
+      online: base.filter((tutor) => tutorCoversMode(tutor, "online")).length,
+      private: base.filter((tutor) => tutorCoversMode(tutor, "private")).length,
+    };
   }, [tutors, statusFilter]);
 
   const statusCounts = useMemo(() => {
@@ -1071,6 +1114,36 @@ export default function AdminTutorsPage() {
       setError(createError instanceof Error ? createError.message : "Could not create the tutor account");
     } finally {
       setCreating(false);
+    }
+  }
+
+  const BROAD_COVERAGE_LEVELS = 2;
+  const BROAD_COVERAGE_STUDENTS = 25;
+
+  /** Runs on every "Save assignment" click — a broad-looking pattern stops here for a confirm click instead of saving straight away. */
+  async function checkCoverageThenSave() {
+    if (!editingId) return;
+    setError("");
+    setCoveragePreview(null);
+    setCheckingCoverage(true);
+    try {
+      const res = await fetch("/api/admin/lecturers/coverage-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...editAssignment, assignmentGroups: editAssignment.groups }),
+      });
+      const data = await res.json().catch(() => ({ count: 0, levels: [] }));
+      const broad = (data.levels?.length ?? 0) >= BROAD_COVERAGE_LEVELS || (data.count ?? 0) >= BROAD_COVERAGE_STUDENTS;
+      if (broad) {
+        setCoveragePreview({ count: data.count ?? 0, levels: data.levels ?? [] });
+        return;
+      }
+      await saveAssignment();
+    } catch {
+      // A failed preview must not block a genuine save — fall through.
+      await saveAssignment();
+    } finally {
+      setCheckingCoverage(false);
     }
   }
 
@@ -1183,6 +1256,34 @@ export default function AdminTutorsPage() {
             })}
           </div>
 
+          {/* Physical and online coverage read identically in a flat list —
+              same level, same "Currently teaching" badge — which is exactly
+              what let one tutor's coverage silently absorb every online AND
+              hybrid student at their level. This filter keeps the two apart. */}
+          <div className="mt-2 flex flex-wrap gap-2">
+            {(
+              [
+                { key: "all" as const, label: "All modes", count: tutors.length },
+                { key: "physical" as const, label: "Physical", count: modeCounts.physical },
+                { key: "online" as const, label: "Online", count: modeCounts.online },
+                { key: "private" as const, label: "Private", count: modeCounts.private },
+              ]
+            ).map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setModeFilter(option.key)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                  modeFilter === option.key
+                    ? "bg-[var(--foreground)] text-[var(--surface)]"
+                    : "border border-dashed border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {option.label} ({option.count})
+              </button>
+            ))}
+          </div>
+
           <div className="mt-5 space-y-3">
             {selectedTutorIds.size > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -1252,6 +1353,7 @@ export default function AdminTutorsPage() {
                           setEditingId(isEditing ? "" : tutor.id);
                           setEditAssignment(tutor.assignment);
                           setEditFeatures(tutor.features ?? [...LECTURER_FEATURES]);
+                          setCoveragePreview(null);
                         }}
                         className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold text-[var(--foreground)]"
                       >
@@ -1314,7 +1416,14 @@ export default function AdminTutorsPage() {
                         ) : null}
                       </div>
 
-                      <AssignmentFields branches={branches} value={editAssignment} onChange={setEditAssignment} />
+                      <AssignmentFields
+                        branches={branches}
+                        value={editAssignment}
+                        onChange={(next) => {
+                          setEditAssignment(next);
+                          setCoveragePreview(null);
+                        }}
+                      />
 
                       <div className="mt-5">
                         <PortalAccessFields value={editFeatures} onChange={setEditFeatures} />
@@ -1330,18 +1439,51 @@ export default function AdminTutorsPage() {
                         onChanged={load}
                       />
 
+                      {coveragePreview ? (
+                        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                          <p className="font-semibold">
+                            This covers {coveragePreview.count} student{coveragePreview.count === 1 ? "" : "s"}
+                            {coveragePreview.levels.length ? ` across ${coveragePreview.levels.join(", ")}` : ""}.
+                          </p>
+                          <p className="mt-1 text-xs text-amber-800">
+                            That is a lot of ground for one tutor's coverage — double-check the levels, sessions and
+                            class type above before confirming.
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={saveAssignment}
+                              disabled={savingEdit}
+                              className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                            >
+                              {savingEdit ? "Saving…" : `Confirm — cover ${coveragePreview.count} students`}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCoveragePreview(null)}
+                              className="rounded-lg border border-amber-400 px-4 py-2 text-xs font-semibold text-amber-900"
+                            >
+                              Let me adjust it
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
                       <div className="flex flex-wrap gap-3">
                         <button
                           type="button"
-                          onClick={saveAssignment}
-                          disabled={savingEdit}
+                          onClick={checkCoverageThenSave}
+                          disabled={savingEdit || checkingCoverage}
                           className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                         >
-                          {savingEdit ? "Saving…" : "Save assignment"}
+                          {checkingCoverage ? "Checking…" : savingEdit ? "Saving…" : "Save assignment"}
                         </button>
                         <button
                           type="button"
-                          onClick={() => setEditingId("")}
+                          onClick={() => {
+                            setEditingId("");
+                            setCoveragePreview(null);
+                          }}
                           className="rounded-lg border border-[var(--border)] px-5 py-2.5 text-sm font-semibold"
                         >
                           Cancel

@@ -925,7 +925,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                         <p className="text-sm font-semibold text-[var(--foreground)]">{combo.label}</p>
                         {combo.id === "other" ? (
                           <p className="mt-1 text-xs text-[var(--muted)]">
-                            None of these fit your schedule — the office will reach out to arrange your times.
+                            Not sure yet? We will start you on a sitting and pair you with a tutor right away — you
+                            can change your times with the office once you are enrolled.
                           </p>
                         ) : (
                           <p className="mt-1 text-xs text-[var(--muted)]">
