@@ -5,14 +5,26 @@ session — each step needs an account, a payment, or a decision only Jason
 can make. Skip a "before real candidates" step and the site still runs;
 skip a "before it's usable at all" step and it won't start.
 
-## 1. Domain (decide, don't need to buy anything)
+## 1. Domain — DECIDED (2026-09-14), not yet registered
 
-Recommended: a subdomain of the existing domain — `exams.easywayschoollms.com.ng`
-or `osd.easywayschoollms.com.ng`. A candidate about to bank-transfer real
-money trusts a subdomain of a name they can already verify far more than an
-unfamiliar new domain; this app is organizationally separate (own repo
-folder, own database, own Vercel project) without needing a separate domain
-name too. Revisit only if this ever gets licensed to another school.
+~~Recommended: a subdomain of easywayschoollms.com.ng~~ — superseded by
+Jason's own call: **`easywaygermanexamregistration.com`**, at the domain
+root (not under a path like `/osd` — confirmed explicitly, since a path
+would need a Next.js `basePath` change and something else answering the
+root). **Not registered yet** as of this writing — DNS doesn't resolve and
+nothing indicates it's taken, but that's not an authoritative check.
+Registering it (an AI session can't purchase domains or hold payment
+info) is the one remaining step:
+
+- **Easiest**: Vercel dashboard → `easyway-osd-exam-centre` project →
+  Domains → type the domain in → if available, register it right there.
+  Zero DNS config needed afterward, it just works.
+- **Or**: register anywhere else (Namecheap, Cloudflare Registrar,
+  GoDaddy...) and come back for the CNAME record + attaching it in Vercel.
+
+Once registered: attach it to the Vercel project, then update `SITE_URL`
+(currently the Vercel-assigned placeholder — every email link depends on
+this being right).
 
 ## 2. Database — DONE (2026-09-13)
 
@@ -79,19 +91,25 @@ step 2); admin login with the generated password works and returns a real
 values this app's `next.config.ts` sets (not Vercel's platform defaults);
 the daily nurture cron auto-registered from `vercel.json`.
 
-Once the real domain (step 1) is ready: attach it in Vercel dashboard →
-Domains (a CNAME record wherever `easywayschoollms.com.ng`'s DNS is
-managed), then update `SITE_URL` to match.
+Once the real domain (step 1 — `easywaygermanexamregistration.com`, not
+registered yet) is ready: attach it in Vercel dashboard → Domains (or it's
+automatic if registered through Vercel directly), then update `SITE_URL`
+to match.
 
 ## 4. Before real candidates use it — do these before announcing it publicly
 
-- **Object storage** — set `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`,
-  `S3_SECRET_ACCESS_KEY` (Cloudflare R2 or AWS S3). **Without these, every
-  passport photo / passport data page / payment slip a candidate uploads is
-  silently lost** — Vercel's filesystem is read-only outside `/tmp`, so
-  `lib/storage.ts` falls back to writing to local disk, which does not
-  persist between requests on Vercel. This is the single most important
-  thing to set before letting a real candidate book.
+- **Object storage — DONE (2026-09-15).** ~~set `S3_ENDPOINT`,
+  `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`~~ — real
+  Cloudflare R2 bucket `easyway-osd-exam-centre` (Jason's own Cloudflare
+  account, same one the LMS's R2 uses), Public Access deliberately left
+  disabled. Since the bucket is private, uploaded files are served through
+  this app's own admin-only proxy (`app/api/files/[...key]/route.ts`)
+  rather than a raw bucket URL — see `lib/storage.ts`'s `readUpload()` and
+  the comment there for why (passport photos and bank slips shouldn't get
+  a public, even "unlisted," URL). Verified live: a real upload landed in
+  the real bucket, an unauthenticated request to read it back got 401, an
+  admin-session request got the exact bytes back. Env vars set on both
+  `.env.local` and the Vercel project's production environment.
 - **Email** — set `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`
   (Brevo, the same provider the LMS already uses, or any SMTP relay).
   Without this, booking confirmations, seat-confirmed emails, and the
