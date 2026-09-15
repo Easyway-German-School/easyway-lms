@@ -16,6 +16,7 @@ type Session = {
   endDate: string;
   registrationDeadline: string;
   capacity: number;
+  examFormat: string;
   feeWholeExam: number;
   published: boolean;
   modulePrices: { module: string; price: number }[];
@@ -24,7 +25,7 @@ type Session = {
 
 const emptyForm = {
   level: "B2", title: "", venueName: "Easyway German Language School, Ikeja", venueAddress: "",
-  startDate: "", endDate: "", registrationDeadline: "", capacity: "50", feeWholeExam: "",
+  startDate: "", endDate: "", registrationDeadline: "", capacity: "50", examFormat: "paper", feeWholeExam: "",
   modulePrices: { reading: "", listening: "", writing: "", speaking: "" } as Record<string, string>,
 };
 
@@ -71,6 +72,7 @@ export default function AdminSessionsPage() {
       endDate: s.endDate.slice(0, 10),
       registrationDeadline: s.registrationDeadline.slice(0, 10),
       capacity: String(s.capacity),
+      examFormat: s.examFormat,
       feeWholeExam: String(s.feeWholeExam),
       modulePrices: {
         reading: "", listening: "", writing: "", speaking: "",
@@ -145,6 +147,17 @@ export default function AdminSessionsPage() {
               <F label="Registration deadline" type="date" value={form.registrationDeadline} onChange={(v) => setForm({ ...form, registrationDeadline: v })} />
               <F label="Capacity (seats)" type="number" value={form.capacity} onChange={(v) => setForm({ ...form, capacity: v })} />
               <F label="Whole-exam fee (₦)" type="number" value={form.feeWholeExam} onChange={(v) => setForm({ ...form, feeWholeExam: v })} />
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Format</span>
+                <select
+                  value={form.examFormat}
+                  onChange={(e) => setForm({ ...form, examFormat: e.target.value })}
+                  className="mt-1 w-full rounded-sm border border-[var(--line)] px-3 py-2 text-sm focus:border-[var(--navy)] focus:outline-none"
+                >
+                  <option value="paper">Paper</option>
+                  <option value="computer">Computer</option>
+                </select>
+              </label>
             </div>
             <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Individual module prices (optional)</p>
             <div className="mt-2 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -164,7 +177,7 @@ export default function AdminSessionsPage() {
               <div>
                 <p className="font-semibold text-[var(--navy)]">{s.title}</p>
                 <p className="text-xs text-[var(--ink-soft)]">
-                  {new Date(s.startDate).toLocaleDateString()} · {s.venueName} · {s._count.bookings} booked / {s.capacity} seats · ₦{s.feeWholeExam.toLocaleString()}
+                  {new Date(s.startDate).toLocaleDateString()} · {s.venueName} · {s.examFormat} · {s._count.bookings} booked / {s.capacity} seats · ₦{s.feeWholeExam.toLocaleString()}
                 </p>
               </div>
               <div className="flex items-center gap-2">

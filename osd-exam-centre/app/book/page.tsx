@@ -42,8 +42,10 @@ export default function BookPage() {
 
   const [form, setForm] = useState({
     fullName: "", email: "", phone: "", addressLine: "", city: "", country: "Nigeria",
-    dateOfBirth: "", placeOfBirth: "",
+    dateOfBirth: "", placeOfBirth: "", countryOfBirth: "", nationality: "", gender: "",
+    idType: "", idNumber: "", idExpiry: "", specialNeeds: "",
   });
+  const [isRepeatAttempt, setIsRepeatAttempt] = useState(false);
   const [ack, setAck] = useState(false);
   const [consent, setConsent] = useState(false);
   // Honeypot — invisible to a real candidate (off-screen, unreachable by
@@ -83,7 +85,9 @@ export default function BookPage() {
     if (step === 1) {
       return Boolean(
         form.fullName.trim() && form.email.trim() && form.phone.trim() &&
-        form.addressLine.trim() && form.city.trim() && form.dateOfBirth && form.placeOfBirth.trim(),
+        form.addressLine.trim() && form.city.trim() && form.dateOfBirth && form.placeOfBirth.trim() &&
+        form.countryOfBirth.trim() && form.nationality.trim() &&
+        form.idType.trim() && form.idNumber.trim() && form.idExpiry,
       );
     }
     if (step === 2) return selection === "full" || modules.size > 0;
@@ -100,6 +104,7 @@ export default function BookPage() {
         body: JSON.stringify({
           sessionId,
           ...form,
+          isRepeatAttempt,
           modules: selection === "full" ? ["full"] : Array.from(modules),
           consentAccepted: consent,
           website,
@@ -192,6 +197,46 @@ export default function BookPage() {
                 <Field label="Date of birth" type="date" value={form.dateOfBirth} onChange={(v) => setForm({ ...form, dateOfBirth: v })} />
                 <Field label="Place of birth" value={form.placeOfBirth} onChange={(v) => setForm({ ...form, placeOfBirth: v })} />
               </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Country of birth" value={form.countryOfBirth} onChange={(v) => setForm({ ...form, countryOfBirth: v })} />
+                <Field label="Nationality" value={form.nationality} onChange={(v) => setForm({ ...form, nationality: v })} />
+              </div>
+              <Field label="Gender (optional)" value={form.gender} onChange={(v) => setForm({ ...form, gender: v })} />
+
+              <p className="pt-2 text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Identification — bring this document on exam day</p>
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">ID type</span>
+                <select
+                  value={form.idType}
+                  onChange={(e) => setForm({ ...form, idType: e.target.value })}
+                  className="mt-1.5 w-full rounded-sm border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
+                >
+                  <option value="">Select…</option>
+                  <option value="International Passport">International Passport</option>
+                  <option value="National ID Card (NIN)">National ID Card (NIN)</option>
+                  <option value="Driver's License">Driver's License</option>
+                  <option value="Other">Other</option>
+                </select>
+              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="ID number" value={form.idNumber} onChange={(v) => setForm({ ...form, idNumber: v })} />
+                <Field label="ID expiry date" type="date" value={form.idExpiry} onChange={(v) => setForm({ ...form, idExpiry: v })} />
+              </div>
+
+              <label className="flex items-center gap-2 text-sm text-[var(--ink)]">
+                <input type="checkbox" checked={isRepeatAttempt} onChange={(e) => setIsRepeatAttempt(e.target.checked)} />
+                This is a repeat attempt (I have sat this exam before)
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Special examination needs (optional)</span>
+                <textarea
+                  value={form.specialNeeds}
+                  onChange={(e) => setForm({ ...form, specialNeeds: e.target.value })}
+                  rows={2}
+                  placeholder="Leave blank if none. If you require an accommodation, describe it here — the office will follow up."
+                  className="mt-1.5 w-full rounded-sm border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
+                />
+              </label>
             </div>
           )}
 
@@ -241,6 +286,9 @@ export default function BookPage() {
               <Row label="Sitting" value={`${session.title} · ${session.venueName}`} />
               <Row label="Candidate" value={form.fullName} />
               <Row label="Email" value={form.email} />
+              <Row label="Nationality" value={form.nationality} />
+              <Row label="ID" value={`${form.idType} · ${form.idNumber}`} />
+              {isRepeatAttempt && <Row label="Attempt" value="Repeat attempt" />}
               <Row label="Modules" value={selection === "full" ? "Whole exam" : Array.from(modules).map((m) => MODULE_LABEL[m]).join(", ")} />
               <Row label="Amount due" value={`₦${feeTotal.toLocaleString()}`} strong />
 

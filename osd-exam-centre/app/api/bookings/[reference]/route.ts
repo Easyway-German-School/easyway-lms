@@ -54,6 +54,14 @@ export function shapeBooking(booking: NonNullable<Awaited<ReturnType<typeof pris
     country: booking.country,
     dateOfBirth: booking.dateOfBirth,
     placeOfBirth: booking.placeOfBirth,
+    countryOfBirth: booking.countryOfBirth,
+    nationality: booking.nationality,
+    gender: booking.gender,
+    idType: booking.idType,
+    idNumber: booking.idNumber,
+    idExpiry: booking.idExpiry,
+    isRepeatAttempt: booking.isRepeatAttempt,
+    specialNeeds: booking.specialNeeds,
     modules: booking.modules,
     feeTotal: booking.feeTotal,
     paymentMethod: booking.paymentMethod,
@@ -72,6 +80,7 @@ export function shapeBooking(booking: NonNullable<Awaited<ReturnType<typeof pris
       venueAddress: booking.session.venueAddress,
       startDate: booking.session.startDate,
       endDate: booking.session.endDate,
+      examFormat: booking.session.examFormat,
     },
   };
 }

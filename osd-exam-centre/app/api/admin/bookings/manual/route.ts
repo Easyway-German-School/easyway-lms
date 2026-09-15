@@ -10,7 +10,11 @@ export const POST = jsonRoute(async (req: NextRequest) => {
   if (!(await isAdminRequest())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json();
 
-  if (!b.sessionId || !b.fullName || !b.email || !b.phone || !b.addressLine || !b.city || !b.dateOfBirth || !b.placeOfBirth) {
+  if (
+    !b.sessionId || !b.fullName || !b.email || !b.phone || !b.addressLine || !b.city ||
+    !b.dateOfBirth || !b.placeOfBirth || !b.countryOfBirth || !b.nationality ||
+    !b.idType || !b.idNumber || !b.idExpiry
+  ) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
@@ -25,6 +29,14 @@ export const POST = jsonRoute(async (req: NextRequest) => {
       country: b.country,
       dateOfBirth: b.dateOfBirth,
       placeOfBirth: b.placeOfBirth,
+      countryOfBirth: b.countryOfBirth,
+      nationality: b.nationality,
+      gender: b.gender,
+      idType: b.idType,
+      idNumber: b.idNumber,
+      idExpiry: b.idExpiry,
+      isRepeatAttempt: b.isRepeatAttempt,
+      specialNeeds: b.specialNeeds,
       modules: Array.isArray(b.modules) && b.modules.length ? b.modules : ["full"],
     },
     "office",

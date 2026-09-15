@@ -36,6 +36,10 @@ model ExamSession {
   /// (50→1, then 100→51, …) — see lib/seat-numbering.ts.
   capacity Int
 
+  /// paper | computer — a whole sitting is one format, not chosen per
+  /// candidate (see the Easyway ÖSD Examination Operations Manual, §35).
+  examFormat String @default("paper")
+
   /// Naira, whole exam, all four skills.
   feeWholeExam Int
   published    Boolean @default(false)
@@ -75,17 +79,35 @@ model ExamBooking {
   sessionId     String
   session       ExamSession @relation(fields: [sessionId], references: [id])
 
-  // ----- personal data — the fields the reference Goethe confirmation
-  // collected, not invented ones. See README.md for what's still missing
-  // pending Jason's actual ÖSD field list. -----
+  // ----- personal data — originally modelled on a reference Goethe
+  // confirmation's field shape; extended to match the Easyway ÖSD
+  // Examination Operations Manual §7 ("Required Candidate Information")
+  // once Jason sent it. -----
   fullName      String
   email         String
   phone         String
   addressLine   String
   city          String
+  /// Residential/contact country — not country of birth (below).
   country       String @default("Nigeria")
   dateOfBirth   DateTime
   placeOfBirth  String
+  countryOfBirth String
+  nationality    String
+  /// "where required by the applicable system" (Manual §7) — optional on
+  /// purpose, not every candidate needs to state it.
+  gender         String?
+
+  /// Passport/ID details — Manual §7 "passport/ID details; valid
+  /// identification document". idType is almost always "passport" for an
+  /// international examination but the manual doesn't hard-code that.
+  idType   String
+  idNumber String
+  idExpiry DateTime
+
+  /// Manual §7 "first attempt/repeat attempt" and §16 "special needs".
+  isRepeatAttempt Boolean @default(false)
+  specialNeeds    String?
 
   /// Either ["full"] or a subset of reading/listening/writing/speaking.
   modules  String[]
@@ -153,10 +175,12 @@ model ExamBooking {
 
   /// Which nurture-drip stages have already fired, so the cron sweep is
   /// idempotent without a separate notification-log table. See
-  /// lib/nurture.ts.
-  nurtureDay2Sent  Boolean @default(false)
-  nurtureWeekSent  Boolean @default(false)
-  nurture3DaySent  Boolean @default(false)
+  /// lib/nurture.ts. Timed at 7 days and 24 hours before the exam, per the
+  /// Easyway ÖSD Examination Operations Manual §9's candidate journey (was
+  /// 7 days / 3 days before the manual specified the exact schedule).
+  nurtureDay2Sent      Boolean @default(false)
+  nurtureWeekSent      Boolean @default(false)
+  nurtureDayBeforeSent Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

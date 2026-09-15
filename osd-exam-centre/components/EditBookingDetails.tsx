@@ -10,6 +10,11 @@ type Details = {
   country: string;
   dateOfBirth: string; // ISO
   placeOfBirth: string;
+  countryOfBirth: string;
+  nationality: string;
+  idType: string;
+  idNumber: string;
+  idExpiry: string; // ISO
 };
 
 /**
@@ -30,7 +35,7 @@ export default function EditBookingDetails({
   onSaved: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ ...initial, dateOfBirth: initial.dateOfBirth.slice(0, 10) });
+  const [form, setForm] = useState({ ...initial, dateOfBirth: initial.dateOfBirth.slice(0, 10), idExpiry: initial.idExpiry.slice(0, 10) });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -76,7 +81,12 @@ export default function EditBookingDetails({
         <I label="Address" value={form.addressLine} onChange={(v) => setForm({ ...form, addressLine: v })} full />
         <I label="City" value={form.city} onChange={(v) => setForm({ ...form, city: v })} />
         <I label="Country" value={form.country} onChange={(v) => setForm({ ...form, country: v })} />
-        <I label="Place of birth" value={form.placeOfBirth} onChange={(v) => setForm({ ...form, placeOfBirth: v })} full />
+        <I label="Place of birth" value={form.placeOfBirth} onChange={(v) => setForm({ ...form, placeOfBirth: v })} />
+        <I label="Country of birth" value={form.countryOfBirth} onChange={(v) => setForm({ ...form, countryOfBirth: v })} />
+        <I label="Nationality" value={form.nationality} onChange={(v) => setForm({ ...form, nationality: v })} />
+        <I label="ID type" value={form.idType} onChange={(v) => setForm({ ...form, idType: v })} />
+        <I label="ID number" value={form.idNumber} onChange={(v) => setForm({ ...form, idNumber: v })} />
+        <I label="ID expiry date" type="date" value={form.idExpiry} onChange={(v) => setForm({ ...form, idExpiry: v })} full />
       </div>
       <div className="mt-3 flex gap-2">
         <button onClick={save} disabled={saving} className="rounded-sm bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createBooking, isPlausibleDateOfBirth, MODULES } from "@/lib/booking";
+import { createBooking, isPlausibleDateOfBirth, isPlausibleIdExpiry, MODULES } from "@/lib/booking";
 import { jsonRoute } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +15,14 @@ const schema = z.object({
   country: z.string().optional(),
   dateOfBirth: z.string().refine(isPlausibleDateOfBirth, "Enter a valid date of birth."),
   placeOfBirth: z.string().min(1),
+  countryOfBirth: z.string().min(1),
+  nationality: z.string().min(1),
+  gender: z.string().optional(),
+  idType: z.string().min(1, "Select the type of ID you'll bring on exam day."),
+  idNumber: z.string().min(1, "Enter your ID number."),
+  idExpiry: z.string().refine(isPlausibleIdExpiry, "Your ID must not already be expired."),
+  isRepeatAttempt: z.boolean().optional(),
+  specialNeeds: z.string().optional(),
   modules: z.array(z.enum([...MODULES, "full"])).min(1),
   consentAccepted: z.literal(true, { message: "You must accept the rules and data-consent notice." }),
   // Honeypot: a real candidate never sees or fills this field (hidden

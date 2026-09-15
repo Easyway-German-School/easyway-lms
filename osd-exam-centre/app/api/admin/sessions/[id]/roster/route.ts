@@ -8,8 +8,10 @@ export const dynamic = "force-dynamic";
 
 const COLUMNS = [
   "seatNumber", "referenceCode", "fullName", "email", "phone",
-  "dateOfBirth", "placeOfBirth", "addressLine", "city", "country",
-  "modules", "documentStatus",
+  "dateOfBirth", "placeOfBirth", "countryOfBirth", "nationality", "gender",
+  "idType", "idNumber", "idExpiry",
+  "addressLine", "city", "country",
+  "modules", "isRepeatAttempt", "specialNeeds", "documentStatus",
 ];
 
 /** The exam-day candidate list — confirmed (paid + seated) bookings only, one row per candidate, sorted by seat. */
@@ -34,10 +36,18 @@ export const GET = jsonRoute(async (req: NextRequest, { params }: { params: Prom
       phone: b.phone,
       dateOfBirth: b.dateOfBirth.toISOString().slice(0, 10),
       placeOfBirth: b.placeOfBirth,
+      countryOfBirth: b.countryOfBirth,
+      nationality: b.nationality,
+      gender: b.gender,
+      idType: b.idType,
+      idNumber: b.idNumber,
+      idExpiry: b.idExpiry.toISOString().slice(0, 10),
       addressLine: b.addressLine,
       city: b.city,
       country: b.country,
       modules: b.modules.join(" "),
+      isRepeatAttempt: b.isRepeatAttempt ? "yes" : "no",
+      specialNeeds: b.specialNeeds,
       documentStatus: b.documentStatus,
     })),
     COLUMNS,

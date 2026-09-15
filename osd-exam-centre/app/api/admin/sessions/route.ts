@@ -38,6 +38,7 @@ export const POST = jsonRoute(async (req: NextRequest) => {
       endDate: new Date(b.endDate || b.startDate),
       registrationDeadline: new Date(b.registrationDeadline),
       capacity: Number(b.capacity),
+      examFormat: b.examFormat === "computer" ? "computer" : "paper",
       feeWholeExam: Number(b.feeWholeExam),
       published: Boolean(b.published),
       modulePrices: { create: modulePrices },
@@ -71,6 +72,7 @@ export const PATCH = jsonRoute(async (req: NextRequest) => {
   if (b.endDate) data.endDate = new Date(b.endDate);
   if (b.registrationDeadline) data.registrationDeadline = new Date(b.registrationDeadline);
   if (b.feeWholeExam) data.feeWholeExam = Number(b.feeWholeExam);
+  if (b.examFormat === "paper" || b.examFormat === "computer") data.examFormat = b.examFormat;
 
   // Capacity needs its own check, not just a blind assignment: dropping it
   // below the number of seats already confirmed would silently make

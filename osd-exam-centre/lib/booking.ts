@@ -27,6 +27,19 @@ export function isPlausibleDateOfBirth(value: string): boolean {
   return ageYears >= MIN_AGE_YEARS && ageYears <= MAX_AGE_YEARS;
 }
 
+/**
+ * A candidate's ID document must not already be expired on the day they
+ * book — the Easyway ÖSD Examination Operations Manual (§7, §12) treats a
+ * valid identification document as a precondition for admission, and
+ * catching an already-expired one at booking time is cheaper for everyone
+ * than catching it at exam-day identity verification.
+ */
+export function isPlausibleIdExpiry(value: string): boolean {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getTime() > Date.now();
+}
+
 export type UpdateBookingDetailsInput = Partial<{
   fullName: string;
   phone: string;
@@ -35,6 +48,14 @@ export type UpdateBookingDetailsInput = Partial<{
   country: string;
   dateOfBirth: string;
   placeOfBirth: string;
+  countryOfBirth: string;
+  nationality: string;
+  gender: string;
+  idType: string;
+  idNumber: string;
+  idExpiry: string;
+  isRepeatAttempt: boolean;
+  specialNeeds: string;
 }>;
 
 /**
@@ -58,6 +79,9 @@ export async function updateBookingDetails(
   if (updates.dateOfBirth !== undefined && !isPlausibleDateOfBirth(updates.dateOfBirth)) {
     return { ok: false, error: "Enter a valid date of birth." };
   }
+  if (updates.idExpiry !== undefined && !isPlausibleIdExpiry(updates.idExpiry)) {
+    return { ok: false, error: "Your ID document must not already be expired." };
+  }
 
   await prisma.examBooking.update({
     where: { id: bookingId },
@@ -69,6 +93,14 @@ export async function updateBookingDetails(
       ...(updates.country !== undefined ? { country: updates.country.trim() } : {}),
       ...(updates.dateOfBirth !== undefined ? { dateOfBirth: new Date(updates.dateOfBirth) } : {}),
       ...(updates.placeOfBirth !== undefined ? { placeOfBirth: updates.placeOfBirth.trim() } : {}),
+      ...(updates.countryOfBirth !== undefined ? { countryOfBirth: updates.countryOfBirth.trim() } : {}),
+      ...(updates.nationality !== undefined ? { nationality: updates.nationality.trim() } : {}),
+      ...(updates.gender !== undefined ? { gender: updates.gender.trim() || null } : {}),
+      ...(updates.idType !== undefined ? { idType: updates.idType.trim() } : {}),
+      ...(updates.idNumber !== undefined ? { idNumber: updates.idNumber.trim() } : {}),
+      ...(updates.idExpiry !== undefined ? { idExpiry: new Date(updates.idExpiry) } : {}),
+      ...(updates.isRepeatAttempt !== undefined ? { isRepeatAttempt: updates.isRepeatAttempt } : {}),
+      ...(updates.specialNeeds !== undefined ? { specialNeeds: updates.specialNeeds.trim() || null } : {}),
     },
   });
 
@@ -85,6 +117,14 @@ export type CreateBookingInput = {
   country?: string;
   dateOfBirth: string; // ISO date
   placeOfBirth: string;
+  countryOfBirth: string;
+  nationality: string;
+  gender?: string;
+  idType: string;
+  idNumber: string;
+  idExpiry: string; // ISO date
+  isRepeatAttempt?: boolean;
+  specialNeeds?: string;
   modules: string[]; // ["full"] or a subset of MODULES
   /** True the instant the candidate ticks the consent checkbox — see ExamBooking.consentAcceptedAt. */
   consentAccepted: boolean;
@@ -175,6 +215,14 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
       country: input.country?.trim() || "Nigeria",
       dateOfBirth: new Date(input.dateOfBirth),
       placeOfBirth: input.placeOfBirth.trim(),
+      countryOfBirth: input.countryOfBirth.trim(),
+      nationality: input.nationality.trim(),
+      gender: input.gender?.trim() || null,
+      idType: input.idType.trim(),
+      idNumber: input.idNumber.trim(),
+      idExpiry: new Date(input.idExpiry),
+      isRepeatAttempt: input.isRepeatAttempt ?? false,
+      specialNeeds: input.specialNeeds?.trim() || null,
       modules,
       feeTotal,
       consentAcceptedAt: new Date(),
@@ -249,6 +297,14 @@ export async function createManualBooking(
       country: input.country?.trim() || "Nigeria",
       dateOfBirth: new Date(input.dateOfBirth),
       placeOfBirth: input.placeOfBirth.trim(),
+      countryOfBirth: input.countryOfBirth.trim(),
+      nationality: input.nationality.trim(),
+      gender: input.gender?.trim() || null,
+      idType: input.idType.trim(),
+      idNumber: input.idNumber.trim(),
+      idExpiry: new Date(input.idExpiry),
+      isRepeatAttempt: input.isRepeatAttempt ?? false,
+      specialNeeds: input.specialNeeds?.trim() || null,
       modules,
       feeTotal,
       addedByOffice: true,

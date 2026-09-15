@@ -22,6 +22,12 @@ type Booking = {
   documentStatus: string;
   seatNumber: number | null;
   createdAt: string;
+  nationality: string;
+  idType: string;
+  idNumber: string;
+  idExpiry: string;
+  isRepeatAttempt: boolean;
+  specialNeeds: string | null;
   session: { title: string; level: string; startDate: string };
 };
 
@@ -127,6 +133,13 @@ export default function AdminDashboard() {
                 <div>
                   <p className="font-semibold text-[var(--navy)]">{b.fullName} <span className="font-mono text-xs text-[var(--ink-soft)]">{b.referenceCode}</span></p>
                   <p className="text-xs text-[var(--ink-soft)]">{b.session.title} · {b.email} · ₦{b.feeTotal.toLocaleString()}</p>
+                  <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+                    {b.nationality} · {b.idType} {b.idNumber} (expires {new Date(b.idExpiry).toLocaleDateString()})
+                    {b.isRepeatAttempt && <span className="ml-2 rounded-sm bg-[var(--gold-soft)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--navy)]">Repeat</span>}
+                  </p>
+                  {b.specialNeeds && (
+                    <p className="mt-0.5 text-xs font-semibold text-[var(--navy)]">Special needs: {b.specialNeeds}</p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {b.status === "cancelled" ? (

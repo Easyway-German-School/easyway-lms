@@ -18,7 +18,8 @@ export default function ManualBookingForm({ onCreated }: { onCreated: () => void
   const [sessions, setSessions] = useState<SessionOption[]>([]);
   const [form, setForm] = useState({
     sessionId: "", fullName: "", email: "", phone: "", addressLine: "", city: "", country: "Nigeria",
-    dateOfBirth: "", placeOfBirth: "",
+    dateOfBirth: "", placeOfBirth: "", countryOfBirth: "", nationality: "",
+    idType: "", idNumber: "", idExpiry: "",
   });
   const [modules, setModules] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -45,7 +46,10 @@ export default function ManualBookingForm({ onCreated }: { onCreated: () => void
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not create that booking");
       setResult({ referenceCode: data.referenceCode, feeTotal: data.feeTotal });
-      setForm({ sessionId: "", fullName: "", email: "", phone: "", addressLine: "", city: "", country: "Nigeria", dateOfBirth: "", placeOfBirth: "" });
+      setForm({
+        sessionId: "", fullName: "", email: "", phone: "", addressLine: "", city: "", country: "Nigeria",
+        dateOfBirth: "", placeOfBirth: "", countryOfBirth: "", nationality: "", idType: "", idNumber: "", idExpiry: "",
+      });
       setModules(new Set());
       onCreated();
     } catch (e) {
@@ -96,6 +100,24 @@ export default function ManualBookingForm({ onCreated }: { onCreated: () => void
         <I label="Country" value={form.country} onChange={(v) => setForm({ ...form, country: v })} />
         <I label="Date of birth" type="date" value={form.dateOfBirth} onChange={(v) => setForm({ ...form, dateOfBirth: v })} />
         <I label="Place of birth" value={form.placeOfBirth} onChange={(v) => setForm({ ...form, placeOfBirth: v })} />
+        <I label="Country of birth" value={form.countryOfBirth} onChange={(v) => setForm({ ...form, countryOfBirth: v })} />
+        <I label="Nationality" value={form.nationality} onChange={(v) => setForm({ ...form, nationality: v })} />
+        <label className="block">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">ID type</span>
+          <select
+            value={form.idType}
+            onChange={(e) => setForm({ ...form, idType: e.target.value })}
+            className="mt-0.5 w-full rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs focus:border-[var(--navy)] focus:outline-none"
+          >
+            <option value="">Select…</option>
+            <option value="International Passport">International Passport</option>
+            <option value="National ID Card (NIN)">National ID Card (NIN)</option>
+            <option value="Driver's License">Driver's License</option>
+            <option value="Other">Other</option>
+          </select>
+        </label>
+        <I label="ID number" value={form.idNumber} onChange={(v) => setForm({ ...form, idNumber: v })} />
+        <I label="ID expiry date" type="date" value={form.idExpiry} onChange={(v) => setForm({ ...form, idExpiry: v })} />
       </div>
 
       <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">
@@ -116,7 +138,10 @@ export default function ManualBookingForm({ onCreated }: { onCreated: () => void
 
       <button
         onClick={submit}
-        disabled={busy || !form.sessionId || !form.fullName || !form.email}
+        disabled={
+          busy || !form.sessionId || !form.fullName || !form.email ||
+          !form.countryOfBirth || !form.nationality || !form.idType || !form.idNumber || !form.idExpiry
+        }
         className="mt-3 rounded-sm bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
       >
         {busy ? "Booking…" : "Book & mark paid"}

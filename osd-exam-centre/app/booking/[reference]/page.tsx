@@ -16,6 +16,13 @@ type Booking = {
   country: string;
   dateOfBirth: string;
   placeOfBirth: string;
+  countryOfBirth: string;
+  nationality: string;
+  idType: string;
+  idNumber: string;
+  idExpiry: string;
+  isRepeatAttempt: boolean;
+  specialNeeds: string | null;
   modules: string[];
   feeTotal: number;
   paymentMethod: string | null;
@@ -277,6 +284,8 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
           initial={{
             fullName: booking.fullName, phone: booking.phone, addressLine: booking.addressLine,
             city: booking.city, country: booking.country, dateOfBirth: booking.dateOfBirth, placeOfBirth: booking.placeOfBirth,
+            countryOfBirth: booking.countryOfBirth, nationality: booking.nationality,
+            idType: booking.idType, idNumber: booking.idNumber, idExpiry: booking.idExpiry,
           }}
           onSaved={onChange}
         />
