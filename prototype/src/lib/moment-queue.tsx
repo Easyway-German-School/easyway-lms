@@ -104,17 +104,21 @@ export type MomentId =
   | "welcome-tour"
   | "goal"
   | "login-upgrade"
+  | "hybrid-combo"
   | "cohort-check"
   | "level-advance"
   | "office-reply"
   | "class-schedule-changed"
   | "lesson-complete"
+  | "exam-campaign"
   | "assignments-open"
   | "notifications"
+  | "notifications-travel"
   | "daily-briefing"
   | "journey"
   | "poster"
   | "game-turn"
+  | "profile-details"
   | "install-offline-notes";
 
 type Kind = "toast" | "modal";
@@ -159,6 +163,21 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Set up your login",
     dockBlurb: "Swap your temporary login for an email and password you'll remember.",
+  },
+  /**
+   * "Pick your hybrid sittings." Existing hybrid students predate the combo
+   * picker (lib/hybrid-combo.ts) — they were on a single vague "hybrid" mode
+   * with no concrete online sitting, which is the same gap that let one
+   * tutor's coverage silently absorb every online/hybrid student at their
+   * level. Due whenever a hybrid student has no `hybridOnlineSlot` on file.
+   * Above cohort-check: this decides which two tutors they actually have,
+   * not just which batch they're in.
+   */
+  "hybrid-combo": {
+    priority: 73,
+    kind: "modal",
+    dockLabel: "Pick your class times",
+    dockBlurb: "Tell us your campus and online sittings so we can pair you with both tutors.",
   },
   /**
    * "Which one are you?" — two taps, no typing, for the account the cohort
@@ -209,6 +228,23 @@ const MOMENTS: Record<MomentId, Definition> = {
     dockBlurb: "Your session moved — here is where to now.",
   },
   /**
+   * "Turn on notifications so your Travel Package updates reach you."
+   *
+   * Raised only right after a reply to a marketing-page enquiry (see
+   * TravelPackageNotifyNudge). Sits just under "office-reply" so the answer
+   * they asked for is read first and this follows as its consequence, and
+   * above the generic "notifications" ask because the reason here is concrete
+   * and time-boxed — a document, a payment step, a deadline — rather than the
+   * standing "hear about class" one. Same snooze / ask-cap memory as the
+   * generic invite, so "don't ask again" anywhere silences both.
+   */
+  "notifications-travel": {
+    priority: 66,
+    kind: "modal",
+    dockLabel: "Turn on updates",
+    dockBlurb: "So your Travel Package news reaches you in time.",
+  },
+  /**
    * A single lesson finished, not a whole level — smaller news, so it sits
    * below level-advance. Still above the notification ask and the journey
    * moment: this is earned, happened just now, and is why the student is
@@ -221,15 +257,31 @@ const MOMENTS: Record<MomentId, Definition> = {
     dockBlurb: "You finished something — come see.",
   },
   /**
+   * "The ÖSD exam is now in Lagos — register before it closes." A time-boxed
+   * campaign with a hard external deadline, shown once a calendar day while it
+   * runs, to every student who has not marked themselves registered. It sits
+   * below a finished lesson / level and the office reply — news about THEM
+   * always wins — but above the standing notification ask and Becca's daily
+   * hello, so on an ordinary day it takes the first slot and only docks behind
+   * genuine earned-news. Counts against the two-modal cap like any other modal;
+   * the bell, the pinned banner and the 3×/week reminder carry it when it docks.
+   */
+  "exam-campaign": {
+    priority: 63,
+    kind: "modal",
+    dockLabel: "Register for the ÖSD exam",
+    dockBlurb: "Dates, fees and the free prep class — before registration closes.",
+  },
+  /**
    * "You can submit assignments now." Fires once ever, the first time a
    * student's portal is unlocked AND there is work sitting unsubmitted — see
-   * src/lib/assignment-availability-nudge.ts for the server side. Above the
-   * notification ask because this is news about a capability the student did
-   * not know they had, and below a just-finished lesson because that is about
-   * something they themselves just did.
+   * src/lib/assignment-availability-nudge.ts for the server side. Below the
+   * exam campaign (that one has a hard external deadline; this doesn't) but
+   * still above the standing notification ask because it is news about a
+   * capability the student did not know they had.
    */
   "assignments-open": {
-    priority: 63,
+    priority: 62,
     kind: "modal",
     dockLabel: "Assignments are open",
     dockBlurb: "You can submit your homework now — see what's waiting.",
@@ -297,6 +349,22 @@ const MOMENTS: Record<MomentId, Definition> = {
     dockBlurb: "Your class is writing a story and it's your turn to add a line.",
   },
   /**
+   * "Becca needs a few sign-up details." Only ever due for a student the
+   * office onboarded by hand, whose admission record still has gaps. It is a
+   * chore we are asking of them, not news or a gift, and it is entirely
+   * optional — the /profile card and a weekly nudge carry it regardless — so
+   * it sits low and the two-modal cap will usually send it to the dock. Above
+   * the poster and the install advert because it is at least a real request
+   * with an answer the school needs; below the game turn because a classmate
+   * is actually waiting on that one.
+   */
+  "profile-details": {
+    priority: 38,
+    kind: "modal",
+    dockLabel: "Finish your profile",
+    dockBlurb: "A few sign-up details the office didn't get to ask you.",
+  },
+  /**
    * "Install the app to keep your notes offline." A soft upsell shown only to
    * physical students, who get no video downloads but can still pocket their
    * notes. Priority below the poster: it is the least urgent thing on the
@@ -336,10 +404,16 @@ const SETTLE_MS = 450;
 const SETTLE_CEILING_MS = 2600;
 
 /**
- * Fired by anything that must own the screen outright — today, only an incoming
- * live class. `detail.active` true silences the queue; false hands it back.
- * An event rather than a context method so a component rendered ALONGSIDE the
- * provider (not inside it) can still say so.
+ * Fired by anything that must own the screen outright — an incoming live
+ * class, the paid-but-no-photo guide, a tutorial walkthrough mid-navigation.
+ * `detail.active` true silences the queue on `detail.source`'s behalf; false
+ * hands its share back. `source` matters because more than one of these can
+ * be true at once (the tour can be running while a live class rings) — a
+ * plain last-write-wins boolean let whichever one's effect happened to fire
+ * last clear a preempt the other still needed, which is exactly how the
+ * photo-upload guide ended up sharing the screen with the cohort-check
+ * popup instead of blocking it. An event rather than a context method so a
+ * component rendered ALONGSIDE the provider (not inside it) can still say so.
  */
 export const MOMENT_PREEMPT_EVENT = "easyway:moment-preempt";
 
@@ -372,10 +446,12 @@ type State = {
   active: MomentId | null;
   /** Everything that was due and did not get a turn. */
   deferred: Array<{ id: MomentId } & Definition>;
+  /** See MOMENT_PREEMPT_EVENT. True while something outside the queue owns the screen. */
+  preempted: boolean;
 };
 
 const ActionsContext = createContext<Actions | null>(null);
-const StateContext = createContext<State>({ active: null, deferred: [] });
+const StateContext = createContext<State>({ active: null, deferred: [], preempted: false });
 
 export function MomentQueueProvider({ children }: { children: ReactNode }) {
   const [claimed, setClaimed] = useState<Set<MomentId>>(() => new Set());
@@ -487,15 +563,30 @@ export function MomentQueueProvider({ children }: { children: ReactNode }) {
    *
    * Not `holding`: holding is the handover gap and expires on a timer. This one
    * clears only when the call does.
+   *
+   * A SET, NOT A BOOLEAN, because more than one preemptor can be up at once.
+   * Each keeps its own seat by `source`; the queue stays preempted as long as
+   * the set isn't empty, so one preemptor clearing its own flag can never
+   * cancel another's.
    */
-  const [preempted, setPreempted] = useState(false);
+  const [preemptedBy, setPreemptedBy] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     const onPreempt = (event: Event) => {
-      setPreempted(Boolean((event as CustomEvent<{ active?: boolean }>).detail?.active));
+      const detail = (event as CustomEvent<{ active?: boolean; source?: string }>).detail;
+      const source = detail?.source ?? "unknown";
+      const wantsActive = Boolean(detail?.active);
+      setPreemptedBy((current) => {
+        if (current.has(source) === wantsActive) return current;
+        const next = new Set(current);
+        if (wantsActive) next.add(source);
+        else next.delete(source);
+        return next;
+      });
     };
     window.addEventListener(MOMENT_PREEMPT_EVENT, onPreempt);
     return () => window.removeEventListener(MOMENT_PREEMPT_EVENT, onPreempt);
   }, []);
+  const preempted = preemptedBy.size > 0;
 
   /** Whose turn it is. */
   useEffect(() => {
@@ -539,7 +630,7 @@ export function MomentQueueProvider({ children }: { children: ReactNode }) {
     () => ({ claim, withdraw, release, summon }),
     [claim, withdraw, release, summon],
   );
-  const state = useMemo<State>(() => ({ active, deferred }), [active, deferred]);
+  const state = useMemo<State>(() => ({ active, deferred, preempted }), [active, deferred, preempted]);
 
   return (
     <ActionsContext.Provider value={actions}>
@@ -568,7 +659,7 @@ export function MomentQueueProvider({ children }: { children: ReactNode }) {
  */
 export function useMoment(id: MomentId, due: boolean): { open: boolean; close: () => void } {
   const actions = useContext(ActionsContext);
-  const { active } = useContext(StateContext);
+  const { active, preempted } = useContext(StateContext);
 
   useEffect(() => {
     if (!actions) return;
@@ -593,7 +684,14 @@ export function useMoment(id: MomentId, due: boolean): { open: boolean; close: (
   }, [actions, id]);
 
   if (!actions) return { open: due, close: () => {} };
-  return { open: due && active === id, close };
+  // A moment already granted its turn still yields the screen the instant a
+  // preemptor shows up — that turn was already spent, so this hides rather
+  // than releases: nothing is lost, it just waits for the preemptor to clear
+  // and reappears where it left off (the same reason a claim survives here
+  // instead of ping-ponging withdraw/claim). Without this a moment that was
+  // already on screen when PhotoUnlockGuide or a tutorial step preempted kept
+  // rendering underneath it — the exact stacking this queue exists to stop.
+  return { open: due && active === id && !preempted, close };
 }
 
 /** For the dock, and for anything that needs to hand over to a named moment. */

@@ -185,6 +185,13 @@ export async function setStudentCoTutors(input: {
   assignedById?: string | null;
   /** Skip the notifications — used by bulk paths that send their own summary. */
   quiet?: boolean;
+  /**
+   * Which half of a hybrid combo each co-tutor covers ("physical" | "online"),
+   * keyed by lecturerId. Only the hybrid auto-assign flow sets this; a manual
+   * pairing from the admin roster leaves it unset. Applied to new rows and
+   * kept in sync on rows that already exist.
+   */
+  roles?: Record<string, string | null>;
 }): Promise<CoTutorResult> {
   const { studentId, assignedById = null, quiet = false } = input;
 
@@ -254,6 +261,8 @@ export async function setStudentCoTutors(input: {
     };
   }
 
+  const roles = input.roles ?? {};
+
   await prisma.$transaction([
     ...(toRemove.length
       ? [
@@ -265,11 +274,22 @@ export async function setStudentCoTutors(input: {
     ...(validToAddIds.length
       ? [
           prisma.studentCoTutor.createMany({
-            data: validToAddIds.map((lecturerId) => ({ studentId, lecturerId, assignedById })),
+            data: validToAddIds.map((lecturerId) => ({
+              studentId,
+              lecturerId,
+              assignedById,
+              role: roles[lecturerId] ?? null,
+            })),
             skipDuplicates: true,
           }),
         ]
       : []),
+    // Keep an already-present co-tutor's role in sync when the caller states one.
+    ...Object.entries(roles)
+      .filter(([lecturerId]) => currentSet.has(lecturerId) && !toRemove.includes(lecturerId))
+      .map(([lecturerId, role]) =>
+        prisma.studentCoTutor.updateMany({ where: { studentId, lecturerId }, data: { role } }),
+      ),
   ]);
 
   const finalNames = [

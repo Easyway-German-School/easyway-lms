@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import TutorialOverlay from "@/components/TutorialOverlay";
 import { CrossIcon, PlayIcon } from "@/components/icons";
+import { MOMENT_PREEMPT_EVENT } from "@/lib/moment-queue";
 import {
   buildTutorials,
   buildWelcomeTutorial,
@@ -29,7 +30,16 @@ import { useStudentAccess } from "@/lib/useStudentAccess";
  *
  * Deliberately NOT gated through the moment queue: a tutorial is student-
  * initiated and repeatable (reached by visiting /tutorials), not a one-time
- * "did they see this yet" interruption competing for a turn.
+ * "did they see this yet" interruption competing for a turn. The one
+ * exception is the `welcome` run, which claims and instantly releases the
+ * queue's "welcome-tour" slot (see WelcomeTutorialLauncher) because the
+ * queue can't hold a turn across the page navigations a tutorial makes.
+ * That release used to leave a gap: a lower-priority popup (the cohort-check
+ * ask, the goal question) could open behind the tour's own steps the moment
+ * that slot was free, which is how a new student could meet two interruptions
+ * stacked on their first visit. So while any step is genuinely on screen this
+ * preempts the queue directly instead (see MOMENT_PREEMPT_EVENT) — a tutorial
+ * still isn't a queue entry, but nothing else gets to show while one is up.
  */
 export default function TutorialRuntime() {
   const pathname = usePathname();
@@ -67,6 +77,30 @@ export default function TutorialRuntime() {
   }, [run, tutorial, step, isWelcomeRun, onboardingQuery.isPending]);
 
   const active = Boolean(run && tutorial && step && run.expectedRoute === pathname);
+
+  /**
+   * A `welcome` run is known synchronously (sessionStorage) on the very first
+   * render, but `tutorial` for it stays null until the onboarding fetch
+   * resolves — same shape of race as PhotoUnlockGuide's `maybeNeedsScreen`
+   * (see that module's comment): a queue-managed popup could take a turn in
+   * that gap and be caught mid-transition once this preempts a beat later.
+   * Held only while a run genuinely matches the current route, so an
+   * unrelated stale run elsewhere can't hold the queue hostage.
+   */
+  const pendingOnRoute = Boolean(run && !active && run.expectedRoute === pathname);
+
+  // See the module comment: stand the queue down for exactly as long as a
+  // step is genuinely rendered, or might be about to be, so nothing else can
+  // open mid-walkthrough.
+  useEffect(() => {
+    const dispatch = (wantsActive: boolean) => {
+      window.dispatchEvent(
+        new CustomEvent(MOMENT_PREEMPT_EVENT, { detail: { active: wantsActive, source: "tutorial" } }),
+      );
+    };
+    dispatch(active || pendingOnRoute);
+    return () => dispatch(false);
+  }, [active, pendingOnRoute]);
 
   // The one path out, however it happens — the last step's "Done", or the
   // Exit/Escape button on any earlier step. Both count as "seen": WelcomeTour

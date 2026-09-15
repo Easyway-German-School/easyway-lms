@@ -26,6 +26,8 @@ export const KIND = {
   studentRegistered: "student.registered",
   studentImported: "student.imported",
   paymentReceived: "payment.received",
+  /** A tutor was matched to a student — the admin feed version fires immediately at signup; the student-facing one waits for tutor-reveal.ts to release it once payment clears. */
+  tutorAssigned: "tutor.assigned",
   paymentFailed: "payment.failed",
   paymentPending: "payment.pending",
   gatewayError: "gateway.error",
@@ -73,6 +75,14 @@ export const KIND = {
   /** The office approved, rejected, or paid out a refund request. */
   refundDecided: "refund.decided",
   announcement: "announcement",
+  /**
+   * The exam-registration campaign nudge (currently ÖSD October 2026) — the
+   * 3×/week "register now" reminder to students who have not marked themselves
+   * registered. Namespaced under `announcement.` on purpose: the dashboard
+   * Announcements card and the bell both key off `startsWith("announcement")`,
+   * so it surfaces there with no extra routing. See src/lib/exam-campaign-reminders.ts.
+   */
+  examCampaign: "announcement.exam",
   /** Somebody started a game in the room's chat — see /api/community/messages. */
   gameInvite: "game.invite",
   /** A class recording uploaded but the bucket won't serve it back — admins need to know before a student does. */
@@ -91,6 +101,8 @@ export const KIND = {
   profilePhotoMissing: "profile.photo_missing",
   /** A student has no branch set — Becca asks them to place themselves, at most once a week. See src/lib/branch-nudge.ts. */
   profileBranchMissing: "profile.branch_missing",
+  /** An off-form student (office-added / imported) still has admission gaps — Becca asks for the important few, at most once a week. See src/lib/profile-details-nudge.ts. */
+  profileDetailsMissing: "profile.details_missing",
   /** A student's portal just unlocked and there is work waiting for them — sent once ever. See src/lib/assignment-availability-nudge.ts. */
   assignmentsAvailable: "assignments.available",
   general: "general",

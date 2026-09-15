@@ -24,6 +24,8 @@ import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
 import { normalizeProfileInput } from "@/lib/student-profile";
 import { openEnrolment } from "@/lib/student-enrolment";
 import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
+import { findHybridCombo, fallbackHybridCombo } from "@/lib/hybrid-combo";
+import { autoAssignTutor } from "@/lib/tutor-auto-assign";
 
 /**
  * Whether there is a Branch table to select from.
@@ -109,6 +111,7 @@ export async function POST(request: NextRequest) {
       sessionSlot,
       classType,
       deliveryMode,
+      hybridCombo,
       // Admission extra fields
       gender,
       dob,
@@ -217,7 +220,9 @@ export async function POST(request: NextRequest) {
     // "morning" rather than an empty string nothing downstream expects.
     const rawSessionSlot = typeof sessionSlot === "string" ? sessionSlot.trim().toLowerCase() : "";
     const sessionSlotValid = (TIME_SLOTS as readonly string[]).includes(rawSessionSlot);
-    const normalizedSessionSlot = sessionSlotValid ? rawSessionSlot : "morning";
+    // let: a hybrid student's physical slot is overridden below by their
+    // chosen combo (lib/hybrid-combo.ts) rather than this raw dropdown value.
+    let normalizedSessionSlot = sessionSlotValid ? rawSessionSlot : "morning";
 
     /**
      * How this student attends: physical | hybrid | online.
@@ -240,6 +245,38 @@ export async function POST(request: NextRequest) {
       : requestedDeliveryMode === "hybrid"
         ? "hybrid"
         : "physical";
+
+    // Read once, ahead of the hybrid combo fallback below AND the boundary
+    // check further down, rather than fetching this JSON row twice.
+    const sessionSettingsForSignup =
+      normalizedRole === "STUDENT" ? await readSessionSettings(currentTenantId()) : null;
+    const isSlotOpen = (level: string | null | undefined, slot: string, mode: "hybrid" | "online") =>
+      isCellEnabled(sessionSettingsForSignup, level, slot, mode);
+
+    /**
+     * A hybrid student picks ONE of the curated combos in lib/hybrid-combo.ts
+     * — which physical sitting they attend on campus, and which online
+     * sitting they drop into over video — rather than a vague "hybrid" mode
+     * that let a student appear in any online sitting of their level to
+     * whichever tutor's coverage happened to catch them. "Other" (or no
+     * combo at all) does NOT skip assignment: an unsure student still gets
+     * the same rule-based match everyone else does, against a sensible
+     * default combo — they are flagged (`hybridComboWasDefaulted`) so the
+     * office and HybridComboMoment both know to offer them a real choice
+     * later, but nobody is left waiting on a human to place them first.
+     */
+    let normalizedHybridOnlineSlot: string | null = null;
+    let hybridComboWasDefaulted = false;
+    if (normalizedDeliveryMode === "hybrid") {
+      const combo = findHybridCombo(hybridCombo);
+      const resolved =
+        combo && combo.id !== "other" && combo.physicalSlot && combo.onlineSlot
+          ? combo
+          : fallbackHybridCombo(isSlotOpen, normalizedLevel);
+      normalizedSessionSlot = resolved.physicalSlot!;
+      normalizedHybridOnlineSlot = resolved.onlineSlot!;
+      hybridComboWasDefaulted = !combo || combo.id === "other";
+    }
 
     // Only present on an online signup. Left undefined for a campus student so
     // their admission record does not gain an empty object.
@@ -301,6 +338,11 @@ export async function POST(request: NextRequest) {
       // than flattened so `readOnlineProfile` has one place to look and these
       // keys can never collide with an admission field added later.
       online: normalizedOnlineProfile,
+      // Set when a hybrid student was auto-defaulted onto a combo because
+      // they picked "Other" (or skipped the picker) — they ARE assigned a
+      // real tutor immediately, this just flags the office/HybridComboMoment
+      // to offer them a genuine choice later. See lib/hybrid-combo.ts.
+      hybridComboWasDefaulted: hybridComboWasDefaulted || undefined,
     };
 
     if (!normalizedEmail || !normalizedPassword || !normalizedName) {
@@ -430,8 +472,16 @@ export async function POST(request: NextRequest) {
 
     // Group students pick one of the house sittings; a private student agrees
     // their own times with their tutor and never sees this question, so it is
-    // not required for them.
-    if (normalizedRole === "STUDENT" && normalizedClassType !== "private" && !sessionSlotValid) {
+    // not required for them. A hybrid student picks a combo instead of the
+    // plain dropdown (`sessionSlotValid` reflects the raw field, which they
+    // never send) — `normalizedSessionSlot` is always valid for them by this
+    // point, resolved from their combo or its fallback.
+    if (
+      normalizedRole === "STUDENT" &&
+      normalizedClassType !== "private" &&
+      normalizedDeliveryMode !== "hybrid" &&
+      !sessionSlotValid
+    ) {
       return NextResponse.json(
         { error: "Please select a session" },
         { status: 400 }
@@ -445,7 +495,7 @@ export async function POST(request: NextRequest) {
      * runs. Same defence-in-depth as the level check above.
      */
     if (normalizedRole === "STUDENT") {
-      const sessionSettings = await readSessionSettings(currentTenantId());
+      const sessionSettings = sessionSettingsForSignup;
       if (!isModeEnabled(sessionSettings, normalizedLevel, normalizedDeliveryMode)) {
         return NextResponse.json(
           { error: `${normalizedLevel} is not offered ${normalizedDeliveryMode === "physical" ? "on campus" : normalizedDeliveryMode} right now. Please choose another level or branch.` },
@@ -458,6 +508,15 @@ export async function POST(request: NextRequest) {
       ) {
         return NextResponse.json(
           { error: `The ${normalizedSessionSlot} session is not running for ${normalizedLevel} ${normalizedDeliveryMode === "physical" ? "on campus" : normalizedDeliveryMode} right now. Please choose another.` },
+          { status: 400 }
+        );
+      }
+      if (
+        normalizedHybridOnlineSlot &&
+        !isCellEnabled(sessionSettings, normalizedLevel, normalizedHybridOnlineSlot, "online")
+      ) {
+        return NextResponse.json(
+          { error: `The ${normalizedHybridOnlineSlot} online session is not running for ${normalizedLevel} right now. Please choose another combo.` },
           { status: 400 }
         );
       }
@@ -519,6 +578,7 @@ export async function POST(request: NextRequest) {
       sessionSlot: normalizedSessionSlot,
       classType: normalizedClassType,
       deliveryMode: normalizedDeliveryMode,
+      hybridOnlineSlot: normalizedHybridOnlineSlot,
       outcome: "C1 readiness + German work placement support",
       branchId: hasBranchTable ? normalizedBranchId : null,
       // store admission payload as JSON
@@ -638,6 +698,29 @@ export async function POST(request: NextRequest) {
             });
           } catch (enrolmentError) {
             console.error("Enrolment history creation failed on signup:", enrolmentError);
+          }
+
+          // Write-time tutor assignment — see lib/tutor-auto-assign.ts. Private
+          // students are paired by hand on the private-class screen, not this
+          // engine. Best-effort like the rest of this block: a failed match
+          // alerts an admin instead of blocking the signup, and instead of
+          // leaving the student silently on nobody.
+          if (normalizedClassType !== "private") {
+            try {
+              await autoAssignTutor({
+                studentId: created.id,
+                studentName: normalizedName || normalizedEmail,
+                tenantId: currentTenantId(),
+                branchId: normalizedBranchId,
+                level: normalizedLevel,
+                deliveryMode: normalizedDeliveryMode as "physical" | "hybrid" | "online",
+                sessionSlot: normalizedSessionSlot,
+                hybridOnlineSlot: normalizedHybridOnlineSlot,
+                admission: normalizedAdmission,
+              });
+            } catch (assignError) {
+              console.error("Tutor auto-assignment failed on signup:", assignError);
+            }
           }
 
           /**

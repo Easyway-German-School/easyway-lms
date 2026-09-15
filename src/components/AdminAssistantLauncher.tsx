@@ -10,6 +10,7 @@ import {
   type AssistantStatus,
   type AssistantTurn,
 } from "@/lib/assistant-stream";
+import { useAssistantConversation } from "@/lib/assistant-conversation";
 
 /**
  * The office assistant, one tap away from anywhere in the admin portal.
@@ -37,12 +38,23 @@ export default function AdminAssistantLauncher() {
   const [status, setStatus] = useState<AssistantStatus | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
 
-  const [turns, setTurns] = useState<AssistantTurn[]>([]);
   const [question, setQuestion] = useState("");
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState("");
-  const [tools, setTools] = useState<string[]>([]);
-  const [proposal, setProposal] = useState<Proposal | null>(null);
+
+  // Shared with the full page at /admin/assistant and kept in sessionStorage,
+  // so minimising the panel or changing route no longer wipes the chat.
+  const { convo, update, reset } = useAssistantConversation();
+  const turns = convo.turns;
+  const proposal = convo.proposal;
+  const tools = convo.toolsUsed.map((tool) => tool.name);
+
+  type Updater<T> = T | ((prev: T) => T);
+  const setTurns = (u: Updater<AssistantTurn[]>) =>
+    update((p) => ({
+      turns: typeof u === "function" ? (u as (t: AssistantTurn[]) => AssistantTurn[])(p.turns) : u,
+    }));
+  const setProposal = (v: Proposal | null) => update({ proposal: v });
 
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -82,7 +94,7 @@ export default function AdminAssistantLauncher() {
     setError("");
     setQuestion("");
     setProposal(null);
-    setTools([]);
+    update({ toolsUsed: [] });
     const history = turns.slice(-6);
     setTurns((current) => [...current, { role: "user", content: trimmed }]);
     setThinking(true);
@@ -105,11 +117,11 @@ export default function AdminAssistantLauncher() {
         streamed = true;
         appendToLastTurn(full);
       },
-      onTool: (name) => setTools((current) => [...current, name]),
+      onTool: (name) => update((p) => ({ toolsUsed: [...p.toolsUsed, { name }] })),
       onProposal: (p) => setProposal(p),
       onDone: (result) => {
         appendToLastTurn(result.answer);
-        setTools(result.toolsUsed.map((t) => t.name));
+        update({ toolsUsed: result.toolsUsed });
         if (result.proposal !== undefined) setProposal(result.proposal);
         if (result.degraded) setError(result.degraded);
       },
@@ -148,6 +160,21 @@ export default function AdminAssistantLauncher() {
               </div>
             </div>
             <div className="flex items-center gap-1.5">
+              {turns.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (thinking) return;
+                    reset();
+                    setError("");
+                    setQuestion("");
+                  }}
+                  disabled={thinking}
+                  className="rounded-full border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--muted)] hover:bg-[var(--surface-alt)] disabled:opacity-40"
+                >
+                  New chat
+                </button>
+              )}
               <Link
                 href="/admin/assistant"
                 className="rounded-full border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold hover:bg-[var(--surface-alt)]"

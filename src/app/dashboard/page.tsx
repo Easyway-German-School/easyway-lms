@@ -2,21 +2,37 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import BrandLoader from "@/components/BrandLoader";
 import PaymentSuccessToastClient from "@/components/PaymentSuccessToastClient";
 import TuitionNudge from "@/components/TuitionNudge";
+import ExamCampaignBanner from "@/components/ExamCampaignBanner";
 import PrivateUpgradeNudge from "@/components/PrivateUpgradeNudge";
 import LiveClassBanner from "@/components/live/LiveClassBanner";
 import LevelAdvance from "@/components/LevelAdvance";
 import WelcomeTutorialLauncher from "@/components/WelcomeTutorialLauncher";
 import NotificationInvite from "@/components/NotificationInvite";
-import { ArrowRightIcon, BookOpenIcon, CheckCircleIcon, CompassIcon, FlameIcon, SparklesIcon, StarIcon, TargetIcon, TrendingDownIcon, TrendingUpIcon, UserIcon, VideoIcon } from "@/components/icons";
+import { ArrowRightIcon, BookOpenIcon, CheckCircleIcon, ChevronDownIcon, CompassIcon, FlameIcon, SparklesIcon, StarIcon, TargetIcon, TrendingDownIcon, TrendingUpIcon, UserIcon, VideoIcon } from "@/components/icons";
 import { summarizeGamification } from "@/lib/gamification";
-import { REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { isReceivedPayment, isRegistrationFeePayment, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { useGamification } from "@/lib/useGamification";
 import { useLiveClass } from "@/lib/useLiveClass";
+
+/** Paystack transaction statuses that will never become "success". A stored
+ *  reference in one of these is dead, so its dashboard breadcrumbs should be
+ *  cleared rather than left showing a "payment processing" band forever. */
+const TERMINAL_PAYSTACK_FAILURE = new Set(["failed", "abandoned", "reversed", "cancelled"]);
+
+function clearPendingPaystackBreadcrumbs() {
+  try {
+    window.localStorage.removeItem("pendingPaystackReference");
+    window.localStorage.removeItem("pendingPaystackAmount");
+    window.localStorage.removeItem("pendingPaystackPathwayName");
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 type Mission = {
   id?: string;
@@ -138,6 +154,61 @@ import DeliveryExperiencePanel from "@/components/DeliveryExperiencePanel";
 import PremiumProgressPanel from "@/components/PremiumProgressPanel";
 import PrivateScheduleSetup from "@/components/PrivateScheduleSetup";
 
+/**
+ * Everything below "today's missions" used to render unconditionally, every
+ * visit — Leaderboard, exam dates, new materials, the whole active-courses
+ * list, stacked one after another. None of that is wrong to have, it's just
+ * not what most visits are for. This collapses it behind one toggle, closed
+ * by default, and remembers the student's choice in localStorage so opening
+ * it once doesn't mean re-discovering it every time.
+ */
+function DashboardMoreSection({ children, summaryHint }: { children: ReactNode; summaryHint: string }) {
+  const STORAGE_KEY = "dashboard:moreExpanded";
+  const [expanded, setExpanded] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    try {
+      setExpanded(window.localStorage.getItem(STORAGE_KEY) === "1");
+    } catch {
+      /* storage unavailable — stay collapsed */
+    }
+    setHydrated(true);
+  }, []);
+
+  const toggle = () => {
+    setExpanded((previous) => {
+      const next = !previous;
+      try {
+        window.localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        /* storage unavailable */
+      }
+      return next;
+    });
+  };
+
+  // Before localStorage is read, `expanded` defaults to false either way —
+  // rendering the same collapsed toggle here avoids a flash of open content
+  // that immediately collapses once hydration catches up.
+  const isOpen = hydrated && expanded;
+
+  return (
+    <section className="mt-8">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={isOpen}
+        className="flex w-full items-center justify-between rounded-[28px] border border-[var(--border)] bg-[var(--surface-alt)] px-6 py-4 text-left text-sm font-medium text-[var(--foreground-soft)] transition hover:bg-[var(--surface)]"
+      >
+        <span>{isOpen ? "Show less" : `Show more — ${summaryHint}`}</span>
+        <ChevronDownIcon className={`h-4 w-4 shrink-0 text-[var(--muted)] transition-transform ${isOpen ? "rotate-180" : ""}`} />
+      </button>
+      {isOpen && <div className="mt-6 space-y-6">{children}</div>}
+    </section>
+  );
+}
+
 export default function DashboardPage() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-[var(--background)] flex items-center justify-center text-[var(--foreground)]"><p className="text-[var(--muted)]">Loading dashboard…</p></div>}>
@@ -211,9 +282,11 @@ function DashboardContent() {
         const paymentsResponse = await fetchWithTiming("/api/student/payments", undefined, "student-payments");
         if (paymentsResponse.ok) {
           const paymentsData = await paymentsResponse.json();
-          const completed = (paymentsData.payments || []).filter((payment: any) => payment.status === "completed");
-          const totalPaid = completed.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
-          const feeLookup = { level: data.level, branch: data.branchName ?? null, classType: data.classType ?? null };
+          const received = (paymentsData.payments || []).filter(
+            (payment: any) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description),
+          );
+          const totalPaid = received.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
+          const feeLookup = { level: data.level, branch: data.branchName ?? null, classType: data.classType ?? null, pathway: data.pathway ?? null };
           const tuitionFee = tuitionFeeFor(feeLookup);
           const requiredDeposit = requiredDepositFor(feeLookup);
           setPaymentUnlock({ requiredDeposit, totalPaid, tuitionFee });
@@ -324,9 +397,22 @@ function DashboardContent() {
       const verifyData = await verifyResponse.json().catch(() => null);
 
       if (verifyResponse.ok && verifyData?.paid) {
-        window.localStorage.removeItem("pendingPaystackReference");
-        window.localStorage.removeItem("pendingPaystackAmount");
-        window.localStorage.removeItem("pendingPaystackPathwayName");
+        clearPendingPaystackBreadcrumbs();
+        setPendingPayment(null);
+      } else if (
+        verifyResponse.ok &&
+        TERMINAL_PAYSTACK_FAILURE.has(String(verifyData?.transactionStatus || ""))
+      ) {
+        // Paystack answered and the charge is dead (abandoned / failed /
+        // reversed). Nothing is ever coming for this reference. A student who
+        // closed the tab on Paystack's failure screen never reaches
+        // /enrollment/success, so without this the "payment processing" band
+        // would follow them on every visit from here on.
+        console.info("Discarding dead Paystack reference", {
+          pendingReference,
+          transactionStatus: verifyData?.transactionStatus,
+        });
+        clearPendingPaystackBreadcrumbs();
         setPendingPayment(null);
       } else {
         console.warn("Pending Paystack reference has not cleared yet", {
@@ -540,7 +626,11 @@ function DashboardContent() {
   if (status === "loading" && !student && !dashboardError && !fastFallback) {
     return (
       <StudentShell>
-        <PaymentSuccessToastClient />
+        {/* PaymentSuccessToastClient is deliberately NOT rendered here. It
+            consumes the one-shot `paystackPaymentSuccess` flag on mount; if it
+            mounts behind the loader and this branch then unmounts once the
+            dashboard is ready, the flag is already gone and the real instance
+            below never shows the toast. It renders once, after load. */}
         <BrandLoader />
       </StudentShell>
     );
@@ -662,6 +752,10 @@ function DashboardContent() {
               before anything else, and it disappears entirely once settled. */}
           <PrivateScheduleSetup classType={resolvedStudent?.classType} />
           <TuitionNudge className="mb-6" />
+          {/* The pinned ÖSD exam-campaign strip. Renders nothing unless the
+              campaign is running and this student has not marked themselves
+              registered. See components/ExamCampaignBanner.tsx. */}
+          <ExamCampaignBanner variant="banner" className="mb-6" />
           {/* Same slot the balance band just vacated — a group student stops
               seeing TuitionNudge the moment they finish paying, and this is
               what a FULLY PAID group student sees there instead. See
@@ -890,8 +984,7 @@ function DashboardContent() {
             ))}
           </section>
 
-          <section className="mt-8 grid gap-6 xl:grid-cols-[1.4fr_0.9fr]">
-            <div className="space-y-6">
+          <section className="mt-8 space-y-6">
               {showPaymentProgress && <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} whileHover={{ y: -3, scale: 1.005 }} className={cardClass}>
                 <div className="flex items-center justify-between gap-4">
                   <div>
@@ -1018,12 +1111,20 @@ function DashboardContent() {
                 </div>
               </div>
 
-              {!isPrivateStudent && missionHistory && missionHistory.totalMissions > 0 && (
-                <QuestHistoryCard history={missionHistory} cardClass={cardClass} eyebrowClass={eyebrowClass} headingClass={headingClass} mutedClass={mutedClass} />
-              )}
-            </div>
+          </section>
 
-            <div className="space-y-6">
+          <DashboardMoreSection
+            summaryHint={
+              isPrivateStudent
+                ? "your coaching notes, exams, materials & more"
+                : "exams, materials, leaderboard, courses & more"
+            }
+          >
+            {!isPrivateStudent && missionHistory && missionHistory.totalMissions > 0 && (
+              <QuestHistoryCard history={missionHistory} cardClass={cardClass} eyebrowClass={eyebrowClass} headingClass={headingClass} mutedClass={mutedClass} />
+            )}
+
+            <div className="grid gap-6 lg:grid-cols-2">
               {isPrivateStudent && (
                 <div className="relative overflow-hidden rounded-[32px] border border-[#D4AF37]/30 bg-[radial-gradient(circle_at_20%_0%,_#1c1917_0%,_#0b0a09_60%,_#000000_100%)] p-6">
                   <div
@@ -1199,10 +1300,8 @@ function DashboardContent() {
                 />
               </Link>
             </div>
-          </section>
 
-          {announcements.length > 0 && (
-            <section className="mt-8">
+            {announcements.length > 0 && (
               <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} whileHover={{ y: -3, scale: 1.005 }} className={cardClass}>
                 <div className="flex items-center justify-between gap-4">
                   <div>
@@ -1225,8 +1324,8 @@ function DashboardContent() {
                   ))}
                 </div>
               </motion.div>
-            </section>
-          )}
+            )}
+          </DashboardMoreSection>
         </div>
       </motion.div>
     </StudentShell>

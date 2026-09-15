@@ -10,6 +10,7 @@ import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import BranchSetupCard from "@/components/BranchSetupCard";
 import PhotoCapture from "@/components/PhotoCapture";
+import { ProfileDetailsCard } from "@/components/ProfileDetailsPrompt";
 import { useGamification } from "@/lib/useGamification";
 import { uploadErrorMessage, uploadImage, validateImageFile } from "@/lib/upload";
 import type { Badge, BadgeIcon } from "@/lib/gamification";
@@ -241,6 +242,20 @@ export default function ProfilePage() {
   // The record photo is taken with the live camera only — never a file the
   // student picks — so nobody can set a stranger's face or a random image.
   const [showCamera, setShowCamera] = useState(false);
+  // PhotoUnlockGuide's spotlight+card only make sense before this sheet
+  // opens — they exist to get the student TO the camera button. Once it's
+  // open, its own z-60 modal sits under the guide's z-132 overlay, so the
+  // guide's now-redundant "Tap the camera" card and stale spotlight (still
+  // aimed at the avatar behind the sheet) end up sitting on top of the real
+  // shutter button and face-guide oval, blocking them. See PhotoUnlockGuide.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("easyway:photo-capture-open", { detail: { open: showCamera } }));
+    return () => {
+      window.dispatchEvent(new CustomEvent("easyway:photo-capture-open", { detail: { open: false } }));
+    };
+  }, [showCamera]);
+  /** ?setup=details — Becca's "finish your profile" nudge links here. */
+  const [detailsAutoOpen, setDetailsAutoOpen] = useState(false);
   const { game } = useGamification();
   const queryClient = useQueryClient();
 
@@ -280,6 +295,7 @@ export default function ProfilePage() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("setup") === "branch") setBranchSetupAutoOpen(true);
+    if (params.get("setup") === "details") setDetailsAutoOpen(true);
   }, []);
 
   useEffect(() => {
@@ -403,6 +419,10 @@ export default function ProfilePage() {
       queryClient.invalidateQueries({ queryKey: studentAccessQueryKey });
     } catch (uploadError) {
       setError(uploadErrorMessage(uploadError, "Could not upload that photo"));
+      // Lets PhotoUnlockGuide count failed attempts and, after two, promote its
+      // "message the office" way out — so a broken uploader never fully traps a
+      // photo-locked student.
+      window.dispatchEvent(new CustomEvent("easyway:photo-upload-failed"));
     } finally {
       setUploading(false);
     }
@@ -522,8 +542,10 @@ export default function ProfilePage() {
           <div className="mx-auto max-w-6xl">
             <div className="rounded-[36px] border border-[var(--border)] bg-[linear-gradient(160deg,_rgba(2,15,20,0.96),_rgba(6,25,32,0.92))] p-6 shadow-[0_40px_100px_rgba(2,6,23,0.4)] backdrop-blur-2xl sm:p-8">
               <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-end">
-                {/* Avatar with a tier-coloured story ring */}
-                <div className="relative shrink-0">
+                {/* Avatar with a tier-coloured story ring. `data-guide-target`
+                    is what PhotoUnlockGuide spotlights when it walks a
+                    photo-locked student here. */}
+                <div className="relative shrink-0" data-guide-target="photo">
                   <div className="rounded-full p-[3px]" style={{ background: ring }}>
                     <div className="rounded-full border-[3px] border-[#04141a] bg-[#04141a] p-0.5">
                       <div className="relative h-28 w-28 overflow-hidden rounded-full sm:h-32 sm:w-32">
@@ -677,6 +699,11 @@ export default function ProfilePage() {
                 }}
               />
             ) : null}
+
+            {/* Becca recreating the important parts of the sign-up form, for a
+                student the office onboarded by hand. Renders itself only when
+                the account is genuinely off-form and still has gaps. */}
+            <ProfileDetailsCard autoOpen={detailsAutoOpen} />
 
             {/* ---------- Tabs ---------- */}
             <div className="mt-8 flex gap-1 rounded-full cinematic-card p-1.5">

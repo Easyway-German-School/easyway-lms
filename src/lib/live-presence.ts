@@ -312,25 +312,6 @@ export async function declineInvite(sessionId: string, studentId: string): Promi
  * named student belongs to their tutor's class the same way they belong to
  * that tutor's register — the cohort fields are not the test.
  */
-export function liveSessionNamedStudentsWhere(args: {
-  lecturerId: string;
-  branchId?: string | null;
-  level?: string | null;
-}): Record<string, unknown> {
-  const where: Record<string, unknown> = { deletedAt: null };
-
-  if (args.branchId) where.branchId = args.branchId;
-  if (args.level) where.level = args.level;
-
-  return {
-    ...where,
-    OR: [
-      { ...where, tutorId: args.lecturerId },
-      { ...where, coTutors: { some: { lecturerId: args.lecturerId } } },
-    ],
-  };
-}
-
 export async function liveSessionForStudent(student: {
   id: string;
   branchId: string | null;
@@ -394,14 +375,14 @@ export async function liveSessionForStudent(student: {
   const attendsOverVideo =
     canAttendLive(student.deliveryMode, student.classType) ||
     isOnlineBranch(student.branch ?? null);
-  const mayJoinAnyCohort = mayJoinAnyLiveCohort(student.deliveryMode);
+  const mayJoinAnyCohortFlag = mayJoinAnyLiveCohort(student.deliveryMode);
 
   const liveCohorts = await prisma.liveClassSession.findMany({
     where: {
       kind: "cohort",
       branchId: student.branchId,
       level: student.level,
-      ...(attendsOverVideo && mayJoinAnyCohort ? {} : { sessionSlot: student.sessionSlot }),
+      ...(attendsOverVideo && mayJoinAnyCohortFlag ? {} : { sessionSlot: student.sessionSlot }),
       ...liveWhere(now),
     },
     include: { lecturer: { select: { user: { select: { name: true } } } } },

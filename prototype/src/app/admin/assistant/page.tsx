@@ -13,6 +13,7 @@ import {
   type AssistantStatus as Status,
   type AssistantTurn as Turn,
 } from "@/lib/assistant-stream";
+import { useAssistantConversation } from "@/lib/assistant-conversation";
 import {
   AlertIcon,
   ArrowRightIcon,
@@ -68,6 +69,7 @@ const ACTION_SUGGESTIONS = [
   "Mark the Lagos A1 morning class present today.",
   "Move the A1 students who finished this batch up to A2.",
   "Send enrolment links to everyone who enquired this month.",
+  "Reset the portal logins for the September intake.",
 ];
 
 function Stat({
@@ -98,17 +100,33 @@ export default function AdminAssistantPage() {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [turns, setTurns] = useState<Turn[]>([]);
   const [question, setQuestion] = useState("");
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState("");
-  /** The rows the last lookup returned. Replaced, not appended: the table
-      always shows the cohort belonging to the question on screen. */
-  const [cohort, setCohort] = useState<Cohort | null>(null);
-  const [toolsUsed, setToolsUsed] = useState<Array<{ name: string }>>([]);
   const [capabilities, setCapabilities] = useState<string[]>([]);
-  /** The action awaiting confirmation, if the last answer proposed one. */
-  const [proposal, setProposal] = useState<Proposal | null>(null);
+
+  /**
+   * The transcript, the cohort table and the pending proposal are NOT local
+   * state — they live in a shared, sessionStorage-backed store so the chat
+   * survives leaving this page and is the same conversation the floating
+   * launcher shows. See lib/assistant-conversation.
+   */
+  const { convo, update, reset } = useAssistantConversation();
+  const turns = convo.turns;
+  const cohort = convo.cohort;
+  const toolsUsed = convo.toolsUsed;
+  const proposal = convo.proposal;
+
+  type Updater<T> = T | ((prev: T) => T);
+  const setTurns = (u: Updater<Turn[]>) =>
+    update((p) => ({ turns: typeof u === "function" ? (u as (t: Turn[]) => Turn[])(p.turns) : u }));
+  const setCohort = (v: Cohort | null) => update({ cohort: v });
+  const setProposal = (v: Proposal | null) => update({ proposal: v });
+  const setToolsUsed = (u: Updater<Array<{ name: string }>>) =>
+    update((p) => ({
+      toolsUsed:
+        typeof u === "function" ? (u as (t: Array<{ name: string }>) => Array<{ name: string }>)(p.toolsUsed) : u,
+    }));
 
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -129,6 +147,13 @@ export default function AdminAssistantPage() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, thinking]);
+
+  const newChat = () => {
+    if (thinking) return;
+    reset();
+    setError("");
+    setQuestion("");
+  };
 
   async function ask(text: string) {
     const trimmed = text.trim();
@@ -376,6 +401,21 @@ export default function AdminAssistantPage() {
 
         {/* The chat. */}
         <section className="mt-6 overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--surface)]">
+          {turns.length > 0 && (
+            <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-5 py-2.5">
+              <span className="text-xs font-semibold text-[var(--muted)]">
+                This chat is kept while you move around the admin area.
+              </span>
+              <button
+                type="button"
+                onClick={newChat}
+                disabled={thinking}
+                className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--muted)] transition hover:bg-[var(--surface-alt)] disabled:opacity-40"
+              >
+                New chat
+              </button>
+            </div>
+          )}
           <div className="max-h-[26rem] overflow-y-auto p-5">
             {turns.length === 0 ? (
               <div className="py-6 text-center">

@@ -3,6 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   belongsToLecturer,
+  isAssigned,
   readAssignment,
   studentWhereForLecturer,
   type AssignmentSource,
@@ -63,7 +64,7 @@ async function requireLecturer(): Promise<LecturerMessagesAuth> {
 async function cohortStudents(lecturer: AssignmentSource & { id: string }) {
   const assignment = readAssignment(lecturer);
   const where = studentWhereForLecturer(assignment, lecturer.id);
-  if (!where) return [];
+  if (!where) return { assignment, students: [] as Array<{ id: string; user: { name: string | null; email: string } }> };
 
   const rows = await prisma.student.findMany({
     where: { ...(where as Record<string, unknown>), status: "active" } as never,
@@ -76,7 +77,10 @@ async function cohortStudents(lecturer: AssignmentSource & { id: string }) {
     },
   });
 
-  return rows.filter((student) => belongsToLecturer(assignment, lecturer.id, student));
+  return {
+    assignment,
+    students: rows.filter((student) => belongsToLecturer(assignment, lecturer.id, student)),
+  };
 }
 
 /** GET — what this tutor has already sent, newest first, grouped per send. */
@@ -85,7 +89,7 @@ export async function GET() {
   if ("error" in auth) return auth.error;
   const { lecturer } = auth;
 
-  const students = await cohortStudents(lecturer);
+  const { assignment, students } = await cohortStudents(lecturer);
   const studentIds = students.map((student) => student.id);
 
   const notifications = studentIds.length
@@ -149,7 +153,16 @@ export async function GET() {
       name: student.user.name || student.user.email,
       email: student.user.email,
     })),
-    assigned: Boolean(lecturer.branchId && lecturer.level),
+    /**
+     * `lecturer.branchId && lecturer.level` was the legacy single-column
+     * check — wrong for a tutor who has ONLY named students (no class
+     * description at all, so those legacy columns are empty). It hid the
+     * whole "New announcement" form and told a tutor with real students to
+     * go set a class, exactly the trap the roster/roster-panel/gradebook
+     * were rebuilt to avoid. Same rule as /api/lecturer/students: assigned
+     * means a class description OR at least one named student.
+     */
+    assigned: isAssigned(assignment) || students.length > 0,
   });
 }
 
@@ -175,7 +188,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "A subject and a message are both required" }, { status: 400 });
     }
 
-    const students = await cohortStudents(lecturer);
+    const { students } = await cohortStudents(lecturer);
     if (students.length === 0) {
       return NextResponse.json(
         { error: "You have no cohort yet. Set your branch and level under Customise my classes first." },

@@ -15,6 +15,7 @@ import { isOnlineBranch } from "@/lib/online-branch";
 import { computeChurnRisk } from "@/lib/student-risk";
 import { deriveSegments } from "@/lib/student-segments";
 import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
+import { isTemporaryLogin } from "@/lib/login-upgrade";
 
 /**
  * Everything the office knows about one student, in one request.
@@ -78,6 +79,7 @@ export async function GET(
       sessionSlot: true,
       classType: true,
       deliveryMode: true,
+      hybridOnlineSlot: true,
       pathway: true,
       outcome: true,
       examReadiness: true,
@@ -113,6 +115,7 @@ export async function GET(
       },
       coTutors: {
         select: {
+          role: true,
           lecturer: {
             select: { id: true, user: { select: { name: true, email: true } } },
           },
@@ -423,6 +426,7 @@ export async function GET(
       sessionSlot: student.sessionSlot,
       classType: student.classType,
       deliveryMode: student.deliveryMode,
+      hybridOnlineSlot: student.hybridOnlineSlot,
       pathway: student.pathway,
       outcome: student.outcome,
       examReadiness: student.examReadiness,
@@ -439,6 +443,7 @@ export async function GET(
         id: link.lecturer.id,
         name: link.lecturer.user?.name ?? "Unnamed tutor",
         email: link.lecturer.user?.email ?? null,
+        role: link.role,
       })),
       registeredAt: student.createdAt.toISOString(),
       updatedAt: student.updatedAt.toISOString(),
@@ -453,6 +458,14 @@ export async function GET(
       accountCreatedAt: student.user?.createdAt.toISOString() ?? null,
       welcomeTourSeenAt: student.welcomeTourSeenAt?.toISOString() ?? null,
       lastJourneySeenAt: student.journeySeenAt?.toISOString() ?? null,
+      // A login the office minted for a no-email student (phone number at a
+      // school subdomain, or an importer placeholder). `loginUpgradedByStudentAt`
+      // is stamped when they trade it for their own email from the portal.
+      loginIsTemporary: isTemporaryLogin(student.user?.email),
+      loginUpgradedByStudentAt:
+        typeof admission?.loginUpgradedByStudentAt === "string" ? admission.loginUpgradedByStudentAt : null,
+      loginUpgradedFrom:
+        typeof admission?.loginUpgradedFrom === "string" ? admission.loginUpgradedFrom : null,
     },
 
     origin: student.convertedFromLead

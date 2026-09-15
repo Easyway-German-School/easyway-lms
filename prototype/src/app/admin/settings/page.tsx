@@ -17,6 +17,7 @@ import {
 import { MONTH_NAMES } from "@/lib/batch";
 import { defaultCurrentIntake, type CurrentIntake } from "@/lib/intake";
 import { emptySchedulePatternSettings, type SchedulePatternSettings, type SchedulePatternGrid } from "@/lib/schedule-pattern";
+import { defaultSessionTimes, type SessionTimes } from "@/lib/session-times";
 
 type MovePreview = { level: string; mode: ModeSlot; from: string; to: string; count: number };
 type StrandPreview = { level: string; mode: ModeSlot; slot: string; count: number };
@@ -38,6 +39,9 @@ export default function SettingsPage() {
   const [message, setMessage] = useState("");
   const [pendingImpact, setPendingImpact] = useState<ImpactResponse | null>(null);
 
+  // The school's current intake — the month a new student joins by default
+  // when the sign-up form, the Add-student form or the CSV import did not
+  // carry one. See lib/intake.ts.
   const [intake, setIntake] = useState<CurrentIntake>(() => defaultCurrentIntake());
   const [intakeSaving, setIntakeSaving] = useState(false);
   const [intakeMsg, setIntakeMsg] = useState("");
@@ -46,11 +50,49 @@ export default function SettingsPage() {
   const [patternSaving, setPatternSaving] = useState(false);
   const [patternMsg, setPatternMsg] = useState("");
 
+  const [sessionTimes, setSessionTimes] = useState<SessionTimes>(() => defaultSessionTimes());
+  const [timesSaving, setTimesSaving] = useState(false);
+  const [timesMsg, setTimesMsg] = useState("");
+
   useEffect(() => {
     loadSettings();
     loadIntake();
     loadPattern();
+    loadSessionTimes();
   }, []);
+
+  async function loadSessionTimes() {
+    try {
+      const res = await fetch("/api/admin/settings/session-times", { cache: "no-store" });
+      if (res.ok) setSessionTimes(await res.json());
+    } catch (error) {
+      console.error("Failed to load session times:", error);
+    }
+  }
+
+  async function saveSessionTimes() {
+    setTimesSaving(true);
+    setTimesMsg("");
+    try {
+      const res = await fetch("/api/admin/settings/session-times", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sessionTimes),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTimesMsg("Saved. Signup and the hybrid-combo prompt now quote these hours.");
+        setTimeout(() => setTimesMsg(""), 4000);
+      } else {
+        setTimesMsg(data.error || "Failed to save session times");
+      }
+    } catch (error) {
+      console.error("Failed to save session times:", error);
+      setTimesMsg("Failed to save session times");
+    } finally {
+      setTimesSaving(false);
+    }
+  }
 
   async function loadPattern() {
     try {
@@ -347,6 +389,66 @@ export default function SettingsPage() {
           {intakeMsg && (
             <p className={`mt-3 text-sm font-medium ${intakeMsg.startsWith("Saved") ? "text-emerald-700" : "text-red-700"}`}>
               {intakeMsg}
+            </p>
+          )}
+        </div>
+
+        {/* Session clock times */}
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+          <h2 className="mb-2 text-lg font-bold text-[var(--foreground)]">Session times</h2>
+          <p className="mb-6 text-sm text-[var(--muted)]">
+            The clock hours quoted on the sign-up form and the hybrid-combo prompt — these change
+            every batch, so they live here instead of in code. Purely a display string; it does not
+            change which sessions run (see &quot;Sessions &amp; attendance&quot; below for that).
+          </p>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div>
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-[var(--muted)]">On campus</p>
+              <div className="space-y-3">
+                {(["morning", "afternoon", "evening", "weekend"] as const).map((slot) => (
+                  <label key={slot} className="flex items-center gap-3 text-sm font-medium text-[var(--foreground)]">
+                    <span className="w-24 shrink-0 capitalize">{slot}</span>
+                    <input
+                      type="text"
+                      value={sessionTimes.physical[slot]}
+                      onChange={(e) =>
+                        setSessionTimes((prev) => ({ ...prev, physical: { ...prev.physical, [slot]: e.target.value } }))
+                      }
+                      className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-normal text-[var(--foreground)]"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Online (WAT)</p>
+              <div className="space-y-3">
+                {(["morning", "evening"] as const).map((slot) => (
+                  <label key={slot} className="flex items-center gap-3 text-sm font-medium text-[var(--foreground)]">
+                    <span className="w-24 shrink-0 capitalize">{slot}</span>
+                    <input
+                      type="text"
+                      value={sessionTimes.online[slot]}
+                      onChange={(e) =>
+                        setSessionTimes((prev) => ({ ...prev, online: { ...prev.online, [slot]: e.target.value } }))
+                      }
+                      className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-normal text-[var(--foreground)]"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={saveSessionTimes}
+            disabled={timesSaving}
+            className="mt-6 rounded-lg bg-[var(--accent)] px-6 py-2.5 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+          >
+            {timesSaving ? "Saving..." : "Save session times"}
+          </button>
+          {timesMsg && (
+            <p className={`mt-3 text-sm font-medium ${timesMsg.startsWith("Saved") ? "text-emerald-700" : "text-red-700"}`}>
+              {timesMsg}
             </p>
           )}
         </div>

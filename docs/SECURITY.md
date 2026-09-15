@@ -70,7 +70,15 @@ Two routes. Try them in this order.
 > a paid-plan setting and the free window is short. Whatever it is set to is
 > the maximum age of damage this route can undo. Write the number here:
 >
-> **Our Neon retention window: ______ days**
+> **Our Neon retention window: ______ days** &nbsp;— _unconfirmed as of 2026-09-08._
+>
+> To find and set it: Neon console → the project → **Settings** → **Storage**
+> (or **Branching**) → *History retention* / *Restore window*. Free plans are
+> typically 6 hours to 1 day; a paid plan can go to 7–30 days. Anything older
+> than this number can only be recovered from the off-provider dump below, and
+> only as far back as that job's retention (14 dailies / 8 weeklies / 12
+> monthlies). Set it as high as the plan allows, then fill in the blank above
+> and delete this note.
 
 **Restore from the off-provider dump — an hour, and works when the Neon
 account itself is the problem.**
@@ -199,6 +207,11 @@ recorded within 26 hours, the daily cron raises a critical alert to super
 admins. This is deliberate — the way backups fail is by quietly stopping, and
 a job that has not run produces no error to notice.
 
+The same daily tick now also alerts whoever holds `security` when **any of its
+own jobs throws** (deduped per job per day, see `src/app/api/cron/tick`), so a
+reminder or digest that has silently started failing surfaces within a day
+instead of only turning the Vercel cron log red where nobody looks.
+
 ### 4.1 Required GitHub secrets
 
 Repository → Settings → Secrets and variables → Actions:
@@ -219,6 +232,36 @@ Repository → Settings → Secrets and variables → Actions:
 the cheap default — 10GB free, then about $6/TB/month. A backup in the same
 account as the thing it backs up dies in the same compromise, the same
 declined card, the same suspension. That is the entire point of the exercise.
+
+### 4.2 Standing up the off-provider destination (~20 minutes)
+
+Until this is done, `backup-database.yml` falls back to an encrypted GitHub
+Actions **artifact**, retained 90 days. That is a real off-account copy and the
+restore drill exercises it — but artifacts expire, cannot be pruned to a
+retention policy, and are size-capped. The restic destination is the intended
+end state.
+
+1. **Make the bucket, at a vendor that is not Cloudflare.** Backblaze B2 →
+   *Buckets* → *Create a Bucket* (private). Note the bucket name and its
+   endpoint, e.g. `s3.us-west-004.backblazeb2.com`.
+2. **Make an application key** scoped to that one bucket. Keep the keyID and
+   the key secret.
+3. **Generate the repo passphrase:** `openssl rand -base64 48`. This is
+   `RESTIC_PASSWORD`. **Put it in the password manager first** — if it is lost,
+   every restic backup is unreadable forever, with no reset.
+4. **Add the GitHub Actions secrets** (repo → Settings → Secrets and variables
+   → Actions), from the table in §4.1: `RESTIC_REPOSITORY`
+   (`s3:<endpoint>/<bucket>`), `RESTIC_PASSWORD`, `BACKUP_S3_ACCESS_KEY`,
+   `BACKUP_S3_SECRET_KEY`, and the `BACKUP_S3_ENDPOINT` / `_REGION` /
+   `_PROVIDER` trio.
+5. **Run `Backup database` by hand** (Actions → *Backup database* → *Run
+   workflow*). The "Check the configuration" step should now print
+   `destination=restic` instead of the artifact warning, and the run should end
+   with `restic check` passing.
+6. **Run `Restore drill` by hand** and confirm it still passes. It reads
+   whichever destination is live, so this proves the restic path end to end.
+7. Confirm `/admin/security` shows both a fresh **Database backup** and a fresh
+   **Restore drill**.
 
 ---
 
@@ -293,9 +336,9 @@ Stated plainly so nobody assumes cover that does not exist.
 | **Rate limiting is per-isolate** | In-memory on the edge, so it slows a single attacker but does not stop a distributed one | Shared counter in Upstash Redis; swap inside `hit()` in `src/middleware.ts` |
 | **Two-factor is not yet enforced** | Built and working, but `MFA_ENFORCED` is off until every super admin has enrolled — until then a leaked password is still enough | Finish enrolment, then set the variable. See §10 |
 | **Two-factor covers admins only** | A lecturer account can read their students' work and grades | Same library; the policy check in `shouldRequireMfa()` is where to widen it |
-| **No error tracking** | A failure nobody sees is a failure nobody fixes | Sentry, or self-hosted GlitchTip |
+| **Error tracking is alert-only** | Server errors and failed crons now raise an in-app alert to `security` holders and, if `ERROR_WEBHOOK_URL` is set, POST to that sink (`src/lib/capture-error.ts`, `src/instrumentation.ts`). There is still no searchable history, grouping, or stack-trace UI | Point `ERROR_WEBHOOK_URL` at a real Sentry/GlitchTip ingest URL, or adopt `@sentry/nextjs` |
 | **Soft-delete does not filter nested reads** | `include: { payments: true }` will return soft-deleted children; top-level reads are filtered correctly | Filter in the `include`, or query the child model directly |
-| **No alert on unusual sign-in location** | The trail records the IP but nothing reads it | A daily job comparing each admin's addresses against their history |
+| **Sign-in alert is IP-only, staff-only** | `src/lib/sign-in-anomaly.ts` flags an admin/tutor sign-in from an address not seen on that account in 90 days. It does not resolve the IP to a city or country, and does not watch student accounts | Add a GeoIP lookup for the alert text; widen `WATCHED_ROLES` in `src/lib/sign-in-audit.ts` |
 
 ---
 

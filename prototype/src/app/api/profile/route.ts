@@ -98,14 +98,17 @@ export async function POST(request: NextRequest) {
   const currentLevel = normalizeString(body.currentLevel) || "A1";
   const photoUrl = normalizeString(body.photoUrl);
 
-  // Only accept URLs this app's own storage produced — a local /uploads/ path,
-  // an /api/files/ key, or the configured bucket's own origin. keyFromUrl()
-  // returns null for anything else, which is exactly the "not one of ours"
-  // test: a student editing their profile could otherwise point their avatar
-  // at any URL on the internet. It also fixes the bug this replaces — in
-  // production uploadImage() hands back "/api/files/<key>", which the old
-  // startsWith("/uploads/") check rejected, so every avatar save 400'd with
-  // "must be uploaded, not linked".
+  // Only accept paths this app served. A student editing their own profile
+  // could otherwise point their avatar at any URL on the internet, which would
+  // then be rendered for tutors and admins looking at their record.
+  //
+  // `keyFromUrl` returns non-null only for a URL this app handed back from an
+  // upload: `/uploads/<key>` on a laptop with no bucket, `/api/files/<key>`
+  // when files are proxied out of the private bucket (production), and the
+  // `STORAGE_PUBLIC_BASE_URL` / endpoint prefixes if a public bucket is set.
+  // The old check only allowed `/uploads/`, so in production — where the
+  // uploader returns `/api/files/...` — every profile photo save 400'd and the
+  // student could never set a photo after signup.
   if (photoUrl && !keyFromUrl(photoUrl)) {
     return NextResponse.json(
       { error: "Profile photos must be uploaded through EasyWay, not linked." },

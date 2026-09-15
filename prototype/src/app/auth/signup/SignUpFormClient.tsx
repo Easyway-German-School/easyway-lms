@@ -19,6 +19,8 @@ import {
   isOnlineBranch,
 } from "@/lib/online-branch";
 import { TIME_SLOTS, slotLabel } from "@/lib/class-times";
+import { HYBRID_COMBOS, type HybridComboId } from "@/lib/hybrid-combo";
+import { defaultSessionTimes, timeFor, type SessionTimes } from "@/lib/session-times";
 import { OFFERED_LEVELS } from "@/lib/levels";
 import {
   defaultSessionSettings,
@@ -100,6 +102,13 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
    * in the signup route.
    */
   const [deliveryMode, setDeliveryMode] = useState("physical");
+  /**
+   * Which physical+online sitting pair a hybrid (campus) student picked —
+   * see lib/hybrid-combo.ts. Not used for the Online branch's "hybrid" toggle,
+   * which is a separate in-person-interest flag, not a real second sitting.
+   */
+  const [hybridCombo, setHybridCombo] = useState<HybridComboId | "">("");
+  const [sessionTimes, setSessionTimes] = useState<SessionTimes>(() => defaultSessionTimes());
   /** group | private — a private student books a tutor rather than a seat. */
   const [classType, setClassType] = useState("group");
   const [address, setAddress] = useState("");
@@ -270,8 +279,10 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         !onlineClosedForLevel &&
         // A private student agrees their own times with their tutor and never
         // sees the session dropdown (it is hidden below), so it cannot gate
-        // them forward.
-        (classType === "private" || sessionSlot !== "")
+        // them forward. A campus hybrid student picks a combo instead of the
+        // plain session dropdown — "Other" counts as a real, submittable pick.
+        (classType === "private" ||
+          (!isOnline && deliveryMode === "hybrid" ? hybridCombo !== "" : sessionSlot !== ""))
       : step === 2
       ? phone.trim() !== "" &&
         city.trim() !== "" &&
@@ -332,6 +343,43 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         /* keep the permissive default — every option stays offered */
       });
   }, []);
+
+  useEffect(() => {
+    fetch(buildApiUrl("/api/school/session-times"))
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.physical && data.online) setSessionTimes(data as SessionTimes);
+      })
+      .catch(() => {
+        /* keep the seeded defaults */
+      });
+  }, []);
+
+  // Dropped the same way the plain session picker resets below: if the
+  // office turns a combo's cells off, or the student switches away from
+  // campus hybrid, a stale pick must not silently ride along to submit.
+  useEffect(() => {
+    if (isOnline || deliveryMode !== "hybrid") {
+      if (hybridCombo) setHybridCombo("");
+      return;
+    }
+    if (!hybridCombo) return;
+    const combo = HYBRID_COMBOS.find((c) => c.id === hybridCombo);
+    if (!combo) return;
+    if (combo.id === "other") return;
+    const physicalOk = !level || isCellEnabled(sessionCfg, level, combo.physicalSlot!, "hybrid");
+    const onlineOk = !level || isCellEnabled(sessionCfg, level, combo.onlineSlot!, "online");
+    if (!physicalOk || !onlineOk) setHybridCombo("");
+  }, [isOnline, deliveryMode, hybridCombo, level, sessionCfg]);
+
+  // The combo picker sets sessionSlot from its physical half so the rest of
+  // the form (and the "which session suits you" summary text) stays correct
+  // without a second source of truth.
+  useEffect(() => {
+    if (deliveryMode !== "hybrid" || isOnline) return;
+    const combo = HYBRID_COMBOS.find((c) => c.id === hybridCombo);
+    if (combo?.physicalSlot) setSessionSlot(combo.physicalSlot);
+  }, [hybridCombo, deliveryMode, isOnline]);
 
   // If the picked session no longer runs for this level in this mode, drop it so
   // the student re-chooses rather than submitting a closed one. Same for a
@@ -519,6 +567,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
         level,
         sessionSlot,
         deliveryMode,
+        hybridCombo: !isOnline && deliveryMode === "hybrid" ? hybridCombo : undefined,
         classType,
         pathway,
         batch,
@@ -843,6 +892,54 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                 </div>
               ) : null}
 
+              {/* Hybrid students pick ONE concrete pairing rather than a vague
+                  "hybrid" mode — see lib/hybrid-combo.ts. This decides both
+                  their real timetable and which two tutors (campus + online)
+                  they get assigned automatically. */}
+              {!isOnline && deliveryMode === "hybrid" && selectedBranch ? (
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+                  <p className="text-sm font-semibold text-[var(--foreground)]">Which sittings will you attend?</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    Pick the campus sitting you will attend in person, paired with the online sitting you will join
+                    over video on other days.
+                  </p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {HYBRID_COMBOS.filter((combo) => {
+                      if (combo.id === "other") return true;
+                      if (!level) return true;
+                      return (
+                        isCellEnabled(sessionCfg, level, combo.physicalSlot!, "hybrid") &&
+                        isCellEnabled(sessionCfg, level, combo.onlineSlot!, "online")
+                      );
+                    }).map((combo) => (
+                      <button
+                        key={combo.id}
+                        type="button"
+                        onClick={() => setHybridCombo(combo.id)}
+                        className={`rounded-2xl border p-4 text-left transition ${
+                          hybridCombo === combo.id
+                            ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                            : "border-[var(--border)] bg-white hover:border-[var(--accent)]"
+                        }`}
+                      >
+                        <p className="text-sm font-semibold text-[var(--foreground)]">{combo.label}</p>
+                        {combo.id === "other" ? (
+                          <p className="mt-1 text-xs text-[var(--muted)]">
+                            Not sure yet? We will start you on a sitting and pair you with a tutor right away — you
+                            can change your times with the office once you are enrolled.
+                          </p>
+                        ) : (
+                          <p className="mt-1 text-xs text-[var(--muted)]">
+                            Campus: {timeFor(sessionTimes, "physical", combo.physicalSlot!)} &middot; Online:{" "}
+                            {timeFor(sessionTimes, "online", combo.onlineSlot!)} WAT
+                          </p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               {/* Private tuition. A separate question from the pathway, because
                   it changes the product rather than the destination: a private
                   student books their tutor's whole session instead of a seat in
@@ -887,8 +984,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
 
               {/* A private student agrees their own times with their tutor, so
                   asking them to pick one of the house sittings would be asking
-                  a question their answer cannot affect. */}
-              <div className={`grid gap-4 md:grid-cols-1 ${classType === "private" ? "hidden" : ""}`}>
+                  a question their answer cannot affect. A campus hybrid
+                  student picks their sitting pair above instead — asking
+                  twice would let the two answers disagree. */}
+              <div
+                className={`grid gap-4 md:grid-cols-1 ${
+                  classType === "private" || (!isOnline && deliveryMode === "hybrid") ? "hidden" : ""
+                }`}
+              >
                 <div>
                   <label htmlFor="sessionSlot" className="block text-sm font-semibold text-[var(--muted)]">Which session suits you?</label>
                   <select id="sessionSlot" name="sessionSlot" value={sessionSlot} onChange={(e) => setSessionSlot(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">

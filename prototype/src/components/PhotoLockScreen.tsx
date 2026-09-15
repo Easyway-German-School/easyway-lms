@@ -20,6 +20,12 @@ import Mascot from "@/components/Mascot";
  * a mistake they didn't make. `/api/student/access` backs this up with a
  * one-time notification the moment they first hit this wall, in case they
  * see it on their phone before they see this screen.
+ *
+ * This is the BASE LAYER. `PhotoUnlockGuide` (mounted in StudentShell) sits on
+ * top of it, non-dismissible, and actually walks the student to the camera
+ * button on /profile. This screen is what shows in the beat before that guide
+ * mounts, or if its access query is still in flight — so it stands on its own,
+ * spells out the three steps, and still points at /profile.
  */
 export default function PhotoLockScreen({ areaLabel }: { areaLabel: string }) {
   return (
@@ -27,24 +33,31 @@ export default function PhotoLockScreen({ areaLabel }: { areaLabel: string }) {
       <Mascot mood="smiling" className="h-40 w-40" />
 
       <p className="mt-6 text-[11px] font-semibold uppercase tracking-[0.42em] text-emerald-500">
-        Your payment is all sorted ✓
+        Your payment is all sorted
       </p>
 
       <h1 className="mt-3 max-w-lg text-2xl font-semibold leading-snug text-[var(--foreground)]">
-        Just one more thing before {areaLabel.toLowerCase()} opens up
+        One step and {areaLabel.toLowerCase()} opens up
       </h1>
 
       <p className="mt-3 max-w-md text-sm leading-6 text-[var(--muted)]">
-        Becca here — this has nothing to do with your fees, promise. Your profile is just missing a
-        photo, and it takes about ten seconds to fix (camera or upload both work). It puts a face to
-        your name for your tutor and classmates, and it is the one that goes on your certificate.
+        Becca here — this is nothing to do with your fees, promise. Your classes are ready and
+        waiting; the only thing holding your portal shut is that your profile has no photo yet. It
+        puts a face to your name for your tutor in class, and it is the one that goes on your
+        certificate at the end.
       </p>
+
+      <ol className="mt-5 max-w-xs space-y-1.5 text-left text-sm text-[var(--muted)]">
+        <li>1. Open your <span className="font-semibold text-[var(--foreground)]">Profile</span> page.</li>
+        <li>2. Tap the camera button on your photo.</li>
+        <li>3. Take a selfie or pick one from your phone.</li>
+      </ol>
 
       <Link
         href="/profile"
         className="mt-7 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:brightness-110"
       >
-        Add my photo now
+        Take me to my profile
       </Link>
 
       <p className="mt-4 text-xs text-[var(--muted)]">

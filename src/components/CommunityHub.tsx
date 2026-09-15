@@ -7,6 +7,7 @@ import { uploadFile } from "@/lib/upload";
 import { ALLOWED_REACTIONS, type ReactionSummary } from "@/lib/community-reactions";
 import { STICKERS, StickerArt, stickerById } from "@/lib/community-stickers";
 import CommunityWins from "@/components/CommunityWins";
+import ExamCampaignBanner from "@/components/ExamCampaignBanner";
 import StoryTour from "@/components/StoryTour";
 import {
   CHAT_THEMES,
@@ -1314,6 +1315,13 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
             certificates, levels passed. Ambient and dismissible; hides itself
             when there is nothing to show. */}
         {!compact && !isDm ? <CommunityWins spaceId={activeSpace?.id ?? null} /> : null}
+
+        {/* The pinned ÖSD exam-campaign strip — a nudge AT students, from the
+            office. Staff already know the campaign exists; showing them their
+            own "have you registered?" banner inside every room they moderate
+            is just clutter, and the office monitoring a room is not the
+            audience it is written for. */}
+        {!compact && !isStaff ? <ExamCampaignBanner variant="pinned" /> : null}
 
         <div
           ref={scrollRef}
