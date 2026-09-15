@@ -472,8 +472,16 @@ export async function POST(request: NextRequest) {
 
     // Group students pick one of the house sittings; a private student agrees
     // their own times with their tutor and never sees this question, so it is
-    // not required for them.
-    if (normalizedRole === "STUDENT" && normalizedClassType !== "private" && !sessionSlotValid) {
+    // not required for them. A hybrid student picks a combo instead of the
+    // plain dropdown (`sessionSlotValid` reflects the raw field, which they
+    // never send) — `normalizedSessionSlot` is always valid for them by this
+    // point, resolved from their combo or its fallback.
+    if (
+      normalizedRole === "STUDENT" &&
+      normalizedClassType !== "private" &&
+      normalizedDeliveryMode !== "hybrid" &&
+      !sessionSlotValid
+    ) {
       return NextResponse.json(
         { error: "Please select a session" },
         { status: 400 }
