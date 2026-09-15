@@ -60,9 +60,11 @@ projects`), linked to the same GitHub repo, **Root Directory**
 `ADMIN_PASSWORD` and `ADMIN_SESSION_SECRET` (freshly generated, not a
 placeholder — the password is `53kUIpQUEuOoKKAe`, change it in Vercel's
 project settings any time you want a different one), `CRON_SECRET`
-(generated), and `SITE_URL` (temporarily the Vercel-assigned domain until
-step 1's real domain is attached — **update this once the domain is live**,
-since it drives every link in every email this app sends). Not yet set:
+(generated), and `SITE_URL`. Also claimed a short custom `*.vercel.app`
+alias — **`easyway-osd.vercel.app`** — instead of the long auto-generated
+`easyway-osd-exam-centre-jaysmithstrategist-2324s-projects.vercel.app`
+(both work; `SITE_URL` and every email link now use the short one). Update
+`SITE_URL` again once step 1's real domain is attached. Not yet set:
 `EXAM_BANK_ACCOUNT_NUMBER`/`EXAM_BANK_NAME`/`EXAM_BANK_ACCOUNT_NAME` (no
 real account number handed over yet — until then the bank-transfer panel
 tells candidates to "ask the office"), and the object-storage/email/
