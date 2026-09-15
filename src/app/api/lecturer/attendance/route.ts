@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
-import { dayKey } from '@/lib/class-sessions';
+import { dayKey, normalizeSlot, wasAutoAddedFromLiveStart } from '@/lib/class-sessions';
 import {
   belongsToLecturer,
   readAssignment,
@@ -154,8 +154,17 @@ export async function POST(req: NextRequest) {
 
     const assignedStudents = await prisma.student.findMany({
       where: { ...(where as Record<string, unknown>), status: 'active' } as any,
-      select: { id: true, tutorId: true, coTutors: { select: { lecturerId: true } }, admission: true },
+      select: {
+        id: true,
+        tutorId: true,
+        coTutors: { select: { lecturerId: true } },
+        admission: true,
+        branchId: true,
+        level: true,
+        sessionSlot: true,
+      },
     });
+    const studentInfoById = new Map(assignedStudents.map((student) => [student.id, student]));
     const permitted = new Set(
       assignedStudents
         .filter((student) => belongsToLecturer(readAssignment(lecturer), lecturerId, student))
@@ -177,15 +186,47 @@ export async function POST(req: NextRequest) {
     for (const entry of rows) {
       const status = entry.status === 'late' ? 'late' : entry.present ? 'present' : 'absent';
       const present = status === 'present' || status === 'late';
+
+      /**
+       * A class started straight from the live room (see
+       * `ensureClassSessionForLiveStart`) never reached a student's calendar
+       * in advance — the only notice they had was the same-instant "class is
+       * live" push. Marking that fact on the row itself means a dispute like
+       * "I wasn't told there was class today" is answered by looking at the
+       * register, not by guessing whether it's a bug.
+       */
+      let unscheduledNote: string | undefined;
+      if (!present) {
+        const info = studentInfoById.get(entry.studentId);
+        if (info?.branchId && info.level && info.sessionSlot) {
+          const daySession = await prisma.classSession.findUnique({
+            where: {
+              branchId_level_date_timeSlot: {
+                branchId: info.branchId,
+                level: info.level.toUpperCase(),
+                date: day,
+                timeSlot: normalizeSlot(info.sessionSlot),
+              },
+            },
+            select: { notes: true },
+          });
+          if (wasAutoAddedFromLiveStart(daySession?.notes)) {
+            unscheduledNote =
+              'Marked absent for a class started directly from the live room — it was never on the calendar in advance.';
+          }
+        }
+      }
+
       await prisma.attendance.upsert({
         where: { studentId_date: { studentId: entry.studentId, date: day } },
-        update: { present, status, classId: cls?.id ?? undefined },
+        update: { present, status, classId: cls?.id ?? undefined, notes: unscheduledNote },
         create: {
           studentId: entry.studentId,
           date: day,
           present,
           status,
           classId: cls?.id ?? null,
+          notes: unscheduledNote ?? null,
         },
       });
       saved += 1;
@@ -201,12 +242,15 @@ export async function POST(req: NextRequest) {
        * flips somebody TO absent still reaches them.
        */
       if (!present) {
+        const studentMessage = unscheduledNote
+          ? "Your tutor recorded you as absent for today's class. That class was started directly from the live room and wasn't on your calendar in advance — if you weren't told about it in time, let your tutor know so they can review it."
+          : "Your tutor recorded you as absent for today's class. If that's wrong, let them know.";
         notifyInBackground({
           to: { studentIds: [entry.studentId] },
           kind: KIND.attendanceMarked,
           severity: "info",
           title: "Marked absent today",
-          message: "Your tutor recorded you as absent for today's class. If that's wrong, let them know.",
+          message: studentMessage,
           link: "/attendance",
           dedupeKey: `attendance-marked:${entry.studentId}:${day.toISOString()}:absent`,
         });

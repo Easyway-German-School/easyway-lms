@@ -105,6 +105,8 @@ export const KIND = {
   profileDetailsMissing: "profile.details_missing",
   /** A student's portal just unlocked and there is work waiting for them — sent once ever. See src/lib/assignment-availability-nudge.ts. */
   assignmentsAvailable: "assignments.available",
+  /** A tutor has office-uploaded materials matching their class sitting in the shelf, waiting to be pushed to their students. Becca nudges weekly. See src/lib/material-send-nudge.ts. */
+  materialsWaitingToSend: "materials.waiting_to_send",
   general: "general",
 } as const;
 

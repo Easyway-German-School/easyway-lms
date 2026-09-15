@@ -29,6 +29,7 @@ import {
 import { lecturerCan } from "@/lib/lecturer-features";
 import { assignmentHasGroup, parseGroupKey, readAssignment } from "@/lib/lecturer-assignment";
 import { studentsWhoCanEnterLiveClass } from "@/lib/live-eligibility";
+import { ensureClassSessionForLiveStart } from "@/lib/class-sessions";
 
 export const dynamic = "force-dynamic";
 
@@ -396,6 +397,22 @@ export async function GET(request: Request) {
         void announceLiveToVideoStudents(opened).catch((err) =>
           console.error("announceLiveToVideoStudents failed", err),
         );
+
+        // The calendar (`/api/lecturer/sessions`) is the only thing that puts a
+        // day on a student's timetable in advance — opening this room is not
+        // that, and skips it entirely. Backfill the row now so a class run
+        // straight from here (no advance notice, ever) at least becomes
+        // visible, and is honestly marked as never having been scheduled ahead
+        // of time. A no-op if the tutor already put this day on the calendar.
+        if (branch?.id && level && sessionSlot) {
+          void ensureClassSessionForLiveStart({
+            branchId: branch.id,
+            level,
+            sessionSlot,
+            date: new Date(),
+            lecturerId: lecturer?.id ?? null,
+          }).catch((err) => console.error("ensureClassSessionForLiveStart failed", err));
+        }
       }
     } else if (liveSession && student) {
       /**

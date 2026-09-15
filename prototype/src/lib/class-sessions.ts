@@ -35,6 +35,59 @@ export function dayKey(date: Date | string): Date {
   return new Date(`${zonedDateKey(new Date(date), SCHOOL_TIMEZONE)}T00:00:00.000Z`);
 }
 
+/**
+ * Marks a `ClassSession` row created by `ensureClassSessionForLiveStart`
+ * rather than by a tutor deliberately using the calendar. Distinguishing the
+ * two matters downstream — see that function and its call site.
+ */
+export const AUTO_ADDED_LIVE_NOTE =
+  "Started directly from the live class room — not pre-scheduled on the calendar in advance.";
+
+/**
+ * A tutor can open the live room for a cohort without ever touching the
+ * calendar (`/api/lecturer/sessions`), which is the only tool that puts a day
+ * on students' timetables and tells them about it ahead of time. That gap is
+ * exactly how a class the students never saw coming still happens — and then
+ * gets attendance taken.
+ *
+ * Called the moment such a class goes live, this backfills the calendar row
+ * so the class at least becomes visible (to a student who checks mid-class,
+ * and to anyone auditing an absence afterwards) and leaves a note recording
+ * that it was never scheduled in advance. It never overwrites a row a tutor
+ * already created or edited — `update: {}` makes this a pure "create if
+ * missing" — so a properly pre-scheduled class is left completely alone.
+ */
+export async function ensureClassSessionForLiveStart(args: {
+  branchId: string;
+  level: string;
+  sessionSlot: string;
+  date: Date;
+  lecturerId?: string | null;
+}): Promise<void> {
+  const slot = normalizeSlot(args.sessionSlot);
+  const day = dayKey(args.date);
+  const level = args.level.toUpperCase();
+
+  await prisma.classSession.upsert({
+    where: { branchId_level_date_timeSlot: { branchId: args.branchId, level, date: day, timeSlot: slot } },
+    create: {
+      branchId: args.branchId,
+      level,
+      date: day,
+      timeSlot: slot,
+      status: "held",
+      notes: AUTO_ADDED_LIVE_NOTE,
+      lecturerId: args.lecturerId ?? undefined,
+    },
+    update: {},
+  });
+}
+
+/** Whether a `ClassSession` row (as read from `notes`) was backfilled by `ensureClassSessionForLiveStart` rather than scheduled by a tutor in advance. */
+export function wasAutoAddedFromLiveStart(notes: string | null | undefined): boolean {
+  return notes === AUTO_ADDED_LIVE_NOTE;
+}
+
 export type MergedSession = {
   date: string;
   weekday: string;
