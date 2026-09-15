@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notify, KIND } from "@/lib/notify";
 import { computeStudentFinance, type FinanceStudentInput } from "@/lib/finance/receivables";
+import { RECEIVED_PAYMENT_STATUSES } from "@/lib/payment";
 
 /**
  * CHURN RISK — a different question from the dashboard's existing "at risk".
@@ -162,10 +163,20 @@ const FINANCE_LOOKUP_SELECT = {
   level: true,
   status: true,
   classType: true,
+  // Without this, computeStudentFinance() quotes a Travel Package student's
+  // fee off the per-level ladder instead of the flat ₦980,000 price — see
+  // the identical bug fixed in student-roster-query.ts.
+  pathway: true,
   createdAt: true,
   branch: { select: { id: true, name: true } },
   user: { select: { name: true, email: true } },
-  payments: { where: { status: "completed" }, select: { amount: true, createdAt: true, method: true } },
+  payments: {
+    // `description` is loaded so `computeStudentFinance` can drop the ₦5,000
+    // registration fee in memory — this select is `as const`, which makes a
+    // NULL-safe `OR` array unassignable to Prisma's where type.
+    where: { status: { in: RECEIVED_PAYMENT_STATUSES } },
+    select: { amount: true, createdAt: true, method: true, description: true },
+  },
 } as const;
 
 /**
