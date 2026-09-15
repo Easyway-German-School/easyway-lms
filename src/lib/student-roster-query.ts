@@ -212,6 +212,13 @@ export function scoreAndFilterRoster(
         level: student.level,
         status: student.status,
         classType: student.classType,
+        // Travel Package prices at the flat ₦980,000, not the per-level
+        // ladder fee — omitting this made tuitionFeeFor() quote the roster
+        // the standard A1 price, so a Travel Package student's ₦350,000
+        // cleared that lower bar and the roster badged them "Paid in full"
+        // / ₦0 owed while the ledger (and their own /payments page) both
+        // knew ₦630,000 was still outstanding.
+        pathway: student.pathway,
         createdAt: student.createdAt,
         branch: student.branch ? { id: student.branch.id, name: student.branch.name } : null,
         user: student.user,
@@ -260,6 +267,7 @@ export function scoreAndFilterRoster(
         level: entry.student.level,
         status: entry.student.status,
         classType: entry.student.classType,
+        pathway: entry.student.pathway,
         createdAt: entry.student.createdAt,
         branch: entry.student.branch ? { id: entry.student.branch.id, name: entry.student.branch.name } : null,
         user: entry.student.user,

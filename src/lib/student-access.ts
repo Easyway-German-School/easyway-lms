@@ -12,8 +12,12 @@ import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
  * differently and drift — which is exactly what happened when
  * `/api/live/session` hand-rolled a `deriveStudentAccess` call without
  * `charges`, `flatDeposit`, or `paymentPlanOnTrack`: a student the ledger
- * (promotions, waivers, an on-track payment plan) says is fine got walled
- * out of the room the portal itself showed as open.
+ * (promotions, waivers, an on-track payment plan) says is fine got walled out
+ * of the room the portal itself showed as open.
+ *
+ * Deliberately NOT the photo lock: that is a separate gate with its own
+ * screen, and "you have no profile photo" is not a reason to hide from a
+ * student that their class has started.
  */
 export async function getStudentAccess(studentId: string): Promise<StudentAccess | null> {
   const student = await prisma.student.findUnique({
