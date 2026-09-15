@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { getStudentAccess } from "@/lib/student-access";
 import { isPlayableVideo, toPlayableUrl, type LibraryVideo, type VideoKind } from "@/lib/video-library";
 import { isEmbeddedVideo, needsIframe, parseEmbed } from "@/lib/media-embed";
 import { reconcileRecordingsSoon } from "@/lib/class-recorder";
@@ -48,20 +47,12 @@ export async function GET() {
      */
     reconcileRecordingsSoon();
 
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-    const totalPaid = student.payments
-      .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
-      .reduce((sum, payment) => sum + payment.amount, 0);
-    const access = deriveStudentAccess({
-      totalPaid,
-      tuitionFee: tuitionFeeFor(feeLookup),
-      requiredDeposit: requiredDepositFor(feeLookup),
-      classesStartedAt: student.classesStartedAt,
-      enrolledAt: student.createdAt,
-      paymentGraceUntil: student.paymentGraceUntil,
-    });
+    // Same ledger-aware computation the portal itself uses — not a hand-rolled
+    // copy that drifts when a student has a promotion, a waiver, legacy
+    // arrears, or an on-track payment plan on their record.
+    const access = await getStudentAccess(student.id);
 
-    if (!access.hasAccess) {
+    if (access && !access.hasAccess) {
       const message =
         access.lockReason === "unsettled_balance"
           ? `Settle your tuition balance of ₦${access.outstandingBalance.toLocaleString()} to restore the video library.`

@@ -1,8 +1,7 @@
 import { getServerSession, type Session } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { getStudentAccess } from "@/lib/student-access";
 import { NextResponse } from "next/server";
 
 const DEFAULT_EXAM_CAPACITY = 30;
@@ -64,7 +63,6 @@ export async function POST(request: Request) {
 
     const student = await prisma.student.findUnique({
       where: { userId: session.user.id },
-      include: { payments: true, branch: { select: { name: true } } },
     });
 
     if (!student) {
@@ -74,17 +72,10 @@ export async function POST(request: Request) {
     // Same gate as the video library and the live classroom: a student who
     // has not met their deposit cannot register for an exam either. Checked
     // here, at registration, rather than only at the exam centre later —
-    // finding out the day of is the failure mode this closes.
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
-    const totalPaid = student.payments
-      .filter((payment) => payment.status === "completed")
-      .reduce((sum, payment) => sum + payment.amount, 0);
-    const access = deriveStudentAccess({
-      totalPaid,
-      tuitionFee: tuitionFeeFor(feeLookup),
-      requiredDeposit: requiredDepositFor(feeLookup),
-    });
-    if (!access.hasAccess) {
+    // finding out the day of is the failure mode this closes. Same
+    // ledger-aware computation the portal itself uses, not a hand-rolled copy.
+    const access = await getStudentAccess(student.id);
+    if (access && !access.hasAccess) {
       return NextResponse.json(
         { error: `Pay your deposit of ₦${access.requiredDeposit.toLocaleString()} before registering for an exam.` },
         { status: 402 },

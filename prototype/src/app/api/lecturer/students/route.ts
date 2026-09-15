@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment, isTravelPackagePathway } from "@/lib/payment";
 import {
   belongsToLecturer,
   describeAssignment,
@@ -70,6 +70,10 @@ export async function GET() {
           branch: { select: { name: true } },
           coTutors: { select: { lecturerId: true } },
           payments: { select: { amount: true, status: true, description: true } },
+          tuitionCharges: {
+            where: { deletedAt: null },
+            select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+          },
           attendances: { select: { present: true } },
           _count: { select: { assignmentSubmissions: true, certificates: true } },
         },
@@ -99,10 +103,19 @@ export async function GET() {
           classType: student.classType,
           pathway: student.pathway,
         };
+        // Same ledger-aware fields the student's own portal and the admin
+        // remote view feed in — omitting them is what let this tag disagree
+        // with whether the student could actually get into the room.
         const access = deriveStudentAccess({
           totalPaid,
           tuitionFee: tuitionFeeFor(feeLookup),
           requiredDeposit: requiredDepositFor(feeLookup),
+          level: student.level,
+          charges: student.tuitionCharges,
+          flatDeposit: isTravelPackagePathway(student.pathway),
+          classesStartedAt: student.classesStartedAt,
+          enrolledAt: student.createdAt,
+          paymentGraceUntil: student.paymentGraceUntil,
         });
 
         const present = student.attendances.filter((attendance) => attendance.present).length;
