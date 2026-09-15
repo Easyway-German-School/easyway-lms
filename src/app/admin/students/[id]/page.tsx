@@ -29,6 +29,7 @@ import { SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
 import { TIME_SLOTS, SLOT_DEFAULTS } from "@/lib/class-times";
 import { defaultSessionSettings, isCellEnabled, isModeEnabled, type SessionSettings } from "@/lib/school-settings";
 import { isOnlineBranch } from "@/lib/online-branch";
+import { coversClassType, type LecturerAssignment } from "@/lib/lecturer-assignment";
 import SchedulePreview from "@/components/admin/SchedulePreview";
 
 /**
@@ -75,7 +76,8 @@ type Dossier = {
     examReadiness: number;
     branch: { id: string; name: string; mode: string; location: string | null } | null;
     tutor: { id: string; name: string; email: string | null; status: string } | null;
-    coTutors: Array<{ id: string; name: string; email: string | null }>;
+    coTutors: Array<{ id: string; name: string; email: string | null; role: string | null }>;
+    hybridOnlineSlot: string | null;
     registeredAt: string;
     updatedAt: string;
     daysEnrolled: number;
@@ -413,18 +415,38 @@ function TutorField({
  * on, and only for an online/hybrid student. Saves immediately, like TutorField
  * above, rather than waiting for the bigger "Edit details" modal.
  */
+/** Does this tutor's coverage plausibly reach this student's online sitting? A hint for sorting, not the authoritative match. */
+function suggestsOnlineTutor(
+  assignment: LecturerAssignment | undefined,
+  level: string | undefined,
+  onlineSlot: string | null | undefined,
+): boolean {
+  if (!assignment || !level || !onlineSlot) return false;
+  if (!coversClassType(assignment, "online")) return false;
+  const levelOk = !assignment.levels.length || assignment.levels.some((l) => l.toUpperCase() === level.toUpperCase());
+  const slotOk =
+    !assignment.sessionSlots.length || assignment.sessionSlots.some((s) => s.toLowerCase() === onlineSlot.toLowerCase());
+  return levelOk && slotOk;
+}
+
 function CoTutorsField({
   studentId,
   primaryTutorId,
   current,
+  level,
+  onlineSlot,
   onChanged,
 }: {
   studentId: string;
   primaryTutorId: string | null;
   current: Array<{ id: string; name: string }>;
+  /** The student's level — narrows which tutors get the "Suggested" badge. */
+  level?: string;
+  /** Their online sitting (the whole slot for an online-only student, the online half of a hybrid combo) — same purpose. */
+  onlineSlot?: string | null;
   onChanged: () => void;
 }) {
-  const [tutors, setTutors] = useState<Array<{ id: string; name: string }>>([]);
+  const [tutors, setTutors] = useState<Array<{ id: string; name: string; suggested: boolean }>>([]);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
 
@@ -436,16 +458,24 @@ function CoTutorsField({
       const payload = await response.json().catch(() => ({}));
       if (cancelled) return;
       setTutors(
-        (payload.lecturers || []).map((tutor: { id: string; user: { name: string | null; email: string } }) => ({
-          id: tutor.id,
-          name: tutor.user.name || tutor.user.email,
-        })),
+        (payload.lecturers || []).map(
+          (tutor: { id: string; user: { name: string | null; email: string }; assignment: LecturerAssignment }) => ({
+            id: tutor.id,
+            name: tutor.user.name || tutor.user.email,
+            // A rough same-signal-as-the-real-engine hint, not an
+            // authoritative match (that lives server-side in
+            // tutor-auto-assign.ts and runs at signup) — this just orders the
+            // picker so the office is not scanning the whole tutor directory
+            // by hand to find who actually covers this student's online sitting.
+            suggested: suggestsOnlineTutor(tutor.assignment, level, onlineSlot),
+          }),
+        ),
       );
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [level, onlineSlot]);
 
   async function toggle(lecturerId: string, checked: boolean) {
     const next = checked
@@ -472,11 +502,17 @@ function CoTutorsField({
   }
 
   const currentIds = new Set(current.map((c) => c.id));
-  const options = tutors.filter((tutor) => tutor.id !== primaryTutorId);
+  const options = tutors
+    .filter((tutor) => tutor.id !== primaryTutorId)
+    // Suggested tutors first, so the office picks from the top of the list
+    // instead of hunting through everyone who teaches anywhere.
+    .sort((a, b) => Number(b.suggested) - Number(a.suggested));
 
   return (
     <div className="min-w-0">
-      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">Additional tutors</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+        Additional tutors {onlineSlot ? <span className="font-normal normal-case">— suggested by online sitting</span> : null}
+      </p>
       <div className="mt-1 max-h-32 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--background)] p-2">
         {options.length === 0 ? (
           <p className="px-1 py-1 text-xs text-[var(--muted)]">No other tutors to add.</p>
@@ -490,6 +526,11 @@ function CoTutorsField({
                 onChange={(event) => void toggle(tutor.id, event.target.checked)}
               />
               <span>{tutor.name}</span>
+              {tutor.suggested ? (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                  Suggested
+                </span>
+              ) : null}
             </label>
           ))
         )}
@@ -1351,6 +1392,8 @@ export default function StudentDossierPage() {
                   studentId={identity.id}
                   primaryTutorId={identity.tutor?.id ?? null}
                   current={identity.coTutors}
+                  level={identity.level}
+                  onlineSlot={identity.deliveryMode === "online" ? identity.sessionSlot : identity.hybridOnlineSlot}
                   onChanged={() => void load(false)}
                 />
               ) : null}

@@ -104,6 +104,7 @@ export type MomentId =
   | "welcome-tour"
   | "goal"
   | "login-upgrade"
+  | "hybrid-combo"
   | "cohort-check"
   | "level-advance"
   | "office-reply"
@@ -162,6 +163,21 @@ const MOMENTS: Record<MomentId, Definition> = {
     kind: "modal",
     dockLabel: "Set up your login",
     dockBlurb: "Swap your temporary login for an email and password you'll remember.",
+  },
+  /**
+   * "Pick your hybrid sittings." Existing hybrid students predate the combo
+   * picker (lib/hybrid-combo.ts) — they were on a single vague "hybrid" mode
+   * with no concrete online sitting, which is the same gap that let one
+   * tutor's coverage silently absorb every online/hybrid student at their
+   * level. Due whenever a hybrid student has no `hybridOnlineSlot` on file.
+   * Above cohort-check: this decides which two tutors they actually have,
+   * not just which batch they're in.
+   */
+  "hybrid-combo": {
+    priority: 73,
+    kind: "modal",
+    dockLabel: "Pick your class times",
+    dockBlurb: "Tell us your campus and online sittings so we can pair you with both tutors.",
   },
   /**
    * "Which one are you?" — two taps, no typing, for the account the cohort

@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { toPlayableUrl } from "@/lib/video-library";
 
 export async function GET() {
@@ -18,6 +18,7 @@ export async function GET() {
       include: {
         payments: true,
         branch: { select: { name: true } },
+        coTutors: { select: { lecturerId: true, role: true } },
       },
     });
 
@@ -25,10 +26,10 @@ export async function GET() {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
 
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType };
+    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const totalPaid = student.payments
-      .filter((payment) => payment.status === "completed")
+      .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
       .reduce((sum, payment) => sum + payment.amount, 0);
     const requiredDeposit = requiredDepositFor(feeLookup);
     const canUnlockMaterials = totalPaid >= requiredDeposit;
@@ -66,17 +67,41 @@ export async function GET() {
      * bug so confusing to look at: the same upload showed on the Watch shelf
      * and not in Materials. The two queries now agree.
      */
+    /**
+     * OFFICE TARGETING NARROWS, IT NEVER WIDENS.
+     *
+     * The level match above is unchanged. On top of it, an office upload may
+     * name one branch and/or one sitting (null = "every one"), and may be
+     * hidden from students entirely (`visibleToStudents = false`, staff-only).
+     * A tutor's own upload sets none of these, so it still reaches the whole
+     * level exactly as before. Batch lives in the admission JSON and is applied
+     * in memory below.
+     */
     const records = await prisma.material.findMany({
       where: {
-        OR: [{ level: student.level }, { course: { level: student.level } }],
+        AND: [
+          { OR: [{ level: student.level }, { course: { level: student.level } }] },
+          { OR: [{ branchId: null }, { branchId: student.branchId }] },
+          { OR: [{ sessionSlot: null }, { sessionSlot: student.sessionSlot }] },
+          { visibleToStudents: true },
+        ],
       },
       include: {
         course: {
           select: { title: true, level: true },
         },
+        lecturer: { select: { id: true, user: { select: { name: true, email: true } } } },
       },
       orderBy: { createdAt: "desc" },
     });
+
+    const studentBatch =
+      student.admission && typeof student.admission === "object"
+        ? String((student.admission as Record<string, unknown>).batch ?? "").toLowerCase()
+        : "";
+    const visible = records.filter(
+      (material) => !material.batch || material.batch.toLowerCase() === studentBatch,
+    );
 
     /**
      * The client reads `fileUrl`; the column is `filePath`. Expose both so the
@@ -87,10 +112,26 @@ export async function GET() {
      * as absolute URLs, and prefixing those with a slash produced
      * `/https://…`, a link that can only 404.
      */
-    const materials = records.map((material) => ({
-      ...material,
-      fileUrl: toPlayableUrl(material.filePath),
-    }));
+    // Who sent this — shown on the student's materials list so a hybrid
+    // student (two tutors) knows which one it came from. `Material.lecturerId`
+    // already exists and is used server-side for tutor roster/notification
+    // targeting, but was never surfaced to the student before now.
+    const onlineCoTutorId = student.coTutors.find((row) => row.role === "online")?.lecturerId ?? null;
+    const materials = visible.map((material) => {
+      const { lecturer, ...rest } = material;
+      const sentBy = lecturer
+        ? {
+            name: lecturer.user.name || lecturer.user.email,
+            role:
+              student.deliveryMode === "hybrid"
+                ? material.lecturerId === onlineCoTutorId
+                  ? ("online" as const)
+                  : ("physical" as const)
+                : null,
+          }
+        : null;
+      return { ...rest, fileUrl: toPlayableUrl(material.filePath), sentBy };
+    });
 
     return NextResponse.json({ materials, locked: false, totalPaid, tuitionFee });
   } catch (error) {

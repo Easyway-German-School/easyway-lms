@@ -21,6 +21,9 @@ type Material = {
   uploadedBy: string;
   createdAt: string;
   course?: { title: string; level?: string };
+  /** Who sent this — null for an office upload. `role` only set for a hybrid
+   * student (two tutors); null for everyone else since there is only one. */
+  sentBy?: { name: string; role: "physical" | "online" | null } | null;
 };
 
 type Tab = "watch" | "documents";
@@ -253,10 +256,19 @@ export default function MaterialsPage() {
                         {material.description ? (
                           <p className="mt-1 truncate text-sm text-[var(--muted)]">{material.description}</p>
                         ) : null}
-                        <div className="mt-2 flex gap-4 text-xs text-[var(--muted)]">
+                        <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-[var(--muted)]">
                           {material.course ? <span>{material.course.title}</span> : null}
                           <span>{formatFileSize(material.fileSize)}</span>
                           <span>{new Date(material.createdAt).toLocaleDateString()}</span>
+                          {material.sentBy ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 font-semibold text-[var(--accent)]">
+                              From {material.sentBy.name}
+                              {material.sentBy.role === "online" ? " · Online tutor" : null}
+                              {material.sentBy.role === "physical" ? " · Campus tutor" : null}
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-[var(--surface-alt)] px-2.5 py-1 font-semibold">From the office</span>
+                          )}
                         </div>
                       </div>
                       <a

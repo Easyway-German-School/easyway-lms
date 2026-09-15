@@ -15,6 +15,7 @@ import ExamCampaignMoment from "@/components/moment/ExamCampaignMoment";
 import LoginUpgradeMoment from "@/components/moment/LoginUpgradeMoment";
 import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
 import TravelPackageNotifyNudge from "@/components/moment/TravelPackageNotifyNudge";
+import HybridComboMoment from "@/components/moment/HybridComboMoment";
 import AssignmentsOpenMoment from "@/components/moment/AssignmentsOpenMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
@@ -656,6 +657,15 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
         TravelPackageNotifyNudge.
       */}
       <TravelPackageNotifyNudge />
+
+      {/*
+        "Pick your hybrid sittings" — an existing hybrid student who signed up
+        before the combo picker existed, with no concrete online sitting on
+        file yet. Not behind `hasAccess` for the same reason as the moment
+        above: this decides which tutors they get, which matters whether or
+        not they've paid. See HybridComboMoment.
+      */}
+      <HybridComboMoment />
 
       {/*
         Message popups, mounted once per shell so they follow the reader onto
