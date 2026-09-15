@@ -387,7 +387,9 @@ export async function POST(request: Request) {
      * the same game again is not possible (POST /api/games already caps
      * active stories per room), but this keeps the rule honest either way.
      */
-    if (gameMatch) {
+    // A game only ever starts in a cohort room, so `channel.space` is always
+    // set when `gameMatch` is — this guard is for TypeScript, not runtime.
+    if (gameMatch && channel.space) {
       notify({
         to: {
           students: {
