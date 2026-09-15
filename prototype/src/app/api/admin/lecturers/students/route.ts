@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { deriveStudentAccess } from "@/lib/access";
 import {
   belongsToLecturer,
   isAssigned,
   readAssignment,
   studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment, isTravelPackagePathway } from "@/lib/payment";
+import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { accessFromStudent } from "@/lib/student-access";
 import { setStudentTutor } from "@/lib/tutor-pairing";
 
 /**
@@ -102,30 +102,18 @@ type RawStudent = {
 };
 
 function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
-  const totalPaid = student.payments
-    .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
-    .reduce((sum, payment) => sum + payment.amount, 0);
-
-  const feeLookup = {
-    level: student.level,
-    branch: student.branch?.name ?? null,
-    classType: student.classType,
-    pathway: student.pathway,
-  };
-  // Same ledger-aware fields the student's own portal and the admin remote
-  // view feed in — omitting them is what let this tag disagree with whether
-  // the student could actually get into class.
-  const access = deriveStudentAccess({
-    totalPaid,
-    tuitionFee: tuitionFeeFor(feeLookup),
-    requiredDeposit: requiredDepositFor(feeLookup),
-    level: student.level,
-    charges: student.tuitionCharges,
-    flatDeposit: isTravelPackagePathway(student.pathway),
-    classesStartedAt: student.classesStartedAt,
-    enrolledAt: student.createdAt,
-    paymentGraceUntil: student.paymentGraceUntil,
-  });
+  const receivedTuitionPayments = student.payments.filter(
+    (payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description),
+  );
+  // Same computation the student's own portal and the admin remote view run
+  // (lib/student-access.ts) — not a hand-rolled copy, which is exactly what
+  // let this tag disagree with whether the student could actually get into
+  // class. `paymentPlanOnTrack` is skipped: it is its own async query per
+  // student, too expensive for a search result of twenty-five, and skipping
+  // it only ever makes `hasPaid` STRICTER than the truth, never wrongly "paid".
+  const accessInput = { ...student, payments: receivedTuitionPayments };
+  const access = accessFromStudent(accessInput);
+  const totalPaid = access.totalPaid;
 
   return {
     id: student.id,

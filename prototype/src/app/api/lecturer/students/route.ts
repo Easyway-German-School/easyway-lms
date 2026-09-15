@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment, isTravelPackagePathway } from "@/lib/payment";
+import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { accessFromStudent } from "@/lib/student-access";
 import {
   belongsToLecturer,
   describeAssignment,
@@ -94,29 +94,20 @@ export async function GET() {
             ? (student.admission as Record<string, unknown>)
             : {};
 
-        const totalPaid = student.payments
-          .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
-          .reduce((sum, payment) => sum + payment.amount, 0);
-        const feeLookup = {
-          level: student.level,
-          branch: student.branch?.name ?? null,
-          classType: student.classType,
-          pathway: student.pathway,
-        };
-        // Same ledger-aware fields the student's own portal and the admin
-        // remote view feed in — omitting them is what let this tag disagree
-        // with whether the student could actually get into the room.
-        const access = deriveStudentAccess({
-          totalPaid,
-          tuitionFee: tuitionFeeFor(feeLookup),
-          requiredDeposit: requiredDepositFor(feeLookup),
-          level: student.level,
-          charges: student.tuitionCharges,
-          flatDeposit: isTravelPackagePathway(student.pathway),
-          classesStartedAt: student.classesStartedAt,
-          enrolledAt: student.createdAt,
-          paymentGraceUntil: student.paymentGraceUntil,
-        });
+        const receivedTuitionPayments = student.payments.filter(
+          (payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description),
+        );
+        // Same computation the student's own portal and the admin remote view
+        // run (lib/student-access.ts) — not a hand-rolled copy, which is
+        // exactly what let this tag disagree with whether the student could
+        // actually get into the room. `paymentPlanOnTrack` is skipped here on
+        // purpose: it is its own async query per student, too expensive for a
+        // roster of fifty, and skipping it only ever makes this tag STRICTER
+        // than the truth (a same-or-worse "Owing" instead of a false "Paid"),
+        // never the wrong direction.
+        const accessInput = { ...student, payments: receivedTuitionPayments };
+        const access = accessFromStudent(accessInput);
+        const totalPaid = access.totalPaid;
 
         const present = student.attendances.filter((attendance) => attendance.present).length;
         const attendanceRate = student.attendances.length

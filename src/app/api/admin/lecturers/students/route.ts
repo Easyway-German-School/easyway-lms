@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { deriveStudentAccess } from "@/lib/access";
 import {
   belongsToLecturer,
   isAssigned,
   readAssignment,
   studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
-import { requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { accessFromStudent } from "@/lib/student-access";
 import { setStudentTutor } from "@/lib/tutor-pairing";
 
 /**
@@ -56,13 +56,21 @@ const STUDENT_SHAPE = {
   level: true,
   sessionSlot: true,
   classType: true,
+  pathway: true,
   deliveryMode: true,
   studentCode: true,
   admission: true,
   tutorId: true,
+  classesStartedAt: true,
+  createdAt: true,
+  paymentGraceUntil: true,
   user: { select: { name: true, email: true } },
   branch: { select: { name: true } },
-  payments: { select: { amount: true, status: true } },
+  payments: { select: { amount: true, status: true, description: true } },
+  tuitionCharges: {
+    where: { deletedAt: null },
+    select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+  },
   tutor: { select: { id: true, user: { select: { name: true, email: true } } } },
 } as const;
 
@@ -71,30 +79,41 @@ type RawStudent = {
   level: string;
   sessionSlot: string;
   classType: string;
+  pathway: string;
   deliveryMode: string;
   studentCode: string | null;
   tutorId: string | null;
+  classesStartedAt: Date | null;
+  createdAt: Date;
+  paymentGraceUntil: Date | null;
   user: { name: string | null; email: string };
   branch: { name: string } | null;
-  payments: Array<{ amount: number; status: string }>;
+  payments: Array<{ amount: number; status: string; description?: string | null }>;
+  tuitionCharges: Array<{
+    id: string;
+    level: string;
+    amount: number;
+    waivedAmount: number;
+    legacyArrears: boolean;
+    createdAt: Date;
+    settledAt: Date | null;
+  }>;
   tutor: { id: string; user: { name: string | null; email: string } } | null;
 };
 
 function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
-  const totalPaid = student.payments
-    .filter((payment) => payment.status === "completed")
-    .reduce((sum, payment) => sum + payment.amount, 0);
-
-  const feeLookup = {
-    level: student.level,
-    branch: student.branch?.name ?? null,
-    classType: student.classType,
-  };
-  const access = deriveStudentAccess({
-    totalPaid,
-    tuitionFee: tuitionFeeFor(feeLookup),
-    requiredDeposit: requiredDepositFor(feeLookup),
-  });
+  const receivedTuitionPayments = student.payments.filter(
+    (payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description),
+  );
+  // Same computation the student's own portal and the admin remote view run
+  // (lib/student-access.ts) — not a hand-rolled copy, which is exactly what
+  // let this tag disagree with whether the student could actually get into
+  // class. `paymentPlanOnTrack` is skipped: it is its own async query per
+  // student, too expensive for a search result of twenty-five, and skipping
+  // it only ever makes `hasPaid` STRICTER than the truth, never wrongly "paid".
+  const accessInput = { ...student, payments: receivedTuitionPayments };
+  const access = accessFromStudent(accessInput);
+  const totalPaid = access.totalPaid;
 
   return {
     id: student.id,
