@@ -107,15 +107,22 @@ async function syncLecturerClasses(lecturerId: string, levels: string[]) {
  * student read "0 students" on their own card while that student sat on their
  * register. Two different answers to the same question on two screens is how
  * an office stops trusting either.
+ *
+ * MUST filter `status: "active"`, same as every other roster reader
+ * (resolveRoster, /api/admin/lecturers/students, /api/lecturer/profile) —
+ * this was the one that forgot it, so a tutor with paused/graduated/withdrawn
+ * students on the books read "5 students" on their card while the roster
+ * panel underneath, filtered correctly, showed 1.
  */
 async function countStudents(assignment: ReturnType<typeof readAssignment>, lecturerId: string) {
   const where = studentWhereForLecturer(assignment, lecturerId);
   if (!where) return 0;
+  const activeWhere = { ...(where as Record<string, unknown>), status: "active" };
   if (!hasBatchConstraint(assignment)) {
-    return prisma.student.count({ where: where as any });
+    return prisma.student.count({ where: activeWhere as any });
   }
   const rows = await prisma.student.findMany({
-    where: where as any,
+    where: activeWhere as any,
     select: {
       admission: true,
       tutorId: true,
