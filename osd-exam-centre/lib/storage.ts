@@ -61,9 +61,39 @@ async function storeToS3(buffer: Buffer, key: string, contentType: string): Prom
   const bucket = process.env.S3_BUCKET!;
   await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: buffer, ContentType: contentType }));
 
+  // No S3_PUBLIC_BASE_URL set: default to a private bucket served through
+  // this app's own admin-gated proxy (/api/files/<key> — see
+  // app/api/files/[...key]/route.ts) rather than a raw bucket URL. These are
+  // passport photos and bank-transfer slips; a public (even "unlisted") URL
+  // to one is a standing leak the moment it appears in an email, a browser
+  // history, or a log line. Set S3_PUBLIC_BASE_URL explicitly (an R2 custom
+  // domain, a CDN) only if the bucket is deliberately public.
   const publicBase = process.env.S3_PUBLIC_BASE_URL;
-  const url = publicBase ? `${publicBase.replace(/\/$/, "")}/${key}` : `${process.env.S3_ENDPOINT}/${bucket}/${key}`;
+  const url = publicBase ? `${publicBase.replace(/\/$/, "")}/${key}` : `/api/files/${key}`;
   return { url, key };
+}
+
+export type ReadFile = { buffer: Buffer; contentType: string };
+
+/** Reads a file back from the S3-compatible bucket — used by the admin-only proxy route, never called directly with a client-supplied path. */
+export async function readUpload(key: string): Promise<ReadFile | null> {
+  if (!s3Configured()) return null;
+  const { S3Client, GetObjectCommand } = await import("@aws-sdk/client-s3");
+  const client = new S3Client({
+    region: process.env.S3_REGION || "auto",
+    endpoint: process.env.S3_ENDPOINT,
+    credentials: {
+      accessKeyId: process.env.S3_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+    },
+  });
+  try {
+    const result = await client.send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key }));
+    const buffer = Buffer.from(await result.Body!.transformToByteArray());
+    return { buffer, contentType: result.ContentType || "application/octet-stream" };
+  } catch {
+    return null;
+  }
 }
 
 function guessExtension(contentType: string): string {
