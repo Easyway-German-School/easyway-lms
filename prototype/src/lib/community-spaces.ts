@@ -289,6 +289,8 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
       level: true,
       sessionSlot: true,
       classType: true,
+      deliveryMode: true,
+      hybridOnlineSlot: true,
       branch: { select: { name: true } },
     },
   });
@@ -327,12 +329,36 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
     sessionSlot,
   });
 
+  const spaceIds = space ? [space.id] : [];
+
+  /**
+   * A hybrid student is in TWO cohorts, not one — their campus sitting and
+   * their online sitting each run their own group chat, same as any other
+   * physical or online-only student's does. Before this they resolved to
+   * exactly one room (their campus one) and had no online-cohort room at
+   * all, whichever mode they actually spent more of their week in. Every
+   * consumer of `spaceIds` already treats it as a set (`.includes`,
+   * `{ in: … }`), so adding a second id here is the whole fix.
+   */
+  if (student.deliveryMode === "hybrid" && student.hybridOnlineSlot) {
+    const onlineBranch = await prisma.branch.findFirst({
+      where: { mode: "online", ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, name: true },
+    });
+    if (onlineBranch) {
+      const onlineSlot = normalizeSlot(student.hybridOnlineSlot);
+      const onlineSpace = await ensureSpaceForCohort({
+        branchId: onlineBranch.id,
+        branchName: onlineBranch.name,
+        level: student.level,
+        sessionSlot: onlineSlot,
+      });
+      if (onlineSpace) spaceIds.push(onlineSpace.id);
+    }
+  }
+
   return {
-    // EXACTLY ONE ROOM, and this is where the sitting boundary is enforced.
-    // A1 Morning resolves to the A1 Morning space and nothing else, so an A1
-    // Afternoon channel id posted by hand fails the membership check in
-    // authorizeChannel rather than being filtered out in the UI.
-    spaceIds: space ? [space.id] : [],
+    spaceIds,
     isStaff: false,
     branchId: student.branchId,
     level: student.level,

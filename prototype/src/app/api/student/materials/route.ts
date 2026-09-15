@@ -18,6 +18,7 @@ export async function GET() {
       include: {
         payments: true,
         branch: { select: { name: true } },
+        coTutors: { select: { lecturerId: true, role: true } },
       },
     });
 
@@ -89,6 +90,7 @@ export async function GET() {
         course: {
           select: { title: true, level: true },
         },
+        lecturer: { select: { id: true, user: { select: { name: true, email: true } } } },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -110,10 +112,26 @@ export async function GET() {
      * as absolute URLs, and prefixing those with a slash produced
      * `/https://…`, a link that can only 404.
      */
-    const materials = visible.map((material) => ({
-      ...material,
-      fileUrl: toPlayableUrl(material.filePath),
-    }));
+    // Who sent this — shown on the student's materials list so a hybrid
+    // student (two tutors) knows which one it came from. `Material.lecturerId`
+    // already exists and is used server-side for tutor roster/notification
+    // targeting, but was never surfaced to the student before now.
+    const onlineCoTutorId = student.coTutors.find((row) => row.role === "online")?.lecturerId ?? null;
+    const materials = visible.map((material) => {
+      const { lecturer, ...rest } = material;
+      const sentBy = lecturer
+        ? {
+            name: lecturer.user.name || lecturer.user.email,
+            role:
+              student.deliveryMode === "hybrid"
+                ? material.lecturerId === onlineCoTutorId
+                  ? ("online" as const)
+                  : ("physical" as const)
+                : null,
+          }
+        : null;
+      return { ...rest, fileUrl: toPlayableUrl(material.filePath), sentBy };
+    });
 
     return NextResponse.json({ materials, locked: false, totalPaid, tuitionFee });
   } catch (error) {

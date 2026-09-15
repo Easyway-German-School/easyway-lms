@@ -450,6 +450,66 @@ export function belongsToLecturer(
   return matchesBatch(assignment, student.admission);
 }
 
+export type MatchClassType = "physical" | "online";
+
+/** Does this tutor's coverage reach this delivery mode? Empty, or every class type selected, both mean "no restriction". */
+export function coversClassType(assignment: LecturerAssignment, classType: MatchClassType): boolean {
+  const types = assignment.classTypes.map((type) => type.toLowerCase());
+  return !types.length || types.length >= CLASS_TYPES.length || types.includes(classType);
+}
+
+export type AssignmentAttemptStudent = {
+  branchId: string | null;
+  level: string;
+  sessionSlot: string;
+  admission?: unknown;
+};
+
+/**
+ * Does this tutor's coverage match one concrete sitting — one side of a
+ * hybrid combo, or the whole of a physical/online-only student? Used both by
+ * the write-time auto-assign engine (lib/tutor-auto-assign.ts) and, for
+ * suggesting a co-tutor, the admin student dossier — hence living here
+ * rather than in the (server-only) auto-assign module.
+ *
+ * Branch/level/session are checked here directly — `belongsToLecturer` only
+ * covers the in-memory batch/named-tutor half of the question, on the
+ * assumption a SQL `where` already did this part.
+ */
+export function assignmentMatchesStudent(
+  assignment: LecturerAssignment,
+  classType: MatchClassType,
+  student: AssignmentAttemptStudent,
+): boolean {
+  if (!isAssigned(assignment)) return false;
+
+  const level = student.level.toUpperCase();
+  const sessionSlot = student.sessionSlot.toLowerCase();
+
+  const branchLevelSessionOk = assignment.groups.length
+    ? assignment.groups.some(
+        (group) =>
+          group.branchId === student.branchId &&
+          group.level.toUpperCase() === level &&
+          group.sessionSlot.toLowerCase() === sessionSlot,
+      )
+    : Boolean(student.branchId) &&
+      assignment.branchIds.includes(student.branchId as string) &&
+      assignment.levels.some((candidate) => candidate.toUpperCase() === level) &&
+      (!assignment.sessionSlots.length ||
+        assignment.sessionSlots.some((candidate) => candidate.toLowerCase() === sessionSlot));
+
+  if (!branchLevelSessionOk) return false;
+  if (!coversClassType(assignment, classType)) return false;
+
+  return belongsToLecturer(assignment, null, {
+    admission: student.admission,
+    branchId: student.branchId,
+    level: student.level,
+    sessionSlot: student.sessionSlot,
+  });
+}
+
 /**
  * Batch lives in the admission JSON, so it is filtered in memory. Coarse: any
  * of the tutor's months (standalone picker or per-group) is a match. Use

@@ -31,71 +31,14 @@ import { KIND, notify } from "@/lib/notify";
 import { featuresFor } from "@/lib/tenant/features-server";
 import { setStudentCoTutors, setStudentTutor } from "@/lib/tutor-pairing";
 import {
-  belongsToLecturer,
-  CLASS_TYPES,
-  isAssigned,
+  assignmentMatchesStudent,
   readAssignment,
-  type LecturerAssignment,
+  type AssignmentAttemptStudent,
+  type MatchClassType as AssignmentMatchClassType,
 } from "@/lib/lecturer-assignment";
 
-type MatchClassType = "physical" | "online";
-
-type AttemptStudent = {
-  branchId: string | null;
-  level: string;
-  sessionSlot: string;
-  admission?: unknown;
-};
-
-function coversClassType(assignment: LecturerAssignment, classType: MatchClassType): boolean {
-  const types = assignment.classTypes.map((type) => type.toLowerCase());
-  // Empty, or every class type selected, both mean "no restriction" — the
-  // same rule studentWhereForAssignment uses.
-  if (!types.length || types.length >= CLASS_TYPES.length) return true;
-  return types.includes(classType);
-}
-
-/**
- * Does this tutor's coverage cover this student's attempt (one side of a
- * hybrid combo, or the whole of a physical/online-only student)?
- *
- * Branch/level/session are checked here directly — `belongsToLecturer` only
- * covers the in-memory batch/named-tutor half of the question, on the
- * assumption a SQL `where` already did this part.
- */
-function lecturerMatchesAttempt(
-  assignment: LecturerAssignment,
-  classType: MatchClassType,
-  student: AttemptStudent,
-): boolean {
-  if (!isAssigned(assignment)) return false;
-
-  const level = student.level.toUpperCase();
-  const sessionSlot = student.sessionSlot.toLowerCase();
-
-  const branchLevelSessionOk = assignment.groups.length
-    ? assignment.groups.some(
-        (group) =>
-          group.branchId === student.branchId &&
-          group.level.toUpperCase() === level &&
-          group.sessionSlot.toLowerCase() === sessionSlot,
-      )
-    : Boolean(student.branchId) &&
-      assignment.branchIds.includes(student.branchId as string) &&
-      assignment.levels.some((candidate) => candidate.toUpperCase() === level) &&
-      (!assignment.sessionSlots.length ||
-        assignment.sessionSlots.some((candidate) => candidate.toLowerCase() === sessionSlot));
-
-  if (!branchLevelSessionOk) return false;
-  if (!coversClassType(assignment, classType)) return false;
-
-  return belongsToLecturer(assignment, null, {
-    admission: student.admission,
-    branchId: student.branchId,
-    level: student.level,
-    sessionSlot: student.sessionSlot,
-  });
-}
+type MatchClassType = AssignmentMatchClassType;
+type AttemptStudent = AssignmentAttemptStudent;
 
 type MatchOutcome =
   | { status: "matched"; lecturerId: string; lecturerName: string }
@@ -124,7 +67,7 @@ async function findMatch(
     },
   });
 
-  const matches = lecturers.filter((lecturer) => lecturerMatchesAttempt(readAssignment(lecturer), classType, student));
+  const matches = lecturers.filter((lecturer) => assignmentMatchesStudent(readAssignment(lecturer), classType, student));
 
   if (matches.length === 0) return { status: "no-match" };
   if (matches.length > 1) return { status: "ambiguous", lecturerIds: matches.map((lecturer) => lecturer.id) };
