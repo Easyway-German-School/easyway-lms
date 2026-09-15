@@ -1,0 +1,229 @@
+// The ÖSD Exam Centre's own database. Deliberately separate from the
+// EasyWay LMS schema — a different Neon project/branch, not shared tables in
+// the same database. The two products are linked only by a "book prep
+// classes" link out to the LMS, never by a foreign key. See ../README.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // DATABASE_URL is the POOLED connection (via PgBouncer) — what the app
+  // actually queries with, since every serverless invocation is a fresh
+  // connection. Migrations use DIRECT_DATABASE_URL instead: PgBouncer's
+  // transaction mode doesn't support the prepared statements/advisory locks
+  // `prisma migrate` needs. Same split the EasyWay LMS's own schema uses —
+  // see prototype/.env.example.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+/// One sitting: a date, a level, a venue, a capacity, a fee. An admin
+/// publishes it before it appears on the public booking page.
+model ExamSession {
+  id           String   @id @default(cuid())
+  examBody     String   @default("ÖSD")
+  level        String
+  title        String
+  venueName    String
+  venueAddress String
+  startDate    DateTime
+  endDate      DateTime
+
+  registrationDeadline DateTime
+  /// Seats. Seat NUMBERS are assigned in blocks of 50 counting down
+  /// (50→1, then 100→51, …) — see lib/seat-numbering.ts.
+  capacity Int
+
+  /// paper | computer — a whole sitting is one format, not chosen per
+  /// candidate (see the Easyway ÖSD Examination Operations Manual, §35).
+  examFormat String @default("paper")
+
+  /// Naira, whole exam, all four skills.
+  feeWholeExam Int
+  published    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  modulePrices ExamModulePrice[]
+  bookings     ExamBooking[]
+
+  @@index([published, startDate])
+}
+
+/// A per-skill price, for a candidate who only needs to re-sit one module
+/// rather than the whole exam — this is a real ÖSD/Goethe booking option
+/// (see the reference confirmation this was modelled on: modules picked
+/// individually, priced individually, summed into one total).
+model ExamModulePrice {
+  id        String      @id @default(cuid())
+  sessionId String
+  session   ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  /// reading | listening | writing | speaking
+  module    String
+  price     Int
+
+  @@unique([sessionId, module])
+}
+
+/// One candidate's booking for one sitting.
+model ExamBooking {
+  id            String      @id @default(cuid())
+  /// Human-typeable, shown on the confirmation and used for the status
+  /// lookup — see lib/reference-code.ts. Never the raw cuid: a candidate
+  /// reading this off a screenshot over the phone needs it short and
+  /// unambiguous.
+  referenceCode String      @unique
+  sessionId     String
+  session       ExamSession @relation(fields: [sessionId], references: [id])
+
+  // ----- personal data — originally modelled on a reference Goethe
+  // confirmation's field shape; extended to match the Easyway ÖSD
+  // Examination Operations Manual §7 ("Required Candidate Information")
+  // once Jason sent it. -----
+  fullName      String
+  email         String
+  phone         String
+  addressLine   String
+  city          String
+  /// Residential/contact country — not country of birth (below).
+  country       String @default("Nigeria")
+  dateOfBirth   DateTime
+  placeOfBirth  String
+  countryOfBirth String
+  nationality    String
+  /// "where required by the applicable system" (Manual §7) — optional on
+  /// purpose, not every candidate needs to state it.
+  gender         String?
+
+  /// Passport/ID details — Manual §7 "passport/ID details; valid
+  /// identification document". idType is almost always "passport" for an
+  /// international examination but the manual doesn't hard-code that.
+  idType   String
+  idNumber String
+  idExpiry DateTime
+
+  /// Manual §7 "first attempt/repeat attempt" and §16 "special needs".
+  isRepeatAttempt Boolean @default(false)
+  specialNeeds    String?
+
+  /// Either ["full"] or a subset of reading/listening/writing/speaking.
+  modules  String[]
+  feeTotal Int
+
+  // ----- payment -----
+  /// bank_transfer | card — bank_transfer is manual (an admin verifies a
+  /// slip); card settles automatically via Flutterwave. See lib/payments.ts.
+  paymentMethod          String?
+  /// unpaid | pending_verification | paid | refund_pending | refund_failed
+  ///
+  /// The last two exist for one specific, real scenario: a sitting fills up
+  /// (via bank transfers an admin already verified) in the moments between
+  /// a candidate starting a card checkout and Flutterwave confirming the
+  /// charge. The card payment succeeds — real money moves — but there is no
+  /// seat left to give them. See lib/booking.ts settleCardPayment(), which
+  /// automatically requests a Flutterwave refund the instant this happens,
+  /// rather than silently leaving someone charged with nothing to show for
+  /// it. `refund_pending` if Flutterwave accepted the refund request (the
+  /// money itself can take days to actually land back on their card);
+  /// `refund_failed` if even the automatic refund attempt was rejected —
+  /// that one needs an admin to refund by hand, and is flagged loudly on
+  /// the dashboard for exactly that reason. Bank transfer can never reach
+  /// either state — an admin verifies the amount before anything is marked
+  /// paid, so there is nothing to accidentally overcharge.
+  paymentStatus          String    @default("unpaid")
+  transferProofUrl       String?
+  transferReference      String?
+  /// Human-readable reason a payment isn't settled — a rejected bank slip,
+  /// or (for the refund case above) an explanation for the candidate.
+  transferRejectedReason String?
+  verifiedBy             String?
+  verifiedAt             DateTime?
+  /// When the refund request was sent to Flutterwave — not when the money
+  /// actually lands back on the candidate's card, which this app has no
+  /// way to observe (no refund-completion webhook is wired up).
+  refundRequestedAt      DateTime?
+
+  /// When the "I have read the rules and consent to my data being used for
+  /// registration and certification" checkbox was ticked — a timestamp, not
+  /// just a boolean, because "did we ask for consent" is exactly the kind of
+  /// thing worth being able to prove later. Null on a manually-added booking
+  /// (see lib/booking.ts createManualBooking) — the candidate never saw the
+  /// online form to consent to in the first place; the office is vouching
+  /// for the data instead.
+  consentAcceptedAt DateTime?
+
+  // ----- documents -----
+  passportPhotoUrl       String?
+  passportDataPageUrl    String?
+  /// pending | approved | rejected
+  documentStatus         String  @default("pending")
+  documentRejectedReason String?
+
+  /// Only set once payment is verified — see lib/seat-numbering.ts. Null
+  /// means "not yet confirmed", not "seat 0".
+  seatNumber Int?
+  /// booked | confirmed | cancelled | no_show
+  status     String @default("booked")
+
+  /// Set only when the office booked this on a candidate's behalf (a phone
+  /// or walk-in registration) — see lib/booking.ts createManualBooking().
+  /// Null means the candidate booked it themselves online.
+  addedByOffice Boolean @default(false)
+
+  /// Which nurture-drip stages have already fired, so the cron sweep is
+  /// idempotent without a separate notification-log table. See
+  /// lib/nurture.ts. Timed at 7 days and 24 hours before the exam, per the
+  /// Easyway ÖSD Examination Operations Manual §9's candidate journey (was
+  /// 7 days / 3 days before the manual specified the exact schedule).
+  nurtureDay2Sent      Boolean @default(false)
+  nurtureWeekSent      Boolean @default(false)
+  nurtureDayBeforeSent Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  supportMessages SupportMessage[]
+
+  @@index([sessionId])
+  @@index([email])
+  @@index([paymentStatus])
+}
+
+/// "Need help?" — a candidate messaging the office directly, distinct from
+/// the nurture drip's prep-class upsell link (see lib/nurture.ts). Tied to
+/// a booking when the candidate has one, but not required: someone with a
+/// question before they've registered can still reach the office.
+model SupportMessage {
+  id         String       @id @default(cuid())
+  bookingId  String?
+  booking    ExamBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  name    String
+  email   String
+  message String
+
+  /// open | resolved
+  status     String    @default("open")
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt])
+  @@index([bookingId])
+}
+
+/// Every /admin/login attempt, success or failure — the only thing standing
+/// between the internet and the admin back office is ADMIN_PASSWORD (see
+/// lib/admin-auth.ts), so brute-forcing it is a real attack surface, not a
+/// theoretical one. See lib/admin-auth.ts recordLoginAttempt/isLockedOut.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([ip, createdAt])
+}

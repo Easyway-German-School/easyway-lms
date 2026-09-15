@@ -1,0 +1,229 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import ManualBookingForm from "@/components/ManualBookingForm";
+
+type Booking = {
+  id: string;
+  referenceCode: string;
+  fullName: string;
+  email: string;
+  feeTotal: number;
+  paymentStatus: string;
+  status: string;
+  paymentMethod: string | null;
+  transferProofUrl: string | null;
+  transferReference: string | null;
+  transferRejectedReason: string | null;
+  passportPhotoUrl: string | null;
+  passportDataPageUrl: string | null;
+  documentStatus: string;
+  seatNumber: number | null;
+  createdAt: string;
+  nationality: string;
+  idType: string;
+  idNumber: string;
+  idExpiry: string;
+  isRepeatAttempt: boolean;
+  specialNeeds: string | null;
+  session: { title: string; level: string; startDate: string };
+};
+
+type Filter = "review" | "all";
+
+export default function AdminDashboard() {
+  const router = useRouter();
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [filter, setFilter] = useState<Filter>("review");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/bookings", { cache: "no-store" });
+      if (res.status === 401) {
+        router.push("/admin/login");
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Unable to load bookings");
+      setBookings(data.bookings ?? []);
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to load bookings");
+    } finally {
+      setLoaded(true);
+    }
+  }, [router]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function act(id: string, body: Record<string, unknown>) {
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/admin/bookings/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.refundAttempted) {
+        window.alert(data.refundOk ? "Refund requested via Flutterwave — allow a few business days to reflect." : "Automatic refund FAILED — refund this candidate manually.");
+      }
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function logout() {
+    await fetch("/api/admin/logout", { method: "POST" });
+    router.push("/admin/login");
+  }
+
+  if (!loaded) return <div className="p-8 text-sm text-[var(--ink-soft)]">Loading…</div>;
+
+  const shown = filter === "all"
+    ? bookings
+    : bookings.filter((b) =>
+        b.paymentStatus === "pending_verification" ||
+        b.paymentStatus === "refund_pending" ||
+        b.paymentStatus === "refund_failed" ||
+        (b.passportPhotoUrl && b.passportDataPageUrl && b.documentStatus === "pending"),
+      );
+
+  return (
+    <div className="min-h-screen bg-[var(--paper)] p-6">
+      <div className="mx-auto max-w-5xl">
+        <div className="flex items-center justify-between">
+          <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Bookings</h1>
+          <div className="flex gap-3">
+            <Link href="/admin/support" className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">Help requests</Link>
+            <Link href="/admin/sessions" className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">Manage sittings</Link>
+            <button onClick={logout} className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink-soft)]">Sign out</button>
+          </div>
+        </div>
+
+        {error && <p className="mt-4 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
+
+        <div className="mt-4">
+          <ManualBookingForm onCreated={load} />
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          {(["review", "all"] as Filter[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`rounded-sm px-4 py-2 text-sm font-semibold ${filter === f ? "bg-[var(--navy)] text-white" : "border border-[var(--line)] text-[var(--ink-soft)]"}`}
+            >
+              {f === "review" ? "Needs review" : "All bookings"}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-6 space-y-3">
+          {shown.length === 0 && <p className="text-sm text-[var(--ink-soft)]">Nothing here.</p>}
+          {shown.map((b) => (
+            <div key={b.id} className="seal-border rounded-sm bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-semibold text-[var(--navy)]">{b.fullName} <span className="font-mono text-xs text-[var(--ink-soft)]">{b.referenceCode}</span></p>
+                  <p className="text-xs text-[var(--ink-soft)]">{b.session.title} · {b.email} · ₦{b.feeTotal.toLocaleString()}</p>
+                  <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+                    {b.nationality} · {b.idType} {b.idNumber} (expires {new Date(b.idExpiry).toLocaleDateString()})
+                    {b.isRepeatAttempt && <span className="ml-2 rounded-sm bg-[var(--gold-soft)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--navy)]">Repeat</span>}
+                  </p>
+                  {b.specialNeeds && (
+                    <p className="mt-0.5 text-xs font-semibold text-[var(--navy)]">Special needs: {b.specialNeeds}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {b.status === "cancelled" ? (
+                    <span className="rounded-sm bg-[var(--red-soft)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--red)]">Cancelled</span>
+                  ) : b.status === "no_show" ? (
+                    <span className="rounded-sm bg-[var(--red-soft)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--red)]">No-show</span>
+                  ) : (
+                    <span className={`rounded-sm px-2 py-0.5 text-[10px] font-bold uppercase ${b.paymentStatus === "paid" ? "bg-[var(--green-soft)] text-[var(--green)]" : "bg-[var(--red-soft)] text-[var(--red)]"}`}>
+                      {b.paymentStatus}
+                    </span>
+                  )}
+                  {b.paymentMethod && (
+                    <span className="rounded-sm border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ink-soft)]">
+                      {b.paymentMethod === "card" ? "Intl. card" : "Bank transfer"}
+                    </span>
+                  )}
+                  {b.seatNumber !== null && <span className="rounded-sm bg-[var(--gold-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--navy)]">SEAT {b.seatNumber}</span>}
+                  {b.status === "confirmed" && (
+                    <button
+                      disabled={busyId === b.id}
+                      onClick={() => act(b.id, { markNoShow: true })}
+                      className="rounded-sm border border-[var(--line)] px-2 py-1 text-[10px] font-semibold text-[var(--ink-soft)] hover:border-[var(--red)] hover:text-[var(--red)]"
+                    >
+                      Mark no-show
+                    </button>
+                  )}
+                  {b.status !== "cancelled" && b.status !== "no_show" && (
+                    <button
+                      disabled={busyId === b.id}
+                      onClick={() => { const reason = window.prompt("Why is this booking being cancelled?"); if (reason !== null) act(b.id, { cancelReason: reason }); }}
+                      className="rounded-sm border border-[var(--line)] px-2 py-1 text-[10px] font-semibold text-[var(--ink-soft)] hover:border-[var(--red)] hover:text-[var(--red)]"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {(b.paymentStatus === "refund_pending" || b.paymentStatus === "refund_failed") && (
+                <div className={`mt-3 rounded-sm p-2.5 text-xs font-semibold ${b.paymentStatus === "refund_failed" ? "bg-[var(--red-soft)] text-[var(--red)]" : "bg-[var(--gold-soft)] text-[var(--navy)]"}`}>
+                  {b.paymentStatus === "refund_failed"
+                    ? "⚠ Automatic refund FAILED — this candidate was charged for a sitting that filled up. Refund them manually."
+                    : "A card charge for a full sitting was automatically refunded via Flutterwave — check it lands."}
+                  {b.transferRejectedReason && <span className="mt-1 block font-normal">{b.transferRejectedReason}</span>}
+                </div>
+              )}
+
+              {b.paymentStatus === "pending_verification" && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-sm bg-[var(--gold-soft)]/40 p-2.5">
+                  {b.transferProofUrl && <a href={b.transferProofUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-[var(--navy)] underline">View slip</a>}
+                  {b.transferReference && <span className="text-xs text-[var(--ink-soft)]">Ref: {b.transferReference}</span>}
+                  <button disabled={busyId === b.id} onClick={() => act(b.id, { transferAction: "verify" })} className="rounded-sm bg-[var(--green)] px-3 py-1.5 text-xs font-semibold text-white">
+                    Verify &amp; confirm seat
+                  </button>
+                  <button
+                    disabled={busyId === b.id}
+                    onClick={() => { const reason = window.prompt("Why is this transfer being rejected?"); if (reason !== null) act(b.id, { transferAction: "reject", transferRejectReason: reason }); }}
+                    className="rounded-sm border border-[var(--red)] px-3 py-1.5 text-xs font-semibold text-[var(--red)]"
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
+
+              {b.passportPhotoUrl && b.passportDataPageUrl && b.documentStatus === "pending" && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-sm bg-blue-50 p-2.5">
+                  <a href={b.passportPhotoUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-blue-700 underline">Photo</a>
+                  <a href={b.passportDataPageUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-blue-700 underline">Data page</a>
+                  <button disabled={busyId === b.id} onClick={() => act(b.id, { documentAction: "approved" })} className="rounded-sm bg-[var(--green)] px-3 py-1.5 text-xs font-semibold text-white">
+                    Approve
+                  </button>
+                  <button
+                    disabled={busyId === b.id}
+                    onClick={() => { const reason = window.prompt("What's wrong with the documents?"); if (reason !== null) act(b.id, { documentAction: "rejected", documentRejectReason: reason }); }}
+                    className="rounded-sm border border-[var(--red)] px-3 py-1.5 text-xs font-semibold text-[var(--red)]"
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

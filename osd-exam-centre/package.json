@@ -1,0 +1,39 @@
+{
+  "name": "osd-exam-centre",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Public ÖSD exam booking, payment and document intake for Easyway German Language School. Standalone from the EasyWay LMS on purpose — see README.md.",
+  "scripts": {
+    "postinstall": "prisma generate",
+    "dev": "next dev",
+    "build": "node scripts/vercel-migrate.mjs && prisma generate && next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.716.0",
+    "@aws-sdk/s3-request-presigner": "^3.716.0",
+    "@prisma/client": "^6.19.3",
+    "next": "^16.2.9",
+    "nodemailer": "^6.9.16",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.4",
+    "@types/node": "^22.10.2",
+    "@types/nodemailer": "^6.4.17",
+    "@types/react": "^19.2.4",
+    "@types/react-dom": "^19.2.4",
+    "postcss": "^8.5.1",
+    "prisma": "^6.19.3",
+    "tailwindcss": "^4.1.4",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

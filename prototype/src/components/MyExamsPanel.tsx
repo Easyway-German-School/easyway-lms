@@ -3,6 +3,7 @@ import { CalendarIcon, ExternalLinkIcon } from "@/components/icons";
 
 import { useCallback, useEffect, useState } from "react";
 import ExamBodyComingSoon from "@/components/ExamBodyComingSoon";
+import ExamBookingExtras from "@/components/ExamBookingExtras";
 import { examCountdown, examWhen } from "@/lib/exam-schedule";
 
 /**
@@ -26,6 +27,11 @@ type MyExam = {
   fee: number | null;
   seatNumber: string | null;
   branchName: string | null;
+  transferRejectedReason: string | null;
+  passportPhotoUrl: string | null;
+  passportDataPageUrl: string | null;
+  documentStatus: string;
+  documentRejectedReason: string | null;
   result: {
     score: number;
     grade: string | null;
@@ -298,6 +304,21 @@ export default function MyExamsPanel() {
                         >
                           Print hall ticket
                         </a>
+                      )}
+                      {!isEasywayExam(e.examBody) && (
+                        <ExamBookingExtras
+                          exam={{
+                            registrationId: e.registrationId,
+                            fee: e.fee,
+                            paymentStatus: e.paymentStatus,
+                            transferRejectedReason: e.transferRejectedReason,
+                            passportPhotoUrl: e.passportPhotoUrl,
+                            passportDataPageUrl: e.passportDataPageUrl,
+                            documentStatus: e.documentStatus,
+                            documentRejectedReason: e.documentRejectedReason,
+                          }}
+                          onChange={load}
+                        />
                       )}
                     </div>
 
