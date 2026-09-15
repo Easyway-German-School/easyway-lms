@@ -523,6 +523,14 @@ model Student {
    * keeps the portal they already had.
    */
   deliveryMode  String @default("physical")
+  /**
+   * The online half of a hybrid combo — morning | evening. Only meaningful
+   * when deliveryMode is "hybrid"; `sessionSlot` above is that same student's
+   * physical half. Null for a hybrid student means they haven't picked a
+   * combo yet (new signup mid-flow, or a pre-existing hybrid student who
+   * hasn't answered the HybridComboMoment popup) — see lib/hybrid-combo.ts.
+   */
+  hybridOnlineSlot String?
   pathway       String @default("Language training")
   examReadiness Int    @default(0)
   outcome       String @default("C1 readiness + German work placement support")
@@ -1031,6 +1039,14 @@ model StudentCoTutor {
 
   lecturerId String
   lecturer   Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+
+  /**
+   * physical | online | null — which half of a hybrid student's class this
+   * co-tutor covers. Drives materials attribution and portal ordering. Null
+   * for co-tutors added by hand outside the hybrid auto-assign flow, where
+   * the distinction doesn't apply.
+   */
+  role String?
 
   /// Admin User.id who added this co-tutor, for audit.
   assignedById String?

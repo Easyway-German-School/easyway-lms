@@ -24,6 +24,8 @@ import { recordRegistrationFeeFromRef } from "@/lib/paystack-verify";
 import { normalizeProfileInput } from "@/lib/student-profile";
 import { openEnrolment } from "@/lib/student-enrolment";
 import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
+import { findHybridCombo } from "@/lib/hybrid-combo";
+import { autoAssignTutor } from "@/lib/tutor-auto-assign";
 
 /**
  * Whether there is a Branch table to select from.
@@ -109,6 +111,7 @@ export async function POST(request: NextRequest) {
       sessionSlot,
       classType,
       deliveryMode,
+      hybridCombo,
       // Admission extra fields
       gender,
       dob,
@@ -217,7 +220,9 @@ export async function POST(request: NextRequest) {
     // "morning" rather than an empty string nothing downstream expects.
     const rawSessionSlot = typeof sessionSlot === "string" ? sessionSlot.trim().toLowerCase() : "";
     const sessionSlotValid = (TIME_SLOTS as readonly string[]).includes(rawSessionSlot);
-    const normalizedSessionSlot = sessionSlotValid ? rawSessionSlot : "morning";
+    // let: a hybrid student's physical slot is overridden below by their
+    // chosen combo (lib/hybrid-combo.ts) rather than this raw dropdown value.
+    let normalizedSessionSlot = sessionSlotValid ? rawSessionSlot : "morning";
 
     /**
      * How this student attends: physical | hybrid | online.
@@ -240,6 +245,29 @@ export async function POST(request: NextRequest) {
       : requestedDeliveryMode === "hybrid"
         ? "hybrid"
         : "physical";
+
+    /**
+     * A hybrid student picks ONE of the curated combos in lib/hybrid-combo.ts
+     * — which physical sitting they attend on campus, and which online
+     * sitting they drop into over video — rather than a vague "hybrid" mode
+     * that let a student appear in any online sitting of their level to
+     * whichever tutor's coverage happened to catch them. "Other" (or no
+     * combo at all) means the physical slot above still applies, but there
+     * is no online half yet: the student is flagged for the office to set
+     * up by hand, and HybridComboMoment will ask them again once they are on
+     * the portal, same as an existing hybrid student mid-migration.
+     */
+    let normalizedHybridOnlineSlot: string | null = null;
+    let hybridNeedsOfficeSetup = false;
+    if (normalizedDeliveryMode === "hybrid") {
+      const combo = findHybridCombo(hybridCombo);
+      if (combo && combo.id !== "other" && combo.physicalSlot && combo.onlineSlot) {
+        normalizedSessionSlot = combo.physicalSlot;
+        normalizedHybridOnlineSlot = combo.onlineSlot;
+      } else {
+        hybridNeedsOfficeSetup = true;
+      }
+    }
 
     // Only present on an online signup. Left undefined for a campus student so
     // their admission record does not gain an empty object.
@@ -301,6 +329,11 @@ export async function POST(request: NextRequest) {
       // than flattened so `readOnlineProfile` has one place to look and these
       // keys can never collide with an admission field added later.
       online: normalizedOnlineProfile,
+      // Set when a hybrid student picked "Other" (or skipped the combo
+      // picker entirely) — no online sitting/tutor could be auto-assigned,
+      // so the office needs to set one up by hand. Cleared once HybridComboMoment
+      // (or the office) fills in a real combo. See lib/hybrid-combo.ts.
+      hybridNeedsOfficeSetup: hybridNeedsOfficeSetup || undefined,
     };
 
     if (!normalizedEmail || !normalizedPassword || !normalizedName) {
@@ -461,6 +494,15 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+      if (
+        normalizedHybridOnlineSlot &&
+        !isCellEnabled(sessionSettings, normalizedLevel, normalizedHybridOnlineSlot, "online")
+      ) {
+        return NextResponse.json(
+          { error: `The ${normalizedHybridOnlineSlot} online session is not running for ${normalizedLevel} right now. Please choose another combo.` },
+          { status: 400 }
+        );
+      }
     }
 
     if (normalizedPathway === "Ausbildung (vocational training)" && !normalizedAdmission.profession) {
@@ -519,6 +561,7 @@ export async function POST(request: NextRequest) {
       sessionSlot: normalizedSessionSlot,
       classType: normalizedClassType,
       deliveryMode: normalizedDeliveryMode,
+      hybridOnlineSlot: normalizedHybridOnlineSlot,
       outcome: "C1 readiness + German work placement support",
       branchId: hasBranchTable ? normalizedBranchId : null,
       // store admission payload as JSON
@@ -638,6 +681,29 @@ export async function POST(request: NextRequest) {
             });
           } catch (enrolmentError) {
             console.error("Enrolment history creation failed on signup:", enrolmentError);
+          }
+
+          // Write-time tutor assignment — see lib/tutor-auto-assign.ts. Private
+          // students are paired by hand on the private-class screen, not this
+          // engine. Best-effort like the rest of this block: a failed match
+          // alerts an admin instead of blocking the signup, and instead of
+          // leaving the student silently on nobody.
+          if (normalizedClassType !== "private") {
+            try {
+              await autoAssignTutor({
+                studentId: created.id,
+                studentName: normalizedName || normalizedEmail,
+                tenantId: currentTenantId(),
+                branchId: normalizedBranchId,
+                level: normalizedLevel,
+                deliveryMode: normalizedDeliveryMode as "physical" | "hybrid" | "online",
+                sessionSlot: normalizedSessionSlot,
+                hybridOnlineSlot: normalizedHybridOnlineSlot,
+                admission: normalizedAdmission,
+              });
+            } catch (assignError) {
+              console.error("Tutor auto-assignment failed on signup:", assignError);
+            }
           }
 
           /**
