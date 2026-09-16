@@ -47,6 +47,7 @@ type StudentRow = {
   hasPaid: boolean;
   currentTutorId: string | null;
   currentTutorName: string | null;
+  coTutorIds: string[];
   /** In this tutor's class because the office named them, not by matching. */
   namedByOffice: boolean;
 };
@@ -146,6 +147,7 @@ function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
     hasPaid: access.hasAccess,
     currentTutorId: student.tutor?.id ?? null,
     currentTutorName: student.tutor ? student.tutor.user.name || student.tutor.user.email : null,
+    coTutorIds: student.coTutors.map((link) => link.lecturerId),
     namedByOffice: Boolean(
       lecturerId &&
         (student.tutorId === lecturerId || student.coTutors.some((link) => link.lecturerId === lecturerId)),
