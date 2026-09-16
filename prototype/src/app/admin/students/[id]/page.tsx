@@ -435,6 +435,7 @@ function CoTutorsField({
   current,
   level,
   onlineSlot,
+  sharingEnabled,
   onChanged,
 }: {
   studentId: string;
@@ -444,6 +445,16 @@ function CoTutorsField({
   level?: string;
   /** Their online sitting (the whole slot for an online-only student, the online half of a hybrid combo) — same purpose. */
   onlineSlot?: string | null;
+  /**
+   * Whether this school has "more than one tutor per student" turned on
+   * (roster.sharedStudents, set at /platform). When it is off the API still
+   * lets ONE extra tutor through by hand — a rescue valve for a hybrid
+   * student the auto-assign fail-safe half-matched (see
+   * lib/tutor-auto-assign.ts) — but refuses a second, so the picker caps
+   * itself here to match rather than let the office fill a list the server
+   * will reject past the first entry.
+   */
+  sharingEnabled: boolean;
   onChanged: () => void;
 }) {
   const [tutors, setTutors] = useState<Array<{ id: string; name: string; suggested: boolean }>>([]);
@@ -502,6 +513,7 @@ function CoTutorsField({
   }
 
   const currentIds = new Set(current.map((c) => c.id));
+  const atRescueCap = !sharingEnabled && currentIds.size >= 1;
   const options = tutors
     .filter((tutor) => tutor.id !== primaryTutorId)
     // Suggested tutors first, so the office picks from the top of the list
@@ -517,24 +529,34 @@ function CoTutorsField({
         {options.length === 0 ? (
           <p className="px-1 py-1 text-xs text-[var(--muted)]">No other tutors to add.</p>
         ) : (
-          options.map((tutor) => (
-            <label key={tutor.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm">
-              <input
-                type="checkbox"
-                checked={currentIds.has(tutor.id)}
-                disabled={saving}
-                onChange={(event) => void toggle(tutor.id, event.target.checked)}
-              />
-              <span>{tutor.name}</span>
-              {tutor.suggested ? (
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                  Suggested
-                </span>
-              ) : null}
-            </label>
-          ))
+          options.map((tutor) => {
+            const checked = currentIds.has(tutor.id);
+            return (
+              <label key={tutor.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={saving || (atRescueCap && !checked)}
+                  onChange={(event) => void toggle(tutor.id, event.target.checked)}
+                />
+                <span>{tutor.name}</span>
+                {tutor.suggested ? (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                    Suggested
+                  </span>
+                ) : null}
+              </label>
+            );
+          })
         )}
       </div>
+      {!sharingEnabled ? (
+        <p className="mt-1 text-[11px] leading-4 text-[var(--muted)]">
+          Multi-tutor mode is off for this school, so only one extra tutor can be added by hand here — enough to
+          cover a hybrid student&apos;s online half. Turn on &quot;Online / hybrid students can have more than one
+          tutor&quot; in /platform for full sharing.
+        </p>
+      ) : null}
       {problem ? <p className="mt-1 text-[11px] font-semibold text-red-600">{problem}</p> : null}
     </div>
   );
@@ -1386,14 +1408,14 @@ export default function StudentDossierPage() {
                 }
                 onChanged={() => void load(false)}
               />
-              {data.viewer.sharedStudentsEnabled &&
-              (identity.deliveryMode === "hybrid" || identity.deliveryMode === "online") ? (
+              {identity.deliveryMode === "hybrid" || identity.deliveryMode === "online" ? (
                 <CoTutorsField
                   studentId={identity.id}
                   primaryTutorId={identity.tutor?.id ?? null}
                   current={identity.coTutors}
                   level={identity.level}
                   onlineSlot={identity.deliveryMode === "online" ? identity.sessionSlot : identity.hybridOnlineSlot}
+                  sharingEnabled={data.viewer.sharedStudentsEnabled}
                   onChanged={() => void load(false)}
                 />
               ) : null}
