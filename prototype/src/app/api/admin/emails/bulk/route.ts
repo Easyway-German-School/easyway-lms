@@ -11,7 +11,8 @@ import {
   renderEmailBlocks,
   type EmailBlock,
 } from "@/lib/email-blocks";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { receivedPaymentFilter } from "@/lib/payment";
+import { accessFromStudent } from "@/lib/student-access";
 import { readAssignment } from "@/lib/lecturer-assignment";
 import { batchFromAdmission } from "@/lib/batch";
 
@@ -169,10 +170,18 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
       // Only for the batch filter: admission.batch is a JSON month name, not a
       // column, so it is matched in memory below.
       admission: true,
+      deliveryMode: true,
+      classesStartedAt: true,
+      createdAt: true,
+      paymentGraceUntil: true,
       // Needed for the fee: Abuja is priced above the other branches.
-      branch: { select: { name: true } },
+      branch: { select: { name: true, mode: true } },
       user: { select: { id: true, name: true, email: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+      },
     },
   });
 
@@ -185,13 +194,10 @@ async function resolveStudents(audience: Audience): Promise<Recipient[]> {
     })
     .filter((s) => {
       if (wanted === "all") return true;
-      const feeLookup = { level: s.level, branch: s.branch?.name ?? null, classType: s.classType, pathway: s.pathway };
-      const totalPaid = s.payments.reduce((sum, p) => sum + p.amount, 0);
-      const { fullPaid } = derivePaymentStatus({
-        totalPaid,
-        tuitionFee: tuitionFeeFor(feeLookup),
-        requiredDeposit: requiredDepositFor(feeLookup),
-      });
+      // Same ledger-aware computation the portal itself uses — a raw
+      // `totalPaid >= tuitionFee` here miscategorised a promoted/waived
+      // student into the wrong side of a bulk-send audience.
+      const fullPaid = accessFromStudent(s).outstandingBalance <= 0;
       return wanted === "paid" ? fullPaid : !fullPaid;
     })
     .filter((s) => Boolean(s.user.email))

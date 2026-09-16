@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { receivedPaymentFilter } from "@/lib/payment";
+import { accessFromStudent } from "@/lib/student-access";
 import { listGroups, upsertSubscriber } from "@/lib/mailerlite";
 
 /**
@@ -70,9 +71,17 @@ export async function syncStudentsToMailerLite(options?: {
       classType: true,
       pathway: true,
       studentCode: true,
-      branch: { select: { name: true } },
+      deliveryMode: true,
+      classesStartedAt: true,
+      createdAt: true,
+      paymentGraceUntil: true,
+      branch: { select: { name: true, mode: true } },
       user: { select: { name: true, email: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+      },
     },
   });
 
@@ -88,14 +97,10 @@ export async function syncStudentsToMailerLite(options?: {
       continue;
     }
 
-    const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-    const tuitionFee = tuitionFeeFor(feeLookup);
-    const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
-    const { fullPaid } = derivePaymentStatus({
-      totalPaid,
-      tuitionFee,
-      requiredDeposit: requiredDepositFor(feeLookup),
-    });
+    // Same ledger-aware computation the portal itself uses — a raw
+    // `totalPaid >= tuitionFee` here tagged a promoted/waived student with
+    // the wrong "paid" segment in the external CRM.
+    const fullPaid = accessFromStudent(student).outstandingBalance <= 0;
 
     const wanted = groupNamesFor(student.level, fullPaid, year);
     const ids: string[] = [];

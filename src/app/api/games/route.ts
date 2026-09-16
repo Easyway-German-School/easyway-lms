@@ -4,29 +4,22 @@ import { prisma } from "@/lib/prisma";
 import { resolveSpaceScope } from "@/lib/community-spaces";
 import { createMatch, turnsAwaiting } from "@/lib/satzkette-server";
 import { parseConstraint, type Constraint } from "@/lib/satzkette";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import { getStudentAccess } from "@/lib/student-access";
 
 export const dynamic = "force-dynamic";
 
 async function canUseStudentGames(userId: string) {
   const student = await prisma.student.findUnique({
     where: { userId },
-    select: {
-      classType: true,
-      level: true,
-      branch: { select: { name: true } },
-      payments: { where: { status: "completed" }, select: { amount: true } },
-    },
+    select: { id: true, classType: true },
   });
   if (!student) return false;
   if (student.classType === "private") return false;
-  const lookup = { level: student.level, branch: student.branch?.name, classType: student.classType };
-  const payment = derivePaymentStatus({
-    totalPaid: student.payments.reduce((sum, payment) => sum + payment.amount, 0),
-    tuitionFee: tuitionFeeFor(lookup),
-    requiredDeposit: requiredDepositFor(lookup),
-  });
-  return payment.depositPaid;
+  // Same ledger-aware computation the portal itself uses — a raw
+  // `totalPaid >= requiredDeposit` here locked ledger-clear (promoted,
+  // waived, on a payment plan) students out of the Games tab.
+  const access = await getStudentAccess(student.id);
+  return access?.hasAccess ?? false;
 }
 
 /**

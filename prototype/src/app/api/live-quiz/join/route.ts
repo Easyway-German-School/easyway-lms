@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolvePlayer } from "@/lib/live-quiz-views";
 import { assignTeam, gameByPin, joinableGameForStudent, normalisePin } from "@/lib/live-quiz";
-import { derivePaymentStatus, requiredDepositFor, tuitionFeeFor, receivedPaymentFilter } from "@/lib/payment";
+import { getStudentAccess } from "@/lib/student-access";
 
 export const dynamic = "force-dynamic";
 
@@ -24,24 +24,22 @@ export async function GET() {
   const student = await prisma.student.findUnique({
     where: { id: player.studentId },
     select: {
+      id: true,
       branchId: true,
       level: true,
       sessionSlot: true,
       classType: true,
       pathway: true,
       branch: { select: { name: true } },
-      payments: { where: receivedPaymentFilter(), select: { amount: true } },
     },
   });
   if (!student) return NextResponse.json({ game: null });
 
-  const tuitionFee = tuitionFeeFor({ level: student.level, branch: student.branch?.name, classType: student.classType, pathway: student.pathway });
-  const payment = derivePaymentStatus({
-    totalPaid: student.payments.reduce((sum, row) => sum + row.amount, 0),
-    tuitionFee,
-    requiredDeposit: requiredDepositFor({ level: student.level, branch: student.branch?.name, classType: student.classType, pathway: student.pathway }),
-  });
-  if (!payment.depositPaid) return NextResponse.json({ game: null, locked: true });
+  // Same ledger-aware computation the portal itself uses — a raw
+  // `totalPaid >= requiredDeposit` here locked ledger-clear (promoted,
+  // waived, on a payment plan) students out of the quiz join screen.
+  const access = await getStudentAccess(student.id);
+  if (!access?.hasAccess) return NextResponse.json({ game: null, locked: true });
 
   const game = await joinableGameForStudent(student);
   if (!game) return NextResponse.json({ game: null });
@@ -71,22 +69,14 @@ export async function POST(request: NextRequest) {
 
   const student = await prisma.student.findUnique({
     where: { id: player.studentId },
-    select: {
-      level: true,
-      classType: true,
-      pathway: true,
-      branch: { select: { name: true } },
-      payments: { where: receivedPaymentFilter(), select: { amount: true } },
-    },
+    select: { id: true },
   });
   if (!student) return NextResponse.json({ error: "Student profile not found" }, { status: 404 });
-  const tuitionFee = tuitionFeeFor({ level: student.level, branch: student.branch?.name, classType: student.classType, pathway: student.pathway });
-  const payment = derivePaymentStatus({
-    totalPaid: student.payments.reduce((sum, row) => sum + row.amount, 0),
-    tuitionFee,
-    requiredDeposit: requiredDepositFor({ level: student.level, branch: student.branch?.name, classType: student.classType, pathway: student.pathway }),
-  });
-  if (!payment.depositPaid) {
+
+  // Same ledger-aware computation the portal itself uses — see the GET
+  // handler above for why the raw comparison this replaced was wrong.
+  const access = await getStudentAccess(student.id);
+  if (!access?.hasAccess) {
     return NextResponse.json({ error: "Pay your tuition deposit to unlock the quiz game.", locked: true }, { status: 402 });
   }
 
