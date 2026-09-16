@@ -234,7 +234,6 @@ export async function DELETE(req: NextRequest) {
       const { deleteRecordingObject } = await import("@/lib/recording");
       storageDeleted = await deleteRecordingObject(material.recording.objectKey);
     }
-     */
     if (material.recording) {
       await prisma.classRecording.update({
         where: { id: material.recording.id },
@@ -243,7 +242,6 @@ export async function DELETE(req: NextRequest) {
     }
     await prisma.material.delete({ where: { id } });
     return NextResponse.json({ success: true, storageDeleted });
-    return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error deleting material:", error);
     return NextResponse.json({ error: "Failed to delete material" }, { status: 500 });
