@@ -72,6 +72,7 @@ const STUDENT_SHAPE = {
     select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
   },
   tutor: { select: { id: true, user: { select: { name: true, email: true } } } },
+  coTutors: { select: { lecturerId: true } },
 } as const;
 
 type RawStudent = {
@@ -99,6 +100,7 @@ type RawStudent = {
     settledAt: Date | null;
   }>;
   tutor: { id: string; user: { name: string | null; email: string } } | null;
+  coTutors: { lecturerId: string }[];
 };
 
 function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
@@ -144,7 +146,10 @@ function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
     hasPaid: access.hasAccess,
     currentTutorId: student.tutor?.id ?? null,
     currentTutorName: student.tutor ? student.tutor.user.name || student.tutor.user.email : null,
-    namedByOffice: Boolean(lecturerId && student.tutorId === lecturerId),
+    namedByOffice: Boolean(
+      lecturerId &&
+        (student.tutorId === lecturerId || student.coTutors.some((link) => link.lecturerId === lecturerId)),
+    ),
   };
 }
 

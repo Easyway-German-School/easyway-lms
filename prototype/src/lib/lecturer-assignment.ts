@@ -177,13 +177,17 @@ export function isAssigned(assignment: LecturerAssignment): boolean {
 export function studentWhereForAssignment(assignment: LecturerAssignment): Record<string, unknown> | null {
   if (!isAssigned(assignment)) return null;
 
-  const where: Record<string, unknown> = assignment.groups.length
-    ? { OR: assignment.groups.map((group) => ({ branchId: group.branchId, level: group.level, sessionSlot: group.sessionSlot })) }
-    : { branchId: { in: assignment.branchIds }, level: { in: assignment.levels } };
+  const cohortClauses: Record<string, unknown>[] = assignment.groups.length
+    ? assignment.groups.map((group) => ({ branchId: group.branchId, level: group.level, sessionSlot: group.sessionSlot }))
+    : [{ branchId: { in: assignment.branchIds }, level: { in: assignment.levels } }];
 
   if (!assignment.groups.length && assignment.sessionSlots.length) {
-    where.sessionSlot = { in: assignment.sessionSlots };
+    cohortClauses[0].sessionSlot = { in: assignment.sessionSlots };
   }
+
+  const cohortWhere: Record<string, unknown> = assignment.groups.length
+    ? { OR: cohortClauses }
+    : cohortClauses[0];
 
   // "physical" and "online" describe how a class is delivered and map onto the
   // student's deliveryMode; "private" maps onto their classType. A tutor who
@@ -191,14 +195,18 @@ export function studentWhereForAssignment(assignment: LecturerAssignment): Recor
   // versa. Selecting all three (or none) restricts nothing.
   const types = assignment.classTypes.map((type) => type.toLowerCase());
   if (types.length && types.length < CLASS_TYPES.length) {
-    const clauses: Array<Record<string, unknown>> = [];
-    if (types.includes("physical")) clauses.push({ classType: "group", deliveryMode: { in: ["physical", "hybrid"] } });
-    if (types.includes("online")) clauses.push({ classType: "group", deliveryMode: { in: ["online", "hybrid"] } });
-    if (types.includes("private")) clauses.push({ classType: "private" });
-    if (clauses.length) where.AND = [{ OR: clauses }];
+    const groupTypes: Array<Record<string, unknown>> = [];
+    if (types.includes("physical")) groupTypes.push({ classType: "group", deliveryMode: { in: ["physical", "hybrid"] } });
+    if (types.includes("online")) groupTypes.push({ classType: "group", deliveryMode: { in: ["online", "hybrid"] } });
+
+    const groupWhere = groupTypes.length ? { AND: [cohortWhere, { OR: groupTypes }] } : null;
+    if (types.includes("private")) {
+      return groupWhere ? { OR: [groupWhere, { classType: "private" }] } : { classType: "private" };
+    }
+    if (groupWhere) return groupWhere;
   }
 
-  return where;
+  return cohortWhere;
 }
 
 /**

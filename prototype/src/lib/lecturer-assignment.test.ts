@@ -67,12 +67,22 @@ describe("studentWhereForAssignment class-type filtering", () => {
       classTypes: ["private"],
     });
 
-    expect(studentWhereForAssignment(assignment)).toEqual({
-      branchId: { in: ["branch-a"] },
-      level: { in: ["A1"] },
-      sessionSlot: { in: ["morning"] },
-      AND: [{ OR: [{ classType: "private" }] }],
+    expect(studentWhereForAssignment(assignment)).toEqual({ classType: "private" });
+  });
+
+  it("allows private students from any level or sitting", () => {
+    const assignment = readAssignment({
+      branchIds: ["branch-a"],
+      levels: ["A1", "B1"],
+      sessionSlots: ["morning", "evening"],
+      assignmentGroups: [
+        { branchId: "branch-a", level: "A1", sessionSlot: "morning" },
+        { branchId: "branch-a", level: "B1", sessionSlot: "evening" },
+      ],
+      classTypes: ["private"],
     });
+
+    expect(studentWhereForAssignment(assignment)).toEqual({ classType: "private" });
   });
 
   it("keeps class-type filtering alongside explicit multi-group coverage", () => {
@@ -88,11 +98,15 @@ describe("studentWhereForAssignment class-type filtering", () => {
     });
 
     expect(studentWhereForAssignment(assignment)).toEqual({
-      OR: [
-        { branchId: "branch-a", level: "A1", sessionSlot: "morning" },
-        { branchId: "branch-b", level: "B1", sessionSlot: "evening" },
+      AND: [
+        {
+          OR: [
+            { branchId: "branch-a", level: "A1", sessionSlot: "morning" },
+            { branchId: "branch-b", level: "B1", sessionSlot: "evening" },
+          ],
+        },
+        { OR: [{ classType: "group", deliveryMode: { in: ["online", "hybrid"] } }] },
       ],
-      AND: [{ OR: [{ classType: "group", deliveryMode: { in: ["online", "hybrid"] } }] }],
     });
   });
 });
