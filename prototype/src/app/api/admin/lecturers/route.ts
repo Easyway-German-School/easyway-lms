@@ -169,6 +169,7 @@ export async function GET() {
         if (allowedBranchIds && !assignment.branchIds.some((id) => allowedBranchIds.includes(id))) {
           return null;
         }
+        const studentCount = await countStudents(assignment, lecturer.id);
         return {
           id: lecturer.id,
           user: lecturer.user,
@@ -187,8 +188,15 @@ export async function GET() {
           employmentType: lecturer.employmentType,
           startedAt: lecturer.startedAt,
           assignment,
-          assignmentLabel: describeAssignment(assignment, branchNames),
-          studentCount: await countStudents(assignment, lecturer.id),
+          // A tutor can have a real roster through an explicit student/tutor
+          // link even without a broad branch/level assignment. Do not call
+          // that roster "No class assigned" in the same card that shows it.
+          assignmentLabel: isAssigned(assignment)
+            ? describeAssignment(assignment, branchNames)
+            : studentCount > 0
+              ? "Named student assignment"
+              : describeAssignment(assignment, branchNames),
+          studentCount,
           classes: lecturer.classes.map((klass) => ({
             id: klass.id,
             name: klass.name,
