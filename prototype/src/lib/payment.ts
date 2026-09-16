@@ -152,7 +152,7 @@ const ONLINE_BRANCH_KEYWORDS = ["online", "virtual", "remote"] as const;
 
 /**
  * Prices confirmed 2026-09 for the live launch. A1–B2 vary by tier; C1 is a
- * flat ₦350,000 at every branch (it runs as private / online tuition). C2 is
+ * flat ₦300,000 at every branch (it runs as private / online tuition). C2 is
  * retired — not offered (see OFFERED_LEVELS in levels.ts) and deliberately not
  * priced here. Edit ONLY this table: checkout, the paywall, admin price lists,
  * invoices and reminder emails all read from it.
@@ -164,7 +164,7 @@ const FEE_TABLE: Record<FeeTier, Record<string, number>> = {
     A2: 180000,
     B1: 200000,
     B2: 200000,
-    C1: 350000,
+    C1: 300000,
   },
   // Lagos, Port Harcourt, Ghana, and any campus branch added later
   standard: {
@@ -172,7 +172,7 @@ const FEE_TABLE: Record<FeeTier, Record<string, number>> = {
     A2: 150000,
     B1: 180000,
     B2: 180000,
-    C1: 350000,
+    C1: 300000,
   },
   // Online cohort. A1–B2 currently match the standard campus tier.
   online: {
@@ -180,7 +180,7 @@ const FEE_TABLE: Record<FeeTier, Record<string, number>> = {
     A2: 150000,
     B1: 180000,
     B2: 180000,
-    C1: 350000,
+    C1: 300000,
   },
 };
 
@@ -188,30 +188,28 @@ const FEE_TABLE: Record<FeeTier, Record<string, number>> = {
 export const ONLINE_PRICES_ARE_PLACEHOLDER = false;
 
 /**
- * PRIVATE (one-to-one) TUITION — ONE FLAT PRICE.
+ * PRIVATE (one-to-one) TUITION — LEVEL-BASED PRICE.
  *
- * ₦350,000 whatever the branch and whatever the level (confirmed 2026-09).
- * Change this constant and the upsell card, the paywall's second option, the
- * checkout, the webhook and the receivables ledger all follow — it is the
- * single number private tuition is worth anywhere in the app.
- *
- * ---------------------------------------------------------------------------
- * THIS REPLACED A 2x MULTIPLIER, and the two could not coexist.
- *
- * `tuitionFeeFor` used to price private tuition at twice the group fee for that
- * branch and level, which is ₦300,000 in Lagos but ₦360,000 in Abuja and up to
- * ₦480,000 at C2. The upsell advertised a flat ₦300,000 and the checkout
- * charged it. So an Abuja student paid exactly what they were shown and the
- * ledger still recorded them ₦60,000 short: a permanent outstanding balance
- * they could not clear, fee-chaser emails they did not deserve, and a
- * PROVISIONAL stamp on their certificate — because that stamp reads the live
- * balance.
- *
- * A quoted price and a billed price that disagree is not a pricing question,
- * it is a bug that only appears at one branch. One number now serves both.
- * ---------------------------------------------------------------------------
+ * The school now prices one-to-one tuition by level:
+ *   - A1 / A2: ₦300,000
+ *   - B1 / B2: ₦350,000
+ * The default is kept at ₦300,000 so older generic checkout cards still show a
+ * sensible number when a level is not available yet.
  */
-export const PRIVATE_CLASS_UPGRADE_PRICE = 350000;
+export const PRIVATE_CLASS_UPGRADE_PRICE = 300000;
+
+export function privateClassPriceForLevel(level?: string | null): number {
+  switch (normaliseLevel(level)) {
+    case "A1":
+    case "A2":
+      return 300000;
+    case "B1":
+    case "B2":
+      return 350000;
+    default:
+      return PRIVATE_CLASS_UPGRADE_PRICE;
+  }
+}
 
 /** Private tuition price was confirmed for launch (2026-09), no longer provisional. */
 export const PRIVATE_PRICES_ARE_PLACEHOLDER = false;
@@ -236,7 +234,7 @@ export function isTravelPackagePathway(pathway?: string | null): boolean {
 
 /**
  * Levels a student may buy through the portal. A1–C1 are all self-service now —
- * C1 runs as private / online tuition at the flat ₦350,000 in FEE_TABLE. C2 is
+ * C1 runs as private / online tuition at the flat ₦300,000 in FEE_TABLE. C2 is
  * retired: not offered (see OFFERED_LEVELS in levels.ts) and not sold here.
  */
 export const SELLABLE_LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
@@ -293,10 +291,8 @@ export function tuitionFeeFor({ level, branch, classType, pathway }: FeeLookup):
   // ladder outright, so it is checked before even the private-class price.
   if (isTravelPackagePathway(pathway)) return TRAVEL_PACKAGE_PRICE;
 
-  // One flat price for one-to-one, at every branch and every level — the same
-  // figure the upsell quotes and the checkout charges. See the note on
-  // PRIVATE_CLASS_UPGRADE_PRICE for why these must not be computed separately.
-  if (isPrivateClassType(classType)) return PRIVATE_CLASS_UPGRADE_PRICE;
+  // Private tuition is priced by level, not by a single globals value.
+  if (isPrivateClassType(classType)) return privateClassPriceForLevel(level);
 
   const tier = FEE_TABLE[feeTierForBranch(branch)];
   // A level not in the table is either junk input or retired C2. Fall back to
@@ -383,8 +379,8 @@ export function priceListForBranch(branchName?: string | null, classType?: strin
   const tier = feeTierForBranch(branchName);
   const isPrivate = isPrivateClassType(classType);
   return Object.entries(FEE_TABLE[tier]).map(([level, groupFee]) => {
-    // Private is one flat price per level, not a scaled group fee.
-    const fee = isPrivate ? PRIVATE_CLASS_UPGRADE_PRICE : groupFee;
+    // Private pricing follows the level-specific table, not a single flat fee.
+    const fee = isPrivate ? privateClassPriceForLevel(level) : groupFee;
     return {
       level,
       tuitionFee: fee,

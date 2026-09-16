@@ -223,6 +223,22 @@ suite("requiredDepositFor — Travel Package", () => {
   });
 });
 
+suite("private and online tuition pricing", () => {
+  it("prices A1/A2 private classes at ₦300,000 with a ₦180,000 60% deposit", () => {
+    expect(tuitionFeeFor({ level: "A1", branch: "Lagos", classType: "private" })).toBe(300000);
+    expect(requiredDepositFor({ level: "A1", branch: "Lagos", classType: "private" })).toBe(180000);
+    expect(tuitionFeeFor({ level: "A2", branch: "Lagos", classType: "private" })).toBe(300000);
+    expect(requiredDepositFor({ level: "A2", branch: "Lagos", classType: "private" })).toBe(180000);
+  });
+
+  it("prices B1/B2 private classes at ₦350,000 with a ₦210,000 60% deposit", () => {
+    expect(tuitionFeeFor({ level: "B1", branch: "Lagos", classType: "private" })).toBe(350000);
+    expect(requiredDepositFor({ level: "B1", branch: "Lagos", classType: "private" })).toBe(210000);
+    expect(tuitionFeeFor({ level: "B2", branch: "Lagos", classType: "private" })).toBe(350000);
+    expect(requiredDepositFor({ level: "B2", branch: "Lagos", classType: "private" })).toBe(210000);
+  });
+});
+
 suite("resolvePartialPaymentAmount — Travel Package's ₦200k-then-flexible shape", () => {
   const FEE = TRAVEL_PACKAGE_PRICE;
   const FLOOR = TRAVEL_PACKAGE_MIN_FIRST_PAYMENT;

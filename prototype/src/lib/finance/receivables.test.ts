@@ -103,11 +103,11 @@ describe("computeStudentFinance", () => {
   });
 
   it("charges the flat private-tuition price for a private student", () => {
-    // Private is one flat fee at every branch and level (₦350,000, confirmed
-    // 2026-09) — no longer a 2x multiple of the group fee. See
+    // Private is one flat fee at every branch and level (₦300,000) — no
+    // longer a 2x multiple of the group fee. See
     // PRIVATE_CLASS_UPGRADE_PRICE in src/lib/payment.ts.
     const row = computeStudentFinance(student({ id: "a", classType: "private" }), NOW);
-    expect(row.tuitionFee).toBe(350_000);
+    expect(row.tuitionFee).toBe(300_000);
   });
 
   it("does not compute a lock for a fully-paid or unpaid student", () => {

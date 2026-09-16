@@ -214,7 +214,7 @@ export function scoreAndFilterRoster(
         classType: student.classType,
         // Travel Package prices at the flat ₦980,000, not the per-level
         // ladder fee — omitting this made tuitionFeeFor() quote the roster
-        // the standard A1 price, so a Travel Package student's ₦350,000
+        // the standard A1 price, so a Travel Package student's ₦300,000
         // cleared that lower bar and the roster badged them "Paid in full"
         // / ₦0 owed while the ledger (and their own /payments page) both
         // knew ₦630,000 was still outstanding.
