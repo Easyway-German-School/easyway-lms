@@ -7,6 +7,7 @@ import {
   matchesBatch,
   parseGroupKey,
   readAssignment,
+  studentWhereForAssignment,
   studentWhereForLecturerScope,
   teachingGroups,
 } from "./lecturer-assignment";
@@ -53,6 +54,45 @@ describe("studentWhereForLecturerScope", () => {
         { tutorId: "lecturer-1" },
         { coTutors: { some: { lecturerId: "lecturer-1" } } },
       ],
+    });
+  });
+});
+
+describe("studentWhereForAssignment class-type filtering", () => {
+  it("keeps private filtering inside the selected teaching groups", () => {
+    const assignment = readAssignment({
+      branchIds: ["branch-a"],
+      levels: ["A1"],
+      sessionSlots: ["morning"],
+      classTypes: ["private"],
+    });
+
+    expect(studentWhereForAssignment(assignment)).toEqual({
+      branchId: { in: ["branch-a"] },
+      level: { in: ["A1"] },
+      sessionSlot: { in: ["morning"] },
+      AND: [{ OR: [{ classType: "private" }] }],
+    });
+  });
+
+  it("keeps class-type filtering alongside explicit multi-group coverage", () => {
+    const assignment = readAssignment({
+      branchIds: ["branch-a", "branch-b"],
+      levels: ["A1", "B1"],
+      sessionSlots: ["morning", "evening"],
+      assignmentGroups: [
+        { branchId: "branch-a", level: "A1", sessionSlot: "morning" },
+        { branchId: "branch-b", level: "B1", sessionSlot: "evening" },
+      ],
+      classTypes: ["online"],
+    });
+
+    expect(studentWhereForAssignment(assignment)).toEqual({
+      OR: [
+        { branchId: "branch-a", level: "A1", sessionSlot: "morning" },
+        { branchId: "branch-b", level: "B1", sessionSlot: "evening" },
+      ],
+      AND: [{ OR: [{ classType: "group", deliveryMode: { in: ["online", "hybrid"] } }] }],
     });
   });
 });

@@ -31,7 +31,9 @@ export async function POST(request: NextRequest) {
     where: {
       status: "active",
       ...(where ?? {}),
-      ...(tenantId ? { OR: [{ tenantId }, { branch: { tenantId } }, { user: { tenantId } }] } : {}),
+      ...(tenantId
+        ? { AND: [{ OR: [{ tenantId }, { branch: { tenantId } }, { user: { tenantId } }] }] }
+        : {}),
     },
     select: { level: true },
     take: 2000,

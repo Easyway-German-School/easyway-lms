@@ -195,7 +195,7 @@ export function studentWhereForAssignment(assignment: LecturerAssignment): Recor
     if (types.includes("physical")) clauses.push({ classType: "group", deliveryMode: { in: ["physical", "hybrid"] } });
     if (types.includes("online")) clauses.push({ classType: "group", deliveryMode: { in: ["online", "hybrid"] } });
     if (types.includes("private")) clauses.push({ classType: "private" });
-    if (clauses.length) where.OR = clauses;
+    if (clauses.length) where.AND = [{ OR: clauses }];
   }
 
   return where;
