@@ -79,6 +79,7 @@ type RosterStudent = {
   hasPaid: boolean;
   currentTutorId: string | null;
   currentTutorName: string | null;
+  coTutorIds: string[];
   namedByOffice: boolean;
 };
 
@@ -796,6 +797,30 @@ function ClassRoster({
     }
   }
 
+  async function addCoTutor(student: RosterStudent) {
+    setBusyId(student.id);
+    setMessage("");
+    try {
+      const res = await fetch("/api/admin/students", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: student.id,
+          coTutorIds: [...new Set([...student.coTutorIds, lecturerId])],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not add this tutor");
+      setMessage(`${student.name} is now also assigned to ${tutorName}.`);
+      await load();
+      onChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not add this tutor");
+    } finally {
+      setBusyId("");
+    }
+  }
+
   const named = roster.filter((student) => student.namedByOffice);
   const matched = roster.filter((student) => !student.namedByOffice);
   const rosterIds = new Set(roster.map((student) => student.id));
@@ -882,18 +907,33 @@ function ClassRoster({
               key={student.id}
               student={student}
               right={
-                <button
-                  type="button"
-                  onClick={() => pair(student, lecturerId)}
-                  disabled={busyId === student.id}
-                  className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-                >
-                  {busyId === student.id
-                    ? "Assigning…"
-                    : student.currentTutorName
-                      ? `Move from ${student.currentTutorName}`
-                      : "Add to class"}
-                </button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => pair(student, lecturerId)}
+                    disabled={busyId === student.id}
+                    className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                  >
+                    {busyId === student.id
+                      ? "Assigning…"
+                      : student.currentTutorName
+                        ? `Move from ${student.currentTutorName}`
+                        : "Add as primary tutor"}
+                  </button>
+                  {student.classType === "group" &&
+                  ["online", "hybrid"].includes(student.deliveryMode) &&
+                  student.currentTutorId !== lecturerId &&
+                  !student.coTutorIds.includes(lecturerId) ? (
+                    <button
+                      type="button"
+                      onClick={() => addCoTutor(student)}
+                      disabled={busyId === student.id}
+                      className="rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] disabled:opacity-60"
+                    >
+                      {busyId === student.id ? "Adding…" : "Add as co-tutor"}
+                    </button>
+                  ) : null}
+                </div>
               }
             />
           ))}
