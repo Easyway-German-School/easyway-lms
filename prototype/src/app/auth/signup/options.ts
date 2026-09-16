@@ -7,6 +7,22 @@ export const packageOptions = [
   "Study route",
 ];
 
+export const ausbildungSectorOptions = [
+  "IT & Technology",
+  "Engineering & Technical Trades",
+  "Healthcare & Nursing",
+  "Aviation",
+  "Hospitality & Tourism",
+  "Business & Administration",
+  "Logistics & Transport",
+  "Automotive & Mechanical",
+  "Electrical & Electronics",
+  "Construction & Skilled Trades",
+  "Retail & Sales",
+  "Food, Bakery & Culinary",
+  "Social Care & Education",
+];
+
 export const professionOptions = [
   "Student",
   "Unemployed / seeking work",
