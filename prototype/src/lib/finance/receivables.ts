@@ -7,7 +7,7 @@ import {
   tuitionFeeFor,
 } from "@/lib/payment";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
-import { buildLedger, ledgerIsPopulated, type LedgerLine } from "@/lib/finance/ledger";
+import { alignCurrentChargePrice, buildLedger, ledgerIsPopulated, type LedgerLine } from "@/lib/finance/ledger";
 
 /**
  * ONE DEFINITION OF WHAT A STUDENT OWES.
@@ -294,7 +294,11 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
    * `ensureChargeForLevel` runs) keeps the old behaviour: `owed` stays
    * `tuitionFee - paid` and the ageing clock stays on the enrolment date.
    */
-  const ledger = buildLedger(student.tuitionCharges ?? [], paid, now);
+  const ledger = buildLedger(
+    alignCurrentChargePrice(student.tuitionCharges ?? [], student.level, tuitionFee),
+    paid,
+    now,
+  );
   const ledgerPopulated = ledgerIsPopulated(ledger);
   const openCharges = ledger.lines.map((line: LedgerLine) => ({
     level: line.level,

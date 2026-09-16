@@ -60,6 +60,30 @@ export type LedgerChargeInput = {
   settledAt?: Date | string | null;
 };
 
+/**
+ * Keep the current level aligned with the live price table. Older charge rows
+ * may contain a price from before a pricing correction; historical levels stay
+ * frozen, while the student's current level must use today's fee everywhere.
+ */
+export function alignCurrentChargePrice(
+  charges: LedgerChargeInput[],
+  currentLevel?: string | null,
+  currentAmount?: number,
+): LedgerChargeInput[] {
+  const level = String(currentLevel ?? "").trim().toUpperCase();
+  const amount = Math.max(0, Math.round(Number(currentAmount) || 0));
+  if (!level || !Number.isFinite(currentAmount) || amount < 0) return charges;
+
+  return charges.map((charge) => {
+    if (String(charge.level ?? "").trim().toUpperCase() !== level) return charge;
+    return {
+      ...charge,
+      amount,
+      waivedAmount: Math.min(amount, Math.max(0, Math.round(Number(charge.waivedAmount) || 0))),
+    };
+  });
+}
+
 export type LedgerLine = {
   chargeId: string;
   level: string;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildLedger, emptyLedger, ledgerIsPopulated, type LedgerChargeInput } from "./ledger";
+import { alignCurrentChargePrice, buildLedger, emptyLedger, ledgerIsPopulated, type LedgerChargeInput } from "./ledger";
 
 const NOW = new Date("2026-09-03T12:00:00Z");
 const DAY = 24 * 60 * 60 * 1000;
@@ -16,6 +16,17 @@ function charge(overrides: Partial<LedgerChargeInput> & { id: string }): LedgerC
 }
 
 describe("buildLedger — FIFO allocation", () => {
+  it("aligns a stale current-level charge with the live fee", () => {
+    const charges = alignCurrentChargePrice(
+      [charge({ id: "a1", amount: 350_000 }), charge({ id: "a2", level: "A2", amount: 350_000 })],
+      "A1",
+      300_000,
+    );
+
+    expect(charges[0].amount).toBe(300_000);
+    expect(charges[1].amount).toBe(350_000);
+  });
+
   it("pays the oldest charge down first", () => {
     const ledger = buildLedger(
       [

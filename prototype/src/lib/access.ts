@@ -1,5 +1,5 @@
 import { DEPOSIT_RATE } from "@/lib/payment";
-import { buildLedger, type LedgerChargeInput } from "@/lib/finance/ledger";
+import { alignCurrentChargePrice, buildLedger, type LedgerChargeInput } from "@/lib/finance/ledger";
 
 /**
  * Who can see what before tuition is paid.
@@ -255,7 +255,10 @@ export function deriveStudentAccess({
   const fee = Math.max(0, Math.round(Number(tuitionFee) || 0));
   const deposit = Math.max(0, Math.round(Number(requiredDeposit) || 0));
 
-  const ledger = charges && charges.length ? buildLedger(charges, paid, now) : null;
+  const reconciledCharges = charges && charges.length
+    ? alignCurrentChargePrice(charges, level, fee)
+    : charges;
+  const ledger = reconciledCharges && reconciledCharges.length ? buildLedger(reconciledCharges, paid, now) : null;
   const currentLevelKey = String(level ?? "").trim().toUpperCase();
   const currentLine = ledger && currentLevelKey
     ? ledger.lines.find((line) => line.level.toUpperCase() === currentLevelKey) ?? null
