@@ -197,6 +197,13 @@ async function handleGET(request: NextRequest) {
     }),
   );
 
+  results.push(
+    await run("short-recording-cleanup", async () => {
+      const { purgeShortRecordings } = await import("@/lib/retention");
+      return purgeShortRecordings();
+    }),
+  );
+
   /**
    * Retention no longer deletes anything on a schedule. Staff keep every class
    * recording forever; the student-side 14-day window is a read filter in

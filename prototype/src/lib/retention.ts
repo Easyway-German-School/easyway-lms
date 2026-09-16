@@ -27,7 +27,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { deleteRecordingObject } from "@/lib/recording";
+import { deleteRecordingObject, MIN_RECORDING_DURATION_SECONDS } from "@/lib/recording";
 
 export const RETENTION = {
   /**
@@ -39,6 +39,39 @@ export const RETENTION = {
 
 /** Re-exported flat for callers that just want the number. */
 export const STUDENT_RECORDING_WINDOW_DAYS = RETENTION.studentWindowDays;
+
+export type ShortRecordingCleanupResult = {
+  considered: number;
+  removed: number;
+  storageFailures: number;
+};
+
+/** Remove short auto-recordings that predate the finalisation guard. */
+export async function purgeShortRecordings(): Promise<ShortRecordingCleanupResult> {
+  const recordings = await prisma.classRecording.findMany({
+    where: { status: "completed", durationSeconds: { not: null, lt: MIN_RECORDING_DURATION_SECONDS } },
+    select: { id: true, objectKey: true, materialId: true, durationSeconds: true },
+  });
+
+  let removed = 0;
+  let storageFailures = 0;
+  for (const recording of recordings) {
+    if (recording.objectKey && !(await deleteRecordingObject(recording.objectKey))) storageFailures += 1;
+    if (recording.materialId) await prisma.material.delete({ where: { id: recording.materialId } }).catch(() => {});
+    await prisma.classRecording.update({
+      where: { id: recording.id },
+      data: {
+        status: "purged",
+        purgedAt: new Date(),
+        fileUrl: null,
+        error: `Auto-discarded: ${recording.durationSeconds ?? 0}s is below the ${MIN_RECORDING_DURATION_SECONDS / 60}-minute minimum.`,
+      },
+    });
+    removed += 1;
+  }
+
+  return { considered: recordings.length, removed, storageFailures };
+}
 
 /**
  * The `studentExpiresAt` stamp `class-recorder.ts` writes when a recording is

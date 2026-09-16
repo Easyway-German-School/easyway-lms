@@ -6,6 +6,7 @@ import { deriveMaterialKind } from "@/lib/video-library";
 import { AUDIO_EMBED_FILE_TYPE, EMBED_FILE_TYPE, parseAudioLink, parseEmbed } from "@/lib/media-embed";
 import { BATCHES, COURSE_LEVELS, SESSION_SLOTS } from "@/lib/lecturer-assignment";
 import { generateForMaterial } from "@/lib/material-ai";
+import { MIN_RECORDING_DURATION_SECONDS } from "@/lib/recording";
 import {
   studentIdsForMaterial,
   tutorUserIdsForMaterial,
@@ -115,6 +116,16 @@ export async function POST(req: NextRequest) {
 
     const kind = isRecording ? "recording" : deriveMaterialKind(fileType);
 
+    if (
+      kind === "recording" &&
+      (!durationRaw || !Number.isFinite(Number(durationRaw)) || Number(durationRaw) < MIN_RECORDING_DURATION_SECONDS)
+    ) {
+      return NextResponse.json(
+        { error: `Recordings must be at least ${MIN_RECORDING_DURATION_SECONDS / 60} minutes long.` },
+        { status: 400 },
+      );
+    }
+
     // A material has to land somewhere findable: either it belongs to a course
     // (students of that course's level get it) or it names the level directly.
     if (!courseId && !targetLevel) {
@@ -213,18 +224,25 @@ export async function DELETE(req: NextRequest) {
     const { id } = await req.json().catch(() => ({}));
     if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
-    const material = await prisma.material.findUnique({ where: { id }, select: { id: true } });
+    const material = await prisma.material.findUnique({
+      where: { id },
+      select: { id: true, recording: { select: { id: true, objectKey: true } } },
+    });
     if (!material) return NextResponse.json({ error: "Material not found" }, { status: 404 });
-
-    /**
-     * Soft delete only — the row leaves every list but is restorable from the
-     * audit trail (prisma-guard rewrites this `delete` into `deletedAt = now`).
-     * The stored file is deliberately left in the bucket: reclaiming it here
-     * would make "restore" hand back a row pointing at nothing. A retention
-     * job sweeps orphaned objects separately.
+    let storageDeleted = true;
+    if (material.recording?.objectKey) {
+      const { deleteRecordingObject } = await import("@/lib/recording");
+      storageDeleted = await deleteRecordingObject(material.recording.objectKey);
+    }
      */
+    if (material.recording) {
+      await prisma.classRecording.update({
+        where: { id: material.recording.id },
+        data: { status: "purged", purgedAt: new Date(), fileUrl: null },
+      });
+    }
     await prisma.material.delete({ where: { id } });
-
+    return NextResponse.json({ success: true, storageDeleted });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error deleting material:", error);

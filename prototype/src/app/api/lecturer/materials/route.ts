@@ -7,6 +7,7 @@ import { assignmentBatches, belongsToLecturer, isAssigned, readAssignment, stude
 import { deriveMaterialKind } from '@/lib/video-library';
 import { AUDIO_EMBED_FILE_TYPE, EMBED_FILE_TYPE, parseAudioLink, parseEmbed } from '@/lib/media-embed';
 import { generateForMaterial } from '@/lib/material-ai';
+import { MIN_RECORDING_DURATION_SECONDS } from '@/lib/recording';
 
 function serialise(
   material: {
@@ -195,6 +196,15 @@ export async function POST(req: NextRequest) {
     // Tutors teach German classes by level, not a course catalogue — level is
     // the only thing that has to be chosen for a material to reach students.
     const kind = isRecording ? 'recording' : deriveMaterialKind(fileType);
+    if (
+      kind === 'recording' &&
+      (!durationRaw || !Number.isFinite(Number(durationRaw)) || Number(durationRaw) < MIN_RECORDING_DURATION_SECONDS)
+    ) {
+      return NextResponse.json(
+        { error: `Recordings must be at least ${MIN_RECORDING_DURATION_SECONDS / 60} minutes long.` },
+        { status: 400 },
+      );
+    }
     if (!level) {
       return NextResponse.json({ error: 'Please choose the level this material is for' }, { status: 400 });
     }
