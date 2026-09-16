@@ -757,8 +757,12 @@ function ClassRoster({
         { cache: "no-store" },
       );
       const data = await res.json().catch(() => ({}));
-      setRoster(data.roster || []);
-      setResults(data.results || []);
+      const normalizeStudent = (student: RosterStudent): RosterStudent => ({
+        ...student,
+        coTutorIds: Array.isArray(student.coTutorIds) ? student.coTutorIds : [],
+      });
+      setRoster((data.roster || []).map(normalizeStudent));
+      setResults((data.results || []).map(normalizeStudent));
       setHasClassAssignment(Boolean(data.hasClassAssignment));
     } finally {
       setLoading(false);
