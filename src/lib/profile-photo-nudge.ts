@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { notify, KIND } from "@/lib/notify";
 import { hasProfilePhoto } from "@/lib/access";
-import { receivedPaymentFilter, requiredDepositFor } from "@/lib/payment";
+import { receivedPaymentFilter } from "@/lib/payment";
+import { accessFromStudent } from "@/lib/student-access";
 
 /**
  * "Your profile still has no photo — add one."
@@ -69,10 +70,18 @@ export async function nudgeStudentsWithoutPhoto() {
       level: true,
       classType: true,
       pathway: true,
-      branch: { select: { name: true } },
+      deliveryMode: true,
+      classesStartedAt: true,
+      createdAt: true,
+      paymentGraceUntil: true,
+      branch: { select: { name: true, mode: true } },
       // Received tuition money only — `receivedPaymentFilter` excludes the
       // ₦5,000 registration fee, so it cannot push a student past the deposit.
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+      },
     },
   });
 
@@ -84,16 +93,13 @@ export async function nudgeStudentsWithoutPhoto() {
   const paidIds: string[] = [];
   const unpaidIds: string[] = [];
   for (const s of missing) {
-    const totalPaid = s.payments.reduce((sum, p) => sum + p.amount, 0);
-    const deposit = requiredDepositFor({
-      level: s.level,
-      branch: s.branch?.name ?? null,
-      classType: s.classType,
-      pathway: s.pathway,
-    });
-    // deposit 0 (an unpriced pathway) counts as "past the gate" — a student
-    // with nothing to pay is held only by the photo.
-    (totalPaid >= deposit ? paidIds : unpaidIds).push(s.userId as string);
+    // Same ledger-aware computation the portal itself uses — a raw
+    // `totalPaid >= deposit` here read a promoted/waived/payment-plan
+    // student as still owing the deposit and sent them the gentler weekly
+    // nudge instead of the urgent "you're paid, this is the only thing
+    // holding your portal" one.
+    const access = accessFromStudent(s);
+    (access.hasAccess ? paidIds : unpaidIds).push(s.userId as string);
   }
 
   let created = 0;
