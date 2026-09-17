@@ -102,8 +102,6 @@ export async function POST(req: NextRequest) {
   const occupation = str(body?.occupation);
   const goal = str(body?.goal);
 
-  const tenantId = student.tenantId ?? student.user?.tenantId ?? null;
-
   // ── The typed profile fields ──────────────────────────────────────────────
   // normalizeProfileInput parses `dateOfBirth` (ISO from <input type=date>, or
   // a legacy DD/MM/YYYY string) the same way every other writer does.
@@ -120,9 +118,20 @@ export async function POST(req: NextRequest) {
 
   if (Object.keys(incoming).length > 0) {
     const merged = mergeProfile(student.profile ?? {}, incoming);
+    let profileTenantId: string | undefined;
+    if (!student.profile) {
+      const candidate = student.tenantId ?? student.user?.tenantId ?? null;
+      if (candidate) {
+        const liveTenant = await prisma.tenant.findUnique({
+          where: { id: candidate },
+          select: { id: true },
+        });
+        profileTenantId = liveTenant?.id;
+      }
+    }
     await prisma.studentProfile.upsert({
       where: { studentId: student.id },
-      create: { studentId: student.id, tenantId, ...merged },
+      create: { studentId: student.id, ...(profileTenantId ? { tenantId: profileTenantId } : {}), ...merged },
       update: merged,
     });
   }
