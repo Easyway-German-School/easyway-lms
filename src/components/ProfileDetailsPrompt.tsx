@@ -119,7 +119,7 @@ export function ProfileDetailsWizard({
   const isLast = index === steps.length - 1;
   const set = (patch: Partial<Answers>) => setAnswers((prev) => ({ ...prev, ...patch }));
 
-  async function save(kind: "next" | "done" | "skip-all") {
+  async function save(kind: "next" | "done" | "skip-all"): Promise<boolean> {
     setBusy(true);
     setError("");
     try {
@@ -148,22 +148,21 @@ export function ProfileDetailsWizard({
       }
       if (kind === "skip-all") onSkipAll();
       else if (kind === "done") onDone();
+      return true;
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save that.");
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  function advance() {
+  async function advance() {
     if (isLast) {
-      void save("done");
+      await save("done");
     } else {
-      // Persist progress as we go, so a student who closes the tab halfway
-      // keeps what they have answered. Fire-and-forget; the final save is the
-      // one that marks completion.
-      void save("next");
-      setIndex((i) => Math.min(i + 1, steps.length - 1));
+      // Persist before moving on so two quick steps cannot race each other.
+      if (await save("next")) setIndex((i) => Math.min(i + 1, steps.length - 1));
     }
   }
 

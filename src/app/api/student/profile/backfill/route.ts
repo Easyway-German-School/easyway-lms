@@ -129,11 +129,13 @@ export async function POST(req: NextRequest) {
         profileTenantId = liveTenant?.id;
       }
     }
-    await prisma.studentProfile.upsert({
-      where: { studentId: student.id },
-      create: { studentId: student.id, ...(profileTenantId ? { tenantId: profileTenantId } : {}), ...merged },
-      update: merged,
-    });
+    if (student.profile) {
+      await prisma.studentProfile.update({ where: { studentId: student.id }, data: merged });
+    } else {
+      await prisma.studentProfile.create({
+        data: { studentId: student.id, ...(profileTenantId ? { tenantId: profileTenantId } : {}), ...merged },
+      });
+    }
   }
 
   // ── The admission blob ────────────────────────────────────────────────────
