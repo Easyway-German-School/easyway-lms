@@ -130,11 +130,23 @@ export async function POST(req: NextRequest) {
       }
     }
     if (student.profile) {
-      await prisma.studentProfile.update({ where: { studentId: student.id }, data: merged });
+      try {
+        await prisma.studentProfile.update({ where: { studentId: student.id }, data: merged });
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("Record not found")) throw error;
+        await prisma.studentProfile.create({
+          data: { studentId: student.id, ...(profileTenantId ? { tenantId: profileTenantId } : {}), ...merged },
+        });
+      }
     } else {
-      await prisma.studentProfile.create({
-        data: { studentId: student.id, ...(profileTenantId ? { tenantId: profileTenantId } : {}), ...merged },
-      });
+      try {
+        await prisma.studentProfile.create({
+          data: { studentId: student.id, ...(profileTenantId ? { tenantId: profileTenantId } : {}), ...merged },
+        });
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("Unique constraint")) throw error;
+        await prisma.studentProfile.update({ where: { studentId: student.id }, data: merged });
+      }
     }
   }
 

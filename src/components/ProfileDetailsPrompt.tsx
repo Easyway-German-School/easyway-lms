@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PencilIcon } from "@/components/icons";
 import { countries, nigerianStates } from "@/app/auth/signup/options";
 import type { BackfillField, BackfillPrefill } from "@/lib/profile-backfill";
@@ -114,12 +114,15 @@ export function ProfileDetailsWizard({
   const [answers, setAnswers] = useState<Answers>(() => answersFromPrefill(prefill));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const saveLock = useRef(false);
 
   const field = steps[index];
   const isLast = index === steps.length - 1;
   const set = (patch: Partial<Answers>) => setAnswers((prev) => ({ ...prev, ...patch }));
 
   async function save(kind: "next" | "done" | "skip-all"): Promise<boolean> {
+    if (saveLock.current) return false;
+    saveLock.current = true;
     setBusy(true);
     setError("");
     try {
@@ -153,6 +156,7 @@ export function ProfileDetailsWizard({
       setError(saveError instanceof Error ? saveError.message : "Could not save that.");
       return false;
     } finally {
+      saveLock.current = false;
       setBusy(false);
     }
   }
