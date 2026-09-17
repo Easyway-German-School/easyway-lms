@@ -106,10 +106,11 @@ export async function GET(req: NextRequest) {
           level: student.level,
           sessionSlot: student.sessionSlot,
           branch: student.branch?.name || "N/A",
-          // Default ABSENT, not present. A tutor who forgets to save should not
-          // silently produce a register saying everybody attended.
-          present: mark?.present ?? false,
-          status: mark?.status ?? "absent",
+          // Default PRESENT, not absent. The register submits the whole roster,
+          // so an untouched student must not become absent just because the
+          // tutor saved the register.
+          present: mark?.present ?? true,
+          status: mark?.status ?? "present",
           alreadyMarked: Boolean(mark),
         };
       }),
