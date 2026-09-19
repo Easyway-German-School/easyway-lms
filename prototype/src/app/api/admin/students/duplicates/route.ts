@@ -4,6 +4,7 @@ import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
 import { batchFromAdmission } from "@/lib/batch";
+import { mergeStudentRecords, type MergeDb, type MergeParty } from "@/lib/student-merge";
 import {
   buildClusters,
   normalizeName,
@@ -223,134 +224,26 @@ export async function POST(request: Request) {
       );
     }
 
-    const keeperAdmission = ((keeper.admission ?? {}) as Record<string, unknown>) || {};
-    const absorbAdmission = ((absorb.admission ?? {}) as Record<string, unknown>) || {};
-    const nowIso = new Date().toISOString();
-
-    const moved = await prisma.$transaction(async (tx) => {
-      // 1. The money and its scaffolding — the whole reason to do this.
-      const payments = await tx.payment.updateMany({
-        where: { studentId: absorb.id },
-        data: { studentId: keeper.id },
-      });
-      const invoices = await tx.invoice.updateMany({
-        where: { studentId: absorb.id },
-        data: { studentId: keeper.id },
-      });
-      const plans = await tx.paymentPlan.updateMany({
-        where: { studentId: absorb.id },
-        data: { studentId: keeper.id },
-      });
-
-      // 2. Tuition charges — one per (student, level). Move the levels the
-      //    keeper has no charge for; drop the duplicate's for a level the
-      //    keeper already carries (the office reconciles the figure later).
-      const keeperLevels = new Set(
-        (await tx.tuitionCharge.findMany({ where: { studentId: keeper.id }, select: { level: true } })).map(
-          (r) => r.level,
-        ),
-      );
-      const absorbCharges = await tx.tuitionCharge.findMany({
-        where: { studentId: absorb.id },
-        select: { id: true, level: true },
-      });
-      let chargesMoved = 0;
-      let chargesDropped = 0;
-      for (const charge of absorbCharges) {
-        if (keeperLevels.has(charge.level)) {
-          await tx.tuitionCharge.delete({ where: { id: charge.id } });
-          chargesDropped += 1;
-        } else {
-          await tx.tuitionCharge.update({ where: { id: charge.id }, data: { studentId: keeper.id } });
-          keeperLevels.add(charge.level);
-          chargesMoved += 1;
-        }
-      }
-
-      // 3. Guardian links — one per (parent, student). Move the new ones,
-      //    drop a link to a guardian the keeper already has.
-      const keeperParents = new Set(
-        (await tx.parentStudent.findMany({ where: { studentId: keeper.id }, select: { parentId: true } })).map(
-          (r) => r.parentId,
-        ),
-      );
-      const absorbLinks = await tx.parentStudent.findMany({
-        where: { studentId: absorb.id },
-        select: { id: true, parentId: true },
-      });
-      let guardiansMoved = 0;
-      for (const link of absorbLinks) {
-        if (keeperParents.has(link.parentId)) {
-          await tx.parentStudent.delete({ where: { id: link.id } });
-        } else {
-          await tx.parentStudent.update({ where: { id: link.id }, data: { studentId: keeper.id } });
-          guardiansMoved += 1;
-        }
-      }
-
-      // 4. Fill the keeper's blanks from the duplicate — never overwrite.
-      const keeperData: Record<string, unknown> = {};
-      if (!keeper.branchId && absorb.branchId) keeperData.branchId = absorb.branchId;
-      if (keeper.deliveryMode === "physical" && absorb.deliveryMode !== "physical") {
-        keeperData.deliveryMode = absorb.deliveryMode;
-      }
-      const mergedAdmission: Record<string, unknown> = { ...absorbAdmission, ...keeperAdmission };
-      if (!keeperAdmission.batch && absorbAdmission.batch) mergedAdmission.batch = absorbAdmission.batch;
-      if (!keeperAdmission.phone && absorbAdmission.phone) mergedAdmission.phone = absorbAdmission.phone;
-      const priorMerges = Array.isArray(keeperAdmission.mergedFrom) ? keeperAdmission.mergedFrom : [];
-      mergedAdmission.mergedFrom = [
-        ...priorMerges,
-        {
-          studentId: absorb.id,
-          studentCode: absorb.studentCode ?? null,
-          email: absorbUser.email,
-          at: nowIso,
-        },
-      ];
-      keeperData.admission = mergedAdmission;
-      await tx.student.update({ where: { id: keeper.id }, data: keeperData });
-
-      // Profile: move it wholesale if the keeper has none, else fill blanks.
-      const keeperProfile = keeper.profile;
-      const absorbProfile = absorb.profile;
-      if (!keeperProfile && absorbProfile) {
-        await tx.studentProfile.update({ where: { studentId: absorb.id }, data: { studentId: keeper.id } });
-      } else if (keeperProfile && absorbProfile) {
-        const fill: Record<string, unknown> = {};
-        for (const key of ["phone", "altPhone", "whatsapp", "photoUrl"] as const) {
-          if (!keeperProfile[key] && absorbProfile[key]) fill[key] = absorbProfile[key];
-        }
-        if (Object.keys(fill).length > 0) {
-          await tx.studentProfile.update({ where: { studentId: keeper.id }, data: fill });
-        }
-      }
-
-      // 5. Retire the duplicate. Marker first so it survives in the audit
-      //    before-image, then the soft deletes free the name and the login.
-      await tx.student.update({
-        where: { id: absorb.id },
-        data: {
-          status: "merged",
-          admission: {
-            ...absorbAdmission,
-            mergedInto: keeper.studentCode ?? keeper.id,
-            mergedIntoId: keeper.id,
-            mergedAt: nowIso,
-          },
-        },
-      });
-      await tx.student.delete({ where: { id: absorb.id } });
-      await tx.user.delete({ where: { id: absorbUser.id } });
-
-      return {
-        payments: payments.count,
-        invoices: invoices.count,
-        paymentPlans: plans.count,
-        chargesMoved,
-        chargesDropped,
-        guardiansMoved,
-      };
+    const toParty = (row: MemberRow, user: NonNullable<MemberRow["user"]>): MergeParty => ({
+      id: row.id,
+      studentCode: row.studentCode,
+      branchId: row.branchId,
+      deliveryMode: row.deliveryMode,
+      admission: ((row.admission ?? {}) as Record<string, unknown>) || {},
+      user: { id: user.id, email: user.email },
+      profile: row.profile,
     });
+
+    // The moves run in one transaction; the irreversible soft-deletes run AFTER
+    // it commits. A soft-delete goes through the guard's base client, so inside
+    // a transaction it would commit immediately and survive a rollback — which
+    // once left a duplicate hidden with its payment still attached. See
+    // lib/student-merge.ts.
+    const moved = await mergeStudentRecords(
+      prisma as unknown as MergeDb,
+      toParty(keeper, keeperUser),
+      toParty(absorb, absorbUser),
+    );
 
     await writeAudit(unguardedPrisma, {
       action: "update",
@@ -361,11 +254,26 @@ export async function POST(request: Request) {
       summary:
         `Merged duplicate ${absorbUser.name ?? "student"} (${absorbUser.email}) into ` +
         `${keeperUser.name ?? "student"} (${keeperUser.email}) — ` +
-        `${moved.payments} payment(s), ${moved.chargesMoved} charge(s), ${moved.guardiansMoved} guardian(s) moved`,
+        `${moved.payments} payment(s), ${moved.chargesMoved} charge(s), ${moved.guardiansMoved} guardian(s) moved` +
+        (moved.retired ? "" : ` — clean-up of the duplicate incomplete: ${moved.cleanupErrors.join("; ")}`),
       after: { keeperId: keeper.id, absorbId: absorb.id, moved },
     });
 
-    return NextResponse.json({ ok: true, keeperId: keeper.id, absorbId: absorb.id, moved });
+    return NextResponse.json({
+      ok: true,
+      keeperId: keeper.id,
+      absorbId: absorb.id,
+      moved,
+      // Money is already on the keeper. If hiding the duplicate failed part-way,
+      // say so plainly rather than reporting a clean merge.
+      ...(moved.retired
+        ? {}
+        : {
+            warning:
+              "Payments and records were merged and nothing was lost, but hiding the duplicate did not fully finish. " +
+              "If it still shows in the list, run the merge on it again; otherwise ask a developer to retire its login.",
+          }),
+    });
   } catch (error) {
     console.error("Failed to merge duplicate students:", error);
     return NextResponse.json({ error: "Could not merge those records. Nothing was changed." }, { status: 500 });
