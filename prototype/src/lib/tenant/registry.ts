@@ -350,6 +350,15 @@ export const GLOBAL_MODELS = {
   SignupToken: "looked up by unguessable token/ref, pre-authentication; tenant is stamped on the account it creates",
 
   /**
+   * The problem register (src/lib/incidents.ts): one row per distinct error,
+   * complaint or drift alarm. Its writers are sessionless — a server error, a
+   * cron job, a health probe — so there is no tenant in context to scope by,
+   * the same trap BackupRun fell into. Read only through the platform/developer
+   * console, gated by capability. `tenantId` on the row is an audit column.
+   */
+  Incident: "platform-wide problem register; written by sessionless paths, read by the developer console",
+
+  /**
    * Carries its own tenantId already and is the join point for the others.
    */
   User: "tenant column already present; scoped by the extension directly",

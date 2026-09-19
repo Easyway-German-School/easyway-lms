@@ -41,6 +41,29 @@ export async function captureError(
     stack: payload.stack,
   });
 
+  // Remembered, not just logged: this is what the developer console and the
+  // regression tracking read. Bounded so a slow database cannot hold a request open.
+  try {
+    const { recordIncident } = await import("@/lib/incidents");
+    const routePath = typeof context?.routePath === "string" ? context.routePath : undefined;
+    const job = typeof context?.job === "string" ? context.job : undefined;
+    await Promise.race([
+      recordIncident({
+        kind: "error",
+        source: where === "cron" ? "cron" : "request",
+        route: routePath ?? (job ? `cron:${job}` : where),
+        method: typeof context?.method === "string" ? context.method : null,
+        message: err.message,
+        stack: err.stack,
+        // Never the raw path — it can carry ids. routePath is the pattern.
+        context: { where, renderSource: context?.renderSource, routeType: context?.routeType },
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+    ]);
+  } catch {
+    // Already logged above; the incident register is best-effort too.
+  }
+
   const url = process.env.ERROR_WEBHOOK_URL;
   if (!url) return;
 
