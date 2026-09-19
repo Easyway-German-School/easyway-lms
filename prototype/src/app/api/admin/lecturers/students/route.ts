@@ -45,6 +45,8 @@ type StudentRow = {
   totalPaid: number;
   tuitionFee: number;
   hasPaid: boolean;
+  /** "October 2026" while placed in an intake that has not opened. */
+  waitingBatch: string | null;
   currentTutorId: string | null;
   currentTutorName: string | null;
   /** In this tutor's class because the office named them, not by matching. */

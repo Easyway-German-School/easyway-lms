@@ -77,6 +77,7 @@ type RosterStudent = {
   totalPaid: number;
   tuitionFee: number;
   hasPaid: boolean;
+  waitingBatch?: string | null;
   currentTutorId: string | null;
   currentTutorName: string | null;
   namedByOffice: boolean;
@@ -502,10 +503,18 @@ function StudentLine({
 
       <span
         className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-          student.hasPaid ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/15 text-amber-800"
+          student.waitingBatch
+            ? "bg-sky-500/10 text-sky-700"
+            : student.hasPaid
+              ? "bg-emerald-500/10 text-emerald-700"
+              : "bg-amber-500/15 text-amber-800"
         }`}
       >
-        {student.hasPaid ? "Paid" : `${naira(Math.max(0, student.tuitionFee - student.totalPaid))} owing`}
+        {student.waitingBatch
+          ? `${student.waitingBatch.split(" ")[0]} intake`
+          : student.hasPaid
+            ? "Paid"
+            : `${naira(Math.max(0, student.tuitionFee - student.totalPaid))} owing`}
       </span>
 
       {right}
