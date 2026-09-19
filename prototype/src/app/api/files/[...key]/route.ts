@@ -81,6 +81,17 @@ export async function GET(request: NextRequest, context: { params: Promise<{ key
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // `?signed=1`: hand back the signed bucket URL as JSON instead of redirecting.
+  // The offline downloader needs it — it reads the body for a progress bar, and
+  // fetch() cannot follow a redirect to another origin with credentials. A key
+  // that must stay on the session-checked proxy answers `{ url: null }`, and the
+  // caller falls back to `?proxy=1`. Never streams bytes, so it costs nothing.
+  if (request.nextUrl.searchParams.get("signed") === "1") {
+    const ttl = redirectTtlSeconds(objectKey);
+    const url = ttl === null ? null : await signedGetUrl(objectKey, ttl);
+    return NextResponse.json({ url }, { headers: { "Cache-Control": "private, no-store" } });
+  }
+
   // Recording videos and course materials: check auth once, then redirect the
   // client straight to the bucket instead of streaming the bytes back through
   // this function (Vercel bills every proxied byte as Fast Origin Transfer).
