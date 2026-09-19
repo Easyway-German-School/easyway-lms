@@ -20,6 +20,8 @@ import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 import { normalizeProfileInput, mergeProfile, type StudentProfileInput } from "@/lib/student-profile";
 import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
+import { batchFromAdmission } from "@/lib/batch";
+import { resolveUpcomingBatch } from "@/lib/batch-reservation";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
 import {
   buildRosterWhereClause,
@@ -101,6 +103,15 @@ export async function GET(request: Request) {
     // Machine-derived classification — see lib/student-segments.ts. Combine
     // with the stored `tags` column client-side for one filterable list.
     _segments: segments,
+    // Placed in an intake that has not opened: the learner's portal is a
+    // countdown, so the roster says so instead of showing an ordinary lock.
+    _waitingBatch: (() => {
+      const upcoming = resolveUpcomingBatch(batchFromAdmission(student.admission), {
+        registeredAt: student.createdAt,
+        classesStartedAt: student.classesStartedAt,
+      });
+      return upcoming ? { label: upcoming.monthLabel, daysUntilStart: upcoming.daysUntilStart } : null;
+    })(),
     // Kept under its old name so nothing that reads it breaks. It now comes off
     // the tuition fee rather than the sum of raised invoices: most students who
     // owe the school money have no Invoice row at all, so the old figure read

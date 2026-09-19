@@ -98,6 +98,11 @@ type Dossier = {
   money: {
     paywall: "unpaid" | "registeredOnly" | "depositPaid" | "fullPaid";
     lockedOut: boolean;
+    /** Placed in an intake that has not opened — the portal is a countdown. */
+    waitingForBatch?: boolean;
+    batchLabel?: string | null;
+    batchStartsOn?: string | null;
+    daysUntilBatchStart?: number;
     partPayer: boolean;
     balanceLockAt: string | null;
     balanceLockActive: boolean;
@@ -1245,7 +1250,9 @@ export default function StudentDossierPage() {
             */}
             <div
               className={`rounded-2xl border px-5 py-4 ${
-                money.lockedOut
+                money.waitingForBatch
+                  ? "border-sky-400/40 bg-sky-500/10"
+                  : money.lockedOut
                   ? "border-red-400/40 bg-red-500/10"
                   : photoLocked
                     ? "border-amber-400/40 bg-amber-500/10"
@@ -1255,16 +1262,25 @@ export default function StudentDossierPage() {
               <div className="flex items-center gap-2">
                 <span
                   className={
-                    money.lockedOut ? "text-red-300" : photoLocked ? "text-amber-300" : "text-emerald-300"
+                    money.waitingForBatch ? "text-sky-300" : money.lockedOut ? "text-red-300" : photoLocked ? "text-amber-300" : "text-emerald-300"
                   }
                 >
-                  {money.lockedOut || photoLocked ? <LockIcon /> : <UnlockIcon />}
+                  {money.waitingForBatch || money.lockedOut || photoLocked ? <LockIcon /> : <UnlockIcon />}
                 </span>
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/70">
-                  {money.lockedOut || photoLocked ? "Portal locked" : "Portal open"}
+                  {money.waitingForBatch
+                    ? "Waiting for intake"
+                    : money.lockedOut || photoLocked
+                      ? "Portal locked"
+                      : "Portal open"}
                 </p>
               </div>
-              <p className="mt-2 text-sm font-bold">
+              {money.waitingForBatch && (
+                <p className="mt-2 text-sm font-bold">
+                  {money.batchLabel} opens in {money.daysUntilBatchStart} day{money.daysUntilBatchStart === 1 ? "" : "s"}
+                </p>
+              )}
+              <p className={money.waitingForBatch ? "mt-0.5 text-xs text-white/70" : "mt-2 text-sm font-bold"}>
                 {money.lockedOut
                   ? PAYWALL_LABEL[money.paywall]
                   : photoLocked

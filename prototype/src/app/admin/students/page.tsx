@@ -1895,6 +1895,18 @@ function StudentsRoster() {
                           Weekend
                         </span>
                       ) : null}
+                      {(() => {
+                        const waiting = (student as unknown as { _waitingBatch?: { label: string; daysUntilStart: number } | null })._waitingBatch;
+                        return waiting ? (
+                          <span
+                            title={`Placed in the ${waiting.label} intake — portal is a countdown until it opens, whatever they have paid. See Upcoming intake.`}
+                            className="ml-2 inline-flex items-center gap-1 rounded-full border border-sky-400/50 bg-sky-400/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700"
+                          >
+                            <CalendarIcon className="h-3 w-3" />
+                            {waiting.label.split(" ")[0]} in {waiting.daysUntilStart}d
+                          </span>
+                        ) : null;
+                      })()}
                       {hasNoPhoto ? (
                         <span
                           title="No profile photo on file — this student's portal is locked to their profile, notifications and payments only. Every class page shows an &quot;add your photo&quot; wall until one is uploaded. Becca nudges them once a week automatically; the office can set one from this student's Edit form."

@@ -111,6 +111,16 @@ async function handleGET(request: NextRequest) {
   );
 
   results.push(
+    await run("seat-nudges", async () => {
+      // Becca's reserve-your-seat / countdown / opening-day messages for
+      // learners waiting on a future intake. Idempotent per learner and
+      // milestone via the notification dedupeKey.
+      const { runSeatNudges } = await import("@/lib/seat-nudges");
+      return runSeatNudges();
+    }),
+  );
+
+  results.push(
     await run("fee-reminders", async () => {
       const { sendDueFeeReminders } = await import("@/lib/fee-reminders");
       return sendDueFeeReminders();

@@ -375,7 +375,10 @@ export async function GET(
       recentAttendance: recentAttendance.map((record) => ({ present: record.present, status: record.status })),
       lastVideoActivityAt: videoProgress[0]?.updatedAt ?? null,
       lastJourneyEventAt: journeyEvents[0]?.occurredAt ?? null,
-      behindOnTuition: lockedOut && Math.floor((now.getTime() - student.createdAt.getTime()) / DAY) >= BEHIND_TUITION_MIN_DAYS,
+      // A learner waiting for an intake that has not opened is not "behind" —
+      // they are on the Upcoming intake console instead.
+      behindOnTuition:
+        lockedOut && !access.batchLocked && Math.floor((now.getTime() - student.createdAt.getTime()) / DAY) >= BEHIND_TUITION_MIN_DAYS,
     },
     now,
   );
@@ -459,6 +462,13 @@ export async function GET(
     money: {
       paywall,
       lockedOut,
+      // Placed in an intake that has not opened: the portal is a countdown
+      // whatever they have paid, so "Portal open" would be wrong even for a
+      // student who paid in full. See lib/batch-reservation.ts.
+      waitingForBatch: access.batchLocked,
+      batchLabel: access.batchLabel,
+      batchStartsOn: access.batchStartsOn,
+      daysUntilBatchStart: access.daysUntilBatchStart,
       // Present for every admin so a secretary can see "access on hold", even
       // without the amounts.
       partPayer: isPartPayer,
@@ -606,7 +616,7 @@ export async function GET(
         // can never disagree with `money.lockedOut` or `risk` itself.
         finance: {
           behindOnTuition:
-            lockedOut && Math.floor((now.getTime() - student.createdAt.getTime()) / DAY) >= BEHIND_TUITION_MIN_DAYS,
+            lockedOut && !access.batchLocked && Math.floor((now.getTime() - student.createdAt.getTime()) / DAY) >= BEHIND_TUITION_MIN_DAYS,
           owed,
           progressPercent: 0,
         },

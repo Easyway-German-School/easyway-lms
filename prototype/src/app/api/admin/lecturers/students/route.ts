@@ -45,6 +45,8 @@ type StudentRow = {
   totalPaid: number;
   tuitionFee: number;
   hasPaid: boolean;
+  /** "October 2026" while placed in an intake that has not opened. */
+  waitingBatch: string | null;
   currentTutorId: string | null;
   currentTutorName: string | null;
   /** In this tutor's class because the office named them, not by matching. */
@@ -86,6 +88,8 @@ type RawStudent = {
   classesStartedAt: Date | null;
   createdAt: Date;
   paymentGraceUntil: Date | null;
+  /** The batch month lives here — the upcoming-batch lock reads it. */
+  admission: unknown;
   user: { name: string | null; email: string };
   branch: { name: string } | null;
   payments: Array<{ amount: number; status: string; description?: string | null }>;
@@ -130,6 +134,7 @@ function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
     // Shown next to every result so nobody hands a class to somebody who has
     // not paid for it without at least seeing that first.
     hasPaid: access.hasAccess,
+    waitingBatch: access.batchLocked ? access.batchLabel : null,
     currentTutorId: student.tutor?.id ?? null,
     currentTutorName: student.tutor ? student.tutor.user.name || student.tutor.user.email : null,
     namedByOffice: Boolean(lecturerId && student.tutorId === lecturerId),

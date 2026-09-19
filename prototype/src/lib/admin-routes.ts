@@ -33,6 +33,9 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // and fixing the students who landed outside every cohort. Same desk as the
   // student records it rewrites.
   { prefix: "/admin/cohorts", capability: "students" },
+  // Learners waiting on a batch that has not started — same desk as the cohort
+  // console it sits beside, and it rewrites the same `admission.batch` key.
+  { prefix: "/admin/upcoming-intake", capability: "students" },
   // A read-only roll-call of who has finished a batch / level. Same desk as
   // the cohort console it links out to.
   { prefix: "/admin/completions", capability: "students" },

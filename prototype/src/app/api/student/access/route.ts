@@ -27,8 +27,6 @@ export async function GET() {
     where: { userId: session.user.id as string },
     select: {
       id: true,
-      // Drives the photo lock screen — see hasProfilePhoto below.
-      admission: true,
       // Every field the payment gate itself needs — kept in one place
       // (lib/student-access.ts) so this route cannot drift from it by
       // dropping or retyping a field. See accessFromStudent below.

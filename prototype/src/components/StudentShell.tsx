@@ -31,6 +31,7 @@ import StudentUsageTracker from "@/components/StudentUsageTracker";
 import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
+import BatchLockScreen from "@/components/BatchLockScreen";
 import PhotoLockScreen from "@/components/PhotoLockScreen";
 import PhotoUnlockGuide from "@/components/PhotoUnlockGuide";
 import SignOutButton from "@/components/SignOutButton";
@@ -567,7 +568,11 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         ) : routeLocked ? (
-          <PaymentLockScreen areaLabel={lockedAreaLabel} access={access} />
+          access?.lockReason === "upcoming_batch" ? (
+            <BatchLockScreen access={access} />
+          ) : (
+            <PaymentLockScreen areaLabel={lockedAreaLabel} access={access} />
+          )
         ) : photoLocked ? (
           <PhotoLockScreen areaLabel={lockedAreaLabel} />
         ) : (

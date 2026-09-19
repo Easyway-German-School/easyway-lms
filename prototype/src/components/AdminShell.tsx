@@ -103,6 +103,7 @@ const navItems: NavItem[] = [
   { label: 'Live classes', href: '/admin/live', icon: <PulseIcon />, group: 'Academics' },
   { label: 'Full timetable', href: '/lecturer/timetable', icon: <CalendarIcon />, group: 'Academics' },
   { label: 'Cohorts', href: '/admin/cohorts', icon: <RosterIcon />, group: 'Academics' },
+  { label: 'Upcoming intake', href: '/admin/upcoming-intake', icon: <CalendarIcon />, group: 'Academics' },
   { label: 'Cohort sign-off', href: '/admin/journey', icon: <MapIcon />, group: 'Academics' },
   { label: 'Batch completions', href: '/admin/completions', icon: <ResultsIcon />, group: 'Academics' },
   { label: 'Promotions', href: '/admin/promotions', icon: <LevelUpIcon />, group: 'Academics' },

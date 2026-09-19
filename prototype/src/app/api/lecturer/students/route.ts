@@ -138,8 +138,17 @@ export async function GET() {
           country: typeof admission.country === "string" ? admission.country : null,
           batch: typeof admission.batch === "string" ? admission.batch : null,
           photoUrl: typeof admission.photoUrl === "string" ? admission.photoUrl : null,
-          paymentStatus: access.hasAccess ? "Paid" : totalPaid > 0 ? "Owing" : "Pending",
+          paymentStatus: access.batchLocked
+            ? "Awaiting intake"
+            : access.hasAccess
+              ? "Paid"
+              : totalPaid > 0
+                ? "Owing"
+                : "Pending",
           hasAccess: access.hasAccess,
+          // Placed in an intake that has not opened — their portal is a
+          // countdown, so "outstanding" would misread a fully-paid learner.
+          waitingBatch: access.batchLocked ? access.batchLabel : null,
           attendanceRate,
           sessionsRecorded: student.attendances.length,
           submissions: student._count.assignmentSubmissions,

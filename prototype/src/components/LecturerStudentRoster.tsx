@@ -33,6 +33,8 @@ export type LecturerStudent = {
   tuitionFee: number;
   outstanding: number;
   hasAccess: boolean;
+  /** "October 2026" while placed in an intake that has not opened. */
+  waitingBatch?: string | null;
   attendanceRate: number | null;
   sessionsRecorded: number;
   submissions: number;
@@ -112,10 +114,18 @@ function DetailPanel({ student }: { student: LecturerStudent }) {
         </div>
         <span
           className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${
-            student.hasAccess ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/15 text-amber-800"
+            student.waitingBatch
+              ? "bg-sky-500/10 text-sky-700"
+              : student.hasAccess
+                ? "bg-emerald-500/10 text-emerald-700"
+                : "bg-amber-500/15 text-amber-800"
           }`}
         >
-          {student.hasAccess ? "Tuition cleared to attend" : `${naira(student.outstanding)} outstanding`}
+          {student.waitingBatch
+            ? `${student.waitingBatch} intake — not started`
+            : student.hasAccess
+              ? "Tuition cleared to attend"
+              : `${naira(student.outstanding)} outstanding`}
         </span>
       </div>
 
