@@ -48,11 +48,16 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
-import { getFile, signedGetUrl, storageConfigured, RECORDING_PREFIX } from "@/lib/storage";
+import {
+  getFile,
+  redirectTtlSeconds,
+  signedGetUrl,
+  storageConfigured,
+  RECORDING_PREFIX,
+} from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
-const RECORDING_URL_TTL_SECONDS = 6 * 60 * 60;
 const STREAMABLE_VIDEO = /\.(mp4|webm|mov|m4v)$/i;
 
 export async function GET(request: NextRequest, context: { params: Promise<{ key: string[] }> }) {
@@ -76,15 +81,15 @@ export async function GET(request: NextRequest, context: { params: Promise<{ key
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Recording videos: check auth once, then redirect the player straight to the
-  // bucket instead of streaming the bytes back through this function. Posters
-  // and the `?proxy=1` offline download stream stay on the proxy (see header).
-  const isRecordingVideo =
-    objectKey.startsWith(RECORDING_PREFIX) &&
-    STREAMABLE_VIDEO.test(objectKey) &&
-    request.nextUrl.searchParams.get("proxy") !== "1";
-  if (isRecordingVideo) {
-    const signed = await signedGetUrl(objectKey, RECORDING_URL_TTL_SECONDS);
+  // Recording videos and course materials: check auth once, then redirect the
+  // client straight to the bucket instead of streaming the bytes back through
+  // this function (Vercel bills every proxied byte as Fast Origin Transfer).
+  // Posters and the `?proxy=1` offline download stream stay on the proxy (see
+  // header).
+  const redirectTtl =
+    request.nextUrl.searchParams.get("proxy") === "1" ? null : redirectTtlSeconds(objectKey);
+  if (redirectTtl !== null) {
+    const signed = await signedGetUrl(objectKey, redirectTtl);
     if (signed) {
       const redirect = NextResponse.redirect(signed, 302);
       // Let the browser hold the resolved target for a few minutes so a player

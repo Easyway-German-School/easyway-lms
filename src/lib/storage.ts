@@ -240,6 +240,40 @@ export async function signedGetUrl(key: string, expiresInSeconds = 3600): Promis
   return signed.url;
 }
 
+/** Course-material uploads (`/api/media/presign`, folder "materials") all start here. */
+export const MATERIAL_PREFIX = "materials/";
+
+const STREAMABLE_VIDEO = /\.(mp4|webm|mov|m4v)$/i;
+const STREAMABLE_AUDIO = /\.(mp3|m4a|wav|ogg)$/i;
+const LONG_MEDIA_TTL_SECONDS = 6 * 60 * 60;
+const DOCUMENT_TTL_SECONDS = 60 * 60;
+
+/**
+ * How long a signed bucket URL should live when `/api/files` redirects to it
+ * instead of proxying the bytes — or null when the key must stay on the proxy.
+ *
+ * Every byte proxied through a Vercel function is billed as Fast Origin
+ * Transfer, which is what turned a few weeks of class-recording replays into a
+ * ~$87 line item. Recordings and course materials are the two large, non-
+ * personal things in the bucket; photos, ID scans and hand-ins are small and
+ * private, so they are deliberately absent here and keep the session-checked
+ * proxy.
+ *
+ * Video and audio get six hours so a long lesson never has its link expire
+ * mid-playback; documents are fetched once, so an hour is plenty.
+ */
+export function redirectTtlSeconds(key: string): number | null {
+  if (key.startsWith(RECORDING_PREFIX)) {
+    return STREAMABLE_VIDEO.test(key) ? LONG_MEDIA_TTL_SECONDS : null;
+  }
+  if (key.startsWith(MATERIAL_PREFIX)) {
+    return STREAMABLE_VIDEO.test(key) || STREAMABLE_AUDIO.test(key)
+      ? LONG_MEDIA_TTL_SECONDS
+      : DOCUMENT_TTL_SECONDS;
+  }
+  return null;
+}
+
 /**
  * Recover the object key from a URL we previously handed out, so deletes can
  * find the file again. Returns null for anything that did not come from us.
