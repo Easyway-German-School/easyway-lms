@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-roles";
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
-import { LIVE_ONLY_ROUTES, TUITION_FREE_ROUTES, canAttendLive } from "@/lib/access";
+import { LIVE_ONLY_ROUTES, TUITION_FREE_ROUTES, canAttendLive, hasProfilePhoto, isPhotoGatedRoute } from "@/lib/access";
+import { portalVerdict } from "@/lib/portal-verdict";
 import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { accessFromStudent } from "@/lib/student-access";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
@@ -117,6 +118,21 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const planStatus = await planStatusForStudent(student.id);
   const accessInput = { ...student, payments: receivedTuitionPayments };
   const access = accessFromStudent(accessInput, planSuppressesLock(planStatus?.adherence ?? null));
+  /**
+   * The student's portal is walled by payment/intake OR by a missing photo, and
+   * their own shell applies both. Reading `access.hasAccess` alone reported a
+   * paid student with no photo as "open" while the padlock was on their screen —
+   * see lib/portal-verdict.ts. `hasProfilePhoto` is the same test the student's
+   * own /api/student/access uses.
+   */
+  const hasPhoto = hasProfilePhoto(student.admission);
+  const verdict = portalVerdict(access, hasPhoto);
+  // What their browser last SAID it rendered (lib/portal-witness.ts). Absent until
+  // they have opened the portal on a build that reports it.
+  const snapshot = await prisma.accessSnapshot.findUnique({
+    where: { studentId: student.id },
+    select: { verdictKey: true, changedAt: true, lastWitnessAt: true, lastWitnessRendered: true, lastWitnessPath: true },
+  });
 
   /**
    * The tabs, resolved the same way the student's own shell resolves them, so
@@ -147,7 +163,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       ...tab,
       label: tab.label.charAt(0).toUpperCase() + tab.label.slice(1),
       hidden,
-      locked: !hidden && !free && !access.hasAccess,
+      // Same two clauses the student's shell applies: the tuition gate, and the photo wall.
+      locked: !hidden && ((!free && !access.hasAccess) || (!hasPhoto && isPhotoGatedRoute(tab.path))),
     };
   });
 
@@ -256,7 +273,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       tutor: student.tutor?.user.name ?? null,
     },
     portal: {
-      locked: !access.hasAccess,
+      locked: !verdict.open,
+      // Every reason, with what lifts it — an admin can read these to the student.
+      locks: verdict.locks,
+      witness: snapshot
+        ? {
+            lockedSince: snapshot.verdictKey === verdict.key && !verdict.open ? snapshot.changedAt.toISOString() : null,
+            lastReportedAt: snapshot.lastWitnessAt ? snapshot.lastWitnessAt.toISOString() : null,
+            rendered: snapshot.lastWitnessRendered,
+            path: snapshot.lastWitnessPath,
+          }
+        : null,
       registrationPaid: access.registrationPaid,
       progressPercent: access.progressPercent,
       // Amounts follow the same rule as the rest of the admin area: an admin

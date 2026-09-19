@@ -6087,3 +6087,44 @@ model Incident {
   @@index([kind, status, lastSeenAt])
   @@index([route, lastSeenAt])
 }
+
+/**
+ * WHY A STUDENT'S PORTAL IS THE WAY IT IS, and what their screen last showed.
+ *
+ * One row per student, upserted by the portal witness (src/lib/portal-witness.ts)
+ * — and the verdict half only CHANGES (`changedAt`) when the verdict does, so
+ * the row answers "locked since when, and why" instead of "when did we last
+ * look". The witness half records what the student's own browser last reported
+ * it rendered, which is the one fact nothing on the server can otherwise know.
+ *
+ * `studentId` is a plain column, not a relation: this is a derived record and
+ * must never block, or be cascaded by, anything that happens to the Student.
+ * `tenantId` is a plain column for the same reason (see Incident).
+ */
+model AccessSnapshot {
+  id        String @id @default(cuid())
+  studentId String @unique
+  tenantId  String?
+
+  /// True only when nothing at all holds the portal back. See lib/portal-verdict.ts.
+  open       Boolean
+  /// "open" or the sorted lock codes, e.g. "photo_missing+unpaid_deposit".
+  verdictKey String
+  /// [{ code, label, fix }] — the reasons, readable without joining anything.
+  locks      Json
+  /// The facts the verdict was derived from (amounts, grace, photo, batch).
+  inputs     Json?
+
+  /// When `verdictKey` last changed — i.e. how long they have been in this state.
+  changedAt DateTime
+  /// When the server last recomputed it.
+  checkedAt DateTime
+
+  lastWitnessAt       DateTime?
+  /// none | payment | batch | photo — what their browser last put on screen.
+  lastWitnessRendered String?
+  lastWitnessPath     String?
+
+  @@index([open, changedAt])
+  @@index([tenantId])
+}

@@ -33,6 +33,7 @@ import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggl
 import PaymentLockScreen from "@/components/PaymentLockScreen";
 import BatchLockScreen from "@/components/BatchLockScreen";
 import PhotoLockScreen from "@/components/PhotoLockScreen";
+import { usePortalWitness } from "@/lib/usePortalWitness";
 import PhotoUnlockGuide from "@/components/PhotoUnlockGuide";
 import SignOutButton from "@/components/SignOutButton";
 import { MomentQueueProvider } from "@/lib/moment-queue";
@@ -309,6 +310,10 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   // in flight, so this reads false until we actually know — same reasoning
   // as `hasAccess` defaulting to true above.
   const photoLocked = access !== null && access.hasPhoto === false && isPhotoGatedRoute(pathname);
+
+  // Report what this screen is actually showing, so a student who sees a lock
+  // the office cannot reproduce is a recorded fact rather than a he-said-she-said.
+  usePortalWitness({ access, routeLocked, photoLocked, pathname });
 
   // Hiding the sidebar entry is cosmetic — /live is still reachable by typing
   // it. The route is refused here too, and again on the server.

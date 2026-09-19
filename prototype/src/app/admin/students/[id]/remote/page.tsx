@@ -63,6 +63,8 @@ type Remote = {
   };
   portal: {
     locked: boolean;
+    locks: Array<{ code: string; label: string; fix: string }>;
+    witness: { lockedSince: string | null; lastReportedAt: string | null; rendered: string | null; path: string | null } | null;
     registrationPaid: boolean;
     progressPercent: number;
     outstanding?: number;
@@ -389,6 +391,16 @@ export default function RemoteViewPage() {
                   {portal.locked ? "Their portal is locked" : "Their portal is open"}
                 </p>
               </div>
+              {portal.locks.length > 0 ? (
+                <ul className="mt-2 space-y-1.5">
+                  {portal.locks.map((lock) => (
+                    <li key={lock.code} className="text-sm">
+                      <span className="font-bold">{lock.label}</span>
+                      <span className="block text-xs text-white/60">{lock.fix}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {portal.outstanding !== undefined ? (
                 <p className="mt-2 text-sm font-bold">
                   {portal.outstanding > 0 ? `${naira(portal.outstanding)} to unlock` : "Nothing outstanding"}
@@ -397,6 +409,15 @@ export default function RemoteViewPage() {
                 <p className="mt-2 text-sm font-bold">
                   {portal.registrationPaid ? "Registration paid" : "Nothing paid yet"}
                 </p>
+              )}
+              {portal.witness?.lastReportedAt ? (
+                <p className="mt-2 text-[11px] text-white/55">
+                  Their screen last reported {ago(portal.witness.lastReportedAt)}:{" "}
+                  {portal.witness.rendered === "none" ? "showing real content" : `showing the ${portal.witness.rendered} lock screen`}
+                  {portal.witness.path ? ` on ${portal.witness.path}` : ""}
+                </p>
+              ) : (
+                <p className="mt-2 text-[11px] text-white/45">Their screen has not reported in yet.</p>
               )}
             </div>
           </div>
