@@ -58,7 +58,7 @@ export async function POST(request: Request) {
   if (already) return NextResponse.json({ ok: true, already: true });
 
   const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { tenantId: true } });
-  await prisma.betaFeedback.create({
+  const feedback = await prisma.betaFeedback.create({
     data: {
       userId: session.user.id,
       tenantId: user?.tenantId ?? null,
@@ -67,6 +67,20 @@ export async function POST(request: Request) {
       path: sessionTitle ? `/live · ${sessionTitle}` : sessionId ? `/live/${sessionId}` : "/live",
     },
   });
+
+  // A poor rating of a live class is a complaint about the live classroom as a
+  // whole, not about one session's title — so they fold onto a single route.
+  if (rating !== null && rating <= 2) {
+    const { recordComplaint } = await import("@/lib/incidents");
+    await recordComplaint({
+      feedbackId: feedback.id,
+      kind: "live-rating",
+      path: "/live",
+      message: `[${rating}/5] ${message}`,
+      userId: session.user.id,
+      tenantId: user?.tenantId ?? null,
+    });
+  }
 
   return NextResponse.json({ ok: true });
 }

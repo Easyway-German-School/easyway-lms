@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   if (message.length > MAX_MESSAGE) return NextResponse.json({ error: "Please keep feedback under 2,000 characters" }, { status: 400 });
 
   const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { tenantId: true } });
-  await prisma.$transaction([
+  const [, feedback] = await prisma.$transaction([
     prisma.user.update({
       where: { id: session.user.id },
       data: { analyticsConsentAt: analyticsEnabled ? new Date() : null },
@@ -40,6 +40,20 @@ export async function POST(request: Request) {
       },
     }),
   ]);
+
+  // A bug report or "this should be better" is a complaint: fold it into the
+  // incident register so five students naming the same page read as one problem.
+  if (kind === "bug" || kind === "improve") {
+    const { recordComplaint } = await import("@/lib/incidents");
+    await recordComplaint({
+      feedbackId: feedback.id,
+      kind,
+      path,
+      message,
+      userId: session.user.id,
+      tenantId: user?.tenantId ?? null,
+    });
+  }
   return NextResponse.json({ ok: true });
 }
 
