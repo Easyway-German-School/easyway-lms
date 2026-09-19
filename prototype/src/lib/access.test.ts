@@ -104,3 +104,71 @@ describe("deriveStudentAccess — omitting flatDeposit for Travel Package", () =
     expect(access.hasAccess).toBe(true);
   });
 });
+
+describe("deriveStudentAccess — the upcoming-batch waiting room", () => {
+  // Signed up in early September for the October intake; today is 19 Sept.
+  const october = {
+    tuitionFee: 150_000,
+    requiredDeposit: 90_000,
+    enrolledAt: new Date("2026-09-05T10:00:00Z"),
+    batch: "October",
+    now: new Date("2026-09-19T12:00:00Z"),
+  };
+
+  it("locks EVERY payment state until the batch opens, and says why", () => {
+    for (const [totalPaid, seat] of [
+      [0, "unpaid"],
+      [15_000, "registration_only"],
+      [90_000, "deposit_paid"],
+      [150_000, "paid_in_full"],
+    ] as const) {
+      const access = deriveStudentAccess({ ...october, totalPaid });
+      expect(access.hasAccess).toBe(false);
+      expect(access.batchLocked).toBe(true);
+      expect(access.lockReason).toBe("upcoming_batch");
+      expect(access.seat).toBe(seat);
+      expect(access.batchLabel).toBe("October 2026");
+      expect(access.daysUntilBatchStart).toBe(12);
+    }
+  });
+
+  it("opens the portal on the first day for someone who has paid", () => {
+    const access = deriveStudentAccess({ ...october, totalPaid: 150_000, now: new Date("2026-10-01T00:30:00+01:00") });
+    expect(access.hasAccess).toBe(true);
+    expect(access.batchLocked).toBe(false);
+    expect(access.lockReason).toBeNull();
+  });
+
+  it("puts an unpaid learner behind the ordinary deposit gate once the batch has begun", () => {
+    const access = deriveStudentAccess({ ...october, totalPaid: 0, now: new Date("2026-10-01T00:30:00+01:00") });
+    expect(access.hasAccess).toBe(false);
+    expect(access.lockReason).toBe("unpaid_deposit");
+  });
+
+  it("starts a part-payer's 30-day clock at the batch, not at enrolment", () => {
+    // Enrolled 5 Sept. Without the floor the balance lock would land 5 Oct —
+    // four days after classes open. With it: 1 Oct + 30 days = 31 Oct.
+    const during = deriveStudentAccess({ ...october, totalPaid: 90_000, now: new Date("2026-10-06T12:00:00+01:00") });
+    expect(during.hasAccess).toBe(true);
+    expect(during.lockAt?.slice(0, 10)).toBe("2026-10-30");
+    const after = deriveStudentAccess({ ...october, totalPaid: 90_000, now: new Date("2026-11-02T12:00:00+01:00") });
+    expect(after.lockReason).toBe("unsettled_balance");
+  });
+
+  it("changes nothing for a student with no batch", () => {
+    const access = deriveStudentAccess({ ...october, batch: null, totalPaid: 90_000 });
+    expect(access.hasAccess).toBe(true);
+    expect(access.batchLocked).toBe(false);
+  });
+
+  it("does not lock an ongoing learner whose stale bare month resolves a year out", () => {
+    const access = deriveStudentAccess({
+      ...october,
+      batch: "July",
+      enrolledAt: new Date("2026-08-19T00:00:00Z"),
+      totalPaid: 150_000,
+    });
+    expect(access.batchLocked).toBe(false);
+    expect(access.hasAccess).toBe(true);
+  });
+});
