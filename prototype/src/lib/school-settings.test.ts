@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultSessionSettings,
   diffDisabledCells,
+  effectiveGrid,
   enabledSlotsForMode,
   isCellEnabled,
   isModeEnabled,
@@ -9,6 +10,7 @@ import {
   levelsWithNoCell,
   nearestEnabledSlotForMode,
   parseSessionSettings,
+  withScopedEdit,
   type ModeFlags,
   type SessionConfig,
 } from "@/lib/school-settings";
@@ -20,8 +22,13 @@ const modes = (over: Partial<ModeFlags> = {}): ModeFlags => ({
   ...over,
 });
 
-const row = (level: string, grid?: Partial<Record<string, Partial<ModeFlags>>>): SessionConfig => ({
+const row = (
+  level: string,
+  grid?: Partial<Record<string, Partial<ModeFlags>>>,
+  branchId: string | null = null,
+): SessionConfig => ({
   level,
+  branchId,
   grid: {
     morning: modes(grid?.morning),
     afternoon: modes(grid?.afternoon),
@@ -140,5 +147,59 @@ describe("levelsWithNoCell / enabledSlotsForMode", () => {
   it("enabledSlotsForMode lists the running sessions for a mode", () => {
     const settings = parseSessionSettings({ sessions: [row("A1", { morning: { online: false }, weekend: { online: false } })] });
     expect(enabledSlotsForMode(settings, "A1", "online")).toEqual(["afternoon", "evening"]);
+  });
+});
+
+describe("per-branch overrides", () => {
+  it("a branch with no override rides the tenant-wide default", () => {
+    const settings = parseSessionSettings({ sessions: [row("A1", { morning: { online: false } })] });
+    expect(isCellEnabled(settings, "A1", "morning", "online", "branch-abuja")).toBe(false);
+    expect(isCellEnabled(settings, "A1", "afternoon", "physical", "branch-abuja")).toBe(true);
+  });
+
+  it("an override for one branch does not affect another branch or the default", () => {
+    const settings = parseSessionSettings({
+      sessions: [
+        row("A1"), // tenant-wide default: everything on
+        row("A1", { weekend: { hybrid: false, online: false } }, "branch-abuja"),
+      ],
+    });
+    // Abuja's own override is off for weekend hybrid/online.
+    expect(isCellEnabled(settings, "A1", "weekend", "hybrid", "branch-abuja")).toBe(false);
+    // Lagos has no override, so it still reads the default: on.
+    expect(isCellEnabled(settings, "A1", "weekend", "hybrid", "branch-lagos")).toBe(true);
+    // "All branches" (no branchId) also reads the untouched default.
+    expect(isCellEnabled(settings, "A1", "weekend", "hybrid")).toBe(true);
+  });
+
+  it("effectiveGrid resolves one flat scoped grid per branch", () => {
+    const settings = parseSessionSettings({
+      sessions: [row("A1"), row("A1", { morning: { physical: false } }, "branch-abuja")],
+    });
+    expect(effectiveGrid(settings, "branch-abuja").sessions.find((s) => s.level === "A1")!.grid.morning.physical).toBe(false);
+    expect(effectiveGrid(settings, "branch-lagos").sessions.find((s) => s.level === "A1")!.grid.morning.physical).toBe(true);
+    expect(effectiveGrid(settings, null).sessions.find((s) => s.level === "A1")!.grid.morning.physical).toBe(true);
+  });
+
+  it("withScopedEdit creates a new branch override without disturbing the default or other branches", () => {
+    const stored = parseSessionSettings({
+      sessions: [row("A1"), row("A1", { evening: { online: false } }, "branch-abuja")],
+    });
+    const edited = parseSessionSettings({ sessions: [row("A1", { morning: { physical: false } })] }, { strict: true })!;
+    const next = withScopedEdit(stored, edited, "branch-lagos");
+
+    // The new Lagos override took effect.
+    expect(effectiveGrid(next, "branch-lagos").sessions.find((s) => s.level === "A1")!.grid.morning.physical).toBe(false);
+    // Abuja's existing override survived untouched.
+    expect(effectiveGrid(next, "branch-abuja").sessions.find((s) => s.level === "A1")!.grid.evening.online).toBe(false);
+    // The shared default survived untouched too.
+    expect(effectiveGrid(next, null).sessions.find((s) => s.level === "A1")!.grid.morning.physical).toBe(true);
+  });
+
+  it("withScopedEdit replaces the shared default in place when branchId is null", () => {
+    const stored = parseSessionSettings({ sessions: [row("A1")] });
+    const edited = parseSessionSettings({ sessions: [row("A1", { weekend: { hybrid: false } })] }, { strict: true })!;
+    const next = withScopedEdit(stored, edited, null);
+    expect(effectiveGrid(next, null).sessions.find((s) => s.level === "A1")!.grid.weekend.hybrid).toBe(false);
   });
 });
