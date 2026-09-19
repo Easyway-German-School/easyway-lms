@@ -75,6 +75,7 @@ export async function syncStudentsToMailerLite(options?: {
       classesStartedAt: true,
       createdAt: true,
       paymentGraceUntil: true,
+      admission: true,
       branch: { select: { name: true, mode: true } },
       user: { select: { name: true, email: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },

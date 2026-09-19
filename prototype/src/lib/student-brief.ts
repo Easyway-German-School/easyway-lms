@@ -85,6 +85,7 @@ export async function buildBrief(userId: string, period: BriefPeriod): Promise<B
       createdAt: true,
       classesStartedAt: true,
       paymentGraceUntil: true,
+      admission: true,
       deliveryMode: true,
       branch: { select: { name: true, mode: true } },
       user: { select: { name: true } },

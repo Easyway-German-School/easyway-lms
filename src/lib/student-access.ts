@@ -4,6 +4,7 @@ import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter, isTravelPacka
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { isOnlineBranch } from "@/lib/online-branch";
 import type { LedgerChargeInput } from "@/lib/finance/ledger";
+import { batchFromAdmission } from "@/lib/batch";
 
 /**
  * The exact Prisma field set the payment gate needs off a Student, as a
@@ -20,6 +21,9 @@ export const STUDENT_ACCESS_SELECT = {
   classesStartedAt: true,
   createdAt: true,
   paymentGraceUntil: true,
+  // The batch month lives on the admission blob — the upcoming-batch lock
+  // ("your October seat opens on 1 October") reads it.
+  admission: true,
   // `mode` as well as `name`: an online-branch student whose own `deliveryMode`
   // column was never set (an import, a half-filled add-student form) must
   // still be treated as online below — the branch having no campus is the tell.
@@ -48,6 +52,11 @@ export type StudentAccessFields = {
   classesStartedAt: unknown;
   createdAt: unknown;
   paymentGraceUntil: unknown;
+  /**
+   * REQUIRED, not optional: a caller that forgets it would silently skip the
+   * upcoming-batch lock and show an October learner an open portal.
+   */
+  admission: unknown;
   branch: { name: string | null; mode?: string | null } | null;
   payments: Array<{ amount: number }>;
   tuitionCharges: LedgerChargeInput[];
@@ -98,6 +107,7 @@ export function accessFromStudent(student: StudentAccessFields, paymentPlanOnTra
     enrolledAt: student.createdAt,
     paymentGraceUntil: student.paymentGraceUntil,
     paymentPlanOnTrack,
+    batch: batchFromAdmission(student.admission),
   });
 }
 

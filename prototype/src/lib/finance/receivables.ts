@@ -8,7 +8,7 @@ import {
 } from "@/lib/payment";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { batchFromAdmission } from "@/lib/batch";
-import { batchLockFloor, withBatchFloor } from "@/lib/batch-reservation";
+import { batchLockFloor, resolveUpcomingBatch, withBatchFloor } from "@/lib/batch-reservation";
 import { buildLedger, ledgerIsPopulated, type LedgerLine } from "@/lib/finance/ledger";
 
 /**
@@ -366,7 +366,16 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     lockedOut: LOCKED_OUT_COHORTS.includes(cohort),
 
     daysEnrolled,
-    behindOnTuition: !depositPaid && daysEnrolled >= BEHIND_TUITION_MIN_DAYS,
+    // Not "behind" while their intake has not opened — nothing has been taught
+    // yet. They are tracked on the Upcoming intake console instead.
+    behindOnTuition:
+      !depositPaid &&
+      daysEnrolled >= BEHIND_TUITION_MIN_DAYS &&
+      !resolveUpcomingBatch(batchFromAdmission(student.admission), {
+        registeredAt: student.createdAt,
+        classesStartedAt: student.classesStartedAt,
+        now,
+      }),
     agingBucket: agingBucketFor(agingAnchorDays),
     lastPaymentAt: lastPaymentAt?.toISOString() ?? null,
     paymentCount: received.length,
