@@ -269,6 +269,14 @@ export const TENANT_OWNED_MODELS = [
   "Webinar",
   "WebinarQuestion",
   "WebinarQuestionVote",
+
+  /**
+   * Why one student's portal is open or locked, and what their screen last
+   * showed (lib/portal-witness.ts). Names a student and their payment standing
+   * — the same category of leak as the Student row itself. Written from the
+   * student's own session, so the tenant is in context and scoping is correct.
+   */
+  "AccessSnapshot",
 ] as const;
 
 /**

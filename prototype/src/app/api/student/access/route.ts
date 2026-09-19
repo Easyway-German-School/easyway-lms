@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { hasProfilePhoto } from "@/lib/access";
+import { portalVerdict } from "@/lib/portal-verdict";
 import { accessFromStudent, STUDENT_ACCESS_SELECT } from "@/lib/student-access";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { notify, KIND } from "@/lib/notify";
@@ -85,5 +86,11 @@ export async function GET() {
     // Piggybacks on this endpoint rather than a second round trip — the
     // shell already calls this once per navigation for the payment gate.
     hasPhoto,
+    // Every reason the portal may be walled, composed once (payment, intake
+    // AND photo) — see lib/portal-verdict.ts. `computedAt` is the SERVER clock,
+    // so a client acting on an old cached copy of this response can be told
+    // apart from one acting on a fresh one (the portal witness does exactly that).
+    verdict: portalVerdict(access, hasPhoto),
+    computedAt: Date.now(),
   });
 }
