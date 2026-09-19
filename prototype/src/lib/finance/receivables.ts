@@ -7,6 +7,8 @@ import {
   tuitionFeeFor,
 } from "@/lib/payment";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
+import { batchFromAdmission } from "@/lib/batch";
+import { batchLockFloor, withBatchFloor } from "@/lib/batch-reservation";
 import { buildLedger, ledgerIsPopulated, type LedgerLine } from "@/lib/finance/ledger";
 
 /**
@@ -113,6 +115,8 @@ export const FINANCE_STUDENT_SELECT = {
   // so the roster can show "locks 12 Oct" / "LOCKED" / "grace to 20 Oct".
   classesStartedAt: true,
   paymentGraceUntil: true,
+  // The batch month — the part-payment clock never starts before it.
+  admission: true,
   branch: { select: { id: true, name: true } },
   user: { select: { name: true, email: true } },
   payments: {
@@ -154,6 +158,7 @@ export type FinanceStudentInput = {
   createdAt: Date;
   classesStartedAt?: Date | null;
   paymentGraceUntil?: Date | null;
+  admission?: unknown;
   branch?: { id: string; name: string } | null;
   user?: { name?: string | null; email?: string | null } | null;
   payments: Array<{
@@ -322,7 +327,14 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
   // Part-payment lock — only a student past the deposit but short of the fee.
   const graceDate = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;
   const isPartPayer = depositPaid && !fullPaid;
-  const lockAnchor = student.classesStartedAt ?? student.createdAt;
+  const lockAnchor = withBatchFloor(
+    new Date(student.classesStartedAt ?? student.createdAt),
+    batchLockFloor(batchFromAdmission(student.admission), {
+      registeredAt: student.createdAt,
+      classesStartedAt: student.classesStartedAt,
+      now,
+    }),
+  );
   const lockAt = isPartPayer
     ? new Date(new Date(lockAnchor).getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS)
     : null;

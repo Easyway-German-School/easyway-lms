@@ -60,6 +60,12 @@ describe("resolveUpcomingBatch", () => {
     expect(resolveUpcomingBatch("April", { registeredAt: new Date("2026-08-09T00:00:00Z"), now: NOW })).toBeNull();
   });
 
+  it("still locks an older learner the office deliberately moves to October", () => {
+    // Registered in February; forwards from registration "October" is 1 Oct 2026.
+    const upcoming = resolveUpcomingBatch("October", { registeredAt: new Date("2026-02-10T00:00:00Z"), now: NOW });
+    expect(upcoming?.monthLabel).toBe("October 2026");
+  });
+
   it("still locks a genuine early booking a few months out", () => {
     const upcoming = resolveUpcomingBatch("January", { registeredAt: new Date("2026-09-05T00:00:00Z"), now: NOW });
     expect(upcoming?.monthLabel).toBe("January 2027");
@@ -105,9 +111,12 @@ describe("batchLockFloor / withBatchFloor", () => {
 
 describe("seatStatusFor", () => {
   it("names the four places a learner can stand", () => {
-    expect(seatStatusFor({ totalPaid: 0, depositPaid: false, fullyPaid: false })).toBe("unpaid");
-    expect(seatStatusFor({ totalPaid: 15_000, depositPaid: false, fullyPaid: false })).toBe("registration_only");
-    expect(seatStatusFor({ totalPaid: 90_000, depositPaid: true, fullyPaid: false })).toBe("deposit_paid");
-    expect(seatStatusFor({ totalPaid: 150_000, depositPaid: true, fullyPaid: true })).toBe("paid_in_full");
+    const none = { tuitionPaid: 0, registrationPaid: false, depositPaid: false, fullyPaid: false };
+    expect(seatStatusFor(none)).toBe("unpaid");
+    // The registration fee alone is not tuition — but it is not "nothing" either.
+    expect(seatStatusFor({ ...none, registrationPaid: true })).toBe("registration_only");
+    expect(seatStatusFor({ ...none, tuitionPaid: 15_000 })).toBe("registration_only");
+    expect(seatStatusFor({ ...none, tuitionPaid: 90_000, registrationPaid: true, depositPaid: true })).toBe("deposit_paid");
+    expect(seatStatusFor({ tuitionPaid: 150_000, registrationPaid: true, depositPaid: true, fullyPaid: true })).toBe("paid_in_full");
   });
 });

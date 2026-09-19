@@ -116,17 +116,11 @@ describe("deriveStudentAccess — the upcoming-batch waiting room", () => {
   };
 
   it("locks EVERY payment state until the batch opens, and says why", () => {
-    for (const [totalPaid, seat] of [
-      [0, "unpaid"],
-      [15_000, "registration_only"],
-      [90_000, "deposit_paid"],
-      [150_000, "paid_in_full"],
-    ] as const) {
+    for (const totalPaid of [0, 15_000, 90_000, 150_000]) {
       const access = deriveStudentAccess({ ...october, totalPaid });
       expect(access.hasAccess).toBe(false);
       expect(access.batchLocked).toBe(true);
       expect(access.lockReason).toBe("upcoming_batch");
-      expect(access.seat).toBe(seat);
       expect(access.batchLabel).toBe("October 2026");
       expect(access.daysUntilBatchStart).toBe(12);
     }

@@ -1,12 +1,6 @@
 import { DEPOSIT_RATE } from "@/lib/payment";
 import { buildLedger, type LedgerChargeInput } from "@/lib/finance/ledger";
-import {
-  batchLockFloor,
-  resolveUpcomingBatch,
-  seatStatusFor,
-  withBatchFloor,
-  type SeatStatus,
-} from "@/lib/batch-reservation";
+import { batchLockFloor, resolveUpcomingBatch, withBatchFloor } from "@/lib/batch-reservation";
 
 /**
  * Who can see what before tuition is paid.
@@ -197,11 +191,6 @@ export type StudentAccess = {
   batchStartsOn: string | null;
   /** Whole days until it opens. 0 when not waiting. */
   daysUntilBatchStart: number;
-  /**
-   * Where they stand on their seat, independent of whether it is locked yet:
-   * the lock screen, the admin roster and Becca's nudges all read this.
-   */
-  seat: SeatStatus;
   currency: string;
 };
 
@@ -408,7 +397,6 @@ export function deriveStudentAccess({
     batchLabel: upcomingBatch?.monthLabel ?? null,
     batchStartsOn: upcomingBatch ? upcomingBatch.startsOn.toISOString() : null,
     daysUntilBatchStart: upcomingBatch?.daysUntilStart ?? 0,
-    seat: seatStatusFor({ totalPaid: paid, depositPaid, fullyPaid: fullPaid && paid > 0 }),
     currency: "NGN",
   };
 }

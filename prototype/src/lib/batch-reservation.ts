@@ -19,11 +19,12 @@
  *
  *   1. A bare month name ("July") resolves FORWARDS from the registration
  *      date, so an ongoing student imported in August with batch "July" reads
- *      as "next July" — eleven months away. That is not a reservation, it is a
+ *      as "next July" — ten months away. That is not a reservation, it is a
  *      stale label. A bare month more than `MAX_BARE_MONTH_LEAD_MONTHS` ahead
- *      of registration is therefore NOT treated as a future batch. A month
- *      that carries its own year ("October 2026") is unambiguous and is never
- *      second-guessed.
+ *      of TODAY is therefore NOT treated as a future batch. (Measured from
+ *      today rather than from registration so that an older learner the office
+ *      deliberately moves to October still locks.) A month that carries its own
+ *      year ("October 2026") is unambiguous and is never second-guessed.
  *   2. A confirmed `classesStartedAt` in the past means classes demonstrably
  *      began for this student, whatever the batch label says.
  *
@@ -35,9 +36,9 @@ import { MONTH_NAMES, resolveBatchAbsolute } from "@/lib/batch";
 import { instantToZonedParts, zonedTimeToInstant } from "@/lib/school-time";
 
 /**
- * How far past registration a bare month name may sit and still count as a
+ * How far ahead of today a bare month name may sit and still count as a
  * deliberate reservation. Six months covers "I signed up in September for
- * January"; anything further is almost always a mislabelled ongoing student.
+ * March"; anything further is almost always a mislabelled ongoing student.
  */
 export const MAX_BARE_MONTH_LEAD_MONTHS = 6;
 
@@ -117,10 +118,8 @@ export function resolveBatchStart(
     if (resolved === null) return null;
     absolute = resolved;
 
-    // Lead is measured from when they REGISTERED — that is when the intent was
-    // expressed. With no registration date, from today.
-    const anchor = registered ?? now;
-    const lead = absolute - (anchor.getFullYear() * 12 + anchor.getMonth());
+    const today = instantToZonedParts(now);
+    const lead = absolute - (today.year * 12 + (today.month - 1));
     if (lead > MAX_BARE_MONTH_LEAD_MONTHS) return null;
   }
 
@@ -209,29 +208,34 @@ export function schoolDaysUntil(startsOn: Date, now: Date = new Date()): number 
  *
  *   paid_in_full      nothing owed on the current level
  *   deposit_paid      cleared the deposit; a balance is still open
- *   registration_only paid something, but not yet enough to hold the seat
+ *   registration_only registration fee (and/or part of the deposit) received,
+ *                     but not yet enough to hold the seat
  *   unpaid            nothing received yet
  */
 export type SeatStatus = "paid_in_full" | "deposit_paid" | "registration_only" | "unpaid";
 
 export function seatStatusFor({
-  totalPaid,
+  tuitionPaid,
+  registrationPaid,
   depositPaid,
   fullyPaid,
 }: {
-  totalPaid: number;
+  /** Tuition received — the registration fee is NOT part of this (see receivedPaymentFilter). */
+  tuitionPaid: number;
+  /** Whether the registration fee has been received. */
+  registrationPaid: boolean;
   depositPaid: boolean;
   fullyPaid: boolean;
 }): SeatStatus {
-  if (totalPaid <= 0) return "unpaid";
-  if (fullyPaid) return "paid_in_full";
-  if (depositPaid) return "deposit_paid";
-  return "registration_only";
+  if (tuitionPaid > 0 && fullyPaid) return "paid_in_full";
+  if (tuitionPaid > 0 && depositPaid) return "deposit_paid";
+  if (tuitionPaid > 0 || registrationPaid) return "registration_only";
+  return "unpaid";
 }
 
 export const SEAT_STATUS_LABEL: Record<SeatStatus, string> = {
   paid_in_full: "Paid in full",
   deposit_paid: "Deposit paid",
-  registration_only: "Registration fee only",
+  registration_only: "Registered — deposit pending",
   unpaid: "Nothing paid yet",
 };

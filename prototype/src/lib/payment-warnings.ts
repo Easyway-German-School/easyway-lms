@@ -4,6 +4,8 @@ import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { onTrackPlanStudentIds } from "@/lib/payment-plans";
 import { KIND, notify } from "@/lib/notify";
+import { batchFromAdmission } from "@/lib/batch";
+import { batchLockFloor, resolveUpcomingBatch, withBatchFloor } from "@/lib/batch-reservation";
 
 /**
  * Warns students before their portal access is paused for non-payment.
@@ -118,6 +120,7 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
       createdAt: true,
       classesStartedAt: true,
       paymentGraceUntil: true,
+      admission: true,
       branch: { select: { name: true } },
       user: { select: { id: true, name: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
@@ -135,6 +138,16 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
   const run: WarningRun = { checked: students.length, atRisk: 0, created: [], skipped: 0 };
 
   for (const student of students) {
+    // Placed in an intake that has not opened: there is nothing to be "locked
+    // out" of yet, so the deposit and balance warnings would be wrong on their
+    // face. Becca's seat-reservation nudges (lib/seat-nudges.ts) speak to these
+    // learners instead, and the normal tracks resume the day their batch begins.
+    const batch = batchFromAdmission(student.admission);
+    if (resolveUpcomingBatch(batch, { registeredAt: student.createdAt, classesStartedAt: student.classesStartedAt, now })) {
+      run.skipped++;
+      continue;
+    }
+
     const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const requiredDeposit = requiredDepositFor(feeLookup);
@@ -192,7 +205,9 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
         (hasLedger && ledger.oldestOpenGoForwardChargeAt
           ? new Date(ledger.oldestOpenGoForwardChargeAt)
           : null) ?? student.classesStartedAt ?? student.createdAt;
-      const lockAt = new Date(anchor.getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS);
+      // The clock never starts before the batch does.
+      const floor = batchLockFloor(batch, { registeredAt: student.createdAt, classesStartedAt: student.classesStartedAt, now });
+      const lockAt = new Date(withBatchFloor(anchor, floor).getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS);
       const daysUntilLock = Math.ceil((lockAt.getTime() - now.getTime()) / DAY_MS);
 
       // Most-urgent tier currently reached (BALANCE_TIERS is ordered final→notice).
