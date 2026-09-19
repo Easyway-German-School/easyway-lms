@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
   const tenantId = student.user?.tenantId ?? null;
   const sessionSettings = await readSessionSettings(tenantId);
   const isSlotOpen = (level: string | null | undefined, slot: string, mode: "hybrid" | "online") =>
-    isCellEnabled(sessionSettings, level, slot, mode);
+    isCellEnabled(sessionSettings, level, slot, mode, student.branchId);
 
   const picked = findHybridCombo(comboId);
   const resolved =

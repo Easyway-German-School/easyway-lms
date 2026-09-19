@@ -30,9 +30,12 @@ import { studentExpiryFrom } from "@/lib/retention";
 import {
   AUDIO_ENCODING,
   CLASS_ENCODING,
+  MIN_RECORDING_DURATION_SECONDS,
   buildFileOutput,
+  deleteRecordingObject,
   egressClient,
   egressTemplateBaseUrl,
+  isRecordingTooShort,
   recordingConfigured,
   recordingObjectKey,
   recordingPublicUrl,
@@ -280,7 +283,7 @@ export async function finaliseRecording(egress: {
   status?: EgressStatus;
   error?: string;
   fileResults?: Array<{ filename?: string; duration?: bigint | number; size?: bigint | number; location?: string }>;
-}): Promise<"created" | "already" | "failed" | "unknown"> {
+}): Promise<"created" | "already" | "failed" | "unknown" | "discarded"> {
   try {
     const row =
       (await prisma.classRecording.findUnique({ where: { egressId: egress.egressId } })) ??
@@ -373,6 +376,31 @@ export async function finaliseRecording(egress: {
     // LiveKit reports duration in nanoseconds, as a bigint.
     const durationSeconds = result?.duration ? Math.round(Number(result.duration) / 1_000_000_000) : null;
     const sizeBytes = result?.size ? Number(result.size) : null;
+
+    // A tutor opening and immediately closing a room (testing, a misclick) —
+    // not a lesson. Discard before spending a thumbnail render or a Material
+    // row on it; nobody should ever see this on a shelf. See the module
+    // comment on `MIN_RECORDING_DURATION_SECONDS` in recording.ts.
+    if (isRecordingTooShort(durationSeconds)) {
+      await deleteRecordingObject(objectKey);
+      const minutes = Math.floor((durationSeconds ?? 0) / 60);
+      const seconds = (durationSeconds ?? 0) % 60;
+      await prisma.classRecording.update({
+        where: { id: row.id },
+        data: {
+          status: "purged",
+          endedAt: new Date(),
+          objectKey,
+          durationSeconds,
+          sizeBytes,
+          purgedAt: new Date(),
+          fileUrl: null,
+          error: `Auto-discarded: only ${minutes}m ${seconds}s, below the ${MIN_RECORDING_DURATION_SECONDS / 60}-minute minimum.`,
+        },
+      });
+      return "discarded";
+    }
+
     const fileUrl = recordingPublicUrl(objectKey);
     const recordedAt = row.startedAt;
     const isPrivate = Boolean(row.privateClassId);
@@ -570,7 +598,7 @@ export async function reconcileRecordings(): Promise<{ checked: number; finalise
         error: info.error,
         fileResults: info.fileResults,
       });
-      if (outcome === "created" || outcome === "failed") finalised += 1;
+      if (outcome === "created" || outcome === "failed" || outcome === "discarded") finalised += 1;
     } catch (error) {
       console.error(`Reconcile failed for egress ${egressId}:`, error);
     }

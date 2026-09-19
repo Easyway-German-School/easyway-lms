@@ -18,6 +18,17 @@
  * 3 mode booleans). "A1 mornings, but not online" was impossible to express;
  * now it is one row of the grid. An old stored value migrates cleanly — a cell
  * runs iff its old session flag AND its old mode flag were both on.
+ *
+ * v3: added an optional per-branch override on top of the level grid. Every
+ * level still has one tenant-wide DEFAULT row (`branchId: null`) — that is
+ * the whole grid before this existed, and what every branch runs unless it is
+ * explicitly given its own row. A branch that needs to diverge ("Abuja does
+ * not run A1 weekend hybrid, but Lagos still does") gets its own `{ level,
+ * branchId, grid }` row instead; every other branch keeps riding the default
+ * untouched. `rowFor` is the one place that decides which row wins: an exact
+ * branch match if one exists, the tenant-wide default otherwise. An old
+ * stored document (nothing has a `branchId`) parses as every row being that
+ * default — nothing changes for a school that never opens a branch tab.
  */
 
 export const CLASS_SESSIONS_KEY = "class.sessions";
@@ -56,6 +67,11 @@ export type ModeFlags = { physical: boolean; hybrid: boolean; online: boolean };
 
 export type SessionConfig = {
   level: string;
+  /**
+   * `null` = the tenant-wide default row for this level. A real id scopes
+   * this row to one branch's override — see the v3 module note above.
+   */
+  branchId: string | null;
   /** One entry per session slot; each says which of the three modes run. */
   grid: Record<SessionSlot, ModeFlags>;
 };
@@ -80,9 +96,10 @@ function allModesOn(): ModeFlags {
   return { physical: true, hybrid: true, online: true };
 }
 
-function allOn(level: string): SessionConfig {
+function allOn(level: string, branchId: string | null = null): SessionConfig {
   return {
     level,
+    branchId,
     grid: {
       morning: allModesOn(),
       afternoon: allModesOn(),
@@ -148,7 +165,11 @@ export function parseSessionSettings(value: unknown, options?: ParseOpts): Sessi
   const rows = (value as { sessions?: unknown }).sessions;
   if (!Array.isArray(rows)) return fallback;
 
-  const byLevel = new Map<string, SessionConfig>();
+  // One default row per level (branchId null), plus any number of per-branch
+  // override rows, keyed so a later duplicate in the input wins rather than
+  // silently duplicating.
+  const defaults = new Map<string, SessionConfig>();
+  const overrides = new Map<string, SessionConfig>();
   for (const row of rows) {
     if (!row || typeof row !== "object") {
       if (strict) return null;
@@ -160,6 +181,8 @@ export function parseSessionSettings(value: unknown, options?: ParseOpts): Sessi
       if (strict) return null;
       continue;
     }
+    const rawBranchId = record.branchId;
+    const branchId = typeof rawBranchId === "string" && rawBranchId.trim() ? rawBranchId.trim() : null;
 
     let grid: Record<SessionSlot, ModeFlags>;
     if (record.grid && typeof record.grid === "object") {
@@ -177,35 +200,109 @@ export function parseSessionSettings(value: unknown, options?: ParseOpts): Sessi
       grid = migrateFlatRow(record);
     }
 
-    byLevel.set(level, { level, grid });
+    if (branchId === null) {
+      defaults.set(level, { level, branchId: null, grid });
+    } else {
+      overrides.set(`${branchId}::${level}`, { level, branchId, grid });
+    }
   }
 
   return {
-    sessions: LEVELS.map((level) => byLevel.get(level) ?? allOn(level)),
+    sessions: [
+      ...LEVELS.map((level) => defaults.get(level) ?? allOn(level)),
+      ...overrides.values(),
+    ],
   };
 }
 
 /* ------------------------------------------------------------------ reading */
 
-function rowFor(settings: SessionSettings | null | undefined, level: string | null | undefined) {
+/**
+ * The row that actually governs `(level, branchId)`: that branch's own
+ * override if it has one for this level, otherwise the tenant-wide default.
+ * `branchId: null` (or omitted) always means "the default" outright.
+ */
+function rowFor(
+  settings: SessionSettings | null | undefined,
+  level: string | null | undefined,
+  branchId?: string | null,
+) {
   if (!settings) return null;
   const wanted = String(level ?? "").trim().toUpperCase();
-  return settings.sessions.find((entry) => entry.level === wanted) ?? null;
+  const wantedBranch = branchId ? String(branchId).trim() : null;
+  if (wantedBranch) {
+    const override = settings.sessions.find(
+      (entry) => entry.level === wanted && entry.branchId === wantedBranch,
+    );
+    if (override) return override;
+  }
+  return settings.sessions.find((entry) => entry.level === wanted && !entry.branchId) ?? null;
 }
 
-/** Does this exact (session × mode) run at this level? Unknown input → treated as open. */
+/**
+ * The flat, single-scope grid that actually governs one branch (or the
+ * tenant-wide default when `branchId` is null) — one row per level, each
+ * already resolved to that branch's override or the default. This is the
+ * shape the settings screen edits and the shape `diffDisabledCells` /
+ * `levelsWithNoCell` expect, so a caller scoping a save to one branch can
+ * feed them this instead of the full multi-branch document.
+ */
+export function effectiveGrid(
+  settings: SessionSettings | null | undefined,
+  branchId: string | null = null,
+): SessionSettings {
+  return {
+    sessions: LEVELS.map((level) => {
+      const row = rowFor(settings, level, branchId) ?? allOn(level);
+      return { level, branchId: null, grid: row.grid };
+    }),
+  };
+}
+
+/**
+ * Fold an edited flat grid (what the settings screen posts — one row per
+ * level, no branch of its own) into the full stored document as the row for
+ * `branchId`. Replaces that branch's existing row per level if it had one
+ * (or the default's, when `branchId` is null), inserts a new override row
+ * otherwise, and leaves every other branch's rows untouched.
+ */
+export function withScopedEdit(
+  stored: SessionSettings,
+  edited: SessionSettings,
+  branchId: string | null,
+): SessionSettings {
+  const target = branchId ?? null;
+  const editedByLevel = new Map(edited.sessions.map((row) => [row.level, row]));
+  const kept = stored.sessions.filter(
+    (row) => !((row.branchId ?? null) === target && editedByLevel.has(row.level)),
+  );
+  const replaced = LEVELS.filter((level) => editedByLevel.has(level)).map((level) => ({
+    level,
+    branchId: target,
+    grid: editedByLevel.get(level)!.grid,
+  }));
+  return { sessions: [...kept, ...replaced] };
+}
+
+/**
+ * Does this exact (session × mode) run at this level? Unknown input → treated
+ * as open. Pass `branchId` to check that branch's own override if it has
+ * one; omitted, this reads the tenant-wide default, exactly as before branch
+ * overrides existed.
+ */
 export function isCellEnabled(
   settings: SessionSettings | null | undefined,
   level: string | null | undefined,
   slot: string | null | undefined,
   mode: string | null | undefined,
+  branchId?: string | null,
 ): boolean {
   if (!settings) return true;
   const s = String(slot ?? "").trim().toLowerCase();
   const m = String(mode ?? "").trim().toLowerCase();
   if (!(SESSION_SLOTS as readonly string[]).includes(s)) return true;
   if (!(MODE_SLOTS as readonly string[]).includes(m)) return true;
-  const row = rowFor(settings, level);
+  const row = rowFor(settings, level, branchId);
   if (!row) return true;
   return Boolean(row.grid[s as SessionSlot][m as ModeSlot]);
 }
@@ -215,11 +312,12 @@ export function isSessionEnabled(
   settings: SessionSettings | null | undefined,
   level: string | null | undefined,
   slot: string | null | undefined,
+  branchId?: string | null,
 ): boolean {
   if (!settings) return true;
   const s = String(slot ?? "").trim().toLowerCase();
   if (!(SESSION_SLOTS as readonly string[]).includes(s)) return true;
-  const row = rowFor(settings, level);
+  const row = rowFor(settings, level, branchId);
   if (!row) return true;
   return MODE_SLOTS.some((m) => row.grid[s as SessionSlot][m]);
 }
@@ -229,11 +327,12 @@ export function isModeEnabled(
   settings: SessionSettings | null | undefined,
   level: string | null | undefined,
   mode: string | null | undefined,
+  branchId?: string | null,
 ): boolean {
   if (!settings) return true;
   const m = String(mode ?? "").trim().toLowerCase();
   if (!(MODE_SLOTS as readonly string[]).includes(m)) return true;
-  const row = rowFor(settings, level);
+  const row = rowFor(settings, level, branchId);
   if (!row) return true;
   return SESSION_SLOTS.some((s) => row.grid[s][m as ModeSlot]);
 }
@@ -243,8 +342,9 @@ export function enabledSlotsForMode(
   settings: SessionSettings | null | undefined,
   level: string | null | undefined,
   mode: string,
+  branchId?: string | null,
 ): SessionSlot[] {
-  return SESSION_SLOTS.filter((slot) => isCellEnabled(settings, level, slot, mode));
+  return SESSION_SLOTS.filter((slot) => isCellEnabled(settings, level, slot, mode, branchId));
 }
 
 /**
