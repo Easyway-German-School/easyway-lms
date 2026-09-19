@@ -32,12 +32,20 @@ type ImpactResponse = {
 
 const modeWord = (m: ModeSlot) => (m === "physical" ? "on campus" : m);
 
+type Branch = { id: string; name: string };
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(() => defaultSessionSettings());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [pendingImpact, setPendingImpact] = useState<ImpactResponse | null>(null);
+
+  // Which branch's Sessions & attendance grid is being edited. `null` is the
+  // tenant-wide default every branch rides unless it has its own override —
+  // see the v3 note in lib/school-settings.ts.
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchId, setBranchId] = useState<string | null>(null);
 
   // The school's current intake — the month a new student joins by default
   // when the sign-up form, the Add-student form or the CSV import did not
@@ -55,11 +63,33 @@ export default function SettingsPage() {
   const [timesMsg, setTimesMsg] = useState("");
 
   useEffect(() => {
-    loadSettings();
+    loadSettings(null);
+    loadBranches();
     loadIntake();
     loadPattern();
     loadSessionTimes();
   }, []);
+
+  async function loadBranches() {
+    try {
+      const res = await fetch("/api/admin/branches", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        setBranches(Array.isArray(data.branches) ? data.branches : []);
+      }
+    } catch (error) {
+      // Not every admin role can list branches — the selector just stays
+      // hidden then, and everyone keeps editing the shared default.
+      console.error("Failed to load branches:", error);
+    }
+  }
+
+  function switchBranch(nextBranchId: string | null) {
+    setBranchId(nextBranchId);
+    setPendingImpact(null);
+    setLoading(true);
+    loadSettings(nextBranchId);
+  }
 
   async function loadSessionTimes() {
     try {
@@ -215,9 +245,10 @@ export default function SettingsPage() {
     }
   }
 
-  async function loadSettings() {
+  async function loadSettings(forBranchId: string | null) {
     try {
-      const res = await fetch("/api/admin/settings", { cache: "no-store" });
+      const url = forBranchId ? `/api/admin/settings?branchId=${encodeURIComponent(forBranchId)}` : "/api/admin/settings";
+      const res = await fetch(url, { cache: "no-store" });
       if (res.ok) setSettings(await res.json());
     } catch (error) {
       console.error("Failed to load settings:", error);
@@ -241,6 +272,7 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...settings,
+          branchId,
           ...(phase === "preview" ? { preview: true } : { confirm: true }),
         }),
       });
@@ -465,6 +497,27 @@ export default function SettingsPage() {
             later does not bring anyone back automatically.
           </p>
 
+          {branches.length > 1 && (
+            <label className="mb-6 flex flex-col gap-1.5 text-sm font-medium text-[var(--foreground)] sm:max-w-xs">
+              Branch
+              <select
+                value={branchId ?? ""}
+                onChange={(e) => switchBranch(e.target.value || null)}
+                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-normal text-[var(--foreground)]"
+              >
+                <option value="">All branches (default)</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              <span className="text-xs font-normal text-[var(--muted)]">
+                {branchId
+                  ? "Editing this branch only — every other branch keeps its own setting."
+                  : "Editing the shared default every branch runs unless it has its own override."}
+              </span>
+            </label>
+          )}
+
           <div className="space-y-8">
             {LEVELS.map((level) => {
               const config = settings.sessions.find((s) => s.level === level);
@@ -601,7 +654,7 @@ export default function SettingsPage() {
 
         <div className="flex justify-end gap-3">
           <button
-            onClick={loadSettings}
+            onClick={() => loadSettings(branchId)}
             className="rounded-lg border border-[var(--border)] px-6 py-3 font-semibold text-[var(--foreground)] transition hover:bg-[var(--background)]"
             disabled={saving}
           >

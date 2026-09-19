@@ -175,7 +175,7 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
   // /admin/settings. The data for a previously-run sitting is kept (re-enabling
   // brings the room back), but a disabled one must not spring back to life the
   // next time a stray student record still points at it.
-  if (!isSessionEnabled(await readSessionSettings(branch?.tenantId), level, sessionSlot)) {
+  if (!isSessionEnabled(await readSessionSettings(branch?.tenantId), level, sessionSlot, cohort.branchId)) {
     return null;
   }
 
@@ -213,12 +213,14 @@ export async function ensureSpaceForCohort(cohort: CohortKey) {
  * resolves to any more. `tenantId` comes from the viewer's own account.
  */
 async function keepEnabledSpaces(
-  rows: Array<{ id: string; level: string; sessionSlot: string }>,
+  rows: Array<{ id: string; level: string; sessionSlot: string; branchId?: string | null }>,
   tenantId: string | null | undefined,
 ): Promise<string[]> {
   if (rows.length === 0) return [];
   const settings = await readSessionSettings(tenantId);
-  return rows.filter((r) => isSessionEnabled(settings, r.level, r.sessionSlot)).map((r) => r.id);
+  return rows
+    .filter((r) => isSessionEnabled(settings, r.level, r.sessionSlot, r.branchId))
+    .map((r) => r.id);
 }
 
 /** Resolve exactly which spaces this viewer may read or post in. */
@@ -236,7 +238,7 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
     // switched off are dropped for the same reason.
     const all = await prisma.space.findMany({
       where: { level: { in: OFFERED_LEVELS as unknown as string[] } },
-      select: { id: true, level: true, sessionSlot: true },
+      select: { id: true, level: true, sessionSlot: true, branchId: true },
     });
     return {
       spaceIds: await keepEnabledSpaces(all, tenantId),
@@ -271,7 +273,7 @@ export async function resolveSpaceScope(viewer: Viewer): Promise<SpaceScope> {
 
     const rooms = await prisma.space.findMany({
       where,
-      select: { id: true, level: true, sessionSlot: true },
+      select: { id: true, level: true, sessionSlot: true, branchId: true },
     });
     return {
       spaceIds: await keepEnabledSpaces(rooms, tenantId),

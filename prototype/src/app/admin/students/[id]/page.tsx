@@ -711,8 +711,8 @@ export default function StudentDossierPage() {
     : editForm.deliveryMode === "hybrid"
       ? "hybrid"
       : "physical";
-  const editSlots = TIME_SLOTS.filter((slot) => isCellEnabled(sessionCfg, editForm.level, slot, editMode));
-  const editModes = (["physical", "hybrid"] as const).filter((mode) => isModeEnabled(sessionCfg, editForm.level, mode));
+  const editSlots = TIME_SLOTS.filter((slot) => isCellEnabled(sessionCfg, editForm.level, slot, editMode, editForm.branchId));
+  const editModes = (["physical", "hybrid"] as const).filter((mode) => isModeEnabled(sessionCfg, editForm.level, mode, editForm.branchId));
 
   async function issueCode() {
     if (issuingCode) return;
