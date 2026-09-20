@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const putMedia = vi.fn();
+const sweepExpired = vi.fn(async () => ({ cleared: 0 }));
+const wouldExceedCap = vi.fn(async (_bytes: number) => false);
 vi.mock("@/lib/offline/store", () => ({
   OFFLINE_CAP_BYTES: 1e12,
   putMedia: (...args: unknown[]) => putMedia(...args),
-  wouldExceedCap: async () => false,
+  sweepExpired: () => sweepExpired(),
+  wouldExceedCap: (bytes: number) => wouldExceedCap(bytes),
 }));
 
-import { downloadVideoForOffline } from "./download";
+import { downloadVideoForOffline, OfflineCapError, OfflineDeviceFullError } from "./download";
 import type { LibraryVideo } from "@/lib/video-library";
 
 const video = {
@@ -51,6 +54,9 @@ describe("downloadVideoForOffline", () => {
   beforeEach(() => {
     calls.length = 0;
     putMedia.mockReset();
+    sweepExpired.mockClear();
+    wouldExceedCap.mockReset();
+    wouldExceedCap.mockResolvedValue(false);
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
       calls.push({ url, credentials: init?.credentials });
       return handler(url);
@@ -90,5 +96,45 @@ describe("downloadVideoForOffline", () => {
     await expect(downloadVideoForOffline(video)).rejects.toThrow();
     expect(calls.some((c) => c.url.includes("proxy=1"))).toBe(false);
     expect(putMedia).not.toHaveBeenCalled();
+  });
+
+  it("sweeps expired recordings before checking the cap, so dead files never block a download", async () => {
+    const order: string[] = [];
+    sweepExpired.mockImplementationOnce(async () => {
+      order.push("sweep");
+      return { cleared: 3 };
+    });
+    wouldExceedCap.mockImplementation(async () => {
+      order.push("cap");
+      return false;
+    });
+    handler = (url) => (url.includes("signed=1") ? json({ url: BUCKET }) : bytes());
+    await downloadVideoForOffline(video);
+    expect(order[0]).toBe("sweep");
+    expect(order[1]).toBe("cap");
+  });
+
+  it("refuses with an OfflineCapError when the library is already at the cap", async () => {
+    wouldExceedCap.mockResolvedValue(true);
+    handler = () => bytes();
+    await expect(downloadVideoForOffline(video)).rejects.toBeInstanceOf(OfflineCapError);
+    expect(calls).toHaveLength(0);
+    expect(putMedia).not.toHaveBeenCalled();
+  });
+
+  it("turns the browser's QuotaExceededError into a plain 'phone is full' error", async () => {
+    handler = (url) => (url.includes("signed=1") ? json({ url: BUCKET }) : bytes());
+    putMedia.mockRejectedValueOnce(new DOMException("The quota has been exceeded.", "QuotaExceededError"));
+    const failure = await downloadVideoForOffline(video).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(OfflineDeviceFullError);
+    // Same family as the cap error, so the UI shows the "Open my downloads" link for both.
+    expect(failure).toBeInstanceOf(OfflineCapError);
+    expect((failure as Error).message).toMatch(/out of storage/i);
+  });
+
+  it("lets any other write failure through unchanged", async () => {
+    handler = (url) => (url.includes("signed=1") ? json({ url: BUCKET }) : bytes());
+    putMedia.mockRejectedValueOnce(new Error("disk on fire"));
+    await expect(downloadVideoForOffline(video)).rejects.toThrow("disk on fire");
   });
 });
