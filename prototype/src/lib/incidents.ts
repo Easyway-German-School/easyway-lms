@@ -20,7 +20,7 @@
  * into two. Every path here swallows its own failures into a console line.
  */
 
-import { createHash } from "node:crypto";
+import { BreakerOpenError, BulkheadFullError, createBulkhead, createCircuitBreaker } from "@/lib/resilience";
 
 export type IncidentKind = "error" | "complaint" | "drift" | "health";
 export type IncidentSource = "request" | "cron" | "client" | "feedback" | "invariant";
@@ -82,12 +82,34 @@ export function normaliseMessage(message: string): string {
     .slice(0, 240);
 }
 
+/**
+ * A 53-bit string hash (cyrb53). Not cryptographic and not meant to be: it only
+ * has to keep distinct problems apart. It replaced `node:crypto` because this
+ * file is reachable from `instrumentation.ts`, which Next also compiles for the
+ * edge runtime — where a `node:` import is a build error in dev and a warning
+ * that disables the hook in production. Pure JS has no such constraint.
+ */
+function hash53(text: string, seed: number): number {
+  let h1 = 0xdeadbeef ^ seed;
+  let h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+
 export function fingerprintOf(input: Pick<IncidentInput, "kind" | "route" | "message">): string {
   // Complaints are worded a hundred ways; what makes them "the same" is the page
   // they are about. Only fall back to wording when there is no page to go on.
   const byPage = input.kind === "complaint" && Boolean(input.route);
   const parts = [input.kind, (input.route ?? "").toLowerCase(), byPage ? "" : normaliseMessage(input.message)];
-  return createHash("sha1").update(parts.join(" | ")).digest("hex").slice(0, 32);
+  const text = parts.join(" | ");
+  // Two seeds: ~106 bits, so a collision between two real problems is not a concern.
+  return hash53(text, 0).toString(16).padStart(14, "0") + hash53(text, 1).toString(16).padStart(14, "0");
 }
 
 /**
@@ -149,6 +171,117 @@ export function _resetThrottle() {
   recent.clear();
 }
 
+/**
+ * The database half of recording an incident, kept separate so it can be wrapped
+ * in the two protections below. Returns nothing; throws if the database fails.
+ */
+async function persistIncident(input: IncidentInput, fingerprint: string, message: string, now: number, extra: number): Promise<void> {
+  const { guardedPrisma } = await import("@/lib/prisma");
+  const at = new Date(now);
+  const sample = {
+    at: at.toISOString(),
+    message: message.slice(0, 300),
+    ...(input.context ? { context: input.context } : {}),
+  };
+
+  // A recurrence of something marked fixed is a regression — reopen it and say so.
+  await guardedPrisma.incident.updateMany({
+    where: { fingerprint, status: "resolved" },
+    data: { status: "open", resolvedAt: null, reopenedCount: { increment: 1 } },
+  });
+
+  const existing = await guardedPrisma.incident.findUnique({
+    where: { fingerprint },
+    select: { id: true, samples: true },
+  });
+
+  if (existing) {
+    const samples = [...(Array.isArray(existing.samples) ? existing.samples : []), sample].slice(-SAMPLE_LIMIT);
+    await guardedPrisma.incident.update({
+      where: { id: existing.id },
+      data: {
+        occurrences: { increment: 1 + extra },
+        lastSeenAt: at,
+        samples: samples as never,
+      },
+    });
+    return;
+  }
+
+  try {
+    await guardedPrisma.incident.create({
+      data: {
+        fingerprint,
+        kind: input.kind,
+        source: input.source,
+        severity: input.severity ?? severityFor(input),
+        title: titleOf({ ...input, message }),
+        message,
+        stack: input.stack ? scrub(input.stack).slice(0, 4000) : null,
+        route: input.route ?? null,
+        method: input.method ?? null,
+        context: (input.context ?? undefined) as never,
+        samples: [sample] as never,
+        occurrences: 1 + extra,
+        tenantId: input.tenantId ?? null,
+        userId: input.userId ?? null,
+        feedbackId: input.feedbackId ?? null,
+        firstSeenAt: at,
+        lastSeenAt: at,
+      },
+    });
+  } catch (error) {
+    // Two isolates raced to create the same fingerprint; the loser just counts.
+    if ((error as { code?: string })?.code === "P2002") {
+      await guardedPrisma.incident.update({
+        where: { fingerprint },
+        data: { occurrences: { increment: 1 }, lastSeenAt: at },
+      });
+      return;
+    }
+    throw error;
+  }
+}
+
+/**
+ * OBSERVABILITY MUST NEVER TAKE DOWN THE THING IT OBSERVES.
+ *
+ * This code runs precisely when something has gone wrong — and the commonest
+ * thing to go wrong is the database. So a failing database makes every request
+ * error, every error tries to write an incident to that same failing database,
+ * each write waits on a timeout, and the error handler piles load onto the
+ * thing that is already down. That is a cascading failure with our own hands on
+ * it. Two patterns from lib/resilience.ts stop it:
+ *
+ *  - BULKHEAD: at most a couple of incident writes in flight at once, a short
+ *    queue behind them, everything else dropped. The recorder gets its own small
+ *    share of database connections and can never use more, no matter how many
+ *    errors are happening — so it cannot starve the requests that are trying to
+ *    serve students.
+ *  - CIRCUIT BREAKER: after a run of failed writes, stop trying for a while. A
+ *    write that fails instantly costs nothing; one that waits out a timeout
+ *    costs a held connection every time. The first write after the pause is a
+ *    probe; if it works, recording resumes by itself.
+ *
+ * Dropping an incident here is the right call, not a loss: the error is already
+ * in the platform log (captureError writes that first), and complaints are
+ * already durable in BetaFeedback. The incident register is a convenience layer
+ * and is allowed to be briefly blind. Being unable to see is survivable; being
+ * unable to serve is not.
+ */
+const writeBulkhead = createBulkhead({ name: "incident-writes", maxConcurrent: 2, maxQueue: 20 });
+const writeBreaker = createCircuitBreaker({ name: "incident-db", failureThreshold: 4, resetAfterMs: 30_000 });
+
+let lastShedLog = 0;
+function noteShed(error: Error) {
+  // A storm of dropped writes must not become a storm of log lines.
+  const now = Date.now();
+  if (now - lastShedLog > 60_000) {
+    lastShedLog = now;
+    console.warn(`[incidents] recording paused (${error.name}); errors are still in the platform log`);
+  }
+}
+
 export async function recordIncident(input: IncidentInput): Promise<void> {
   try {
     // Edge runtime has no Prisma; the log line captureError already wrote is all it gets.
@@ -168,69 +301,12 @@ export async function recordIncident(input: IncidentInput): Promise<void> {
       extra = gate.extra;
     }
 
-    const { guardedPrisma } = await import("@/lib/prisma");
-    const at = new Date(now);
-    const sample = {
-      at: at.toISOString(),
-      message: message.slice(0, 300),
-      ...(input.context ? { context: input.context } : {}),
-    };
-
-    // A recurrence of something marked fixed is a regression — reopen it and say so.
-    await guardedPrisma.incident.updateMany({
-      where: { fingerprint, status: "resolved" },
-      data: { status: "open", resolvedAt: null, reopenedCount: { increment: 1 } },
-    });
-
-    const existing = await guardedPrisma.incident.findUnique({
-      where: { fingerprint },
-      select: { id: true, samples: true },
-    });
-
-    if (existing) {
-      const samples = [...(Array.isArray(existing.samples) ? existing.samples : []), sample].slice(-SAMPLE_LIMIT);
-      await guardedPrisma.incident.update({
-        where: { id: existing.id },
-        data: {
-          occurrences: { increment: 1 + extra },
-          lastSeenAt: at,
-          samples: samples as never,
-        },
-      });
-      return;
-    }
-
     try {
-      await guardedPrisma.incident.create({
-        data: {
-          fingerprint,
-          kind: input.kind,
-          source: input.source,
-          severity: input.severity ?? severityFor(input),
-          title: titleOf({ ...input, message }),
-          message,
-          stack: input.stack ? scrub(input.stack).slice(0, 4000) : null,
-          route: input.route ?? null,
-          method: input.method ?? null,
-          context: (input.context ?? undefined) as never,
-          samples: [sample] as never,
-          occurrences: 1 + extra,
-          tenantId: input.tenantId ?? null,
-          userId: input.userId ?? null,
-          feedbackId: input.feedbackId ?? null,
-          firstSeenAt: at,
-          lastSeenAt: at,
-        },
-      });
+      // Bulkhead outside, breaker inside: a full compartment turns work away
+      // before it ever counts against the dependency's health.
+      await writeBulkhead.run(() => writeBreaker.run(() => persistIncident(input, fingerprint, message, now, extra)));
     } catch (error) {
-      // Two isolates raced to create the same fingerprint; the loser just counts.
-      if ((error as { code?: string })?.code === "P2002") {
-        await guardedPrisma.incident.update({
-          where: { fingerprint },
-          data: { occurrences: { increment: 1 }, lastSeenAt: at },
-        });
-        return;
-      }
+      if (error instanceof BreakerOpenError || error instanceof BulkheadFullError) return noteShed(error);
       throw error;
     }
   } catch (error) {

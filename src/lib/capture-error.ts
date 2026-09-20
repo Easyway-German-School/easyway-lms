@@ -16,7 +16,19 @@
  * is worse than none.
  */
 
+import { BreakerOpenError, createCircuitBreaker } from "@/lib/resilience";
+
 export type ErrorContext = Record<string, unknown>;
+
+/**
+ * Forwarding to an outside service is best-effort, and it has to STAY best-effort
+ * when that service is down. Without this, a dead webhook costs every error a
+ * full 4-second wait — and errors are exactly when the app is already struggling.
+ * After three failures in a row the circuit opens and forwarding is skipped
+ * instantly for a minute; then one probe checks whether it is back. See
+ * lib/resilience.ts for how the breaker works.
+ */
+const webhookBreaker = createCircuitBreaker({ name: "error-webhook", failureThreshold: 3, resetAfterMs: 60_000 });
 
 export async function captureError(
   where: string,
@@ -68,15 +80,23 @@ export async function captureError(
   if (!url) return;
 
   try {
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      // Do not let a slow sink hold a request open.
-      signal: AbortSignal.timeout(4000),
+    await webhookBreaker.run(async () => {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        // Do not let a slow sink hold a request open.
+        signal: AbortSignal.timeout(4000),
+      });
+      // A 5xx is a failing dependency too; fetch only throws on network errors.
+      if (response.status >= 500) throw new Error(`webhook answered ${response.status}`);
     });
   } catch (forwardError) {
-    console.error("[captureError] could not reach ERROR_WEBHOOK_URL:", forwardError);
+    // An open circuit is expected while the webhook is down, and the failures that opened
+    // it were each logged already — do not add a log line per skipped error on top.
+    if (!(forwardError instanceof BreakerOpenError)) {
+      console.error("[captureError] could not reach ERROR_WEBHOOK_URL:", forwardError);
+    }
   }
 }
 

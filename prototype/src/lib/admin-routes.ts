@@ -101,6 +101,10 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   { prefix: "/admin/settings", capability: "staff" },
 
   { prefix: "/admin/security", capability: "security" },
+  // Mission control: incidents, drift and the backend map. Incident samples carry
+  // student ids and error detail, so it sits behind the same super-only capability
+  // as the audit trail — and its APIs under /api/admin/developer ask for it too.
+  { prefix: "/admin/developer", capability: "security" },
 
   // The staff file store. Its own capability, hand-granted for now — see
   // docs/WORK_DRIVE.md. The API routes under /api/admin/work-drive enforce the

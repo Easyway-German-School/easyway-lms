@@ -5,6 +5,8 @@
   "scripts": {
     "predev": "node scripts/guard-not-prod.mjs",
     "dev": "next dev --webpack --hostname 0.0.0.0",
+    "graph": "tsx --tsconfig tsconfig.json scripts/build-backend-graph.ts",
+    "prebuild": "npm run graph || echo backend-graph skipped",
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 prisma generate && next build --webpack",
     "start": "next start --hostname 0.0.0.0",
     "lint": "eslint",

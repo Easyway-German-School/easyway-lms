@@ -182,3 +182,12 @@ export function judgeWitness(
 
   return { kind: "ok" };
 }
+
+/** "photo_missing+unpaid_deposit" -> "No profile photo + Deposit not yet paid". For dashboards. */
+export function verdictKeyLabel(key: string): string {
+  if (key === "open") return "Open — nothing holding the portal back";
+  return key
+    .split("+")
+    .map((code) => LOCKS[code as PortalLockCode]?.label ?? code)
+    .join(" + ");
+}
