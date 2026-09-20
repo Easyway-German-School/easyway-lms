@@ -9,6 +9,7 @@ import {
   studentWhereForLecturer,
 } from '@/lib/lecturer-assignment';
 import { KIND, notifyInBackground } from '@/lib/notify';
+import { attributeTutorAction, tutorPhrase } from '@/lib/tutor-attribution';
 
 export async function GET(req: NextRequest) {
   try {
@@ -242,9 +243,12 @@ export async function POST(req: NextRequest) {
        * flips somebody TO absent still reaches them.
        */
       if (!present) {
+        // Absent from WHICH class matters to a hybrid student — their campus
+        // tutor and their online tutor each take their own register.
+        const tutorWho = tutorPhrase(await attributeTutorAction(entry.studentId, lecturerId));
         const studentMessage = unscheduledNote
-          ? "Your tutor recorded you as absent for today's class. That class was started directly from the live room and wasn't on your calendar in advance — if you weren't told about it in time, let your tutor know so they can review it."
-          : "Your tutor recorded you as absent for today's class. If that's wrong, let them know.";
+          ? `${tutorWho} recorded you as absent for today's class. That class was started directly from the live room and wasn't on your calendar in advance — if you weren't told about it in time, let them know so they can review it.`
+          : `${tutorWho} recorded you as absent for today's class. If that's wrong, let them know.`;
         notifyInBackground({
           to: { studentIds: [entry.studentId] },
           kind: KIND.attendanceMarked,

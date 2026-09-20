@@ -23,6 +23,15 @@ import { AttendanceIcon, EmptyIcon, SparklesIcon, TrendingUpIcon } from "@/compo
  * it wanted to. See the comment in /api/student/results.
  */
 
+/** Who marked it. `role` is only set for a hybrid student, who has a campus tutor and an online one. */
+type GradedBy = { name: string; role: "physical" | "online" | null } | null;
+
+/** "Marked by Frau X · Online tutor" — hybrid students only; everyone else has one tutor, so it would be noise. */
+function markedByText(gradedBy: GradedBy | undefined): string {
+  if (!gradedBy || !gradedBy.role) return "";
+  return `Marked by ${gradedBy.name} · ${gradedBy.role === "online" ? "Online" : "Campus"} tutor`;
+}
+
 type Skill = {
   type: string;
   average: number;
@@ -33,6 +42,7 @@ type Skill = {
   change: number | null;
   passed: boolean;
   feedback: string | null;
+  gradedBy?: GradedBy;
 };
 
 type ExamResult = {
@@ -45,6 +55,7 @@ type ExamResult = {
   passed: boolean;
   feedback: string | null;
   submissionMode: string;
+  gradedBy?: GradedBy;
 };
 
 type CourseResults = {
@@ -63,6 +74,7 @@ type Coursework = {
   feedback: string | null;
   submissionMode: string;
   createdAt: string;
+  gradedBy?: GradedBy;
 };
 
 type Payload = {
@@ -424,6 +436,7 @@ export default function ResultsPage() {
                       <p className="mt-1 truncate text-xs text-[var(--muted)]">
                         {skill.attempts} mark{skill.attempts === 1 ? "" : "s"}
                         {skill.feedback ? ` · ${skill.feedback}` : ""}
+                        {markedByText(skill.gradedBy) ? ` · ${markedByText(skill.gradedBy)}` : ""}
                       </p>
                     </div>
                   ))}
@@ -494,6 +507,9 @@ export default function ResultsPage() {
                       {r.feedback && (
                         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{r.feedback}</p>
                       )}
+                      {markedByText(r.gradedBy) && (
+                        <p className="mt-2 text-xs font-semibold text-[var(--accent)]">{markedByText(r.gradedBy)}</p>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -520,6 +536,9 @@ export default function ResultsPage() {
                         </p>
                         {c.feedback && (
                           <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{c.feedback}</p>
+                        )}
+                        {markedByText(c.gradedBy) && (
+                          <p className="mt-1 text-xs font-semibold text-[var(--accent)]">{markedByText(c.gradedBy)}</p>
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-2">

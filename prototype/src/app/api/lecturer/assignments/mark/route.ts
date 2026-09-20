@@ -2,6 +2,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { notify, KIND } from "@/lib/notify";
+import { attributeTutorAction, tutorPhrase } from "@/lib/tutor-attribution";
 import { recordSkillOutcome } from "@/lib/skill-mastery";
 import {
   parseQuestions,
@@ -187,6 +188,7 @@ export async function POST(req: NextRequest) {
           type: isQuiz ? "quiz" : "assignment",
           score: finalScore,
           feedback: updated.feedback,
+          lecturerId: auth.lecturerId,
         },
       });
       if (isQuiz) {
@@ -199,12 +201,13 @@ export async function POST(req: NextRequest) {
     // The one grading path that used to leave the student finding out by
     // opening the page and checking — see gradebook/route.ts and
     // grades/roster/route.ts, which already do this on every score change.
+    const attribution = await attributeTutorAction(submission.studentId, auth.lecturerId);
     await notify({
       to: { studentIds: [submission.studentId] },
       kind: KIND.resultPublished,
       severity: "info",
       title: "Your submission has been marked",
-      message: "Your tutor finished marking your work. Open your results to see it.",
+      message: `${tutorPhrase(attribution)} finished marking your work. Open your results to see it.`,
       link: "/results",
       dedupeKey: `submission-marked:${submission.id}`,
       push: true,

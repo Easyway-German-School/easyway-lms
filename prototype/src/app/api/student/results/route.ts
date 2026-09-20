@@ -3,6 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { letterFor, PASS_MARK, weightedCourseworkAverage } from "@/lib/grading";
+import { roleForLecturer } from "@/lib/tutor-attribution";
 
 /**
  * A student's own scores, grouped so the page can show performance per course
@@ -27,16 +28,33 @@ export async function GET() {
 
     const student = await prisma.student.findUnique({
       where: { userId: session.user.id },
-      select: { id: true, level: true, branchId: true, sessionSlot: true },
+      select: {
+        id: true,
+        level: true,
+        branchId: true,
+        sessionSlot: true,
+        deliveryMode: true,
+        tutorId: true,
+        coTutors: { select: { lecturerId: true, role: true } },
+      },
     });
     if (!student) {
       return NextResponse.json({ error: "No student record" }, { status: 404 });
     }
 
+    // Who marked a grade — `{ name, role }`, role only for a hybrid student
+    // (two tutors). Null for a grade with no recorded marker (older rows, or
+    // AI-graded work) so nothing is invented for them.
+    const markedBy = (g: { lecturer: { id: string; user: { name: string | null; email: string } } | null }) =>
+      g.lecturer
+        ? { name: g.lecturer.user.name || g.lecturer.user.email, role: roleForLecturer(student, g.lecturer.id) }
+        : null;
+
     const grades = await prisma.grade.findMany({
       where: { studentId: student.id, OR: [{ examId: null }, { exam: { resultsReleased: true } }] },
       orderBy: { createdAt: "desc" },
       include: {
+        lecturer: { select: { id: true, user: { select: { name: true, email: true } } } },
         exam: {
           select: {
             id: true,
@@ -69,6 +87,7 @@ export async function GET() {
         passed: boolean;
         feedback: string | null;
         submissionMode: string;
+        gradedBy: { name: string; role: "physical" | "online" | null } | null;
       }>;
       average: number;
     }>();
@@ -99,6 +118,7 @@ export async function GET() {
         passed: g.score >= PASS_MARK,
         feedback: g.feedback,
         submissionMode: g.submissionMode,
+        gradedBy: markedBy(g),
       });
       byCourse.set(groupId, entry);
     }
@@ -139,7 +159,14 @@ export async function GET() {
      */
     const bySkill = new Map<
       string,
-      { type: string; scores: number[]; latest: number; latestAt: Date; feedback: string | null }
+      {
+        type: string;
+        scores: number[];
+        latest: number;
+        latestAt: Date;
+        feedback: string | null;
+        gradedBy: { name: string; role: "physical" | "online" | null } | null;
+      }
     >();
     for (const g of grades) {
       if (g.exam) continue; // formal sittings are reported as exams, below
@@ -153,6 +180,7 @@ export async function GET() {
           latest: g.score,
           latestAt: g.createdAt,
           feedback: g.feedback,
+          gradedBy: markedBy(g),
         });
       }
     }
@@ -175,6 +203,7 @@ export async function GET() {
           change: entry.scores.length > 1 ? entry.latest - first : null,
           passed: average >= PASS_MARK,
           feedback: entry.feedback,
+          gradedBy: entry.gradedBy,
         };
       })
       .sort((a, b) => b.average - a.average);
@@ -295,6 +324,7 @@ export async function GET() {
         feedback: g.feedback,
         submissionMode: g.submissionMode,
         createdAt: g.createdAt,
+        gradedBy: markedBy(g),
       })),
     });
   } catch (error) {

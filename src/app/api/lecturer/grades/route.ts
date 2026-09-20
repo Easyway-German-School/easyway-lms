@@ -116,6 +116,7 @@ export async function POST(req: NextRequest) {
         // A bare number tells a student nothing about what to fix next.
         feedback: typeof feedback === 'string' ? feedback.trim() || null : null,
         submissionMode: mode,
+        lecturerId,
       },
       update: {
         score,
@@ -125,6 +126,7 @@ export async function POST(req: NextRequest) {
         // "erase last month's advice".
         feedback: typeof feedback === 'string' && feedback.trim() ? feedback.trim() : undefined,
         submissionMode: mode,
+        lecturerId,
       },
     });
 

@@ -4,6 +4,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseQuestions, totalPoints, type Question } from "@/lib/assignments";
 import { readAssignment, studentWhereForLecturerScope } from "@/lib/lecturer-assignment";
 import { notify, KIND } from "@/lib/notify";
+import { studentsVisibleToAssignment } from "@/lib/student-assignments";
+import { resolveOnlineBranchId } from "@/lib/online-branch-server";
+import { groupStudentsByTutorPhrase } from "@/lib/tutor-attribution";
 
 /** Tutors create and review assignments for a level (optionally one branch). */
 
@@ -216,34 +219,51 @@ export async function POST(req: NextRequest) {
 
     if (created.published) {
       const dueLine = created.dueAt ? ` Due ${created.dueAt.toLocaleDateString()}.` : "";
-      const notifyPayload = {
+      const notifyBase = {
         kind: KIND.assignmentDue,
         severity: "info" as const,
         title: kind === "quiz" ? "New quiz to take" : "New assignment to submit",
-        message: `"${created.title}" was just set for you.${dueLine} Go to Assignments in the portal to submit it.`,
         link: "/assignment",
         dedupeKey: `assignment-created:${created.id}`,
         push: true,
       };
 
       // Named students get it directly; an untargeted assignment reaches
-      // everyone at the level (and branch/sitting, if the tutor narrowed it) —
-      // the exact same audience `visibleTo()` in /api/student/assignments
-      // will show it to.
-      await notify(
-        targetIds.length
-          ? { ...notifyPayload, to: { studentIds: targetIds } }
-          : {
-              ...notifyPayload,
-              to: {
-                students: {
-                  level: normalizedLevel,
-                  branchId: branchId || null,
-                  sessionSlot: resolvedSessionSlot,
-                },
-              },
-            },
-      ).catch((error) => console.error("Assignment-created notification failed", error));
+      // everyone the student list would show it to — resolved to real ids
+      // here (not `notify()`'s loose branch/sitting filter) so a hybrid
+      // student hears about their ONLINE tutor's homework too, which that
+      // filter can't see (their branch/sitting columns are their campus side).
+      const onlineBranchId = await resolveOnlineBranchId(null);
+      const audienceIds = targetIds.length
+        ? (targetIds as string[])
+        : (
+            await prisma.student.findMany({
+              where: studentsVisibleToAssignment(
+                { level: normalizedLevel, branchId: branchId || null, sessionSlot: resolvedSessionSlot },
+                onlineBranchId,
+              ),
+              select: { id: true },
+            })
+          ).map((row) => row.id);
+
+      // A hybrid student has two tutors, so "was just set for you" is not
+      // enough — say whose. Grouped because the same tutor is a hybrid
+      // student's *campus* tutor and a physical-only student's plain "tutor".
+      const groups = auth.lecturerId
+        ? await groupStudentsByTutorPhrase(audienceIds, auth.lecturerId)
+        : new Map<string, string[]>([["", audienceIds]]);
+
+      for (const [phrase, ids] of groups) {
+        if (!ids.length) continue;
+        const setBy = phrase ? `${phrase} set` : "";
+        await notify({
+          ...notifyBase,
+          to: { studentIds: ids },
+          message: phrase
+            ? `${setBy} "${created.title}" for you.${dueLine} Go to Assignments in the portal to submit it.`
+            : `"${created.title}" was just set for you.${dueLine} Go to Assignments in the portal to submit it.`,
+        }).catch((error) => console.error("Assignment-created notification failed", error));
+      }
     }
 
     return NextResponse.json({ assignment: created, targeted: targetIds.length });

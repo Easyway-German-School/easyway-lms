@@ -3,6 +3,7 @@ import { requireAuthSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveLecturerId } from '@/lib/lecturer';
 import { KIND, notify } from '@/lib/notify';
+import { groupStudentsByTutorPhrase } from '@/lib/tutor-attribution';
 import { assignmentBatches, belongsToLecturer, isAssigned, readAssignment, studentWhereForLecturer } from '@/lib/lecturer-assignment';
 import { deriveMaterialKind } from '@/lib/video-library';
 import { AUDIO_EMBED_FILE_TYPE, EMBED_FILE_TYPE, parseAudioLink, parseEmbed } from '@/lib/media-embed';
@@ -245,21 +246,35 @@ export async function POST(req: NextRequest) {
         .map((student) => student.id);
 
       if (studentIds.length) {
-        await notify({
-          to: { studentIds },
-          kind: KIND.materialPublished,
-          severity: "info",
-          title: kind === "recording" ? "A class recording is up" : "New material from your tutor",
-          message:
-            kind === "recording"
-              ? `“${title}” is in your video library. If you missed the class, it starts where you left off.`
-              : `Your tutor uploaded “${title}”. Open Materials to download it.`,
-          link: kind === "recording" ? "/materials?tab=watch" : "/materials",
-          push: true,
-          // One announcement per material, so a tutor who saves twice does not
-          // buzz two hundred phones twice.
-          dedupeKey: `material:${material.id}`,
-        }).catch((error) => console.error("Material notification failed", error));
+        // A hybrid student has two tutors: say which one uploaded this. The
+        // list itself already tags it (api/student/materials); the push that
+        // announces it has to agree, or the first thing they read is vaguer
+        // than what they find when they open it.
+        const groups = await groupStudentsByTutorPhrase(studentIds, lecturerId);
+        for (const [phrase, ids] of groups) {
+          if (!ids.length) continue;
+          const lowerPhrase = phrase.charAt(0).toLowerCase() + phrase.slice(1);
+          await notify({
+            to: { studentIds: ids },
+            kind: KIND.materialPublished,
+            severity: "info",
+            title:
+              kind === "recording"
+                ? "A class recording is up"
+                : phrase === "Your tutor"
+                  ? "New material from your tutor"
+                  : `New material from ${lowerPhrase}`,
+            message:
+              kind === "recording"
+                ? `“${title}” is in your video library. If you missed the class, it starts where you left off.`
+                : `${phrase} uploaded “${title}”. Open Materials to download it.`,
+            link: kind === "recording" ? "/materials?tab=watch" : "/materials",
+            push: true,
+            // One announcement per material, so a tutor who saves twice does not
+            // buzz two hundred phones twice.
+            dedupeKey: `material:${material.id}`,
+          }).catch((error) => console.error("Material notification failed", error));
+        }
       }
     }
 

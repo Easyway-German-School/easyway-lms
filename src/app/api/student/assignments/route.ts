@@ -12,6 +12,8 @@ import {
   isExpired,
 } from "@/lib/assignments";
 import { assignmentVisibleToWhere } from "@/lib/student-assignments";
+import { resolveOnlineBranchId } from "@/lib/online-branch-server";
+import { attributeTutorAction } from "@/lib/tutor-attribution";
 
 /**
  * A student's assignments: documents to hand in and timed quizzes.
@@ -29,7 +31,16 @@ async function currentStudent(userId: string | undefined) {
   if (!userId) return null;
   return prisma.student.findUnique({
     where: { userId },
-    select: { id: true, level: true, branchId: true, sessionSlot: true },
+    select: {
+      id: true,
+      level: true,
+      branchId: true,
+      sessionSlot: true,
+      deliveryMode: true,
+      hybridOnlineSlot: true,
+      tutorId: true,
+      user: { select: { tenantId: true } },
+    },
   });
 }
 
@@ -42,8 +53,10 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const onlineBranchId = await resolveOnlineBranchId(student.user?.tenantId ?? null);
+
   const assignments = await prisma.assignment.findMany({
-    where: assignmentVisibleToWhere(student),
+    where: assignmentVisibleToWhere(student, onlineBranchId),
     orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
     include: {
       submissions: { where: { studentId: student.id } },
@@ -54,10 +67,14 @@ export async function GET() {
   const now = new Date();
 
   return NextResponse.json({
-    assignments: assignments.map((a) => {
+    assignments: await Promise.all(assignments.map(async (a) => {
       const mine = a.submissions[0] ?? null;
       const questions = parseQuestions(a.questions);
       const deadline = deadlineFor(mine?.startedAt ?? null, a.timeLimitMinutes);
+      // Only a hybrid student has two tutors to tell apart — everyone else's
+      // assignments are unambiguously "your tutor", so the lookup is skipped.
+      const attribution =
+        student.deliveryMode === "hybrid" ? await attributeTutorAction(student.id, a.lecturerId) : null;
 
       return {
         id: a.id,
@@ -69,6 +86,7 @@ export async function GET() {
         totalPoints: totalPoints(questions),
         dueAt: a.dueAt,
         lecturerName: a.lecturer?.user?.name ?? null,
+        tutorRole: attribution?.role ?? null,
         submission: mine
           ? {
               submittedAt: mine.submittedAt,
@@ -83,7 +101,7 @@ export async function GET() {
             }
           : null,
       };
-    }),
+    })),
   });
 }
 
@@ -112,8 +130,9 @@ export async function POST(req: NextRequest) {
      * any assignment in the school by posting an id they were never shown —
      * including one targeted at somebody else.
      */
+    const onlineBranchId = await resolveOnlineBranchId(student.user?.tenantId ?? null);
     const assignment = await prisma.assignment.findFirst({
-      where: { id: String(assignmentId), ...assignmentVisibleToWhere(student) },
+      where: { id: String(assignmentId), ...assignmentVisibleToWhere(student, onlineBranchId) },
       include: { lecturer: { select: { userId: true } } },
     });
     if (!assignment) {
@@ -174,6 +193,13 @@ export async function POST(req: NextRequest) {
         feedback = needsReview
           ? `${ranOut}${result.earned} of ${result.possible - result.results.filter((r) => r.needsReview).reduce((sum, r) => sum + r.possible, 0)} on the questions marked automatically. Your written ${result.awaitingReview === 1 ? "answer is" : "answers are"} with your tutor.`
           : `${ranOut}${result.earned} of ${result.possible} marks.`;
+      } else {
+        // A document has no auto-markable part at all — the whole thing
+        // waits for a human. Without this, a handed-in essay sat with
+        // `needsReview: false` and `score: null` forever: invisible to the
+        // marking queue, which filters on `needsReview`, so nobody ever saw
+        // it arrive.
+        needsReview = true;
       }
 
       const saved = await prisma.assignmentSubmission.upsert({
