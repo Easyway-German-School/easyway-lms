@@ -16,10 +16,10 @@ import {
 type Overlay = Record<string, { incidents: number; occurrences: number; worst: string; drift: boolean }>;
 type Transform = { x: number; y: number; k: number };
 
-const KIND: Record<GraphNodeKind, { fill: string; stroke: string; text: string; name: string }> = {
-  model: { fill: "#0f766e", stroke: "#2dd4bf", text: "#ccfbf1", name: "Tables" },
-  lib: { fill: "#1e40af", stroke: "#60a5fa", text: "#dbeafe", name: "Libraries" },
-  route: { fill: "#b45309", stroke: "#fbbf24", text: "#fef3c7", name: "API routes" },
+const KIND: Record<GraphNodeKind, { fill: string; stroke: string; text: string; name: string; one: string }> = {
+  model: { fill: "#0f766e", stroke: "#2dd4bf", text: "#ccfbf1", name: "Tables", one: "Table" },
+  lib: { fill: "#1e40af", stroke: "#60a5fa", text: "#dbeafe", name: "Libraries", one: "Library" },
+  route: { fill: "#b45309", stroke: "#fbbf24", text: "#fef3c7", name: "API routes", one: "API route" },
 };
 const EDGE = { import: "#64748b", read: "#2dd4bf", write: "#f59e0b" } as const;
 const SEVERITY_COLOR: Record<string, string> = { critical: "#ef4444", high: "#f97316", medium: "#eab308", low: "#94a3b8" };
@@ -483,7 +483,7 @@ export default function BackendMap() {
           <aside className="hidden h-[660px] w-72 shrink-0 overflow-y-auto rounded-3xl border border-white/10 bg-[#0b1220] p-4 text-white lg:block">
             <div className="flex items-center gap-2">
               <span className="h-3 w-3 rounded" style={{ background: KIND[selected.kind].stroke }} />
-              <span className="text-[10px] font-bold uppercase tracking-wider text-white/50">{KIND[selected.kind].name.replace(/s$/, "")}</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-white/50">{KIND[selected.kind].one}</span>
             </div>
             <h3 className="mt-1 break-all text-sm font-bold">{selected.label}</h3>
             {selected.file && <p className="mt-1 break-all text-[10px] text-white/40">{selected.file}</p>}

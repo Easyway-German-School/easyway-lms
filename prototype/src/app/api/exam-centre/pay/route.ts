@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { safeJson } from "@/lib/safe-json";
 import { resolvePayable, settleExamFee } from "@/lib/exam-payments";
+import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
 
 /**
  * Paystack checkout for an exam fee.
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
     const base = process.env.NEXTAUTH_URL || "http://localhost:3000";
     const reference = `exam-${registration.id}-${Date.now()}`;
 
-    const response = await fetch(PAYSTACK_INIT, {
+    const response = await guardedFetch("paystack", PAYSTACK_INIT, {
       method: "POST",
       headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -96,6 +97,7 @@ export async function POST(req: NextRequest) {
       amount: registration.fee,
     });
   } catch (error) {
+    if (isCircuitOpen(error)) return NextResponse.json({ error: PAYMENTS_PAUSED_MESSAGE }, { status: 503 });
     console.error("Exam fee checkout failed:", error);
     return NextResponse.json({ error: "Could not start payment" }, { status: 500 });
   }
@@ -113,7 +115,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const response = await fetch(`${PAYSTACK_VERIFY}/${encodeURIComponent(reference)}`, {
+    const response = await guardedFetch("paystack", `${PAYSTACK_VERIFY}/${encodeURIComponent(reference)}`, {
       headers: { Authorization: `Bearer ${secretKey}` },
     });
     const data = await safeJson(response);
@@ -149,6 +151,11 @@ export async function GET(req: NextRequest) {
       registrationId,
     });
   } catch (error) {
+    // Paused, not failed: the payment may well have gone through, and this is only the
+    // check. Never tell a person their payment failed because OUR check could not run.
+    if (isCircuitOpen(error)) {
+      return NextResponse.json({ error: "We could not confirm your payment yet. It has not been lost — please check again in a minute." }, { status: 503 });
+    }
     console.error("Exam fee verification failed:", error);
     return NextResponse.json({ error: "Could not verify that payment" }, { status: 500 });
   }

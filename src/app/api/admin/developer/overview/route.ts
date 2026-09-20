@@ -9,6 +9,7 @@ import { snapshotAll } from "@/lib/resilience";
 // instance before we ask what state they are in.
 import "@/lib/incidents";
 import "@/lib/capture-error";
+import "@/lib/guarded-fetch";
 
 export const dynamic = "force-dynamic";
 

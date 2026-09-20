@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { REGISTRATION_FEE } from "@/lib/payment";
 import { safeJson } from "@/lib/safe-json";
+import { guardedFetch } from "@/lib/guarded-fetch";
 
 /**
  * THE GATE ON PUBLIC STUDENT SIGNUP.
@@ -146,7 +147,8 @@ export async function validateSignupAccess({
 
     let data: any;
     try {
-      const response = await fetch(
+      const response = await guardedFetch(
+        "paystack",
         `https://api.paystack.co/transaction/verify/${encodeURIComponent(cleanRef)}`,
         {
           method: "GET",
