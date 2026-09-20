@@ -97,8 +97,10 @@ const PATTERNS: Array<{
     where: [
       { file: "src/lib/resilience.ts", note: "createBulkhead(): a small concurrency limiter with a bounded queue." },
       { file: "src/lib/incidents.ts", note: "The incident recorder gets 2 concurrent writes and a queue of 20 (bulkhead \"incident-writes\"), so error handling can never eat the database connections real requests need." },
+      { file: "src/lib/cron-lanes.ts", note: "The daily tick as compartments. The 36 periodic jobs used to run one after another in a single function, once a day — so one hung job cost every later job its turn until tomorrow. They are now grouped into lanes by what they depend on (mail and money, cheap notifications, metering and hooks, AI content, recordings and transcripts), run at the same time, each with its own time budget and a cap per job. A stuck job is abandoned at its cap and its lane carries on; a lane that spends its budget skips only ITS remaining jobs." },
+      { file: "src/app/api/cron/tick/route.ts", note: "Registers the jobs and hands them to the lane runner. `?lane=media` runs one lane on its own, so the heaviest work could be given a scheduler and a whole function of its own." },
     ],
-    gap: "Look at src/app/api/cron/tick/route.ts: 30-odd jobs run one after another in a single function. A slow job (a transcription, an AI call) delays every job behind it and shares that function's memory. Splitting the heavy jobs into their own compartments is the natural next bulkhead.",
+    gap: "Lane timings are only in the tick's response (Vercel's cron log): a job that times out becomes an incident here, but nothing stores how close each lane runs to its budget, so you cannot see one creeping toward the limit before it fails. A small tick-run table would fix that. And remember what a timeout is: it stops the tick WAITING for a job, not the job — heavy work should also carry its own way to stop (an abort signal), as the AI and Paystack calls now do.",
     live: "bulkhead",
   },
 ];
