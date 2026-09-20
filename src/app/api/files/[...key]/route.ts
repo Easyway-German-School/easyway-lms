@@ -44,6 +44,10 @@
  *   - Any request carrying `?proxy=1`: that is the offline download stream,
  *     which reads the body directly for a progress bar and hits the same CORS
  *     wall. It keeps the old streamed path.
+ *
+ * egress-reviewed: large files (recordings, materials) redirect to signed
+ * bucket URLs via redirectTtlSeconds(); what this route still proxies is small
+ * and private (photos, ID scans, hand-ins, poster images).
  */
 
 import { NextRequest, NextResponse } from "next/server";

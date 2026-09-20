@@ -229,13 +229,24 @@ export function publicUrlFor(key: string, storage = objectStorage()): string {
  * file never has to be streamed through a serverless function or held in its
  * memory. Returns null when there is no bucket (local disk, nothing to sign).
  */
-export async function signedGetUrl(key: string, expiresInSeconds = 3600): Promise<string | null> {
+export async function signedGetUrl(
+  key: string,
+  expiresInSeconds = 3600,
+  /**
+   * Ask the bucket to answer with a different filename / type than the object
+   * was stored under (S3 `response-content-*`, signed into the URL). Lets a
+   * download keep its real name when the browser is sent straight to storage.
+   */
+  overrides: { contentDisposition?: string; contentType?: string } = {},
+): Promise<string | null> {
   const storage = storageForKey(key);
   if (!storage) return null;
   const aws = await signer(storage);
   const url = new URL(objectUrl(key, storage));
   // Clamp: at least a minute to be usable, at most a week (S3's SigV4 ceiling).
   url.searchParams.set("X-Amz-Expires", String(Math.max(60, Math.min(expiresInSeconds, 604_800))));
+  if (overrides.contentDisposition) url.searchParams.set("response-content-disposition", overrides.contentDisposition);
+  if (overrides.contentType) url.searchParams.set("response-content-type", overrides.contentType);
   const signed = await aws.sign(url.toString(), { method: "GET", aws: { signQuery: true } });
   return signed.url;
 }
