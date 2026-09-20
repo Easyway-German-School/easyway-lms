@@ -10,6 +10,7 @@ import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
 import BranchSetupCard from "@/components/BranchSetupCard";
 import PhotoCapture from "@/components/PhotoCapture";
+import AppAlertsCard from "@/components/AppAlertsCard";
 import { ProfileDetailsCard } from "@/components/ProfileDetailsPrompt";
 import { useGamification } from "@/lib/useGamification";
 import { uploadErrorMessage, uploadImage, validateImageFile } from "@/lib/upload";
@@ -832,6 +833,8 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+
+      <AppAlertsCard />
 
       <section className="mx-auto mt-6 w-full max-w-5xl rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7">
         <div className="max-w-2xl">
