@@ -5,6 +5,7 @@ import { FilmIcon, PlayIcon } from "@/components/icons";
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import VideoThumb from "@/components/video/VideoThumb";
+import OfflineStorageBar from "@/components/video/OfflineStorageBar";
 import WeekDownloadButton from "@/components/video/WeekDownloadButton";
 import {
   buildShelves,
@@ -237,6 +238,7 @@ export default function VideoLibrary({
           </label>
         </div>
 
+        {canDownload ? <OfflineStorageBar /> : null}
         {canDownload ? <WeekDownloadButton videos={filtered} /> : null}
 
         {shelves.length === 0 ? (

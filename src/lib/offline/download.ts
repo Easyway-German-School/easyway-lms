@@ -3,6 +3,7 @@
 import {
   OFFLINE_CAP_BYTES,
   putMedia,
+  sweepExpired,
   wouldExceedCap,
   type OfflineMediaMeta,
 } from "@/lib/offline/store";
@@ -73,14 +74,32 @@ async function resolveDirectUrl(fileUrl: string, signal?: AbortSignal): Promise<
   }
 }
 
+/**
+ * The download can't land because there is no room — either our own per-device
+ * ceiling or the phone's. Callers show a link to the downloads shelf for both,
+ * because the fix is the same: delete something there.
+ */
 export class OfflineCapError extends Error {
-  constructor() {
+  constructor(message?: string) {
     super(
-      `Your offline library is full (${Math.round(OFFLINE_CAP_BYTES / 1024 / 1024 / 1024)} GB). ` +
-        `Delete a download to make room.`,
+      message ??
+        `Your offline library is full (${Math.round(OFFLINE_CAP_BYTES / 1024 / 1024 / 1024)} GB). ` +
+          `Remove a download to make room.`,
     );
     this.name = "OfflineCapError";
   }
+}
+
+/** The browser refused the write: the phone itself is out of storage. */
+export class OfflineDeviceFullError extends OfflineCapError {
+  constructor() {
+    super("Your phone is out of storage space. Remove a download, or free up space on your phone, then try again.");
+    this.name = "OfflineDeviceFullError";
+  }
+}
+
+function isQuotaError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "QuotaExceededError";
 }
 
 /**
@@ -96,6 +115,12 @@ export async function downloadVideoForOffline(
   } = {},
 ): Promise<void> {
   if (video.embedUrl) throw new Error("Videos hosted elsewhere can't be saved for offline.");
+
+  // Recordings past their 2-week window are only cleared when the shelf page
+  // is opened, so a student who never opens it would carry dead files that
+  // still count against the cap. Sweep first so "full" only ever means full of
+  // things they can still watch.
+  await sweepExpired();
 
   // A recording carries a rough size on the tile via duration; we can't know
   // the exact bytes until the headers arrive, so the hard cap check runs
@@ -156,15 +181,20 @@ export async function downloadVideoForOffline(
     recordedAt: video.recordedAt,
   };
 
-  await putMedia({
-    materialId: video.id,
-    blob,
-    thumbBlob,
-    meta,
-    downloadedAt: Date.now(),
-    expiresAt: video.expiresAt ? new Date(video.expiresAt).getTime() : null,
-    sizeBytes: blob.size,
-  });
+  try {
+    await putMedia({
+      materialId: video.id,
+      blob,
+      thumbBlob,
+      meta,
+      downloadedAt: Date.now(),
+      expiresAt: video.expiresAt ? new Date(video.expiresAt).getTime() : null,
+      sizeBytes: blob.size,
+    });
+  } catch (error) {
+    if (isQuotaError(error)) throw new OfflineDeviceFullError();
+    throw error;
+  }
 }
 
 /** "128 MB", "1.4 GB" — for the button and the offline shelf. */
