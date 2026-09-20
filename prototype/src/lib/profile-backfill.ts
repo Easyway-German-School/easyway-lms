@@ -153,7 +153,7 @@ export function missingBackfillFields(admission: AdmissionBlob, profile: Profile
   const has = {
     whatsapp: Boolean(str(p.whatsapp)),
     dateOfBirth: Boolean(p.dateOfBirth || str(a.dob)),
-    location: Boolean(str(p.city) || str(a.city)),
+    location: Boolean(str(p.city) || str(p.stateRegion) || str(a.city) || str(a.state)),
     emergency: Boolean(
       (str(p.emergencyName) || str(a.emergencyContactName)) &&
         (str(p.emergencyPhone) || str(a.emergencyContactInfo)),

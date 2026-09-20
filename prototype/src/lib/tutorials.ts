@@ -30,9 +30,9 @@ export type TutorialStep = {
   /** Short on-screen line — has to stand alone if the student is muted. */
   caption: string;
   mood?: MascotMood;
-  /** false = wait for a tap instead of advancing on its own. Default true. */
+  /** true = advance after narration; omitted means wait for the student's tap. */
   autoAdvance?: boolean;
-  /** Fallback delay if speech is unavailable/blocked/muted. Default 4500. */
+  /** Fallback delay if speech is unavailable/blocked/muted. */
   autoAdvanceMs?: number;
 };
 

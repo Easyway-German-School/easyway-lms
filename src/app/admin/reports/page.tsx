@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import AdminShell from "@/components/AdminShell";
 
@@ -39,6 +40,19 @@ export default function AdminReportsPage() {
     <AdminShell>
       <div className="p-8">
         <h1 className="text-3xl font-bold mb-6">Admin Reports</h1>
+
+        <Link
+          href="/admin/reports/age"
+          className="mb-6 flex items-center justify-between gap-3 rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] p-4 transition hover:brightness-95"
+        >
+          <span>
+            <span className="block font-semibold">Age &amp; accessibility</span>
+            <span className="block text-sm text-[var(--muted)]">
+              See the age ranges of your students and which older learners may need a hand.
+            </span>
+          </span>
+          <span aria-hidden className="text-lg font-bold text-[var(--accent)]">→</span>
+        </Link>
 
         <div className="grid gap-4 md:grid-cols-3 mb-6">
           <div className="rounded-lg border p-4">
