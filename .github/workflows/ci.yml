@@ -63,5 +63,11 @@ jobs:
       - name: Payment-gate drift check
         run: npm run check:payment-gate
 
+      - name: File-streaming (Vercel egress) check
+        # Fails if a route sends stored file bytes back through a function
+        # without an `egress-reviewed:` note — the bug class behind the
+        # Sept 2026 ~$116 Vercel overage. See scripts/check-file-streaming.mjs.
+        run: npm run check:egress
+
       - name: Unit tests
         run: npm run test
