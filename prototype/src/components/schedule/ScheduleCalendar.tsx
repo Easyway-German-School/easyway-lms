@@ -51,8 +51,6 @@ const DOT: Record<Tone, string> = {
 
 export type DayCell = {
   dots: { tone: Tone; key: string }[];
-  /** A class that used to be on this day and has since been moved off it. */
-  ghosts?: { toLabel: string }[];
   closed?: { label: string };
 };
 
@@ -247,7 +245,6 @@ function DayGridCell({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day:${dayKey}`, disabled: !draggable });
   const dots = cell?.dots ?? [];
-  const ghosts = cell?.ghosts ?? [];
 
   return (
     <button
@@ -274,7 +271,7 @@ function DayGridCell({
           {cell.closed.label}
         </p>
       ) : (
-        (dots.length > 0 || ghosts.length > 0) && (
+        dots.length > 0 && (
           <div className="mt-1.5 flex flex-wrap items-center gap-1">
             {dots.slice(0, 4).map((dot) =>
               draggable ? (
@@ -286,13 +283,6 @@ function DayGridCell({
             {dots.length > 4 && (
               <span className="text-[10px] font-semibold text-[var(--muted)]">+{dots.length - 4}</span>
             )}
-            {ghosts.map((g, i) => (
-              <span
-                key={`ghost-${i}`}
-                title={`Moved to ${g.toLabel}`}
-                className="h-2 w-2 rounded-full border border-dashed border-[var(--muted)]"
-              />
-            ))}
           </div>
         )
       )}

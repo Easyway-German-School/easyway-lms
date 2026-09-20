@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { deriveStudentAccess } from "@/lib/access";
 import {
   belongsToLecturer,
   isAssigned,
   readAssignment,
   studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { accessFromStudent } from "@/lib/student-access";
 import { setStudentTutor } from "@/lib/tutor-pairing";
 
 /**
@@ -45,6 +45,8 @@ type StudentRow = {
   totalPaid: number;
   tuitionFee: number;
   hasPaid: boolean;
+  /** "October 2026" while placed in an intake that has not opened. */
+  waitingBatch: string | null;
   currentTutorId: string | null;
   currentTutorName: string | null;
   /** In this tutor's class because the office named them, not by matching. */
@@ -61,9 +63,16 @@ const STUDENT_SHAPE = {
   studentCode: true,
   admission: true,
   tutorId: true,
+  classesStartedAt: true,
+  createdAt: true,
+  paymentGraceUntil: true,
   user: { select: { name: true, email: true } },
   branch: { select: { name: true } },
   payments: { select: { amount: true, status: true, description: true } },
+  tuitionCharges: {
+    where: { deletedAt: null },
+    select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+  },
   tutor: { select: { id: true, user: { select: { name: true, email: true } } } },
 } as const;
 
@@ -76,28 +85,39 @@ type RawStudent = {
   deliveryMode: string;
   studentCode: string | null;
   tutorId: string | null;
+  classesStartedAt: Date | null;
+  createdAt: Date;
+  paymentGraceUntil: Date | null;
+  /** The batch month lives here — the upcoming-batch lock reads it. */
+  admission: unknown;
   user: { name: string | null; email: string };
   branch: { name: string } | null;
   payments: Array<{ amount: number; status: string; description?: string | null }>;
+  tuitionCharges: Array<{
+    id: string;
+    level: string;
+    amount: number;
+    waivedAmount: number;
+    legacyArrears: boolean;
+    createdAt: Date;
+    settledAt: Date | null;
+  }>;
   tutor: { id: string; user: { name: string | null; email: string } } | null;
 };
 
 function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
-  const totalPaid = student.payments
-    .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
-    .reduce((sum, payment) => sum + payment.amount, 0);
-
-  const feeLookup = {
-    level: student.level,
-    branch: student.branch?.name ?? null,
-    classType: student.classType,
-    pathway: student.pathway,
-  };
-  const access = deriveStudentAccess({
-    totalPaid,
-    tuitionFee: tuitionFeeFor(feeLookup),
-    requiredDeposit: requiredDepositFor(feeLookup),
-  });
+  const receivedTuitionPayments = student.payments.filter(
+    (payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description),
+  );
+  // Same computation the student's own portal and the admin remote view run
+  // (lib/student-access.ts) — not a hand-rolled copy, which is exactly what
+  // let this tag disagree with whether the student could actually get into
+  // class. `paymentPlanOnTrack` is skipped: it is its own async query per
+  // student, too expensive for a search result of twenty-five, and skipping
+  // it only ever makes `hasPaid` STRICTER than the truth, never wrongly "paid".
+  const accessInput = { ...student, payments: receivedTuitionPayments };
+  const access = accessFromStudent(accessInput);
+  const totalPaid = access.totalPaid;
 
   return {
     id: student.id,
@@ -114,6 +134,7 @@ function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
     // Shown next to every result so nobody hands a class to somebody who has
     // not paid for it without at least seeing that first.
     hasPaid: access.hasAccess,
+    waitingBatch: access.batchLocked ? access.batchLabel : null,
     currentTutorId: student.tutor?.id ?? null,
     currentTutorName: student.tutor ? student.tutor.user.name || student.tutor.user.email : null,
     namedByOffice: Boolean(lecturerId && student.tutorId === lecturerId),

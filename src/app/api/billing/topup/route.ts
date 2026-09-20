@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { guardedPrisma } from "@/lib/prisma";
+import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
 
 export const dynamic = "force-dynamic";
 
@@ -101,27 +102,33 @@ export async function POST(request: NextRequest) {
 
   const base = process.env.NEXTAUTH_URL || "http://localhost:3000";
 
-  const response = await fetch("https://api.paystack.co/transaction/initialize", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: payerEmail,
-      amount: amountKobo,
-      currency: "NGN",
-      reference: `topup-${tenant.slug}-${Date.now()}`,
-      callback_url: `${base}/platform/billing?topup=done`,
-      metadata: {
-        /**
-         * The discriminator the webhook branches on. Without it this arrives
-         * looking like a student payment and would be credited to a student
-         * who never paid.
-         */
-        kind: "platform_topup",
-        tenantId: tenant.id,
-        tenantName: tenant.name,
-      },
-    }),
-  });
+  let response: Response;
+  try {
+    response = await guardedFetch("paystack", "https://api.paystack.co/transaction/initialize", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: payerEmail,
+        amount: amountKobo,
+        currency: "NGN",
+        reference: `topup-${tenant.slug}-${Date.now()}`,
+        callback_url: `${base}/platform/billing?topup=done`,
+        metadata: {
+          /**
+           * The discriminator the webhook branches on. Without it this arrives
+           * looking like a student payment and would be credited to a student
+           * who never paid.
+           */
+          kind: "platform_topup",
+          tenantId: tenant.id,
+          tenantName: tenant.name,
+        },
+      }),
+    });
+  } catch (error) {
+    if (isCircuitOpen(error)) return NextResponse.json({ error: PAYMENTS_PAUSED_MESSAGE }, { status: 503 });
+    throw error;
+  }
 
   const data = await response.json().catch(() => null);
   if (!response.ok || !data?.status) {

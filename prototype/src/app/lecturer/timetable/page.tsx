@@ -8,7 +8,7 @@ import { batchRangeLabel } from "@/lib/levels";
 import ScheduleCalendar, { type DayCell, type Tone } from "@/components/schedule/ScheduleCalendar";
 import UndoToast, { type PendingUndo } from "@/components/schedule/UndoToast";
 import { ymd } from "@/components/schedule/grid";
-import { effectiveDayKey } from "@/components/schedule/effectiveDay";
+import { effectiveDayKey, isMoved } from "@/components/schedule/effectiveDay";
 import { AttachmentIcon, CalendarIcon, ClockIcon, PlusIcon } from "@/components/icons";
 
 /**
@@ -129,10 +129,14 @@ const STATUS_STYLES: Record<string, string> = {
   held: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200",
 };
 
-/** Dot colour on the grid, one per class, by status. */
+/**
+ * Dot colour on the grid, one per class, by status. A moved class ("postponed"
+ * in storage) is an ordinary class on its new day, so it wears the normal
+ * colour — the rail says where it came from.
+ */
 const STATUS_TONE: Record<string, Tone> = {
   scheduled: "accent",
-  postponed: "pink",
+  postponed: "accent",
   cancelled: "red",
   held: "emerald",
 };
@@ -146,7 +150,6 @@ const SLOT_LABELS: Record<string, string> = {
 
 const LEGEND = [
   { tone: "accent" as Tone, label: "Scheduled" },
-  { tone: "pink" as Tone, label: "Postponed" },
   { tone: "red" as Tone, label: "Cancelled" },
   { tone: "emerald" as Tone, label: "Held" },
 ];
@@ -279,7 +282,7 @@ export default function LecturerTimetablePage() {
     setCursor(new Date(target.getFullYear(), target.getMonth(), 1));
   }, [allSessions, cursorPinned]);
 
-  // Sessions bucketed by the day they ACTUALLY run — a postponed class sits on
+  // Sessions bucketed by the day they ACTUALLY run — a moved class sits on
   // its new date, not the day it was first timetabled for.
   const sessionsByDay = useMemo(() => {
     const map = new Map<string, Session[]>();
@@ -304,27 +307,15 @@ export default function LecturerTimetablePage() {
         })),
       });
     }
-    // A moved class leaves a hollow marker on the day it came from.
-    for (const s of allSessions) {
-      if (s.status !== "postponed" || !s.postponedTo) continue;
-      const originKey = ymd(new Date(s.date));
-      const cell = map.get(originKey) ?? { dots: [] };
-      cell.ghosts = [...(cell.ghosts ?? []), { toLabel: shortDay(ymd(new Date(s.postponedTo))) }];
-      map.set(originKey, cell);
-    }
     for (const holiday of closedDays) {
       const key = ymd(new Date(holiday.date));
       const existing = map.get(key);
-      map.set(key, { dots: existing?.dots ?? [], ghosts: existing?.ghosts, closed: { label: holiday.label } });
+      map.set(key, { dots: existing?.dots ?? [], closed: { label: holiday.label } });
     }
     return map;
-  }, [sessionsByDay, allSessions, closedDays, branchId, level]);
+  }, [sessionsByDay, closedDays, branchId, level]);
 
   const selectedSessions = selectedDay ? sessionsByDay.get(selectedDay) ?? [] : [];
-  // Classes that were originally on the selected day but have since moved away.
-  const movedFromSelected = selectedDay
-    ? allSessions.filter((s) => s.status === "postponed" && s.postponedTo && ymd(new Date(s.date)) === selectedDay)
-    : [];
   const selectedClosed = selectedDay ? closedDays.find((h) => ymd(new Date(h.date)) === selectedDay) : undefined;
 
   const levelMaterials = materials.filter((item) => !item.course?.level || item.course.level === level);
@@ -396,7 +387,43 @@ export default function LecturerTimetablePage() {
     return { status: "scheduled", postponedTo: null as string | null };
   }
 
+  /** One click to undo a move — puts the class back on the day it was timetabled for. */
+  async function moveBack(session: Session) {
+    setSavingKey(session.date);
+    setSaved("");
+    setError("");
+    const before = { status: session.status, postponedTo: session.postponedTo };
+    try {
+      await putSession(session, { status: "scheduled", postponedTo: null });
+      setSaved(`Moved back to ${shortDay(ymd(new Date(session.date)))}. Your students have been told.`);
+      setUndo({
+        label: `Moved back to ${shortDay(ymd(new Date(session.date)))}`,
+        run: async () => {
+          await putSession(session, before);
+          await load();
+        },
+      });
+      await load();
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "Could not move this class back");
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
   async function save(session: Session, patch: Partial<Session> & { materialId?: string | null }) {
+    // One class per cohort per day — a move onto a busy day would stack two on
+    // one calendar square.
+    const chosenStatus = patch.status ?? session.status;
+    if (
+      chosenStatus !== "cancelled" &&
+      editDate &&
+      editDate !== effectiveDayKey(session) &&
+      (sessionsByDay.get(editDate) ?? []).some((other) => other !== session && other.status !== "cancelled")
+    ) {
+      setError(`You already have a class on ${shortDay(editDate)} — pick a different day.`);
+      return;
+    }
     setSavingKey(session.date);
     setSaved("");
     try {
@@ -523,21 +550,8 @@ export default function LecturerTimetablePage() {
             </p>
           )}
 
-          {movedFromSelected.map((s) => (
-            <p key={`moved-${s.date}`} className="mt-2 rounded-lg bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--muted)]">
-              {level} class originally here — moved to{" "}
-              <button
-                type="button"
-                onClick={() => s.postponedTo && setSelectedDay(ymd(new Date(s.postponedTo)))}
-                className="font-semibold text-[var(--accent)] hover:underline"
-              >
-                {s.postponedTo ? shortDay(ymd(new Date(s.postponedTo))) : "—"}
-              </button>
-            </p>
-          ))}
-
           <div className="mt-3 space-y-2">
-            {selectedSessions.length === 0 && !selectedClosed && movedFromSelected.length === 0 && (
+            {selectedSessions.length === 0 && !selectedClosed && (
               <p className="text-sm text-[var(--muted)]">No class timetabled this day.</p>
             )}
 
@@ -563,13 +577,19 @@ export default function LecturerTimetablePage() {
                         <span className="rounded bg-[var(--surface)] px-1.5 py-0.5 text-xs font-bold text-[var(--foreground)]">
                           {level}
                         </span>
-                        <span
-                          className={`rounded px-2 py-0.5 text-xs font-medium capitalize ${
-                            STATUS_STYLES[session.status] ?? STATUS_STYLES.scheduled
-                          }`}
-                        >
-                          {session.status}
-                        </span>
+                        {isMoved(session) ? (
+                          <span className="rounded bg-[var(--accent)]/10 px-2 py-0.5 text-xs font-semibold text-[var(--accent)]">
+                            Moved from {shortDay(ymd(new Date(session.date)))}
+                          </span>
+                        ) : (
+                          <span
+                            className={`rounded px-2 py-0.5 text-xs font-medium capitalize ${
+                              STATUS_STYLES[session.status] ?? STATUS_STYLES.scheduled
+                            }`}
+                          >
+                            {session.status}
+                          </span>
+                        )}
                       </div>
                       <p className="mt-1 truncate text-sm font-medium text-[var(--foreground)]">
                         {session.topic || session.defaultFocus}
@@ -581,11 +601,6 @@ export default function LecturerTimetablePage() {
                         <ClockIcon className="h-3.5 w-3.5" />
                         {session.startTime}–{session.endTime}
                       </p>
-                      {session.status === "postponed" && session.postponedTo && (
-                        <p className="mt-0.5 text-xs font-semibold text-pink-700 dark:text-pink-300">
-                          Moved to {new Date(session.postponedTo).toLocaleDateString()}
-                        </p>
-                      )}
                       {session.material && (
                         <p className="mt-0.5 flex items-center gap-1 text-xs text-[var(--accent)]">
                           <AttachmentIcon className="h-3.5 w-3.5" /> {session.material.title}
@@ -596,6 +611,16 @@ export default function LecturerTimetablePage() {
                       {isEditing ? "Close" : "Edit"}
                     </span>
                   </button>
+                  {isMoved(session) && !isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => void moveBack(session)}
+                      disabled={savingKey === session.date}
+                      className="mt-2 text-xs font-semibold text-[var(--accent)] hover:underline disabled:opacity-60"
+                    >
+                      Move back to {shortDay(ymd(new Date(session.date)))}
+                    </button>
+                  )}
 
                   {isEditing && editing && (
                     <div className="mt-3 grid gap-3 border-t border-[var(--border)] pt-3">
@@ -618,13 +643,13 @@ export default function LecturerTimetablePage() {
                             onChange={(event) => setEditDate(event.target.value)}
                             className={`mt-1 w-full rounded-lg border bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] ${
                               editDate && editDate !== ymd(new Date(session.date))
-                                ? "border-pink-400"
+                                ? "border-[var(--accent)]"
                                 : "border-[var(--border)]"
                             }`}
                           />
                           {editDate && editDate !== ymd(new Date(session.date)) && (
-                            <span className="mt-1 block text-[11px] text-pink-700 dark:text-pink-300">
-                              Moved from {shortDay(ymd(new Date(session.date)))} — students are told.
+                            <span className="mt-1 block text-[11px] text-[var(--accent)]">
+                              Moves from {shortDay(ymd(new Date(session.date)))} — students are told.
                             </span>
                           )}
                         </label>
@@ -870,8 +895,8 @@ export default function LecturerTimetablePage() {
               ) : null}
             </h1>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              A dot for every class, coloured by status. Tap a day to set its topic, times and materials, postpone it,
-              or add a one-off. What you save is what your students see.
+              A dot for every class, coloured by status. Tap a day to set its topic, times and materials, move it to
+              another day, or add a one-off. What you save is what your students see.
               {myGroups.length > 1 ? " Use the class picker to switch between your classes." : ""}
             </p>
           </div>

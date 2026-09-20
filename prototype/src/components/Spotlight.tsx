@@ -39,6 +39,11 @@ export function useTargetRect(selector: string | undefined, key: unknown): Rect 
       return;
     }
 
+    // A new target (or a new step on the same one) starts from "unknown". The
+    // previous step's rectangle is not this step's, and keeping it would make a
+    // caller believe the new target had already been found.
+    setRect(null);
+
     let frame = 0;
     let elapsed = 0;
     let stableFor = 0;

@@ -5,6 +5,7 @@ import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { safeJson } from "@/lib/safe-json";
 import { setTenantScope } from "@/lib/tenant/context";
 import { revealTutorAfterPayment } from "@/lib/tutor-reveal";
+import { guardedFetch } from "@/lib/guarded-fetch";
 
 function getPaymentDescription(paymentType: string, pathwayName: string) {
   if (paymentType === "registration") {
@@ -371,7 +372,8 @@ export async function verifyPaystackTransaction(reference: string): Promise<Pays
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let data: any;
   try {
-    const response = await fetch(
+    const response = await guardedFetch(
+      "paystack",
       `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
       {
         method: "GET",

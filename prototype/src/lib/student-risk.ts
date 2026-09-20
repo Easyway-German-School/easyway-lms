@@ -163,6 +163,10 @@ const FINANCE_LOOKUP_SELECT = {
   level: true,
   status: true,
   classType: true,
+  // Without this, computeStudentFinance() quotes a Travel Package student's
+  // fee off the per-level ladder instead of the flat ₦980,000 price — see
+  // the identical bug fixed in student-roster-query.ts.
+  pathway: true,
   createdAt: true,
   branch: { select: { id: true, name: true } },
   user: { select: { name: true, email: true } },

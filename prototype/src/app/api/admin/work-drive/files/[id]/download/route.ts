@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
-import { getFile, storageConfigured } from "@/lib/storage";
+import { getFile, signedGetUrl, storageConfigured } from "@/lib/storage";
 import { fileAccessFor } from "@/lib/work-drive/workspaces";
 import { logFileActivity, WORK_DRIVE_PREFIX } from "@/lib/work-drive/files";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Streams a Work Drive file out of the private bucket.
+ * Serves a Work Drive file out of the private bucket.
  *
  * Unlike /api/files, this checks the `work_drive` capability AND that the
  * caller can see the workspace the file lives in — a student who guessed the
@@ -16,6 +16,12 @@ export const dynamic = "force-dynamic";
  *
  * `?inline=1` serves it for viewing in the browser (a PDF, an image); the
  * default is `attachment`, i.e. download.
+ *
+ * egress-reviewed: after those checks the caller is redirected to a
+ * ten-minute signed bucket URL that carries the real filename, so the file's
+ * bytes do not pass through this function (Vercel bills every proxied byte as
+ * Fast Origin Transfer). The streaming code below is only the fallback for a
+ * bucket that cannot sign.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const gate = await requireCapability("work_drive");
@@ -55,6 +61,40 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.redirect(new URL(`/uploads/${key}`, request.url));
   }
 
+  const inline = new URL(request.url).searchParams.get("inline") === "1";
+  // The quoted name must be plain printable ASCII; the real name (accents and
+  // all) travels in the `filename*` part of the signed link below.
+  const safeName = file.name.replace(/["\\\r\n]|[^\x20-\x7E]/g, "_");
+  const disposition = `${inline ? "inline" : "attachment"}; filename="${safeName}"`;
+
+  // Only bill the activity feed for a real (non-range) fetch — a video scrub
+  // fires dozens of range requests and none of them is "someone downloaded it".
+  const recordDownload = async () => {
+    if (request.headers.get("range")) return;
+    await logFileActivity({
+      workspaceId: file.workspace.id,
+      actorId: gate.admin.userId,
+      action: "downloaded",
+      fileId: file.id,
+      meta: { name: file.name },
+    });
+  };
+
+  // Permission has been checked above. Hand the browser a short-lived link to
+  // the bucket instead of carrying the bytes ourselves. The filename and type
+  // are signed into the link so the download keeps its real name.
+  const signed = await signedGetUrl(key, 600, {
+    contentDisposition: `${disposition}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+    contentType: file.mimeType || "application/octet-stream",
+  });
+  if (signed) {
+    await recordDownload();
+    const redirect = NextResponse.redirect(signed, 302);
+    redirect.headers.set("Cache-Control", "private, no-store");
+    return redirect;
+  }
+
+  // Fallback: the bucket could not sign, so stream it as before.
   const upstream = await getFile(key, request.headers.get("range"));
   if (!upstream || !upstream.body) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -66,24 +106,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (value) headers.set(h, value);
   }
   headers.set("Content-Type", file.mimeType || upstream.headers.get("content-type") || "application/octet-stream");
-  const inline = new URL(request.url).searchParams.get("inline") === "1";
-  const safeName = file.name.replace(/["\\\r\n]/g, "_");
-  headers.set("Content-Disposition", `${inline ? "inline" : "attachment"}; filename="${safeName}"`);
+  headers.set("Content-Disposition", disposition);
   // Private working documents: let the browser reuse bytes within a session,
   // never persist them long-term.
   headers.set("Cache-Control", "private, no-store");
 
-  // Only bill the activity feed for a real (non-range) fetch — a video scrub
-  // fires dozens of range requests and none of them is "someone downloaded it".
-  if (!request.headers.get("range")) {
-    await logFileActivity({
-      workspaceId: file.workspace.id,
-      actorId: gate.admin.userId,
-      action: "downloaded",
-      fileId: file.id,
-      meta: { name: file.name },
-    });
-  }
+  await recordDownload();
 
   return new NextResponse(upstream.body, { status: upstream.status, headers });
 }

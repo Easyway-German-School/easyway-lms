@@ -362,7 +362,7 @@ function Region({
                       : state === "today"
                         ? "border-[var(--accent)] bg-gradient-to-br from-[var(--accent)] to-[#FFB061]"
                         : state === "postponed"
-                          ? "border-pink-400 bg-pink-200"
+                          ? "border-dashed border-[var(--border-strong)] bg-[var(--surface-alt)]"
                           : state === "cancelled"
                             ? "border-[var(--danger)]/50 bg-[var(--danger-soft)]"
                             : "border-[var(--border-strong)] bg-[var(--surface)]"
@@ -384,7 +384,7 @@ function Region({
                       : state === "today"
                         ? "text-white"
                         : state === "postponed"
-                          ? "text-pink-800"
+                          ? "text-[var(--muted)]"
                           : state === "cancelled"
                             ? "text-[var(--danger)]"
                             : "text-[var(--muted)]"
@@ -527,10 +527,16 @@ function ClassCardBody({
         </p>
       )}
 
+      {summary.movedFrom && (
+        <p className="mt-3 inline-block rounded-xl bg-[var(--accent-soft)] px-3 py-1.5 text-sm font-bold text-[var(--accent)]">
+          Moved from {summary.movedFrom}
+        </p>
+      )}
+
       {node.status === "postponed" && (
-        <div className="mt-3 rounded-xl bg-pink-100 px-3 py-2">
-          <p className="text-xs font-bold uppercase tracking-wide text-pink-800">Postponed</p>
-          <p className="mt-0.5 text-sm font-semibold text-pink-900">
+        <div className="mt-3 rounded-xl bg-[var(--surface-alt)] px-3 py-2">
+          <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">Date to be confirmed</p>
+          <p className="mt-0.5 text-sm font-semibold text-[var(--foreground)]">
             {node.postponedTo
               ? `Now on ${shortDate(parseDayKey(node.postponedTo))}`
               : "Your tutor will confirm the new date"}

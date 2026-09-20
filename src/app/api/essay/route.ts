@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { prisma } from "@/lib/prisma";
 import { requireAuthSession } from "@/lib/auth";
+import { guardedFetch } from "@/lib/guarded-fetch";
 
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
 
   if (OPENAI_KEY && OPENAI_KEY.length > 20 && !OPENAI_KEY.startsWith("sk-placeholder")) {
     try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      const response = await guardedFetch("openai", "https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

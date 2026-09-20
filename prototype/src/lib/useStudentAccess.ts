@@ -3,6 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { StudentAccess } from "@/lib/access";
+import type { PortalVerdict } from "@/lib/portal-verdict";
 
 export const studentAccessQueryKey = ["student", "access"] as const;
 
@@ -14,7 +15,7 @@ export const studentAccessQueryKey = ["student", "access"] as const;
  * change and flash the lock screen at students who have in fact paid.
  */
 export function useStudentAccess() {
-  const query = useQuery<StudentAccess & { hasPhoto: boolean }>({
+  const query = useQuery<StudentAccess & { hasPhoto: boolean; verdict?: PortalVerdict; computedAt?: number }>({
     queryKey: studentAccessQueryKey,
     queryFn: async () => {
       const response = await fetch("/api/student/access", { cache: "no-store" });
@@ -22,6 +23,19 @@ export function useStudentAccess() {
       return response.json();
     },
     staleTime: 60_000,
+    /**
+     * While a student is locked, keep asking. A student staring at a lock screen
+     * has no other way to learn that an admin just unlocked them, or that their
+     * payment just cleared, short of reloading — which reads as "I paid and it is
+     * still locked". Only locked students poll, only in a visible tab (react-query
+     * pauses background intervals), and the answer is ~1KB.
+     */
+    refetchInterval: (q) => {
+      const data = q.state.data;
+      // Not for an upcoming-intake wait: nothing changes for them until the start date.
+      const payLocked = data?.hasAccess === false && data.lockReason !== "upcoming_batch";
+      return data && (payLocked || data.hasPhoto === false) ? 30_000 : false;
+    },
   });
 
   return {

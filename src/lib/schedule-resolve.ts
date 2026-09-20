@@ -4,6 +4,7 @@ import { getMergedSchedule, type MergedSession } from "@/lib/class-sessions";
 import { getPrivateSchedule } from "@/lib/private-classes";
 import { nextLevelAfter, sessionDurationMonths } from "@/lib/levels";
 import { TIME_SLOTS } from "@/lib/class-times";
+import { applyMoves } from "@/lib/schedule-moves";
 
 /**
  * Builds the same timetable payload /api/schedule has always returned for a
@@ -44,7 +45,7 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
   const viewingNext = Boolean(requested && nextLevel && requested === nextLevel);
   const level = viewingNext ? (nextLevel as string) : student.level;
 
-  const schedule = await getMergedSchedule({
+  const merged = await getMergedSchedule({
     branchId: student.branchId,
     level,
     batch,
@@ -53,6 +54,9 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
     now: new Date(),
     months: sessionDurationMonths(student.sessionSlot),
   });
+  // A moved class shows on the day it now runs, tagged "moved from …" — not as
+  // a pink "postponed" box on the day the student no longer needs to come.
+  const schedule = { ...merged, months: applyMoves(merged.months) };
 
   try {
     if (!viewingNext) {
@@ -108,7 +112,7 @@ export async function resolveScheduleForStudent(student: Student, requestedLevel
           sessionSlot: s,
           now: new Date(),
           months: sessionDurationMonths(s),
-        }).then((r) => ({ slot: s, sessions: r.months.flatMap((m) => m.sessions) })),
+        }).then((r) => ({ slot: s, sessions: applyMoves(r.months).flatMap((m) => m.sessions) })),
       ),
     );
     const withClasses = built.filter((b) => b.sessions.length > 0);

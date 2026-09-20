@@ -75,14 +75,20 @@ async function findMatch(
   return { status: "matched", lecturerId: matched.id, lecturerName: matched.user.name || matched.user.email };
 }
 
-async function alertAdmin(reason: string, detail: string): Promise<void> {
+/**
+ * Points at the student who actually needs the hand-assignment, not at the
+ * tutor list in general. A message that names the student but a link that
+ * lands on a generic screen makes the admin re-find them by hand — exactly
+ * the "the notification doesn't lead anywhere" complaint this replaces.
+ */
+async function alertAdmin(reason: string, detail: string, studentId: string): Promise<void> {
   await notify({
     to: { audience: "admin" },
     kind: KIND.announcement,
     severity: "warning",
     title: `Tutor auto-assignment needs attention: ${reason}`,
     message: detail,
-    link: "/admin/lecturer-invite",
+    link: `/admin/students/${studentId}`,
     push: true,
   }).catch((error) => console.error("Auto-assign admin alert failed", error));
 }
@@ -138,6 +144,7 @@ async function assignSingleMode(input: AutoAssignInput, classType: MatchClassTyp
   await alertAdmin(
     outcome.status === "no-match" ? `no ${classType} tutor found` : `more than one ${classType} tutor matched`,
     `${input.studentName} (${input.level}, ${classType}, ${input.sessionSlot}) needs a tutor assigned by hand.`,
+    input.studentId,
   );
 }
 
@@ -165,6 +172,7 @@ async function assignHybrid(input: AutoAssignInput): Promise<void> {
     await alertAdmin(
       physicalOutcome.status === "no-match" ? "no physical tutor found for hybrid student" : "more than one physical tutor matched a hybrid student",
       `${input.studentName} (${input.level}, hybrid — physical half, ${input.sessionSlot}) needs a physical tutor assigned by hand.`,
+      input.studentId,
     );
   }
 
@@ -172,6 +180,7 @@ async function assignHybrid(input: AutoAssignInput): Promise<void> {
     await alertAdmin(
       onlineOutcome.status === "no-match" ? "no online tutor found for hybrid student" : "more than one online tutor matched a hybrid student",
       `${input.studentName} (${input.level}, hybrid — online half, ${input.hybridOnlineSlot}) needs an online tutor assigned by hand.`,
+      input.studentId,
     );
     return;
   }
@@ -181,6 +190,7 @@ async function assignHybrid(input: AutoAssignInput): Promise<void> {
     await alertAdmin(
       "shared-students feature is off",
       `${input.studentName} matched an online tutor for their hybrid combo, but "shared students" is off for this school, so a second tutor couldn't be added automatically. Turn it on in /admin/platform, or add the co-tutor by hand.`,
+      input.studentId,
     );
     return;
   }

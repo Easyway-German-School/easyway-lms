@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { deriveStudentAccess, hasProfilePhoto } from "@/lib/access";
-import { isOnlineBranch } from "@/lib/online-branch";
-import { requiredDepositFor, tuitionFeeFor, receivedPaymentFilter, isTravelPackagePathway } from "@/lib/payment";
+import { hasProfilePhoto } from "@/lib/access";
+import { portalVerdict } from "@/lib/portal-verdict";
+import { accessFromStudent, STUDENT_ACCESS_SELECT } from "@/lib/student-access";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { notify, KIND } from "@/lib/notify";
 
@@ -28,39 +28,10 @@ export async function GET() {
     where: { userId: session.user.id as string },
     select: {
       id: true,
-      level: true,
-      classType: true,
-      pathway: true,
-      // Drives which pages exist for this student at all — the live classroom
-      // is meaningless to somebody who attends on campus.
-      deliveryMode: true,
-      // The fee depends on the branch as well as the level — leaving it out
-      // would compute an Abuja student's gate at the cheaper Lagos price.
-      // `mode` also lets an online-branch student whose `deliveryMode` column
-      // never got set still be treated as online below.
-      branch: { select: { name: true, mode: true } },
-      // The clock the part-payment lock runs on: 30 days after the confirmed
-      // first day of classes (falling back to enrolment), unless an admin has
-      // granted grace.
-      classesStartedAt: true,
-      createdAt: true,
-      paymentGraceUntil: true,
-      // Drives the photo lock screen — see hasProfilePhoto below.
-      admission: true,
-      payments: {
-        // Received tuition money only — `receivedPaymentFilter` now excludes
-        // the ₦5,000 registration fee, so it cannot push the student past the
-        // deposit gate or the balance lock.
-        where: receivedPaymentFilter(),
-        select: { amount: true },
-      },
-      // The per-level ledger drives the deposit gate and the balance lock — a
-      // student promoted with a balance open below must not walk into the next
-      // level for free. See src/lib/finance/ledger.ts.
-      tuitionCharges: {
-        where: { deletedAt: null },
-        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
-      },
+      // Every field the payment gate itself needs — kept in one place
+      // (lib/student-access.ts) so this route cannot drift from it by
+      // dropping or retyping a field. See accessFromStudent below.
+      ...STUDENT_ACCESS_SELECT,
     },
   });
 
@@ -68,36 +39,9 @@ export async function GET() {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
-  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-
   // An on-track tuition payment plan holds the balance lock back, like grace.
   const planStatus = await planStatusForStudent(student.id);
-
-  const access = deriveStudentAccess({
-    totalPaid,
-    tuitionFee: tuitionFeeFor(feeLookup),
-    requiredDeposit: requiredDepositFor(feeLookup),
-    // Fall back to the branch: an online-branch student whose `deliveryMode`
-    // column was never set (an import, a half-filled add-student form) would
-    // otherwise be classed "physical" here, which hides the Live class entry
-    // from the sidebar AND walls the /live page even though the server is
-    // happy to admit them. The branch having no campus is the tell.
-    deliveryMode: isOnlineBranch(student.branch) ? "online" : student.deliveryMode,
-    // Was selected above for the fee lookup and then dropped, so the portal
-    // could not tell a private student from a group one — and hid the live
-    // classroom from private students the server was happy to admit.
-    classType: student.classType,
-    level: student.level,
-    charges: student.tuitionCharges,
-    // Travel Package's ₦200,000 minimum first payment is a flat floor, not 60%
-    // of the ₦980,000 package — pin the deposit gate to it.
-    flatDeposit: isTravelPackagePathway(student.pathway),
-    classesStartedAt: student.classesStartedAt,
-    enrolledAt: student.createdAt,
-    paymentGraceUntil: student.paymentGraceUntil,
-    paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
-  });
+  const access = accessFromStudent(student, planSuppressesLock(planStatus?.adherence ?? null));
   const hasPhoto = hasProfilePhoto(student.admission);
 
   /**
@@ -142,5 +86,11 @@ export async function GET() {
     // Piggybacks on this endpoint rather than a second round trip — the
     // shell already calls this once per navigation for the payment gate.
     hasPhoto,
+    // Every reason the portal may be walled, composed once (payment, intake
+    // AND photo) — see lib/portal-verdict.ts. `computedAt` is the SERVER clock,
+    // so a client acting on an old cached copy of this response can be told
+    // apart from one acting on a fresh one (the portal witness does exactly that).
+    verdict: portalVerdict(access, hasPhoto),
+    computedAt: Date.now(),
   });
 }

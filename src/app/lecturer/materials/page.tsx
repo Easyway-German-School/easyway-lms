@@ -7,7 +7,7 @@ import LecturerShell from '@/components/LecturerShell';
 import BrandLoader from "@/components/BrandLoader";
 import { BookOpenIcon, CalendarIcon, DocumentIcon, EmptyIcon, LecturerIcon, LinkIcon, PackageIcon, VideoIcon } from '@/components/icons';
 import { uploadFile } from '@/lib/upload';
-import { parseEmbed } from '@/lib/media-embed';
+import { parseAudioLink, parseEmbed } from '@/lib/media-embed';
 import LecturerQuestReview from '@/components/materials/LecturerQuestReview';
 
 interface Material {
@@ -22,6 +22,8 @@ interface Material {
   fileSize: number;
   uploadedAt: string;
   aiState: string;
+  mine: boolean;
+  fromOffice: boolean;
 }
 
 export default function LecturerMaterials() {
@@ -32,6 +34,8 @@ export default function LecturerMaterials() {
   const [error, setError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [sendResults, setSendResults] = useState<Record<string, string>>({});
 
   /**
    * Upload a file, or point at one somebody else is already hosting.
@@ -61,11 +65,15 @@ export default function LecturerMaterials() {
 
   // Parsed here as well as on the server so the tutor sees "YouTube" the moment
   // they paste, rather than discovering the link was unusable after submitting.
-  const parsedLink = source === 'link' ? parseEmbed(formData.sourceUrl) : null;
+  const parsedVideo = source === 'link' ? parseEmbed(formData.sourceUrl) : null;
+  const parsedAudio = source === 'link' && !parsedVideo ? parseAudioLink(formData.sourceUrl) : null;
+  const parsedLink = parsedVideo ?? parsedAudio;
   const linkTyped = source === 'link' && formData.sourceUrl.trim().length > 0;
 
-  // A pasted link is always a video, so the shelf fields below apply to it too.
-  const isVideoFile = source === 'link' ? Boolean(parsedLink) : Boolean(formData.file?.type?.startsWith('video/'));
+  // The video-shelf fields (series, episode, "is this a class recording") only
+  // apply to video — a pasted audio track skips straight past them, like a
+  // document.
+  const isVideoFile = source === 'link' ? Boolean(parsedVideo) : Boolean(formData.file?.type?.startsWith('video/'));
 
   /**
    * Read the runtime out of the chosen file before uploading.
@@ -129,7 +137,7 @@ export default function LecturerMaterials() {
       return;
     }
     if (source === 'link' && !parsedLink) {
-      setError('Paste a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.');
+      setError('Paste a video link (YouTube, Vimeo, Loom, Drive) or an audio link (SoundCloud, Spotify, or a direct .mp4 / .mp3 URL).');
       return;
     }
     if (!formData.level) {
@@ -198,6 +206,38 @@ export default function LecturerMaterials() {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setIsUploading(false);
+    }
+  }
+
+  /**
+   * "Send to my class" — pushes this material to the tutor's roster as it
+   * stands right now, so a student named onto this tutor after the material
+   * first went out (or reassigned into their class later) actually gets it,
+   * instead of it sitting visible-but-unannounced in the portal.
+   */
+  async function sendToClass(materialId: string) {
+    setSendingId(materialId);
+    setSendResults((current) => ({ ...current, [materialId]: '' }));
+    try {
+      const res = await fetch(`/api/lecturer/materials/${materialId}/send`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not send this to your class');
+      const sent = data.sentTo as number;
+      const already = data.alreadyHadIt as number;
+      setSendResults((current) => ({
+        ...current,
+        [materialId]:
+          sent > 0
+            ? `Sent to ${sent} student${sent === 1 ? '' : 's'}${already ? ` (${already} already had it today)` : ''}.`
+            : 'Everyone on your roster already got this today.',
+      }));
+    } catch (err) {
+      setSendResults((current) => ({
+        ...current,
+        [materialId]: err instanceof Error ? err.message : 'Could not send this to your class',
+      }));
+    } finally {
+      setSendingId(null);
     }
   }
 
@@ -296,7 +336,7 @@ export default function LecturerMaterials() {
                   <div className="mb-3 flex flex-wrap gap-2">
                     {([
                       { value: 'file' as const, icon: <PackageIcon className="h-4 w-4" />, label: 'Upload a file', hint: 'PDF, slides, or a video you have' },
-                      { value: 'link' as const, icon: <LinkIcon className="h-4 w-4" />, label: 'Paste a link', hint: 'YouTube, Vimeo, Loom, Drive' },
+                      { value: 'link' as const, icon: <LinkIcon className="h-4 w-4" />, label: 'Paste a link', hint: 'YouTube, Vimeo, Loom, Drive · SoundCloud, Spotify' },
                     ]).map((option) => (
                       <button
                         key={option.value}
@@ -338,7 +378,7 @@ export default function LecturerMaterials() {
                       <input
                         type="url"
                         inputMode="url"
-                        placeholder="https://www.youtube.com/watch?v=…"
+                        placeholder="YouTube, Vimeo, Loom, Drive · SoundCloud, Spotify · or a .mp4 / .mp3 URL"
                         value={formData.sourceUrl}
                         onChange={(e) => setFormData({ ...formData, sourceUrl: e.target.value })}
                         className="w-full px-4 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder-[var(--muted)]"
@@ -348,23 +388,26 @@ export default function LecturerMaterials() {
                           submitting a form and being told the link was wrong. */}
                       {linkTyped && parsedLink ? (
                         <div className="mt-2 flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5">
-                          {parsedLink.thumbnailUrl ? (
+                          {parsedVideo?.thumbnailUrl ? (
                             /* eslint-disable-next-line @next/next/no-img-element */
-                            <img src={parsedLink.thumbnailUrl} alt="" className="h-12 w-20 shrink-0 rounded object-cover" />
+                            <img src={parsedVideo.thumbnailUrl} alt="" className="h-12 w-20 shrink-0 rounded object-cover" />
                           ) : null}
                           <p className="text-xs text-emerald-700 dark:text-emerald-400">
-                            <span className="font-semibold">{parsedLink.label} video recognised.</span>
+                            <span className="font-semibold">
+                              {parsedLink.label} {parsedAudio ? 'audio' : 'video'} recognised.
+                            </span>
                             <br />
                             Students will play it inside the library — they never leave the portal.
                           </p>
                         </div>
                       ) : linkTyped ? (
                         <p className="mt-2 text-xs text-red-600">
-                          Not a video link we recognise. Try a YouTube, Vimeo, Loom or Google Drive link, or a direct .mp4 URL.
+                          Not a link we recognise. Try a YouTube, Vimeo, Loom or Drive video; a SoundCloud or
+                          Spotify link; or a direct .mp4 / .mp3 URL.
                         </p>
                       ) : (
                         <p className="text-xs text-[var(--muted)] mt-1">
-                          Nothing is copied — the video stays where it is and plays inside your students&apos; library.
+                          Nothing is copied — it stays where it is and plays inside your students&apos; library.
                         </p>
                       )}
                     </>
@@ -478,7 +521,14 @@ export default function LecturerMaterials() {
                       <div className="flex items-center gap-3">
                         <DocumentIcon className="h-6 w-6 shrink-0 text-[var(--accent)]" />
                         <div>
-                          <h3 className="font-semibold text-[var(--foreground)]">{material.title}</h3>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-semibold text-[var(--foreground)]">{material.title}</h3>
+                            {material.fromOffice && (
+                              <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+                                From the office
+                              </span>
+                            )}
+                          </div>
                           <p className="text-sm text-[var(--muted)]">{material.courseName || (material.level ? `Level ${material.level}` : null)}</p>
                         </div>
                       </div>
@@ -487,13 +537,26 @@ export default function LecturerMaterials() {
                         <span className="inline-flex items-center gap-1.5"><PackageIcon className="h-3.5 w-3.5" /> {(material.fileSize / 1024 / 1024).toFixed(2)} MB</span>
                         <span className="inline-flex items-center gap-1.5"><CalendarIcon className="h-3.5 w-3.5" /> {new Date(material.uploadedAt).toLocaleDateString()}</span>
                       </div>
+                      {sendResults[material.id] && (
+                        <p className="mt-2 text-xs text-[var(--accent)]">{sendResults[material.id]}</p>
+                      )}
                     </div>
-                    <button
-                      onClick={() => window.open(material.filePath, '_blank')}
-                      className="ml-4 px-3 py-1 bg-[var(--accent)] text-white text-sm rounded hover:opacity-90 transition-opacity"
-                    >
-                      Download
-                    </button>
+                    <div className="ml-4 flex shrink-0 flex-col items-end gap-2">
+                      <button
+                        onClick={() => window.open(material.filePath, '_blank')}
+                        className="px-3 py-1 bg-[var(--accent)] text-white text-sm rounded hover:opacity-90 transition-opacity"
+                      >
+                        Download
+                      </button>
+                      <button
+                        onClick={() => sendToClass(material.id)}
+                        disabled={sendingId === material.id}
+                        title="Push this to the students on your roster right now — catches anyone added to your class since this was last sent."
+                        className="px-3 py-1 border border-[var(--border)] text-[var(--foreground)] text-sm rounded hover:bg-[var(--surface-alt)] transition-colors disabled:opacity-50"
+                      >
+                        {sendingId === material.id ? 'Sending…' : 'Send to my class'}
+                      </button>
+                    </div>
                   </div>
 
                   {material.aiState === 'ready' && <LecturerQuestReview materialId={material.id} />}

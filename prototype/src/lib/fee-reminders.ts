@@ -18,6 +18,8 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mailer";
 import { feeReminderEmailTemplate } from "@/lib/email-templates";
 import { receivedPaymentFilter } from "@/lib/payment";
+import { batchFromAdmission } from "@/lib/batch";
+import { batchLockFloor, withBatchFloor } from "@/lib/batch-reservation";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { onTrackPlanStudentIds } from "@/lib/payment-plans";
@@ -117,7 +119,13 @@ export async function sendDueFeeReminders(options: {
         (hasLedger && ledger.oldestOpenGoForwardChargeAt
           ? new Date(ledger.oldestOpenGoForwardChargeAt)
           : null) ?? student.classesStartedAt ?? student.createdAt;
-      const lockAt = new Date(new Date(anchor).getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS);
+      // The clock never starts before the learner's batch does.
+      const floor = batchLockFloor(batchFromAdmission(student.admission), {
+        registeredAt: student.createdAt,
+        classesStartedAt: student.classesStartedAt,
+        now: new Date(now),
+      });
+      const lockAt = new Date(withBatchFloor(new Date(anchor), floor).getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS);
 
       const invoicePaid = (invoice.payments || []).reduce((sum, payment) => sum + payment.amount, 0);
       const outstandingAmount = hasLedger

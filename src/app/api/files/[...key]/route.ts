@@ -44,15 +44,26 @@
  *   - Any request carrying `?proxy=1`: that is the offline download stream,
  *     which reads the body directly for a progress bar and hits the same CORS
  *     wall. It keeps the old streamed path.
+ *
+ * egress-reviewed: large files (recordings, materials) redirect to signed
+ * bucket URLs via redirectTtlSeconds(); what this route still proxies is small
+ * and private (photos, ID scans, hand-ins, poster images).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
-import { getFile, signedGetUrl, storageConfigured, RECORDING_PREFIX } from "@/lib/storage";
+import {
+  getFile,
+  redirectTtlSeconds,
+  signedGetUrl,
+  storageConfigured,
+  RECORDING_PREFIX,
+} from "@/lib/storage";
+import { prisma } from "@/lib/prisma";
+import { isExpiredForStudents } from "@/lib/retention";
 
 export const dynamic = "force-dynamic";
 
-const RECORDING_URL_TTL_SECONDS = 6 * 60 * 60;
 const STREAMABLE_VIDEO = /\.(mp4|webm|mov|m4v)$/i;
 
 export async function GET(request: NextRequest, context: { params: Promise<{ key: string[] }> }) {
@@ -76,15 +87,45 @@ export async function GET(request: NextRequest, context: { params: Promise<{ key
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Recording videos: check auth once, then redirect the player straight to the
-  // bucket instead of streaming the bytes back through this function. Posters
-  // and the `?proxy=1` offline download stream stay on the proxy (see header).
-  const isRecordingVideo =
+  // The 14-day student window is a read-side rule, and this route is the one
+  // place that hands out the bytes — so a student who kept an old link (or a
+  // shared one) must not get a recording past its window, by redirect, by
+  // `?signed=1`, or by `?proxy=1`. Staff keep everything. Checked BEFORE any of
+  // those branches so none of them can route around it.
+  if (
+    session.user.role === "student" &&
     objectKey.startsWith(RECORDING_PREFIX) &&
-    STREAMABLE_VIDEO.test(objectKey) &&
-    request.nextUrl.searchParams.get("proxy") !== "1";
-  if (isRecordingVideo) {
-    const signed = await signedGetUrl(objectKey, RECORDING_URL_TTL_SECONDS);
+    STREAMABLE_VIDEO.test(objectKey)
+  ) {
+    const recording = await prisma.classRecording.findFirst({
+      where: { objectKey },
+      select: { studentExpiresAt: true, keepForever: true },
+    });
+    if (recording && isExpiredForStudents(recording)) {
+      return NextResponse.json({ error: "This recording is no longer available." }, { status: 404 });
+    }
+  }
+
+  // `?signed=1`: hand back the signed bucket URL as JSON instead of redirecting.
+  // The offline downloader needs it — it reads the body for a progress bar, and
+  // fetch() cannot follow a redirect to another origin with credentials. A key
+  // that must stay on the session-checked proxy answers `{ url: null }`, and the
+  // caller falls back to `?proxy=1`. Never streams bytes, so it costs nothing.
+  if (request.nextUrl.searchParams.get("signed") === "1") {
+    const ttl = redirectTtlSeconds(objectKey);
+    const url = ttl === null ? null : await signedGetUrl(objectKey, ttl);
+    return NextResponse.json({ url }, { headers: { "Cache-Control": "private, no-store" } });
+  }
+
+  // Recording videos and course materials: check auth once, then redirect the
+  // client straight to the bucket instead of streaming the bytes back through
+  // this function (Vercel bills every proxied byte as Fast Origin Transfer).
+  // Posters and the `?proxy=1` offline download stream stay on the proxy (see
+  // header).
+  const redirectTtl =
+    request.nextUrl.searchParams.get("proxy") === "1" ? null : redirectTtlSeconds(objectKey);
+  if (redirectTtl !== null) {
+    const signed = await signedGetUrl(objectKey, redirectTtl);
     if (signed) {
       const redirect = NextResponse.redirect(signed, 302);
       // Let the browser hold the resolved target for a few minutes so a player

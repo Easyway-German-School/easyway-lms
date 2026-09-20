@@ -30,9 +30,9 @@ export type TutorialStep = {
   /** Short on-screen line — has to stand alone if the student is muted. */
   caption: string;
   mood?: MascotMood;
-  /** false = wait for a tap instead of advancing on its own. Default true. */
+  /** true = advance after narration; omitted means wait for the student's tap. */
   autoAdvance?: boolean;
-  /** Fallback delay if speech is unavailable/blocked/muted. Default 4500. */
+  /** Fallback delay if speech is unavailable/blocked/muted. */
   autoAdvanceMs?: number;
 };
 
@@ -112,7 +112,7 @@ export function buildWelcomeTutorial(onboarding: OnboardingProfile): Tutorial {
           ? `Your ${onboarding.sessionSlot} session runs live over video. Pick your video quality before you join — on mobile data, Data saver keeps the lesson steady instead of frozen.`
           : isHybrid
             ? `Your ${onboarding.sessionSlot} session, the topic for each day, and anything your tutor attaches are all on this calendar. Live class, just below, is the same lesson over video.`
-            : `Your ${onboarding.sessionSlot} session, the topic for each day, and anything your tutor attaches are all on this calendar. If a class is postponed it turns pink here with the new date.`,
+            : `Your ${onboarding.sessionSlot} session, the topic for each day, and anything your tutor attaches are all on this calendar. If a class is moved it shows on its new day, marked with where it moved from.`,
         mood: "presenting",
       },
       {
@@ -218,7 +218,7 @@ function buildJoiningClassTutorial(hint: TutorialAccessHint): Tutorial {
         inSidebar: true,
         caption: "Every session, one place",
         narration:
-          "Your sessions, the topic for each day, and anything your tutor attaches — all on this calendar. If a class is postponed, it turns pink with the new date.",
+          "Your sessions, the topic for each day, and anything your tutor attaches — all on this calendar. If a class is moved, it shows on its new day, marked with where it moved from.",
         mood: "presenting",
       };
 

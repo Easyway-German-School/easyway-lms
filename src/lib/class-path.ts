@@ -31,6 +31,12 @@ export type Session = {
   notes: string | null;
   status: string;
   postponedTo: string | null;
+  /**
+   * Set when this class was moved here from another day. The server has already
+   * put it on the day it now runs (see `lib/schedule-moves.ts`); this is only so
+   * the calendar can say where it came from.
+   */
+  movedFrom?: string | null;
   lecturerName: string | null;
   material: Material | null;
 };
@@ -58,12 +64,12 @@ export type SchedulePayload = {
 
 /**
  * done = already held · today = running today · locked = ahead ·
- * postponed = moved to another date · cancelled = not happening
+ * cancelled = not happening · postponed = LEGACY: a class with no new date yet
  *
- * Postponed and cancelled were one state ("off") drawn in one colour. To a
- * student scanning their month those are completely different pieces of news —
- * one means "turn up on a different day", the other means "do not turn up" —
- * and a single red box made them indistinguishable.
+ * A class that has moved is not a state at all — the server puts it on the day
+ * it now runs as an ordinary class with `movedFrom` set (`lib/schedule-moves`),
+ * so "postponed" only survives for an old row that never got a new date.
+ * Cancelled ("do not turn up") stays its own colour.
  */
 /**
  * `before` and `missed` are the two states this map used to be missing, and
@@ -260,6 +266,8 @@ export function nodeSummary(node: ClassNode) {
     tutor: node.lecturerName,
     material: isUnlocked(node) ? node.material : null,
     postponedTo: node.postponedTo,
+    /** "Tuesday 15 September" — where a moved class came from; null otherwise. */
+    movedFrom: node.movedFrom ? longDate(parseDayKey(node.movedFrom)) : null,
     status: node.status,
     /**
      * The tutor's note for the day. Shown even while the topic is locked: a
@@ -268,7 +276,7 @@ export function nodeSummary(node: ClassNode) {
      */
     notes: node.notes,
     /**
-     * Materials stay downloadable through a postponement. The class moved; the
+     * Materials stay downloadable when a class moves. The class moved; the
      * homework did not, and hiding it punishes the student for the change.
      */
     materialAlways: node.material,

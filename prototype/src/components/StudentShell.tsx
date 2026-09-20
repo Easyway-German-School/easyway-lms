@@ -31,7 +31,9 @@ import StudentUsageTracker from "@/components/StudentUsageTracker";
 import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import PaymentLockScreen from "@/components/PaymentLockScreen";
+import BatchLockScreen from "@/components/BatchLockScreen";
 import PhotoLockScreen from "@/components/PhotoLockScreen";
+import { usePortalWitness } from "@/lib/usePortalWitness";
 import PhotoUnlockGuide from "@/components/PhotoUnlockGuide";
 import SignOutButton from "@/components/SignOutButton";
 import { MomentQueueProvider } from "@/lib/moment-queue";
@@ -309,6 +311,10 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   // as `hasAccess` defaulting to true above.
   const photoLocked = access !== null && access.hasPhoto === false && isPhotoGatedRoute(pathname);
 
+  // Report what this screen is actually showing, so a student who sees a lock
+  // the office cannot reproduce is a recorded fact rather than a he-said-she-said.
+  usePortalWitness({ access, routeLocked, photoLocked, pathname });
+
   // Hiding the sidebar entry is cosmetic — /live is still reachable by typing
   // it. The route is refused here too, and again on the server.
   const wrongDeliveryMode = access !== null && !showsLiveClass && isLiveOnlyRoute(pathname);
@@ -567,7 +573,11 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         ) : routeLocked ? (
-          <PaymentLockScreen areaLabel={lockedAreaLabel} access={access} />
+          access?.lockReason === "upcoming_batch" ? (
+            <BatchLockScreen access={access} />
+          ) : (
+            <PaymentLockScreen areaLabel={lockedAreaLabel} access={access} />
+          )
         ) : photoLocked ? (
           <PhotoLockScreen areaLabel={lockedAreaLabel} />
         ) : (

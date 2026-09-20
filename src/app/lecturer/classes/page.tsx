@@ -217,7 +217,7 @@ export default function LecturerClassesPage() {
             </h2>
             <p className="mt-1 text-sm text-[var(--foreground-soft)]">
               Each class&apos;s calendar is yours to run. Set a day&apos;s topic and times, attach the material to
-              bring, or postpone a class to a new date — students see it immediately and get a notification for
+              bring, or move a class to a new day — students see it immediately and get a notification for
               anything that changes their week. {multi ? "Use the class you want on its card below." : ""}
             </p>
             <Link

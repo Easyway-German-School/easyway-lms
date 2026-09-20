@@ -20,33 +20,33 @@
  * Each job is isolated: one throwing does not stop the rest, and the response
  * says per job what happened. A cron whose failures are invisible is a cron
  * nobody trusts, so this reports rather than swallows.
+ *
+ * ---------------------------------------------------------------------------
+ * LANES — ONE SLOW JOB MUST NOT COST THE OTHERS THEIR TURN
+ * ---------------------------------------------------------------------------
+ * This runs ONCE A DAY, so a job that does not get its turn does not run until
+ * tomorrow. It used to run all the jobs one after another in this single
+ * function, which meant one hung job (a partner's webhook endpoint, a LiveKit
+ * call with no timeout) stood between every later job and its turn.
+ *
+ * Now the jobs are grouped into LANES by what they depend on — mail and money,
+ * cheap notifications, metering and hooks, AI content, recordings and
+ * transcripts — and the lanes run at the same time, each with its own time
+ * budget and a cap per job. A stuck job is abandoned at its cap, reported as
+ * timed out, and its lane carries on; a lane that spends its budget skips the
+ * rest of ITS jobs and touches nobody else's. That is the bulkhead pattern; the
+ * plan, the reasoning and the runner are in src/lib/cron-lanes.ts.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { withUnscoped } from "@/lib/tenant/context";
+import { CRON_PLAN, TICK_BUDGET_MS, runTick } from "@/lib/cron-lanes";
 
 export const dynamic = "force-dynamic";
 // The reconcile and retention passes talk to LiveKit and to the bucket, and
 // the transcription pass streams a full class recording through ffmpeg — on a
 // bad day none of that fits in 60s. 300s is the Pro plan's ceiling.
 export const maxDuration = 300;
-
-type JobResult = { job: string; ok: boolean; detail?: unknown; error?: string };
-
-async function run(job: string, work: () => Promise<unknown>): Promise<JobResult> {
-  try {
-    return { job, ok: true, detail: await work() };
-  } catch (error) {
-    console.error(`Cron job ${job} failed:`, error);
-    try {
-      const { captureError } = await import("@/lib/capture-error");
-      await captureError("cron", error, { job });
-    } catch {
-      // The error sink is best-effort; the job result below is the record that matters.
-    }
-    return { job, ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
 
 async function handleGET(request: NextRequest) {
   /**
@@ -61,61 +61,66 @@ async function handleGET(request: NextRequest) {
   }
 
 
-  const results: JobResult[] = [];
+  /**
+   * Jobs are REGISTERED here, in the order they must run relative to each other,
+   * and EXECUTED below by runTick(), which groups them into lanes (see
+   * src/lib/cron-lanes.ts). Registering costs nothing; nothing runs until the
+   * last one is declared. The order matters only WITHIN a lane, so a job that
+   * has to follow another (roll usage up AFTER metering it) goes after it here
+   * AND is placed after it in CRON_PLAN — a test checks the two agree.
+   */
+  const jobs = new Map<string, () => Promise<unknown>>();
+  const register = (name: string, work: () => Promise<unknown>) => {
+    jobs.set(name, work);
+  };
 
-  results.push(
-    await run("email-queue", async () => {
-      const { drainQueue } = await import("@/lib/email-queue");
-      return drainQueue(50);
-    }),
-  );
+  register("email-queue", async () => {
+    const { drainQueue } = await import("@/lib/email-queue");
+    return drainQueue(50);
+  });
 
-  results.push(
-    await run("sms-queue", async () => {
-      const { drainSmsQueue } = await import("@/lib/sms-queue");
-      return drainSmsQueue(50);
-    }),
-  );
+  register("sms-queue", async () => {
+    const { drainSmsQueue } = await import("@/lib/sms-queue");
+    return drainSmsQueue(50);
+  });
 
-  results.push(
-    await run("payment-plans", async () => {
-      // Move plans to completed/defaulted BEFORE the reminder jobs, so a plan
-      // that lapsed today is no longer holding the lock back when they run.
-      const { sweepPaymentPlans } = await import("@/lib/payment-plans");
-      return sweepPaymentPlans();
-    }),
-  );
+  register("payment-plans", async () => {
+    // Move plans to completed/defaulted BEFORE the reminder jobs, so a plan
+    // that lapsed today is no longer holding the lock back when they run.
+    const { sweepPaymentPlans } = await import("@/lib/payment-plans");
+    return sweepPaymentPlans();
+  });
 
-  results.push(
-    await run("accountant-digest", async () => {
-      // Self-gated: idempotent per ISO week via the notification dedupeKey.
-      const { sendAccountantDigest } = await import("@/lib/accountant-digest");
-      return sendAccountantDigest();
-    }),
-  );
+  register("accountant-digest", async () => {
+    // Self-gated: idempotent per ISO week via the notification dedupeKey.
+    const { sendAccountantDigest } = await import("@/lib/accountant-digest");
+    return sendAccountantDigest();
+  });
 
-  results.push(
-    await run("admin-brief-digest", async () => {
-      // The daily (every run) + weekly (Mondays) office brief to payments
-      // holders. Idempotent per day / per ISO week via the dedupeKey.
-      const { sendAdminBriefDigest } = await import("@/lib/admin-brief");
-      return sendAdminBriefDigest();
-    }),
-  );
+  register("admin-brief-digest", async () => {
+    // The daily (every run) + weekly (Mondays) office brief to payments
+    // holders. Idempotent per day / per ISO week via the dedupeKey.
+    const { sendAdminBriefDigest } = await import("@/lib/admin-brief");
+    return sendAdminBriefDigest();
+  });
 
-  results.push(
-    await run("payment-warnings", async () => {
-      const { runPaymentWarnings } = await import("@/lib/payment-warnings");
-      return runPaymentWarnings({ dryRun: false });
-    }),
-  );
+  register("payment-warnings", async () => {
+    const { runPaymentWarnings } = await import("@/lib/payment-warnings");
+    return runPaymentWarnings({ dryRun: false });
+  });
 
-  results.push(
-    await run("fee-reminders", async () => {
-      const { sendDueFeeReminders } = await import("@/lib/fee-reminders");
-      return sendDueFeeReminders();
-    }),
-  );
+  register("seat-nudges", async () => {
+    // Becca's reserve-your-seat / countdown / opening-day messages for
+    // learners waiting on a future intake. Idempotent per learner and
+    // milestone via the notification dedupeKey.
+    const { runSeatNudges } = await import("@/lib/seat-nudges");
+    return runSeatNudges();
+  });
+
+  register("fee-reminders", async () => {
+    const { sendDueFeeReminders } = await import("@/lib/fee-reminders");
+    return sendDueFeeReminders();
+  });
 
   /**
    * Exam reminders used to only exist as a manual "send now" button an admin
@@ -123,12 +128,10 @@ async function handleGET(request: NextRequest) {
    * registered got no reminder unless someone in the office thought to. This
    * fires once, on the single calendar day three days before each sitting.
    */
-  results.push(
-    await run("exam-reminders", async () => {
-      const { sendDueExamReminders } = await import("@/lib/exam-reminders");
-      return sendDueExamReminders();
-    }),
-  );
+  register("exam-reminders", async () => {
+    const { sendDueExamReminders } = await import("@/lib/exam-reminders");
+    return sendDueExamReminders();
+  });
 
   /**
    * The exam-registration campaign nudge (currently ÖSD October 2026): a
@@ -138,24 +141,20 @@ async function handleGET(request: NextRequest) {
    * and only for tenants that have saved the campaign screen. See
    * src/lib/exam-campaign-reminders.ts.
    */
-  results.push(
-    await run("exam-campaign-reminders", async () => {
-      const { sendDueExamCampaignReminders } = await import("@/lib/exam-campaign-reminders");
-      return sendDueExamCampaignReminders();
-    }),
-  );
+  register("exam-campaign-reminders", async () => {
+    const { sendDueExamCampaignReminders } = await import("@/lib/exam-campaign-reminders");
+    return sendDueExamCampaignReminders();
+  });
 
   /**
    * The class-wide reminder for a mock / pretest sitting, three days out. Fires
    * on a single calendar day so one tick a day is one reminder. See
    * src/lib/pretest-reminders.ts.
    */
-  results.push(
-    await run("pretest-reminders", async () => {
-      const { sendDuePretestReminders } = await import("@/lib/pretest-reminders");
-      return sendDuePretestReminders();
-    }),
-  );
+  register("pretest-reminders", async () => {
+    const { sendDuePretestReminders } = await import("@/lib/pretest-reminders");
+    return sendDuePretestReminders();
+  });
 
   /**
    * Results releasing themselves. A mock sitting that is fully marked and past
@@ -163,19 +162,15 @@ async function handleGET(request: NextRequest) {
    * touching anything; one that is graded but still sitting there gets the
    * tutor (and, if it drags, the office) a nudge. See src/lib/result-release.ts.
    */
-  results.push(
-    await run("auto-release-results", async () => {
-      const { autoReleaseDueResults } = await import("@/lib/result-release");
-      return autoReleaseDueResults();
-    }),
-  );
+  register("auto-release-results", async () => {
+    const { autoReleaseDueResults } = await import("@/lib/result-release");
+    return autoReleaseDueResults();
+  });
 
-  results.push(
-    await run("result-release-nudge", async () => {
-      const { nudgeUnreleasedResults } = await import("@/lib/result-release");
-      return nudgeUnreleasedResults();
-    }),
-  );
+  register("result-release-nudge", async () => {
+    const { nudgeUnreleasedResults } = await import("@/lib/result-release");
+    return nudgeUnreleasedResults();
+  });
 
   /**
    * A tutor's students going quiet — low attendance, no portal activity, or
@@ -183,19 +178,15 @@ async function handleGET(request: NextRequest) {
    * office happened to notice. This flags it to the tutor directly, at most
    * once a week per tutor (see the dedupeKey in notifyTutorsOfChurnRisk).
    */
-  results.push(
-    await run("churn-risk", async () => {
-      const { notifyTutorsOfChurnRisk } = await import("@/lib/student-risk");
-      return notifyTutorsOfChurnRisk();
-    }),
-  );
+  register("churn-risk", async () => {
+    const { notifyTutorsOfChurnRisk } = await import("@/lib/student-risk");
+    return notifyTutorsOfChurnRisk();
+  });
 
-  results.push(
-    await run("recording-reconcile", async () => {
-      const { reconcileRecordings } = await import("@/lib/class-recorder");
-      return reconcileRecordings();
-    }),
-  );
+  register("recording-reconcile", async () => {
+    const { reconcileRecordings } = await import("@/lib/class-recorder");
+    return reconcileRecordings();
+  });
 
   /**
    * Retention no longer deletes anything on a schedule. Staff keep every class
@@ -204,12 +195,10 @@ async function handleGET(request: NextRequest) {
    * runs here instead is the nudge: a student about to lose a recording off
    * their shelf gets told, so they can download it in the app first.
    */
-  results.push(
-    await run("recording-expiry-nudge", async () => {
-      const { sendDueExpiryNudges } = await import("@/lib/recording-expiry-nudge");
-      return sendDueExpiryNudges();
-    }),
-  );
+  register("recording-expiry-nudge", async () => {
+    const { sendDueExpiryNudges } = await import("@/lib/recording-expiry-nudge");
+    return sendDueExpiryNudges();
+  });
 
   /**
    * Students who still have no profile photo get a once-a-week nudge from
@@ -223,19 +212,15 @@ async function handleGET(request: NextRequest) {
    * forever, until an admin noticed and ran backfill-student-codes.mjs by
    * hand. See src/lib/student-code-backfill.ts.
    */
-  results.push(
-    await run("student-code-backfill", async () => {
-      const { backfillMissingStudentCodes } = await import("@/lib/student-code-backfill");
-      return backfillMissingStudentCodes();
-    }),
-  );
+  register("student-code-backfill", async () => {
+    const { backfillMissingStudentCodes } = await import("@/lib/student-code-backfill");
+    return backfillMissingStudentCodes();
+  });
 
-  results.push(
-    await run("profile-photo-nudge", async () => {
-      const { nudgeStudentsWithoutPhoto } = await import("@/lib/profile-photo-nudge");
-      return nudgeStudentsWithoutPhoto();
-    }),
-  );
+  register("profile-photo-nudge", async () => {
+    const { nudgeStudentsWithoutPhoto } = await import("@/lib/profile-photo-nudge");
+    return nudgeStudentsWithoutPhoto();
+  });
 
   /**
    * Students with no branch set get a once-a-week nudge from Becca to place
@@ -243,12 +228,10 @@ async function handleGET(request: NextRequest) {
    * student drops out of it the moment they pick a branch. See
    * src/lib/branch-nudge.ts.
    */
-  results.push(
-    await run("profile-branch-nudge", async () => {
-      const { nudgeStudentsWithoutBranch } = await import("@/lib/branch-nudge");
-      return nudgeStudentsWithoutBranch();
-    }),
-  );
+  register("profile-branch-nudge", async () => {
+    const { nudgeStudentsWithoutBranch } = await import("@/lib/branch-nudge");
+    return nudgeStudentsWithoutBranch();
+  });
 
   /**
    * Students the office onboarded by hand (added or imported) still miss the
@@ -257,12 +240,20 @@ async function handleGET(request: NextRequest) {
    * and a student drops out the moment they finish or snooze it. See
    * src/lib/profile-details-nudge.ts.
    */
-  results.push(
-    await run("profile-details-nudge", async () => {
-      const { nudgeStudentsWithProfileGaps } = await import("@/lib/profile-details-nudge");
-      return nudgeStudentsWithProfileGaps();
-    }),
-  );
+  register("profile-details-nudge", async () => {
+    const { nudgeStudentsWithProfileGaps } = await import("@/lib/profile-details-nudge");
+    return nudgeStudentsWithProfileGaps();
+  });
+
+  /**
+   * Tutors with office-uploaded materials matching their class sitting still
+   * sitting unsent get a once-a-week nudge from Becca to open Materials and
+   * push them out. See src/lib/material-send-nudge.ts.
+   */
+  register("material-send-nudge", async () => {
+    const { nudgeTutorsWithUnsentMaterials } = await import("@/lib/material-send-nudge");
+    return nudgeTutorsWithUnsentMaterials();
+  });
 
   /**
    * "You can submit assignments now" — once ever per student, the tick their
@@ -270,12 +261,10 @@ async function handleGET(request: NextRequest) {
    * least one assignment sitting there unsubmitted. See
    * src/lib/assignment-availability-nudge.ts.
    */
-  results.push(
-    await run("assignment-availability-nudge", async () => {
-      const { nudgeStudentsWithAssignmentsAvailable } = await import("@/lib/assignment-availability-nudge");
-      return nudgeStudentsWithAssignmentsAvailable();
-    }),
-  );
+  register("assignment-availability-nudge", async () => {
+    const { nudgeStudentsWithAssignmentsAvailable } = await import("@/lib/assignment-availability-nudge");
+    return nudgeStudentsWithAssignmentsAvailable();
+  });
 
   /**
    * Ask, once a day, whether the backups are still happening.
@@ -287,12 +276,10 @@ async function handleGET(request: NextRequest) {
    * the backups could itself fail silently, which would leave two things
    * broken and nothing left to report either of them.
    */
-  results.push(
-    await run("backup-health", async () => {
-      const { checkBackupHealth } = await import("@/lib/backup-health");
-      return checkBackupHealth();
-    }),
-  );
+  register("backup-health", async () => {
+    const { checkBackupHealth } = await import("@/lib/backup-health");
+    return checkBackupHealth();
+  });
 
   /**
    * Flag any staff sign-in from an address that account has not used before —
@@ -300,12 +287,10 @@ async function handleGET(request: NextRequest) {
    * src/lib/sign-in-anomaly.ts. Deduped per account per address, so a genuine
    * new laptop pages the office once and then never again.
    */
-  results.push(
-    await run("sign-in-anomaly", async () => {
-      const { flagUnfamiliarStaffSignIns } = await import("@/lib/sign-in-anomaly");
-      return flagUnfamiliarStaffSignIns();
-    }),
-  );
+  register("sign-in-anomaly", async () => {
+    const { flagUnfamiliarStaffSignIns } = await import("@/lib/sign-in-anomaly");
+    return flagUnfamiliarStaffSignIns();
+  });
 
   /**
    * Fold yesterday's usage into the daily rollup and debit each school's
@@ -322,26 +307,20 @@ async function handleGET(request: NextRequest) {
    * who was active. Taken BEFORE the rollup so today's reading is in the ledger
    * when yesterday's day is folded.
    */
-  results.push(
-    await run("meter-storage", async () => {
-      const { meterStorage } = await import("@/lib/usage/daily-meters");
-      return meterStorage();
-    }),
-  );
+  register("meter-storage", async () => {
+    const { meterStorage } = await import("@/lib/usage/daily-meters");
+    return meterStorage();
+  });
 
-  results.push(
-    await run("meter-active-students", async () => {
-      const { meterActiveStudents } = await import("@/lib/usage/daily-meters");
-      return meterActiveStudents();
-    }),
-  );
+  register("meter-active-students", async () => {
+    const { meterActiveStudents } = await import("@/lib/usage/daily-meters");
+    return meterActiveStudents();
+  });
 
-  results.push(
-    await run("usage-rollup", async () => {
-      const { rollUpUsage } = await import("@/lib/usage/record");
-      return rollUpUsage();
-    }),
-  );
+  register("usage-rollup", async () => {
+    const { rollUpUsage } = await import("@/lib/usage/record");
+    return rollUpUsage();
+  });
 
   /**
    * Deliver queued webhooks, and warn any school whose balance is running out.
@@ -351,19 +330,15 @@ async function handleGET(request: NextRequest) {
    * failure than carrying them for a few days, so this warns while there is
    * still time to act and the grace allowance does the rest.
    */
-  results.push(
-    await run("webhooks", async () => {
-      const { deliverPendingWebhooks } = await import("@/lib/webhooks");
-      return deliverPendingWebhooks(25);
-    }),
-  );
+  register("webhooks", async () => {
+    const { deliverPendingWebhooks } = await import("@/lib/webhooks");
+    return deliverPendingWebhooks(25);
+  });
 
-  results.push(
-    await run("low-balance-warnings", async () => {
-      const { warnLowBalances } = await import("@/lib/usage/record");
-      return warnLowBalances();
-    }),
-  );
+  register("low-balance-warnings", async () => {
+    const { warnLowBalances } = await import("@/lib/usage/record");
+    return warnLowBalances();
+  });
 
   /**
    * Open the story turns whose day has run out, and close the dead stories.
@@ -380,54 +355,44 @@ async function handleGET(request: NextRequest) {
    * each is seen today, plus a write per student, on the same box as the
    * site itself.
    */
-  results.push(
-    await run("daily-missions-push", async () => {
-      const { sendDueMissionPush } = await import("@/lib/daily-missions-push");
-      return sendDueMissionPush();
-    }),
-  );
+  register("daily-missions-push", async () => {
+    const { sendDueMissionPush } = await import("@/lib/daily-missions-push");
+    return sendDueMissionPush();
+  });
 
   /**
    * "Your streak ends today" — the loss-aversion nudge Duolingo built its
    * habit loop on. See src/lib/streak-reminders.ts for why it reuses the same
    * attendance-day data every other streak display already reads.
    */
-  results.push(
-    await run("streak-reminders", async () => {
-      const { sendDueStreakReminders } = await import("@/lib/streak-reminders");
-      return sendDueStreakReminders();
-    }),
-  );
+  register("streak-reminders", async () => {
+    const { sendDueStreakReminders } = await import("@/lib/streak-reminders");
+    return sendDueStreakReminders();
+  });
 
-  results.push(
-    await run("satzkette-turns", async () => {
-      const { openLapsedTurns, archiveStaleMatches } = await import("@/lib/satzkette-server");
-      return { opened: await openLapsedTurns(), archived: await archiveStaleMatches() };
-    }),
-  );
+  register("satzkette-turns", async () => {
+    const { openLapsedTurns, archiveStaleMatches } = await import("@/lib/satzkette-server");
+    return { opened: await openLapsedTurns(), archived: await archiveStaleMatches() };
+  });
 
   /**
    * Work Drive calendar: remind attendees of an event that starts soon, once
    * per attendee per event (dedupe on EventAttendee.reminderSentAt). See
    * src/lib/work-drive/event-reminders.ts.
    */
-  results.push(
-    await run("work-drive-event-reminders", async () => {
-      const { sendDueEventReminders } = await import("@/lib/work-drive/event-reminders");
-      return sendDueEventReminders();
-    }),
-  );
+  register("work-drive-event-reminders", async () => {
+    const { sendDueEventReminders } = await import("@/lib/work-drive/event-reminders");
+    return sendDueEventReminders();
+  });
 
   /**
    * Work Drive housekeeping: hard-delete files 30 days into a workspace trash,
    * and prune surplus old file versions. Both bounded per tick.
    */
-  results.push(
-    await run("work-drive-retention", async () => {
-      const { purgeExpiredTrash, pruneOldVersions } = await import("@/lib/work-drive/retention");
-      return { trash: await purgeExpiredTrash(), versions: await pruneOldVersions() };
-    }),
-  );
+  register("work-drive-retention", async () => {
+    const { purgeExpiredTrash, pruneOldVersions } = await import("@/lib/work-drive/retention");
+    return { trash: await purgeExpiredTrash(), versions: await pruneOldVersions() };
+  });
 
   /**
    * Summarise newly uploaded materials and turn them into quests.
@@ -441,16 +406,14 @@ async function handleGET(request: NextRequest) {
    * Never fails the tick. A model being unreachable must not turn the mail
    * queue's cron into a red line.
    */
-  results.push(
-    await run("material-ai", async () => {
-      try {
-        const { processMaterialQueue } = await import("@/lib/material-ai");
-        return await processMaterialQueue(3);
-      } catch (error) {
-        return { skipped: true, reason: error instanceof Error ? error.message : String(error) };
-      }
-    }),
-  );
+  register("material-ai", async () => {
+    try {
+      const { processMaterialQueue } = await import("@/lib/material-ai");
+      return await processMaterialQueue(3);
+    } catch (error) {
+      return { skipped: true, reason: error instanceof Error ? error.message : String(error) };
+    }
+  });
 
   /**
    * Turn newly finished class recordings into a transcript, a summary and
@@ -458,16 +421,46 @@ async function handleGET(request: NextRequest) {
    * Capped even lower than material-ai: an ASR call over a full recording is
    * the slowest, heaviest thing any cron job here does.
    */
-  results.push(
-    await run("class-transcription", async () => {
+  register("class-transcription", async () => {
+    try {
+      const { processTranscriptionQueue } = await import("@/lib/class-transcription");
+      return await processTranscriptionQueue(2);
+    } catch (error) {
+      return { skipped: true, reason: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  /**
+   * `?lane=<name>` runs the prelude plus that one lane and nothing else. Lanes
+   * are independent compartments, so they can also be TRIGGERED independently:
+   * point a second scheduler at `?lane=media` and the heavy transcription work
+   * gets a whole function of its own instead of sharing this one's 300 seconds.
+   */
+  const onlyLane = new URL(request.url).searchParams.get("lane") ?? undefined;
+  if (onlyLane && !CRON_PLAN.lanes.some((lane) => lane.name === onlyLane)) {
+    return NextResponse.json(
+      { error: `Unknown lane "${onlyLane}"`, lanes: CRON_PLAN.lanes.map((lane) => lane.name) },
+      { status: 400 },
+    );
+  }
+
+  const { results, lanes } = await runTick({
+    jobs,
+    only: onlyLane,
+    budgetMs: TICK_BUDGET_MS,
+    // Every failed or timed-out job is logged and recorded as an incident (route
+    // "cron:<job>"), so it shows up in the developer console, not just a red line
+    // in a log nobody reads.
+    onError: async (job, error) => {
+      console.error(`Cron job ${job} failed:`, error);
       try {
-        const { processTranscriptionQueue } = await import("@/lib/class-transcription");
-        return await processTranscriptionQueue(2);
-      } catch (error) {
-        return { skipped: true, reason: error instanceof Error ? error.message : String(error) };
+        const { captureError } = await import("@/lib/capture-error");
+        await captureError("cron", error, { job });
+      } catch {
+        // The error sink is best-effort; the job result is the record that matters.
       }
-    }),
-  );
+    },
+  });
 
   const failed = results.filter((result) => !result.ok);
 
@@ -488,7 +481,7 @@ async function handleGET(request: NextRequest) {
           title: `Scheduled job "${job.job}" failed`,
           message:
             `The daily automation job "${job.job}" errored on its last run: ${job.error ?? "no message recorded"}. ` +
-            `The other jobs ran. If this keeps happening, whatever that job does — reminders, digests, the backup check — is not happening.`,
+            `It ran in its own lane, so the other jobs were not held up. If this keeps happening, whatever that job does — reminders, digests, the backup check — is not happening.`,
           kind: "cron.job_failed",
           severity: "warning",
           link: "/admin/security",
@@ -502,7 +495,9 @@ async function handleGET(request: NextRequest) {
   }
 
   return NextResponse.json(
-    { ok: failed.length === 0, ran: results.length, results },
+    // `results` keeps its old shape (job / ok / detail / error) and gains lane, status and ms;
+    // `lanes` says how long each compartment took against its budget.
+    { ok: failed.length === 0, ran: results.length, results, lanes },
     // A non-200 when something failed is what makes Vercel's cron log show a
     // red line instead of a green one.
     { status: failed.length ? 500 : 200 },

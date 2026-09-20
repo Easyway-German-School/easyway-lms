@@ -2139,3 +2139,100 @@ model BackupRun {
   @@index([kind, status, startedAt])
   @@index([startedAt])
 }
+
+/**
+ * ONE DISTINCT PROBLEM, not one occurrence — see src/lib/incidents.ts.
+ *
+ * Errors, complaints and (later) drift alarms all land here, deduped by
+ * `fingerprint`, so the list stays readable and `occurrences` says how bad it
+ * is. GLOBAL in the tenant registry: the writers run with no session (a server
+ * error, a cron job) so there is no tenant to scope by — the same trap that
+ * froze BackupRun. `tenantId` is a plain audit column, not a relation.
+ *
+ * Message, stack and samples are scrubbed of emails, tokens and connection
+ * strings before they are stored.
+ */
+model Incident {
+  id          String @id @default(cuid())
+  /** sha1 of kind + route + normalised message; the dedupe key. */
+  fingerprint String @unique
+
+  /** error | complaint | drift | health */
+  kind     String
+  /** request | cron | client | feedback | invariant */
+  source   String
+  /** low | medium | high | critical */
+  severity String @default("medium")
+  /** open | acknowledged | resolved | ignored */
+  status   String @default("open")
+
+  title   String
+  message String?
+  stack   String?
+  /** A route pattern or "cron:<job>", never a raw URL with ids in it. */
+  route   String?
+  method  String?
+  context Json?
+  /** The last few occurrences, newest last. */
+  samples Json?
+
+  occurrences   Int @default(1)
+  /** Times a resolved incident came back — a fix that did not hold. */
+  reopenedCount Int @default(0)
+
+  tenantId   String?
+  userId     String?
+  feedbackId String?
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  resolvedAt     DateTime?
+  resolvedById   String?
+  resolutionNote String?
+
+  @@index([status, severity, lastSeenAt])
+  @@index([kind, status, lastSeenAt])
+  @@index([route, lastSeenAt])
+}
+
+/**
+ * WHY A STUDENT'S PORTAL IS THE WAY IT IS, and what their screen last showed.
+ *
+ * One row per student, upserted by the portal witness (src/lib/portal-witness.ts)
+ * — and the verdict half only CHANGES (`changedAt`) when the verdict does, so
+ * the row answers "locked since when, and why" instead of "when did we last
+ * look". The witness half records what the student's own browser last reported
+ * it rendered, which is the one fact nothing on the server can otherwise know.
+ *
+ * `studentId` is a plain column, not a relation: this is a derived record and
+ * must never block, or be cascaded by, anything that happens to the Student.
+ * `tenantId` is a plain column for the same reason (see Incident).
+ */
+model AccessSnapshot {
+  id        String @id @default(cuid())
+  studentId String @unique
+  tenantId  String?
+
+  /// True only when nothing at all holds the portal back. See lib/portal-verdict.ts.
+  open       Boolean
+  /// "open" or the sorted lock codes, e.g. "photo_missing+unpaid_deposit".
+  verdictKey String
+  /// [{ code, label, fix }] — the reasons, readable without joining anything.
+  locks      Json
+  /// The facts the verdict was derived from (amounts, grace, photo, batch).
+  inputs     Json?
+
+  /// When `verdictKey` last changed — i.e. how long they have been in this state.
+  changedAt DateTime
+  /// When the server last recomputed it.
+  checkedAt DateTime
+
+  lastWitnessAt       DateTime?
+  /// none | payment | batch | photo — what their browser last put on screen.
+  lastWitnessRendered String?
+  lastWitnessPath     String?
+
+  @@index([open, changedAt])
+  @@index([tenantId])
+}

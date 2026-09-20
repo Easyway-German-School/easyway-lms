@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canAttendLive, deriveStudentAccess } from "@/lib/access";
-import { requiredDepositFor, tuitionFeeFor, isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { canAttendLive } from "@/lib/access";
+import { getStudentAccess } from "@/lib/student-access";
 import { isOnlineBranch, initialVideoQualityFor, readOnlineProfile } from "@/lib/online-branch";
 import { creditGate } from "@/lib/usage/guard";
 import {
@@ -29,6 +29,7 @@ import {
 import { lecturerCan } from "@/lib/lecturer-features";
 import { assignmentHasGroup, parseGroupKey, readAssignment } from "@/lib/lecturer-assignment";
 import { studentsWhoCanEnterLiveClass } from "@/lib/live-eligibility";
+import { ensureClassSessionForLiveStart } from "@/lib/class-sessions";
 
 export const dynamic = "force-dynamic";
 
@@ -199,18 +200,15 @@ export async function GET(request: Request) {
         );
       }
 
-      const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-      const totalPaid = student.payments
-        .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
-        .reduce((sum, payment) => sum + payment.amount, 0);
-      const access = deriveStudentAccess({
-        totalPaid,
-        tuitionFee: tuitionFeeFor(feeLookup),
-        requiredDeposit: requiredDepositFor(feeLookup),
-        classesStartedAt: student.classesStartedAt,
-        enrolledAt: student.createdAt,
-        paymentGraceUntil: student.paymentGraceUntil,
-      });
+      // Same ledger-aware computation the portal itself uses to decide "PORTAL
+      // OPEN" — not a hand-rolled copy. A raw-sum fallback here (no `charges`,
+      // no payment-plan grace) is what let students the portal already
+      // admitted get walled out of the room specifically.
+      const access = await getStudentAccess(student.id);
+
+      if (!access) {
+        return NextResponse.json({ error: "No class profile found for this account" }, { status: 404 });
+      }
 
       if (!access.hasAccess) {
         return NextResponse.json(
@@ -399,6 +397,22 @@ export async function GET(request: Request) {
         void announceLiveToVideoStudents(opened).catch((err) =>
           console.error("announceLiveToVideoStudents failed", err),
         );
+
+        // The calendar (`/api/lecturer/sessions`) is the only thing that puts a
+        // day on a student's timetable in advance — opening this room is not
+        // that, and skips it entirely. Backfill the row now so a class run
+        // straight from here (no advance notice, ever) at least becomes
+        // visible, and is honestly marked as never having been scheduled ahead
+        // of time. A no-op if the tutor already put this day on the calendar.
+        if (branch?.id && level && sessionSlot) {
+          void ensureClassSessionForLiveStart({
+            branchId: branch.id,
+            level,
+            sessionSlot,
+            date: new Date(),
+            lecturerId: lecturer?.id ?? null,
+          }).catch((err) => console.error("ensureClassSessionForLiveStart failed", err));
+        }
       }
     } else if (liveSession && student) {
       /**

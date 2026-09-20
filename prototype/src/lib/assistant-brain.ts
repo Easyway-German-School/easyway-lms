@@ -10,6 +10,7 @@ import {
   type ToolSpec,
 } from "@/lib/ollama";
 import { GROQ_MODEL } from "@/lib/ai";
+import { guardedFetch } from "@/lib/guarded-fetch";
 
 /**
  * The assistant's brain, and which one it uses.
@@ -617,7 +618,7 @@ async function groqTurn(
   if (!apiKey) return { ok: false, reason: "GROQ_API_KEY is not set." };
 
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const response = await guardedFetch("groq", "https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
       body: JSON.stringify({

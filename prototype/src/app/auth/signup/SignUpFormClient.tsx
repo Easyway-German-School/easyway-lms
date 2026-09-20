@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { buildApiUrl } from "@/lib/api";
 import BrandLoader from "@/components/BrandLoader";
-import { countries, nigerianStates, packageOptions, professionOptions } from "@/app/auth/signup/options";
+import { ausbildungSectorOptions, countries, nigerianStates, packageOptions, professionOptions } from "@/app/auth/signup/options";
 import PasswordInput from "@/components/PasswordInput";
 import PhotoCapture from "@/components/PhotoCapture";
 import SignupJourney from "@/components/SignupJourney";
@@ -1182,7 +1182,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                 <select id="profession" name="profession" value={profession} onChange={(e) => setProfession(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-white">
                   <option value="">{isAusbildungPathway ? "Select Ausbildung focus" : "Select your profession"}</option>
                   {isAusbildungPathway ? (
-                    ["IT", "Nursing", "Engineering", "Plumbing"].map((option) => (
+                    ausbildungSectorOptions.map((option) => (
                       <option key={option} value={option}>{option}</option>
                     ))
                   ) : (

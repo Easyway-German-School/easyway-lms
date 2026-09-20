@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { DownloadIcon } from "@/components/icons";
 import { useIsInstalledApp } from "@/lib/client/standalone";
 import { hasMedia } from "@/lib/offline/store";
@@ -24,7 +25,7 @@ export default function WeekDownloadButton({ videos }: { videos: LibraryVideo[] 
     | { phase: "idle" }
     | { phase: "running"; done: number; total: number; bytes: number; title: string }
     | { phase: "finished"; count: number; bytes: number }
-    | { phase: "error"; message: string; done: number }
+    | { phase: "error"; message: string; done: number; noRoom: boolean }
   >({ phase: "idle" });
   const abortRef = useRef<AbortController | null>(null);
 
@@ -85,13 +86,8 @@ export default function WeekDownloadButton({ videos }: { videos: LibraryVideo[] 
           setState({ phase: "idle" });
           return;
         }
-        const message =
-          error instanceof OfflineCapError
-            ? error.message
-            : error instanceof Error
-              ? error.message
-              : "A download failed.";
-        setState({ phase: "error", message, done: i });
+        const message = error instanceof Error ? error.message : "A download failed.";
+        setState({ phase: "error", message, done: i, noRoom: error instanceof OfflineCapError });
         return;
       }
     }
@@ -131,6 +127,22 @@ export default function WeekDownloadButton({ videos }: { videos: LibraryVideo[] 
         >
           Stop
         </button>
+      ) : state.phase === "error" && state.noRoom ? (
+        <div className="flex items-center gap-2">
+          <Link
+            href="/materials/offline"
+            className="rounded-full bg-white px-5 py-2 text-sm font-bold text-slate-900 transition hover:bg-white/85"
+          >
+            Open my downloads
+          </Link>
+          <button
+            type="button"
+            onClick={() => void run()}
+            className="rounded-full bg-white/15 px-4 py-2 text-xs font-semibold text-white"
+          >
+            Retry
+          </button>
+        </div>
       ) : (
         <button
           type="button"

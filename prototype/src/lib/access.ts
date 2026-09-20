@@ -1,5 +1,6 @@
 import { DEPOSIT_RATE } from "@/lib/payment";
 import { buildLedger, type LedgerChargeInput } from "@/lib/finance/ledger";
+import { batchLockFloor, resolveUpcomingBatch, withBatchFloor } from "@/lib/batch-reservation";
 
 /**
  * Who can see what before tuition is paid.
@@ -141,8 +142,13 @@ const LOCK_DAY_MS = 24 * 60 * 60 * 1000;
  *   unpaid_deposit     registration-only — never cleared the 60% to start
  *   unsettled_balance  paid the deposit, never cleared the balance, and the
  *                      30-day grace after classes started has run out
+ *   upcoming_batch     placed in an intake that has not started yet — the
+ *                      portal is a waiting room until its first day, whatever
+ *                      the student has paid (see lib/batch-reservation.ts).
+ *                      Wins over the other two: while it holds, the money
+ *                      question is "reserve your seat", not "start class".
  */
-export type PaymentLockReason = "unpaid_deposit" | "unsettled_balance" | null;
+export type PaymentLockReason = "unpaid_deposit" | "unsettled_balance" | "upcoming_batch" | null;
 
 export type StudentAccess = {
   /** physical | hybrid | online — see DeliveryMode. */
@@ -175,6 +181,16 @@ export type StudentAccess = {
   lockAt: string | null;
   /** ISO date an admin has granted grace until. Null when none. */
   graceUntil: string | null;
+  /** True while the student's intake has not begun — the portal is a waiting room. */
+  batchLocked: boolean;
+  /** "October" — the intake they are waiting for. Null when not waiting. */
+  batch: string | null;
+  /** "October 2026". */
+  batchLabel: string | null;
+  /** ISO instant of the intake's first day (midnight, school timezone). */
+  batchStartsOn: string | null;
+  /** Whole days until it opens. 0 when not waiting. */
+  daysUntilBatchStart: number;
   currency: string;
 };
 
@@ -217,6 +233,7 @@ export function deriveStudentAccess({
   enrolledAt,
   paymentGraceUntil,
   paymentPlanOnTrack,
+  batch,
   now = new Date(),
 }: {
   totalPaid: number;
@@ -249,6 +266,12 @@ export function deriveStudentAccess({
    * grace date; a defaulted or absent plan is `false`/undefined.
    */
   paymentPlanOnTrack?: boolean;
+  /**
+   * The batch month off the student's admission blob. Drives the upcoming-batch
+   * lock and stops the 30-day part-payment clock starting before the batch does.
+   * Omitted → neither applies, exactly as before.
+   */
+  batch?: string | null;
   now?: Date;
 }): StudentAccess {
   const paid = Math.max(0, Math.round(Number(totalPaid) || 0));
@@ -288,6 +311,19 @@ export function deriveStudentAccess({
     : Math.max(0, fee - paid);
   const fullPaid = ledger ? outstandingBalance <= 0 : fee > 0 ? paid >= fee : depositPaid;
 
+  // Waiting for an intake that has not opened yet.
+  const upcomingBatch = resolveUpcomingBatch(batch, {
+    registeredAt: toDate(enrolledAt),
+    classesStartedAt,
+    now,
+  });
+  const batchLocked = upcomingBatch !== null;
+  const batchFloor = batchLockFloor(batch, {
+    registeredAt: toDate(enrolledAt),
+    classesStartedAt,
+    now,
+  });
+
   // The balance lock only exists for a student who is past the deposit gate
   // but has not settled the fee.
   const graceDate = toDate(paymentGraceUntil);
@@ -306,17 +342,22 @@ export function deriveStudentAccess({
       toDate(classesStartedAt) ??
       toDate(enrolledAt);
     if (anchor) {
-      lockAt = new Date(anchor.getTime() + PART_PAYMENT_LOCK_DAYS * LOCK_DAY_MS);
+      // Never before the batch itself: somebody who enrolled in September into
+      // an October intake gets their 30 days from 1 October, not from September.
+      const clockStart = withBatchFloor(anchor, batchFloor);
+      lockAt = new Date(clockStart.getTime() + PART_PAYMENT_LOCK_DAYS * LOCK_DAY_MS);
       balanceLocked = !graceActive && now.getTime() >= lockAt.getTime();
     }
   }
 
-  const hasAccess = depositPaid && !balanceLocked;
+  const hasAccess = depositPaid && !balanceLocked && !batchLocked;
   const lockReason: PaymentLockReason = hasAccess
     ? null
-    : balanceLocked
-      ? "unsettled_balance"
-      : "unpaid_deposit";
+    : batchLocked
+      ? "upcoming_batch"
+      : balanceLocked
+        ? "unsettled_balance"
+        : "unpaid_deposit";
 
   // Deposit-gate figures: against the CURRENT level's charge when the ledger is
   // driving, against the raw payment sum otherwise.
@@ -351,6 +392,11 @@ export function deriveStudentAccess({
     lockReason,
     lockAt: lockAt ? lockAt.toISOString() : null,
     graceUntil: graceDate ? graceDate.toISOString() : null,
+    batchLocked,
+    batch: upcomingBatch?.batch ?? null,
+    batchLabel: upcomingBatch?.monthLabel ?? null,
+    batchStartsOn: upcomingBatch ? upcomingBatch.startsOn.toISOString() : null,
+    daysUntilBatchStart: upcomingBatch?.daysUntilStart ?? 0,
     currency: "NGN",
   };
 }

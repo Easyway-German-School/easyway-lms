@@ -103,6 +103,7 @@ const navItems: NavItem[] = [
   { label: 'Live classes', href: '/admin/live', icon: <PulseIcon />, group: 'Academics' },
   { label: 'Full timetable', href: '/lecturer/timetable', icon: <CalendarIcon />, group: 'Academics' },
   { label: 'Cohorts', href: '/admin/cohorts', icon: <RosterIcon />, group: 'Academics' },
+  { label: 'Upcoming intake', href: '/admin/upcoming-intake', icon: <CalendarIcon />, group: 'Academics' },
   { label: 'Cohort sign-off', href: '/admin/journey', icon: <MapIcon />, group: 'Academics' },
   { label: 'Batch completions', href: '/admin/completions', icon: <ResultsIcon />, group: 'Academics' },
   { label: 'Promotions', href: '/admin/promotions', icon: <LevelUpIcon />, group: 'Academics' },
@@ -169,6 +170,7 @@ const navItems: NavItem[] = [
   { label: 'Notification rules', href: '/admin/notification-settings', icon: <SlidersIcon />, group: 'Settings' },
   { label: 'Admin roles', href: '/admin/staff', icon: <ShieldIcon />, group: 'Settings' },
   { label: 'Security & recovery', href: '/admin/security', icon: <KeyIcon />, group: 'Settings' },
+  { label: 'Mission control', href: '/admin/developer', icon: <PulseIcon />, group: 'Settings' },
   { label: 'Integrations', href: '/admin/integrations', icon: <IntegrationIcon />, group: 'Settings' },
   // Built with the platform layer and reachable only by POSTing JSON by hand
   // until now. The office that needs to notice an endpoint has gone quiet is

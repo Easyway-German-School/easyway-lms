@@ -86,6 +86,24 @@ export default function PhotoUnlockGuide() {
     return () => window.removeEventListener("easyway:photo-upload-failed", bump);
   }, []);
 
+  // Whether the profile page's own live-camera sheet is open — see the
+  // dispatch in profile/page.tsx. That sheet is a `fixed inset-0 z-[60]`
+  // modal with its own shutter button and face-guide oval; this guide's
+  // z-132 spotlight and "Tap the camera" card were rendering ON TOP of it,
+  // stale (still spotlighting the avatar behind the sheet) and redundant
+  // (the student is already in the camera). The fix is not a z-index
+  // reorder — the card would still eat screen real estate the real capture
+  // controls need — it's to step fully out of the way once the hand-off is
+  // done, the same job this component exists to do in the first place.
+  const [captureOpen, setCaptureOpen] = useState(false);
+  useEffect(() => {
+    const onCapture = (event: Event) => {
+      setCaptureOpen(Boolean((event as CustomEvent<{ open?: boolean }>).detail?.open));
+    };
+    window.addEventListener("easyway:photo-capture-open", onCapture);
+    return () => window.removeEventListener("easyway:photo-capture-open", onCapture);
+  }, []);
+
   const active = photoless && (onGatedPage || onProfile);
 
   /**
@@ -187,6 +205,14 @@ export default function PhotoUnlockGuide() {
 
   // ---- POINT: on /profile, spotlight the camera control -------------------
   if (onProfile) {
+    // Hand-off is done — the student is already in the real capture sheet,
+    // which has its own shutter button and face-guide oval. Rendering
+    // nothing here, rather than reordering z-index, is deliberate: the
+    // preempt effect above still holds the queue back regardless (it
+    // doesn't depend on this render path), so nothing else can sneak in
+    // while the student is mid-capture.
+    if (captureOpen) return null;
+
     const hole = rect ? inflate(rect, 10) : null;
     const guideSize = viewport.width < 640 ? 88 : 124;
 

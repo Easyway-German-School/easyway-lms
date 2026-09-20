@@ -3,6 +3,7 @@
 import {
   OFFLINE_CAP_BYTES,
   putMedia,
+  sweepExpired,
   wouldExceedCap,
   type OfflineMediaMeta,
 } from "@/lib/offline/store";
@@ -19,8 +20,9 @@ export async function fetchWithProgress(
   url: string,
   onProgress?: (fraction: number, receivedBytes: number, totalBytes: number) => void,
   signal?: AbortSignal,
+  credentials: RequestCredentials = "include",
 ): Promise<Blob> {
-  const response = await fetch(url, { credentials: "include", signal });
+  const response = await fetch(url, { credentials, signal });
   if (!response.ok) throw new Error(`Download failed (${response.status})`);
 
   const total = Number(response.headers.get("Content-Length")) || 0;
@@ -46,14 +48,58 @@ export async function fetchWithProgress(
   return new Blob(chunks, { type });
 }
 
+function withParam(url: string, param: string): string {
+  return url.includes("?") ? `${url}&${param}` : `${url}?${param}`;
+}
+
+/**
+ * Ask `/api/files` for a direct, signed bucket URL for this file. Null means
+ * "use the proxy" — not an app file, not eligible, or the request failed.
+ */
+async function resolveDirectUrl(fileUrl: string, signal?: AbortSignal): Promise<string | null> {
+  if (!fileUrl.startsWith("/api/files/")) return null;
+  try {
+    const response = await fetch(withParam(fileUrl, "signed=1"), { credentials: "include", signal });
+    const isJson = (response.headers.get("Content-Type") || "").includes("application/json");
+    if (!response.ok || !isJson) {
+      // A server that ignored `signed=1` would be streaming the whole file at us.
+      await response.body?.cancel().catch(() => undefined);
+      return null;
+    }
+    const data = (await response.json()) as { url?: unknown };
+    return typeof data.url === "string" && data.url ? data.url : null;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return null;
+  }
+}
+
+/**
+ * The download can't land because there is no room — either our own per-device
+ * ceiling or the phone's. Callers show a link to the downloads shelf for both,
+ * because the fix is the same: delete something there.
+ */
 export class OfflineCapError extends Error {
-  constructor() {
+  constructor(message?: string) {
     super(
-      `Your offline library is full (${Math.round(OFFLINE_CAP_BYTES / 1024 / 1024 / 1024)} GB). ` +
-        `Delete a download to make room.`,
+      message ??
+        `Your offline library is full (${Math.round(OFFLINE_CAP_BYTES / 1024 / 1024 / 1024)} GB). ` +
+          `Remove a download to make room.`,
     );
     this.name = "OfflineCapError";
   }
+}
+
+/** The browser refused the write: the phone itself is out of storage. */
+export class OfflineDeviceFullError extends OfflineCapError {
+  constructor() {
+    super("Your phone is out of storage space. Remove a download, or free up space on your phone, then try again.");
+    this.name = "OfflineDeviceFullError";
+  }
+}
+
+function isQuotaError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "QuotaExceededError";
 }
 
 /**
@@ -70,21 +116,48 @@ export async function downloadVideoForOffline(
 ): Promise<void> {
   if (video.embedUrl) throw new Error("Videos hosted elsewhere can't be saved for offline.");
 
+  // Recordings past their 2-week window are only cleared when the shelf page
+  // is opened, so a student who never opens it would carry dead files that
+  // still count against the cap. Sweep first so "full" only ever means full of
+  // things they can still watch.
+  await sweepExpired();
+
   // A recording carries a rough size on the tile via duration; we can't know
   // the exact bytes until the headers arrive, so the hard cap check runs
   // again mid-stream is not worth it — check the current total is not already
   // at the ceiling, then let the stream finish.
   if (await wouldExceedCap(0)) throw new OfflineCapError();
 
-  // `proxy=1` keeps a recording download on the app's streaming proxy instead
-  // of being redirected to a signed bucket URL — this fetch reads the body for
-  // a progress bar, and a cross-origin redirect would fail the CORS check.
-  // Harmless on any other kind of file URL: the route only reads it for
-  // `recordings/` video keys.
-  const downloadUrl = video.fileUrl.includes("?")
-    ? `${video.fileUrl}&proxy=1`
-    : `${video.fileUrl}?proxy=1`;
-  const blob = await fetchWithProgress(downloadUrl, opts.onProgress, opts.signal);
+  // Preferred path: ask the app (once, same-origin, a few bytes) for a signed
+  // bucket URL and pull the file straight from the bucket, so the bytes never
+  // pass through a Vercel function — every proxied byte is billed as Fast Origin
+  // Transfer, and a "download this week" button moves gigabytes. The bucket's
+  // CORS rule allows this; if it ever stops (rule removed, link expired, key not
+  // eligible) and nothing has arrived yet, fall back to the old `?proxy=1`
+  // stream, which is slower and costs money but always works.
+  const proxyUrl = withParam(video.fileUrl, "proxy=1");
+  const directUrl = await resolveDirectUrl(video.fileUrl, opts.signal);
+  let blob: Blob;
+  if (directUrl) {
+    let received = 0;
+    try {
+      blob = await fetchWithProgress(
+        directUrl,
+        (fraction, bytes, total) => {
+          received = bytes;
+          opts.onProgress?.(fraction, bytes, total);
+        },
+        opts.signal,
+        "omit",
+      );
+    } catch (error) {
+      // Cancelled, or dropped mid-file: do not silently re-download gigabytes.
+      if (opts.signal?.aborted || received > 0) throw error;
+      blob = await fetchWithProgress(proxyUrl, opts.onProgress, opts.signal);
+    }
+  } else {
+    blob = await fetchWithProgress(proxyUrl, opts.onProgress, opts.signal);
+  }
 
   if (await wouldExceedCap(blob.size)) throw new OfflineCapError();
 
@@ -108,15 +181,20 @@ export async function downloadVideoForOffline(
     recordedAt: video.recordedAt,
   };
 
-  await putMedia({
-    materialId: video.id,
-    blob,
-    thumbBlob,
-    meta,
-    downloadedAt: Date.now(),
-    expiresAt: video.expiresAt ? new Date(video.expiresAt).getTime() : null,
-    sizeBytes: blob.size,
-  });
+  try {
+    await putMedia({
+      materialId: video.id,
+      blob,
+      thumbBlob,
+      meta,
+      downloadedAt: Date.now(),
+      expiresAt: video.expiresAt ? new Date(video.expiresAt).getTime() : null,
+      sizeBytes: blob.size,
+    });
+  } catch (error) {
+    if (isQuotaError(error)) throw new OfflineDeviceFullError();
+    throw error;
+  }
 }
 
 /** "128 MB", "1.4 GB" — for the button and the offline shelf. */

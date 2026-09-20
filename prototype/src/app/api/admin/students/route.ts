@@ -20,6 +20,8 @@ import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 import { normalizeProfileInput, mergeProfile, type StudentProfileInput } from "@/lib/student-profile";
 import { lookupEmailAccount, reviveDeletedAccount } from "@/lib/deleted-account";
+import { batchFromAdmission } from "@/lib/batch";
+import { resolveUpcomingBatch } from "@/lib/batch-reservation";
 import { closeOpenEnrolment, openEnrolment, type EnrolmentOutcome } from "@/lib/student-enrolment";
 import {
   buildRosterWhereClause,
@@ -101,6 +103,15 @@ export async function GET(request: Request) {
     // Machine-derived classification — see lib/student-segments.ts. Combine
     // with the stored `tags` column client-side for one filterable list.
     _segments: segments,
+    // Placed in an intake that has not opened: the learner's portal is a
+    // countdown, so the roster says so instead of showing an ordinary lock.
+    _waitingBatch: (() => {
+      const upcoming = resolveUpcomingBatch(batchFromAdmission(student.admission), {
+        registeredAt: student.createdAt,
+        classesStartedAt: student.classesStartedAt,
+      });
+      return upcoming ? { label: upcoming.monthLabel, daysUntilStart: upcoming.daysUntilStart } : null;
+    })(),
     // Kept under its old name so nothing that reads it breaks. It now comes off
     // the tuition fee rather than the sum of raised invoices: most students who
     // owe the school money have no Invoice row at all, so the old figure read
@@ -880,10 +891,20 @@ export async function PATCH(request: Request) {
      * `setStudentCoTutors`; the feature flag is this route's to check, and when
      * it is off we still let an empty list through so turning sharing off can
      * clean up whatever it left behind.
+     *
+     * ONE-TUTOR RESCUE EXCEPTION. With the flag off, a hybrid student can still
+     * land with only half a teaching team — the auto-assign fail-safe finds
+     * their campus tutor but has nowhere to put the online one (see
+     * lib/tutor-auto-assign.ts). Rather than force a school that has
+     * deliberately kept "one tutor per student" off to flip that policy for
+     * everyone just to patch one signup, a single extra tutor is allowed
+     * through by hand even with the flag off. Two or more still requires the
+     * flag — that's real multi-tutor rostering, not a one-off patch.
      */
     if (coTutorIds !== undefined) {
       const features = await featuresForCurrentTenant();
-      if (!features.roster.sharedStudents && coTutorIds.length) {
+      const rescueOverride = !features.roster.sharedStudents && coTutorIds.length <= 1;
+      if (!features.roster.sharedStudents && !rescueOverride) {
         return NextResponse.json(
           { error: "Sharing a student across tutors is not enabled for this school." },
           { status: 400 },
@@ -891,7 +912,7 @@ export async function PATCH(request: Request) {
       }
       const paired = await setStudentCoTutors({
         studentId,
-        lecturerIds: features.roster.sharedStudents ? coTutorIds : [],
+        lecturerIds: features.roster.sharedStudents || rescueOverride ? coTutorIds : [],
         assignedById: gate.session.user.id,
       });
       if (!paired.ok) {

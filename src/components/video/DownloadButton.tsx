@@ -21,7 +21,7 @@ type State =
   | { phase: "idle" }
   | { phase: "downloading"; fraction: number; received: number; total: number }
   | { phase: "done"; sizeBytes: number; expiresAt: number | null }
-  | { phase: "error"; message: string };
+  | { phase: "error"; message: string; noRoom: boolean };
 
 export default function DownloadButton({
   video,
@@ -65,12 +65,8 @@ export default function DownloadButton({
         return;
       }
       const message =
-        error instanceof OfflineCapError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : "Download failed — try again on a better connection.";
-      setState({ phase: "error", message });
+        error instanceof Error ? error.message : "Download failed — try again on a better connection.";
+      setState({ phase: "error", message, noRoom: error instanceof OfflineCapError });
     } finally {
       abortRef.current = null;
     }
@@ -207,13 +203,27 @@ export default function DownloadButton({
       {state.phase === "error" && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-red-600">{state.message}</p>
-          <button
-            type="button"
-            onClick={() => void start()}
-            className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-white"
-          >
-            Try again
-          </button>
+          <div className="flex items-center gap-2">
+            {state.noRoom ? (
+              <Link
+                href="/materials/offline"
+                className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-white"
+              >
+                Open my downloads
+              </Link>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void start()}
+              className={
+                state.noRoom
+                  ? "rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--muted)]"
+                  : "rounded-full bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-white"
+              }
+            >
+              Try again
+            </button>
+          </div>
         </div>
       )}
     </div>

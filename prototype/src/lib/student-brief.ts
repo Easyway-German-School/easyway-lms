@@ -3,8 +3,10 @@ import { calculateStreak } from "@/lib/gamification";
 import { cached } from "@/lib/ai-cache";
 import { callModel, activeModelName } from "@/lib/ai";
 import { profileFor } from "@/lib/learner-intelligence";
-import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
-import { derivePaymentStatus, receivedPaymentFilter, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
+import type { StudentAccess } from "@/lib/access";
+import { receivedPaymentFilter } from "@/lib/payment";
+import { accessFromStudent } from "@/lib/student-access";
+import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { schoolDayStart } from "@/lib/school-time";
 
 /**
@@ -83,13 +85,26 @@ export async function buildBrief(userId: string, period: BriefPeriod): Promise<B
       createdAt: true,
       classesStartedAt: true,
       paymentGraceUntil: true,
-      branch: { select: { name: true } },
+      admission: true,
+      deliveryMode: true,
+      branch: { select: { name: true, mode: true } },
       user: { select: { name: true } },
       attendances: { select: { date: true, present: true, status: true } },
       payments: { where: receivedPaymentFilter(), select: { amount: true } },
+      tuitionCharges: {
+        where: { deletedAt: null },
+        select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
+      },
     },
   });
   if (!student) return null;
+
+  // Same ledger-aware computation the portal itself uses — the brief's own
+  // tuition-balance nudge used to run a raw `totalPaid >= fee` comparison
+  // with no ledger and no payment-plan awareness, which could tell a
+  // ledger-clear or on-track student they were days from being locked out.
+  const planStatus = await planStatusForStudent(student.id);
+  const access = accessFromStudent(student, planSuppressesLock(planStatus?.adherence ?? null));
 
   const since = periodStart(period);
   const firstName = (student.user?.name ?? "").trim().split(/\s+/)[0] || "";
@@ -136,44 +151,33 @@ export async function buildBrief(userId: string, period: BriefPeriod): Promise<B
     activitySummary: describeActivity(lessonsDone, quizzesPlayed, missionsDone),
   }).catch(() => null);
 
-  return { period, headline, lines, personalNote, paymentNote: buildPaymentNote(student) };
+  return { period, headline, lines, personalNote, paymentNote: buildPaymentNote(access) };
 }
 
 /**
  * The daily tuition-balance nudge — see PaymentNote. Only a part-payer (past
- * the 60% deposit, short of the full fee) gets one; everyone else gets null.
+ * the deposit, short of the full fee, and not held by grace or an on-track
+ * payment plan) gets one; everyone else gets null.
  */
-function buildPaymentNote(student: {
-  level: string;
-  classType: string | null;
-  pathway?: string | null;
-  createdAt: Date;
-  classesStartedAt: Date | null;
-  paymentGraceUntil: Date | null;
-  branch: { name: string } | null;
-  payments: Array<{ amount: number }>;
-}): PaymentNote | null {
-  const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-  const tuitionFee = tuitionFeeFor(feeLookup);
-  const requiredDeposit = requiredDepositFor(feeLookup);
-  const totalPaid = student.payments.reduce((sum, p) => sum + p.amount, 0);
-  const { depositPaid, fullPaid } = derivePaymentStatus({ totalPaid, tuitionFee, requiredDeposit });
-  if (!depositPaid || fullPaid) return null;
+function buildPaymentNote(access: StudentAccess): PaymentNote | null {
+  const depositMet = access.progressPercent >= 100;
+  const fullyPaid = access.outstandingBalance <= 0;
+  if (!depositMet || fullyPaid) return null;
 
   const dayMs = 24 * 60 * 60 * 1000;
-  const anchor = student.classesStartedAt ?? student.createdAt;
-  const lockAt = new Date(new Date(anchor).getTime() + PART_PAYMENT_LOCK_DAYS * dayMs);
-  const graceUntil = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;
+  const graceUntil = access.graceUntil ? new Date(access.graceUntil) : null;
   const graceActive = graceUntil ? Date.now() < graceUntil.getTime() : false;
-  const effectiveLockAt = graceActive ? graceUntil! : lockAt;
+  const lockAt = access.lockAt ? new Date(access.lockAt) : null;
+  const effectiveLockAt = graceActive && graceUntil ? graceUntil : lockAt;
+  if (!effectiveLockAt) return null;
   const daysToLock = Math.ceil((effectiveLockAt.getTime() - Date.now()) / dayMs);
 
   return {
-    outstanding: Math.max(0, tuitionFee - totalPaid),
+    outstanding: access.outstandingBalance,
     lockDate: effectiveLockAt.toISOString(),
     daysToLock,
     urgent: daysToLock <= 7,
-    locked: !graceActive && Date.now() >= lockAt.getTime(),
+    locked: !access.hasAccess && access.lockReason === "unsettled_balance",
     graceUntil: graceUntil ? graceUntil.toISOString() : null,
   };
 }

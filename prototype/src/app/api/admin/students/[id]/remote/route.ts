@@ -3,21 +3,11 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-roles";
 import { prisma, unguardedPrisma } from "@/lib/prisma";
 import { writeAudit } from "@/lib/prisma-guard";
-import {
-  LIVE_ONLY_ROUTES,
-  TUITION_FREE_ROUTES,
-  canAttendLive,
-  deriveStudentAccess,
-} from "@/lib/access";
-import {
-  isReceivedPayment,
-  isRegistrationFeePayment,
-  isTravelPackagePathway,
-  requiredDepositFor,
-  tuitionFeeFor,
-} from "@/lib/payment";
+import { LIVE_ONLY_ROUTES, TUITION_FREE_ROUTES, canAttendLive, hasProfilePhoto, isPhotoGatedRoute } from "@/lib/access";
+import { portalVerdict } from "@/lib/portal-verdict";
+import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
+import { accessFromStudent } from "@/lib/student-access";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
-import { isOnlineBranch } from "@/lib/online-branch";
 import { profileFor } from "@/lib/learner-intelligence";
 import { hourLabel } from "@/lib/learner-signals";
 
@@ -117,36 +107,31 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const admissionPhoto = typeof admission?.photoUrl === "string" ? admission.photoUrl : null;
 
   /* ---- What the portal is currently doing to them --------------------- */
-  // The SAME received-payment test the student's own portal uses
-  // (src/lib/payment.ts): "completed" or "partial", minus the ₦5,000
-  // registration fee. This line read `status === "success"` — a value
-  // Payment.status never takes (it is pending | partial | completed | failed)
-  // — so it counted ₦0 for EVERY student and the mirror showed everyone's
-  // portal as deposit-locked no matter what they had actually paid.
-  const totalPaid = student.payments
-    .filter((p) => isReceivedPayment(p.status) && !isRegistrationFeePayment(p.description))
-    .reduce((sum, payment) => sum + payment.amount, 0);
-  const fees = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
-  const tuitionFee = tuitionFeeFor(fees);
-  const deliveryMode = isOnlineBranch(student.branch) ? "online" : student.deliveryMode;
-  // Feed deriveStudentAccess everything /api/student/access feeds it — the
-  // per-level ledger, the start-of-classes clock, admin grace, and an on-track
-  // payment plan — so the mirror resolves the padlock to the same answer the
-  // student's shell does rather than a thinner re-derivation that drifts.
+  // The SAME computation `/api/student/access` (the student's own portal
+  // gate) runs — see lib/student-access.ts. Feeding it a re-derived set of
+  // fields by hand is exactly how this mirror drifted from the real portal
+  // before: it once read `status === "success"`, a value Payment.status never
+  // takes, and counted ₦0 for EVERY student no matter what they had paid.
+  const receivedTuitionPayments = student.payments.filter(
+    (p) => isReceivedPayment(p.status) && !isRegistrationFeePayment(p.description),
+  );
   const planStatus = await planStatusForStudent(student.id);
-  const access = deriveStudentAccess({
-    totalPaid,
-    tuitionFee,
-    requiredDeposit: requiredDepositFor(fees),
-    deliveryMode,
-    classType: student.classType,
-    level: student.level,
-    charges: student.tuitionCharges,
-    flatDeposit: isTravelPackagePathway(student.pathway),
-    classesStartedAt: student.classesStartedAt,
-    enrolledAt: student.createdAt,
-    paymentGraceUntil: student.paymentGraceUntil,
-    paymentPlanOnTrack: planSuppressesLock(planStatus?.adherence ?? null),
+  const accessInput = { ...student, payments: receivedTuitionPayments };
+  const access = accessFromStudent(accessInput, planSuppressesLock(planStatus?.adherence ?? null));
+  /**
+   * The student's portal is walled by payment/intake OR by a missing photo, and
+   * their own shell applies both. Reading `access.hasAccess` alone reported a
+   * paid student with no photo as "open" while the padlock was on their screen —
+   * see lib/portal-verdict.ts. `hasProfilePhoto` is the same test the student's
+   * own /api/student/access uses.
+   */
+  const hasPhoto = hasProfilePhoto(student.admission);
+  const verdict = portalVerdict(access, hasPhoto);
+  // What their browser last SAID it rendered (lib/portal-witness.ts). Absent until
+  // they have opened the portal on a build that reports it.
+  const snapshot = await prisma.accessSnapshot.findUnique({
+    where: { studentId: student.id },
+    select: { verdictKey: true, changedAt: true, lastWitnessAt: true, lastWitnessRendered: true, lastWitnessPath: true },
   });
 
   /**
@@ -154,8 +139,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
    * the mirror cannot disagree with the real portal about what is padlocked.
    * Reimplementing the rule here is how the two drift apart and an admin ends
    * up reassuring somebody that a page is open when it is not.
+   *
+   * `access.deliveryMode` rather than the raw column: `accessFromStudent`
+   * already applies the online-branch correction (a student onboarded onto
+   * the Online branch whose own `deliveryMode` column was never set is still
+   * "online" here), so there is no second correction to keep in sync.
    */
-  const live = canAttendLive(deliveryMode, student.classType);
+  const live = canAttendLive(access.deliveryMode, student.classType);
   const tabs = [
     { path: "/dashboard", label: "Dashboard" },
     { path: "/classes", label: "Classes" },
@@ -173,7 +163,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       ...tab,
       label: tab.label.charAt(0).toUpperCase() + tab.label.slice(1),
       hidden,
-      locked: !hidden && !free && !access.hasAccess,
+      // Same two clauses the student's shell applies: the tuition gate, and the photo wall.
+      locked: !hidden && ((!free && !access.hasAccess) || (!hasPhoto && isPhotoGatedRoute(tab.path))),
     };
   });
 
@@ -282,7 +273,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       tutor: student.tutor?.user.name ?? null,
     },
     portal: {
-      locked: !access.hasAccess,
+      locked: !verdict.open,
+      // Every reason, with what lifts it — an admin can read these to the student.
+      locks: verdict.locks,
+      witness: snapshot
+        ? {
+            lockedSince: snapshot.verdictKey === verdict.key && !verdict.open ? snapshot.changedAt.toISOString() : null,
+            lastReportedAt: snapshot.lastWitnessAt ? snapshot.lastWitnessAt.toISOString() : null,
+            rendered: snapshot.lastWitnessRendered,
+            path: snapshot.lastWitnessPath,
+          }
+        : null,
       registrationPaid: access.registrationPaid,
       progressPercent: access.progressPercent,
       // Amounts follow the same rule as the rest of the admin area: an admin
