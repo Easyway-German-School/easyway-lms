@@ -23,6 +23,8 @@
  * diarization model, and callers should not present it as one.
  */
 
+import { guardedFetch } from "@/lib/guarded-fetch";
+
 export type TranscriptSegment = { start: number; end: number; text: string };
 
 export type TranscriptionResult = {
@@ -55,11 +57,14 @@ export async function transcribeAudio(
     form.append("model", GROQ_WHISPER_MODEL);
     form.append("response_format", "verbose_json");
 
-    const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-    });
+    // A full class recording is a big upload and a slow answer, and this runs in the 300s
+    // cron function — so a long deadline, but still a deadline.
+    const response = await guardedFetch(
+      "groq",
+      "https://api.groq.com/openai/v1/audio/transcriptions",
+      { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form },
+      { timeoutMs: 240_000 },
+    );
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");

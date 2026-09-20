@@ -6,6 +6,7 @@ import { recordSkillOutcome } from "@/lib/skill-mastery";
 import { getCoachingMemorySummary, saveVoiceCoachMemory } from "@/lib/voice-coach-memory";
 import { assessPronunciationWithAzure, azurePronunciationAvailable } from "@/lib/azure-pronunciation";
 import { prisma } from "@/lib/prisma";
+import { guardedFetch } from "@/lib/guarded-fetch";
 
 export const dynamic = "force-dynamic";
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
@@ -51,19 +52,21 @@ export async function POST(request: NextRequest) {
   // other, and a student waiting on a spinner should not pay for them
   // sequentially.
   const [transcriptionResponse, azureAssessment, coachingMemory] = await Promise.all([
-    fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+    // A failed or paused provider is "could not transcribe" (handled below), not an
+    // uncaught throw out of Promise.all that becomes a bare 500.
+    guardedFetch("groq", "https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
       body: upload,
-    }),
+    }).catch(() => null),
     audioWav instanceof File && azurePronunciationAvailable() && expectedPhrase
       ? assessPronunciationWithAzure(await audioWav.arrayBuffer(), expectedPhrase, "de-DE")
       : Promise.resolve(null),
     student ? getCoachingMemorySummary(student.id) : Promise.resolve(null),
   ]);
 
-  if (!transcriptionResponse.ok) {
-    console.error("Audio transcription failed", transcriptionResponse.status);
+  if (!transcriptionResponse || !transcriptionResponse.ok) {
+    console.error("Audio transcription failed", transcriptionResponse?.status ?? "no response");
     return NextResponse.json({ error: "The audio could not be transcribed. Try once more." }, { status: 502 });
   }
 

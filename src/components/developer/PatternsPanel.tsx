@@ -68,8 +68,9 @@ const PATTERNS: Array<{
       { file: "src/lib/resilience.ts", note: "createCircuitBreaker(): the pattern itself, ~60 lines, fully tested with a fake clock." },
       { file: "src/lib/incidents.ts", note: "Guards the incident recorder's database writes (breaker \"incident-db\")." },
       { file: "src/lib/capture-error.ts", note: "Guards the error-webhook forwarder (breaker \"error-webhook\") — a dead webhook used to cost every error 4 seconds." },
+      { file: "src/lib/guarded-fetch.ts", note: "guardedFetch(): a fetch with a DEADLINE and a breaker per provider — Groq, Anthropic, DeepSeek, OpenAI and Paystack. Every AI and Paystack call in the app now goes through it. Only the provider failing counts (5xx, 429, timeouts, network errors); a 4xx is your own request being wrong and never trips it, so a customer's typo cannot switch payments off." },
     ],
-    gap: "Not yet around the calls that would benefit most: the AI providers, Paystack, LiveKit and the mail transport. Each is a one-line wrap once you have decided what \"down\" should mean for that feature.",
+    gap: "Not yet: the admin assistant's Anthropic SDK stream (it is not a plain fetch, so the wrapper does not see it), Azure speech scoring, LiveKit and the SMTP mail transport. And a breaker only counts what fails — before this, none of these calls had a timeout at all, so a provider that was slow rather than down was invisible. The deadline is what made the breaker meaningful.",
     live: "breaker",
   },
   {

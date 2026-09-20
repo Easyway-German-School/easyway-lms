@@ -2,6 +2,7 @@ import { parseModelJson } from "@/lib/safe-json";
 import type { AzurePronunciationAssessment } from "@/lib/azure-pronunciation";
 import type { CoachingMemorySummary } from "@/lib/voice-coach-memory";
 import { levelRank, pickExploration, styleAdjustment, type LearningStyle } from "@/lib/learner-style";
+import { guardedFetch, isCircuitOpen } from "@/lib/guarded-fetch";
 
 /**
  * AI Service - Supports Claude API, Ollama (local), or mock responses
@@ -135,7 +136,7 @@ async function callGroq(prompt: string, maxTokens: number): Promise<string | nul
   if (!apiKey) return null;
 
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const response = await guardedFetch("groq", "https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -188,7 +189,7 @@ async function callDeepSeekText(prompt: string, maxTokens: number): Promise<stri
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) return null;
   try {
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
+    const response = await guardedFetch("deepseek", "https://api.deepseek.com/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
@@ -234,7 +235,7 @@ async function callClaude(
   lastClaudeFailure = null;
 
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await guardedFetch("anthropic", "https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "x-api-key": apiKey,
@@ -278,6 +279,11 @@ async function callClaude(
         output_config: { effort: "low" },
         messages: [{ role: "user", content: `${prompt}${TAG_GUARD}` }],
       }),
+    }, {
+      // Somebody watching a spinner gets the default deadline (just under the 60s the
+      // function is killed at). Background work — cron summaries of long transcripts —
+      // runs in functions allowed 300s and legitimately takes longer.
+      timeoutMs: workload === "interactive" || workload === "student" ? undefined : 120_000,
     });
 
     if (!response.ok) {
@@ -328,7 +334,10 @@ async function callClaude(
     // lead with a non-text block, and content[0].text would then be undefined.
     const text = data.content?.find((block) => block.type === "text")?.text;
     return text?.trim() || null;
-  } catch {
+  } catch (error) {
+    // The circuit is open: Claude failed repeatedly just now and calls are paused for a
+    // moment instead of each waiting out a timeout. Say so, rather than leaving "no reason".
+    if (isCircuitOpen(error)) lastClaudeFailure = "Claude is paused for a moment after repeated failures and will retry by itself.";
     return null;
   }
 }
@@ -2080,7 +2089,7 @@ async function generateNextStepsWithDeepSeek(score: number, feedback: Array<{ ca
   if (!apiKey) return generateNextStepsMock(score, feedback);
 
   try {
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
+    const response = await guardedFetch("deepseek", "https://api.deepseek.com/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

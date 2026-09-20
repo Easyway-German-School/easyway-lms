@@ -14,6 +14,7 @@ import {
 } from "@/lib/payment";
 import { nextLevelAfter } from "@/lib/levels";
 import { loadStudentLedger } from "@/lib/tuition-charges";
+import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
 
 /**
  * Opens a Paystack checkout.
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
       const callbackUrlBase = process.env.PAYSTACK_CALLBACK_URL || `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/enrollment/success`;
       const callbackUrl = `${callbackUrlBase}${callbackUrlBase.includes("?") ? "&" : "?"}source=paystack`;
 
-      const paystackResponse = await fetch("https://api.paystack.co/transaction/initialize", {
+      const paystackResponse = await guardedFetch("paystack", "https://api.paystack.co/transaction/initialize", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${secretKey}`,
@@ -320,7 +321,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const paystackResponse = await fetch("https://api.paystack.co/transaction/initialize", {
+    const paystackResponse = await guardedFetch("paystack", "https://api.paystack.co/transaction/initialize", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${secretKey}`,
@@ -367,6 +368,11 @@ export async function POST(request: Request) {
       breakdown,
     });
   } catch (error) {
+    // Paystack has been failing and calls are paused for a moment. Say exactly that —
+    // and that nothing was charged, which is the thing a person mid-checkout fears.
+    if (isCircuitOpen(error)) {
+      return NextResponse.json({ error: PAYMENTS_PAUSED_MESSAGE }, { status: 503 });
+    }
     console.error("Paystack initialization error:", error);
     return NextResponse.json(
       { error: "We couldn't start your payment just now. Please try again — if it keeps failing, contact your branch office." },
