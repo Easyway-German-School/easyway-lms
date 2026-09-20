@@ -34,6 +34,8 @@ type Assignment = {
   questionCount: number;
   dueAt: string | null;
   lecturerName: string | null;
+  /** Only set for a hybrid student (two tutors): which of them set this. */
+  tutorRole?: "physical" | "online" | null;
   submission: Submission | null;
 };
 
@@ -436,6 +438,8 @@ export default function AssignmentsPanel() {
                     {a.type === "quiz" && `${a.questionCount} questions`}
                     {a.dueAt && ` · due ${new Date(a.dueAt).toLocaleDateString()}`}
                     {a.lecturerName && ` · set by ${a.lecturerName}`}
+                    {a.tutorRole === "online" && " · Online tutor"}
+                    {a.tutorRole === "physical" && " · Campus tutor"}
                   </p>
                 </div>
 

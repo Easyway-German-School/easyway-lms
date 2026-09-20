@@ -3,6 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { letterFor } from "@/lib/grading";
 import { KIND, notify } from "@/lib/notify";
+import { groupStudentsByTutorPhrase } from "@/lib/tutor-attribution";
 import {
   ASSESSMENT_TYPES,
   isAssessmentType,
@@ -158,6 +159,7 @@ export async function POST(request: NextRequest) {
           score,
           grade: letterFor(score),
           submissionMode: "physical",
+          lecturerId: resolved.lecturerId,
           ...(feedbackText === undefined ? {} : { feedback: feedbackText }),
         },
       });
@@ -170,6 +172,7 @@ export async function POST(request: NextRequest) {
           grade: letterFor(score),
           feedback: feedbackText ?? null,
           submissionMode: "physical",
+          lecturerId: resolved.lecturerId,
         },
       });
     }
@@ -177,15 +180,19 @@ export async function POST(request: NextRequest) {
   }
 
   if (written.length) {
-    await notify({
-      to: { studentIds: written },
-      kind: KIND.resultPublished,
-      severity: "info",
-      title: `Your ${type} result is in`,
-      message: "Your tutor has entered a new score. Open your results to see it.",
-      link: "/results",
-      push: true,
-    }).catch((error) => console.error("Grade notification failed", error));
+    const groups = await groupStudentsByTutorPhrase(written, resolved.lecturerId);
+    for (const [phrase, studentIds] of groups) {
+      if (!studentIds.length) continue;
+      await notify({
+        to: { studentIds },
+        kind: KIND.resultPublished,
+        severity: "info",
+        title: `Your ${type} result is in`,
+        message: `${phrase} has entered a new score. Open your results to see it.`,
+        link: "/results",
+        push: true,
+      }).catch((error) => console.error("Grade notification failed", error));
+    }
   }
 
   return NextResponse.json({ success: true, saved: written.length });

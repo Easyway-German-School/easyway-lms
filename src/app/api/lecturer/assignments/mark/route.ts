@@ -2,6 +2,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { notify, KIND } from "@/lib/notify";
+import { attributeTutorAction, tutorPhrase } from "@/lib/tutor-attribution";
 import { recordSkillOutcome } from "@/lib/skill-mastery";
 import {
   parseQuestions,
@@ -59,13 +60,14 @@ export async function GET(req: NextRequest) {
       student: {
         select: { id: true, studentCode: true, level: true, user: { select: { name: true } } },
       },
-      assignment: { select: { id: true, title: true, questions: true, level: true } },
+      assignment: { select: { id: true, title: true, type: true, questions: true, level: true } },
     },
   });
 
   return NextResponse.json({
     submissions: pending.map((submission) => {
-      const questions = parseQuestions(submission.assignment.questions);
+      const isQuiz = submission.assignment.type === "quiz";
+      const questions = isQuiz ? parseQuestions(submission.assignment.questions) : [];
       const answers = Array.isArray(submission.answers) ? submission.answers : [];
       const auto = (submission.questionScores ?? []) as unknown as QuestionResult[];
 
@@ -77,9 +79,10 @@ export async function GET(req: NextRequest) {
           studentCode: submission.student.studentCode,
           level: submission.student.level,
         },
-        assignment: { id: submission.assignment.id, title: submission.assignment.title },
+        assignment: { id: submission.assignment.id, title: submission.assignment.title, type: submission.assignment.type },
         // Only the questions that actually need a human. The auto-marked ones
         // are already settled and would just be noise in a marking queue.
+        // Empty for a document — it has no questions at all, see `document`.
         toMark: questions
           .map((question, index) => ({ question, index }))
           .filter(({ question }) => question.type === "paragraph")
@@ -91,6 +94,11 @@ export async function GET(req: NextRequest) {
             answer: typeof answers[index] === "string" ? (answers[index] as string) : "",
           })),
         autoEarned: auto.reduce((sum, entry) => sum + (entry?.earned ?? 0), 0),
+        // A document has no questions to walk — what the tutor has to read is
+        // the whole handed-in thing: the written text and/or the attached file.
+        document: isQuiz
+          ? null
+          : { text: submission.text, filePath: submission.filePath, fileName: submission.fileName },
       };
     }),
   });
@@ -101,7 +109,7 @@ export async function POST(req: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const { submissionId, marks, feedback } = await req.json();
+    const { submissionId, marks, feedback, score } = await req.json();
     if (!submissionId) {
       return NextResponse.json({ error: "submissionId is required" }, { status: 400 });
     }
@@ -121,34 +129,53 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const questions = parseQuestions(submission.assignment.questions);
-    const auto = (submission.questionScores ?? []) as unknown as QuestionResult[];
+    const isQuiz = submission.assignment.type === "quiz";
 
-    // finaliseScore clamps each mark to what its question is worth, so a
-    // mistyped 100 in a box worth 10 cannot invent marks.
-    const final = finaliseScore(questions, auto, marks);
+    let finalScore: number;
+    let finalFeedback: string;
+    let questionScoresUpdate: object[] | undefined;
 
-    // Fold the awarded marks back into the per-question record, so the paper
-    // can be re-read later as a whole rather than as auto marks plus a total.
-    const merged = questions.map((question, index) => {
-      if (question.type !== "paragraph") return auto[index] ?? null;
-      const raw = Number(Array.isArray(marks) ? marks[index] : 0);
-      const earned = Number.isFinite(raw) ? Math.max(0, Math.min(raw, question.points)) : 0;
-      return { earned, possible: question.points, correct: earned === question.points, needsReview: false };
-    });
+    if (isQuiz) {
+      const questions = parseQuestions(submission.assignment.questions);
+      const auto = (submission.questionScores ?? []) as unknown as QuestionResult[];
+
+      // finaliseScore clamps each mark to what its question is worth, so a
+      // mistyped 100 in a box worth 10 cannot invent marks.
+      const final = finaliseScore(questions, auto, marks);
+      finalScore = final.score;
+
+      // Fold the awarded marks back into the per-question record, so the
+      // paper can be re-read later as a whole rather than as auto marks plus
+      // a total.
+      questionScoresUpdate = questions.map((question, index) => {
+        if (question.type !== "paragraph") return auto[index] ?? null;
+        const raw = Number(Array.isArray(marks) ? marks[index] : 0);
+        const earned = Number.isFinite(raw) ? Math.max(0, Math.min(raw, question.points)) : 0;
+        return { earned, possible: question.points, correct: earned === question.points, needsReview: false };
+      }) as unknown as object[];
+
+      finalFeedback =
+        typeof feedback === "string" && feedback.trim()
+          ? feedback.trim()
+          : `${final.earned} of ${final.possible} marks.`;
+    } else {
+      // A document has no questions to weigh a score against, so the tutor
+      // gives one holistic mark out of 100 — same scale as everything else on
+      // the transcript (see Grade.score).
+      const raw = Number(score);
+      finalScore = Number.isFinite(raw) ? Math.max(0, Math.min(Math.round(raw), 100)) : 0;
+      finalFeedback = typeof feedback === "string" && feedback.trim() ? feedback.trim() : `${finalScore} / 100.`;
+    }
 
     const updated = await prisma.assignmentSubmission.update({
       where: { id: submission.id },
       data: {
-        score: final.score,
-        questionScores: merged as unknown as object[],
+        score: finalScore,
+        ...(questionScoresUpdate ? { questionScores: questionScoresUpdate } : {}),
         needsReview: false,
         markedById: auth.userId,
         markedAt: new Date(),
-        feedback:
-          typeof feedback === "string" && feedback.trim()
-            ? feedback.trim()
-            : `${final.earned} of ${final.possible} marks.`,
+        feedback: finalFeedback,
       },
     });
 
@@ -158,31 +185,35 @@ export async function POST(req: NextRequest) {
       await prisma.grade.create({
         data: {
           studentId: submission.studentId,
-          type: "quiz",
-          score: final.score,
+          type: isQuiz ? "quiz" : "assignment",
+          score: finalScore,
           feedback: updated.feedback,
+          lecturerId: auth.lecturerId,
         },
       });
-      void recordSkillOutcome({ studentId: submission.studentId, skill: "grammar", score: final.score });
+      if (isQuiz) {
+        void recordSkillOutcome({ studentId: submission.studentId, skill: "grammar", score: finalScore });
+      }
     } catch (error) {
-      console.warn("Could not record marked quiz grade:", error);
+      console.warn("Could not record marked grade:", error);
     }
 
     // The one grading path that used to leave the student finding out by
     // opening the page and checking — see gradebook/route.ts and
     // grades/roster/route.ts, which already do this on every score change.
+    const attribution = await attributeTutorAction(submission.studentId, auth.lecturerId);
     await notify({
       to: { studentIds: [submission.studentId] },
       kind: KIND.resultPublished,
       severity: "info",
       title: "Your submission has been marked",
-      message: "Your tutor finished marking your work. Open your results to see it.",
+      message: `${tutorPhrase(attribution)} finished marking your work. Open your results to see it.`,
       link: "/results",
       dedupeKey: `submission-marked:${submission.id}`,
       push: true,
     }).catch((error) => console.error("Marking notification failed", error));
 
-    return NextResponse.json({ score: final.score, earned: final.earned, possible: final.possible });
+    return NextResponse.json({ score: finalScore });
   } catch (error) {
     console.error("Marking failed:", error);
     return NextResponse.json({ error: "Unable to save the marks" }, { status: 500 });
