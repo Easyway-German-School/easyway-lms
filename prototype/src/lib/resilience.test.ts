@@ -210,3 +210,40 @@ describe("registry", () => {
     expect(names).toEqual([...names].sort());
   });
 });
+
+describe("withTimeout", () => {
+  it("returns the result of work that finishes in time", async () => {
+    const { withTimeout } = await import("./resilience");
+    await expect(withTimeout(async () => "done", 1000, "quick")).resolves.toBe("done");
+  });
+
+  it("rejects with a TimeoutError naming the work when it takes too long", async () => {
+    const { withTimeout, TimeoutError } = await import("./resilience");
+    const error = (await withTimeout(() => new Promise(() => {}), 20, "stuck job").catch((e) => e)) as Error;
+    expect(error).toBeInstanceOf(TimeoutError);
+    expect(error.message).toContain("stuck job");
+  });
+
+  it("passes the work's own error straight through", async () => {
+    const { withTimeout } = await import("./resilience");
+    await expect(withTimeout(() => Promise.reject(new Error("real failure")), 1000)).rejects.toThrow("real failure");
+  });
+
+  it("stops the wait, NOT the work: the abandoned job keeps running, and its later failure is swallowed", async () => {
+    const { withTimeout } = await import("./resilience");
+    let finished = false;
+    let unhandled = false;
+    const onUnhandled = () => (unhandled = true);
+    process.on("unhandledRejection", onUnhandled);
+    await withTimeout(
+      () => new Promise<void>((_resolve, reject) => setTimeout(() => { finished = true; reject(new Error("late failure")); }, 60)),
+      10,
+      "slow",
+    ).catch(() => {});
+    expect(finished).toBe(false); // we already moved on
+    await new Promise((r) => setTimeout(r, 120));
+    expect(finished).toBe(true); // ...but it did keep working
+    expect(unhandled).toBe(false); // ...and its failure did not crash anything
+    process.off("unhandledRejection", onUnhandled);
+  });
+});

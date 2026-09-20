@@ -326,3 +326,56 @@ function register(item: Registered) {
 export function snapshotAll(): Array<BreakerSnapshot | BulkheadSnapshot> {
   return [...registry.values()].map((item) => item.snapshot()).sort((a, b) => a.name.localeCompare(b.name));
 }
+
+// ---------------------------------------------------------------------------
+// 4. TIMEOUT
+// ---------------------------------------------------------------------------
+
+export class TimeoutError extends Error {
+  constructor(
+    readonly label: string,
+    readonly ms: number,
+  ) {
+    super(`"${label}" did not finish within ${Math.round(ms / 100) / 10}s`);
+    this.name = "TimeoutError";
+  }
+}
+
+/**
+ * Stop WAITING for something that is taking too long.
+ *
+ * READ THAT CAREFULLY: this stops the wait, not the work. JavaScript cannot kill
+ * a promise that is already running. The slow job carries on in the background
+ * until it finishes or the function is frozen; all a timeout does is let YOUR
+ * code stop standing still and move on. That is exactly what a bulkhead needs —
+ * one slow compartment must not hold up the rest — but it means two rules:
+ *
+ *  1. Where you can, ALSO give the work its own way to stop (an AbortSignal on a
+ *     fetch, as guarded-fetch.ts does). Then the work really ends, instead of
+ *     carrying on unseen.
+ *  2. The abandoned work's eventual failure must not crash anything. This
+ *     attaches a no-op catch to it: an unhandled rejection from a job nobody is
+ *     waiting for any more would otherwise be a process-level error.
+ *
+ * `setTimeout` is looked up at call time and the timer is cleared as soon as the
+ * work settles, so a fast job leaves nothing behind.
+ */
+export function withTimeout<T>(work: () => Promise<T>, ms: number, label = "operation"): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const running = Promise.resolve().then(work);
+    const timer = setTimeout(() => {
+      running.catch(() => {}); // nobody is waiting any more; its failure is not news
+      reject(new TimeoutError(label, ms));
+    }, ms);
+    running.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
