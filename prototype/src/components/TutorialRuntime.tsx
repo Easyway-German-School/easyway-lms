@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import TutorialOverlay from "@/components/TutorialOverlay";
 import { CrossIcon, PlayIcon } from "@/components/icons";
-import { MOMENT_PREEMPT_EVENT } from "@/lib/moment-queue";
+import { setMomentPreempted } from "@/lib/moment-queue";
 import {
   buildTutorials,
   buildWelcomeTutorial,
@@ -78,6 +78,14 @@ export default function TutorialRuntime() {
 
   const active = Boolean(run && tutorial && step && run.expectedRoute === pathname);
 
+  // A step is only "shown" once its overlay has actually drawn (see
+  // TutorialOverlay: it waits for the target). Narration waits for that too, so
+  // Becca never starts talking over a page that is still showing its loader.
+  // Keyed by step id, so a new step is un-shown again automatically.
+  const [shownStepId, setShownStepId] = useState<string | null>(null);
+  const shown = Boolean(step && shownStepId === step.id);
+  const handleShown = useCallback((id: string) => setShownStepId(id), []);
+
   /**
    * A `welcome` run is known synchronously (sessionStorage) on the very first
    * render, but `tutorial` for it stays null until the onboarding fetch
@@ -94,9 +102,7 @@ export default function TutorialRuntime() {
   // open mid-walkthrough.
   useEffect(() => {
     const dispatch = (wantsActive: boolean) => {
-      window.dispatchEvent(
-        new CustomEvent(MOMENT_PREEMPT_EVENT, { detail: { active: wantsActive, source: "tutorial" } }),
-      );
+      setMomentPreempted("tutorial", wantsActive);
     };
     dispatch(active || pendingOnRoute);
     return () => dispatch(false);
@@ -108,6 +114,7 @@ export default function TutorialRuntime() {
   // dismissed onboarding should not be walked through it again either.
   const finishTutorial = useCallback(() => {
     stopSpeaking();
+    setMomentPreempted("tutorial", false);
     if (tutorial) {
       tutorial.onFinish?.();
       markTutorialCompleted(tutorial.id);
@@ -181,18 +188,22 @@ export default function TutorialRuntime() {
     };
   }, [active]);
 
-  // Narration, with a timed fallback so a step still advances when speech is
-  // unavailable, blocked, or the student has muted it. `handleNext` is read
-  // through a ref so a fresh timer isn't created every time it's redefined.
+  // Narration. A step NEVER moves on by itself — the student taps Next when
+  // they are ready. Reading at their own pace matters more than a hands-free
+  // demo, and a tour that navigates away mid-sentence (or mid-read, for
+  // someone slower to read or new to phones) is a tour they abandon. Only a
+  // step that explicitly sets `autoAdvance: true` advances after narration.
+  // `handleNext` is read through a ref so a fresh timer isn't created every
+  // time it's redefined.
   const handleNextRef = useRef(handleNext);
   handleNextRef.current = handleNext;
   useEffect(() => {
-    if (!active || !step) return;
+    if (!active || !step || !shown) return;
     let cancelled = false;
     let timer: number | null = null;
 
     const scheduleAdvance = (delay: number) => {
-      if (step.autoAdvance === false) return;
+      if (step.autoAdvance !== true) return;
       timer = window.setTimeout(() => {
         if (!cancelled) handleNextRef.current();
       }, delay);
@@ -214,7 +225,16 @@ export default function TutorialRuntime() {
       stopSpeaking();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, step, run?.muted]);
+  }, [active, shown, step?.id, step?.narration, step?.autoAdvance, step?.autoAdvanceMs, run?.muted]);
+
+  // Warm the next page while the student reads this one. A step that carries
+  // them to another route then lands at once instead of suspending on the
+  // route-level loader — which is what made the loader flash mid-tour.
+  useEffect(() => {
+    if (!active || !run || !tutorial) return;
+    const upcoming = tutorial.steps[run.stepIndex + 1]?.route;
+    if (upcoming && upcoming !== pathname) router.prefetch(upcoming);
+  }, [active, run, tutorial, pathname, router]);
 
   useEffect(() => {
     if (!active) return;
@@ -266,6 +286,7 @@ export default function TutorialRuntime() {
       onBack={handleBack}
       onExit={handleExit}
       onToggleMute={handleToggleMute}
+      onShown={handleShown}
     />
   );
 }

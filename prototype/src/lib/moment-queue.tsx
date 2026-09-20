@@ -94,6 +94,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useLayoutEffect,
   type ReactNode,
 } from "react";
 /* eslint-disable react-hooks/exhaustive-deps -- the action callbacks are
@@ -417,6 +418,11 @@ const SETTLE_CEILING_MS = 2600;
  */
 export const MOMENT_PREEMPT_EVENT = "easyway:moment-preempt";
 
+export function setMomentPreempted(source: string, active: boolean) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(MOMENT_PREEMPT_EVENT, { detail: { active, source } }));
+}
+
 /* -------------------------------------------------------------------------- */
 /* The director                                                               */
 /* -------------------------------------------------------------------------- */
@@ -570,7 +576,7 @@ export function MomentQueueProvider({ children }: { children: ReactNode }) {
    * cancel another's.
    */
   const [preemptedBy, setPreemptedBy] = useState<Set<string>>(() => new Set());
-  useEffect(() => {
+  useLayoutEffect(() => {
     const onPreempt = (event: Event) => {
       const detail = (event as CustomEvent<{ active?: boolean; source?: string }>).detail;
       const source = detail?.source ?? "unknown";

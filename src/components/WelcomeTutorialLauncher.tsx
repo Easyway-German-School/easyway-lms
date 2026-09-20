@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useMoment } from "@/lib/moment-queue";
+import { setMomentPreempted, useMoment } from "@/lib/moment-queue";
 import { useOnboardingProfile } from "@/lib/use-onboarding";
 import { writeTutorialRun } from "@/lib/tutorials";
 
@@ -27,6 +27,7 @@ export default function WelcomeTutorialLauncher() {
 
   useEffect(() => {
     if (!open) return;
+    setMomentPreempted("tutorial", true);
     writeTutorialRun({ tutorialId: "welcome", stepIndex: 0, muted: false, expectedRoute: "/dashboard" });
     close();
   }, [open, close]);

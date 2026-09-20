@@ -9,6 +9,7 @@ import { CheckCircleIcon, ClockIcon, PlayIcon } from "@/components/icons";
 import { buildTutorials, writeTutorialRun, type Tutorial } from "@/lib/tutorials";
 import { getCompletedTutorialIds } from "@/lib/tutorial-progress";
 import { unlockSpeechSynthesis } from "@/lib/tutorial-speech";
+import { setMomentPreempted } from "@/lib/moment-queue";
 import { useStudentAccess } from "@/lib/useStudentAccess";
 
 /**
@@ -41,6 +42,7 @@ export default function TutorialsPage() {
     // the client-side route change that follows, on browsers (iOS Safari)
     // that otherwise require speech to originate from a user gesture.
     unlockSpeechSynthesis();
+    setMomentPreempted("tutorial", true);
     const first = tutorial.steps[0];
     const expectedRoute = first.route ?? "/tutorials";
     writeTutorialRun({ tutorialId: tutorial.id, stepIndex: 0, muted: false, expectedRoute });
