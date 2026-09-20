@@ -170,6 +170,7 @@ const navItems: NavItem[] = [
   { label: 'Notification rules', href: '/admin/notification-settings', icon: <SlidersIcon />, group: 'Settings' },
   { label: 'Admin roles', href: '/admin/staff', icon: <ShieldIcon />, group: 'Settings' },
   { label: 'Security & recovery', href: '/admin/security', icon: <KeyIcon />, group: 'Settings' },
+  { label: 'Mission control', href: '/admin/developer', icon: <PulseIcon />, group: 'Settings' },
   { label: 'Integrations', href: '/admin/integrations', icon: <IntegrationIcon />, group: 'Settings' },
   // Built with the platform layer and reachable only by POSTing JSON by hand
   // until now. The office that needs to notice an endpoint has gone quiet is
