@@ -2,9 +2,11 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
+import { SiteFooter } from "@/components/SiteChrome";
+import PageHero from "@/components/PageHero";
 import NeedHelp from "@/components/NeedHelp";
 import EditBookingDetails from "@/components/EditBookingDetails";
+import hallstatt from "@/assets/images/hero-hallstatt.jpg";
 
 type Booking = {
   referenceCode: string;
@@ -96,14 +98,30 @@ function BookingPageInner() {
     return <Shell><p className="text-sm text-[var(--red)]">We couldn't find that booking. Check your reference code and email on the <a className="underline" href="/status">status page</a>.</p></Shell>;
   }
 
+  const confirmed = booking.seatNumber !== null;
+  const heading = confirmed
+    ? "Your seat is confirmed"
+    : booking.paymentStatus === "pending_verification"
+      ? "Payment under review"
+      : "Complete your booking";
+
   return (
     <div className="min-h-screen">
-      <SiteHeader />
-      <main className="mx-auto max-w-2xl px-6 py-12">
-        {booking.seatNumber !== null ? (
+      <PageHero
+        eyebrow={`Booking · ${booking.referenceCode}`}
+        title={heading}
+        subtitle={`${booking.session.title} · ${new Date(booking.session.startDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`}
+        image={hallstatt}
+        alt="Hallstatt, Austria, mirrored in a still alpine lake at dawn"
+        position="object-[60%_45%]"
+      />
+      <main className="relative z-10 mx-auto -mt-16 max-w-2xl px-5 pb-20 sm:px-6">
+        {confirmed ? (
           <ConfirmedTicket booking={booking} />
         ) : (
-          <PendingBooking booking={booking} email={email} onChange={load} error={error} setError={setError} justBooked={justBooked} />
+          <div className="rounded-2xl bg-white p-6 shadow-xl shadow-[var(--navy)]/15 ring-1 ring-black/5 sm:p-8">
+            <PendingBooking booking={booking} email={email} onChange={load} error={error} setError={setError} justBooked={justBooked} />
+          </div>
         )}
 
         <DocumentsPanel booking={booking} email={email} onChange={load} />
@@ -116,8 +134,16 @@ function BookingPageInner() {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
-      <SiteHeader />
-      <main className="mx-auto max-w-2xl px-6 py-16">{children}</main>
+      <PageHero
+        eyebrow="Booking"
+        title="Your booking"
+        image={hallstatt}
+        alt="Hallstatt, Austria, mirrored in a still alpine lake at dawn"
+        position="object-[60%_45%]"
+      />
+      <main className="relative z-10 mx-auto -mt-14 max-w-2xl px-5 pb-20 sm:px-6">
+        <div className="rounded-2xl bg-white p-6 shadow-xl shadow-[var(--navy)]/15 ring-1 ring-black/5 sm:p-8">{children}</div>
+      </main>
       <SiteFooter />
     </div>
   );
@@ -126,48 +152,51 @@ function Shell({ children }: { children: React.ReactNode }) {
 function ConfirmedTicket({ booking }: { booking: Booking }) {
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between print:hidden">
-        <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">Your seat is confirmed</h1>
-        <button onClick={() => window.print()} className="rounded-sm bg-[var(--navy)] px-5 py-2.5 text-sm font-semibold text-white">
-          Print admission slip
-        </button>
-      </div>
-
-      <div id="printable-ticket" className="seal-border rounded-sm bg-[var(--paper-raised)] p-8">
-        <div className="flex items-center justify-between border-b border-[var(--line)] pb-5">
-          <span className="font-serif-display text-lg font-semibold text-[var(--navy)]">Easyway ÖSD Examination Centre</span>
-          <span className="rounded-sm bg-[var(--gold-soft)] px-3 py-1 text-xs font-bold uppercase tracking-wide text-[var(--navy)]">Admission Slip</span>
+      <div id="printable-ticket" className="overflow-hidden rounded-2xl bg-white shadow-xl shadow-[var(--navy)]/15 ring-1 ring-black/5 print:rounded-none print:shadow-none print:ring-black/30">
+        <div className="flex items-center justify-between gap-3 bg-gradient-to-r from-[var(--navy)] to-[#12325c] px-6 py-4 text-white print:bg-none print:text-[var(--navy)]">
+          <span className="font-serif-display text-base font-semibold sm:text-lg">Easyway ÖSD Examination Centre</span>
+          <span className="shrink-0 rounded-full bg-[var(--gold-bright)] px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-[var(--navy-deep)] print:bg-transparent print:ring-1 print:ring-black/40">
+            Admission Slip
+          </span>
         </div>
 
-        <h2 className="mt-5 text-xl font-semibold text-[var(--navy)]">{booking.session.title}</h2>
-        <p className="text-sm text-[var(--ink-soft)]">
-          {booking.session.venueName}, {booking.session.venueAddress}
-        </p>
-        <p className="text-sm text-[var(--ink-soft)]">
-          {new Date(booking.session.startDate).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
-        </p>
-        <p className="mt-1 text-xs font-semibold text-[var(--red)]">Please arrive 30 minutes early.</p>
+        <div className="grid sm:grid-cols-[1fr_11rem] print:grid-cols-[1fr_11rem]">
+          <div className="p-6 sm:p-8">
+            <h2 className="text-xl font-semibold text-[var(--navy)]">{booking.session.title}</h2>
+            <p className="mt-1 text-sm text-[var(--ink-soft)]">
+              {booking.session.venueName}, {booking.session.venueAddress}
+            </p>
+            <p className="text-sm text-[var(--ink-soft)]">
+              {new Date(booking.session.startDate).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            </p>
+            <p className="mt-1 text-xs font-semibold text-[var(--red)]">Please arrive 30 minutes early.</p>
 
-        <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-[var(--line)] pt-6 text-sm">
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-[var(--ink-soft)]">Candidate</dt>
-            <dd className="font-semibold text-[var(--navy)]">{booking.fullName}</dd>
+            <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-[var(--line)] pt-6 text-sm">
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-[var(--ink-soft)]">Candidate</dt>
+                <dd className="font-semibold text-[var(--navy)]">{booking.fullName}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-[var(--ink-soft)]">Reference</dt>
+                <dd className="font-mono font-semibold text-[var(--navy)]">{booking.referenceCode}</dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-xs uppercase tracking-wide text-[var(--ink-soft)]">Modules</dt>
+                <dd className="font-semibold text-[var(--navy)]">{booking.modules.includes("full") ? "Whole exam" : booking.modules.join(", ")}</dd>
+              </div>
+            </dl>
           </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-[var(--ink-soft)]">Reference</dt>
-            <dd className="font-mono font-semibold text-[var(--navy)]">{booking.referenceCode}</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-[var(--ink-soft)]">Modules</dt>
-            <dd className="font-semibold text-[var(--navy)]">{booking.modules.includes("full") ? "Whole exam" : booking.modules.join(", ")}</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-[var(--ink-soft)]">Seat number</dt>
-            <dd className="font-serif-display text-2xl font-bold text-[var(--gold)]">{booking.seatNumber}</dd>
-          </div>
-        </dl>
 
-        <p className="mt-8 border-t border-[var(--line)] pt-4 text-xs leading-5 text-[var(--ink-soft)]">
+          {/* The stub: the seat number is the whole point of the page. */}
+          <div className="flex flex-col items-center justify-center border-t border-dashed border-[var(--line)] bg-gradient-to-b from-[var(--gold-soft)] to-[#fbf6e6] p-6 text-center sm:border-l sm:border-t-0 print:border-l print:border-t-0 print:bg-none">
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[var(--ink-soft)]">Seat</p>
+            <p className="font-serif-display text-7xl font-bold leading-none text-[var(--navy)]">{booking.seatNumber}</p>
+            <div className="barcode mt-5 w-24 text-[var(--navy)]" aria-hidden="true" />
+            <p className="mt-2 font-mono text-[10px] tracking-widest text-[var(--ink-soft)]">{booking.referenceCode}</p>
+          </div>
+        </div>
+
+        <p className="border-t border-[var(--line)] px-6 py-4 text-xs leading-5 text-[var(--ink-soft)] sm:px-8">
           Bring this slip, your international passport's data page, and a normal ballpoint pen. Mobile phones and
           smart watches must be switched off during the exam.
           {booking.documentStatus !== "approved" && (
@@ -178,7 +207,13 @@ function ConfirmedTicket({ booking }: { booking: Booking }) {
         </p>
       </div>
 
-      <div className="mt-8 rounded-sm border border-[var(--line)] p-5 print:hidden">
+      <div className="mt-5 flex justify-end print:hidden">
+        <button onClick={() => window.print()} className="rounded-full bg-[var(--navy)] px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-[var(--navy)]/25 transition hover:brightness-125">
+          Print admission slip
+        </button>
+      </div>
+
+      <div className="mt-8 rounded-lg border border-[var(--line)] p-5 print:hidden">
         <p className="text-sm font-semibold text-[var(--navy)]">What to bring, and what not to do</p>
         <ul className="mt-2 space-y-1.5 text-sm text-[var(--ink-soft)]">
           <li>• This admission slip, printed, and your international passport's data page.</li>
@@ -191,7 +226,7 @@ function ConfirmedTicket({ booking }: { booking: Booking }) {
         </div>
       </div>
 
-      <div className="mt-8 rounded-sm border border-[var(--line)] bg-[var(--gold-soft)]/30 p-5 print:hidden">
+      <div className="mt-8 rounded-lg border border-[var(--line)] bg-[var(--gold-soft)]/30 p-5 print:hidden">
         <p className="text-sm font-semibold text-[var(--navy)]">Ready to prepare?</p>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">
           ÖSD rewards candidates who know its format. Easyway's prep classes practise exactly the way the exam is marked.
@@ -267,14 +302,17 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
   return (
     <div>
       {justBooked && (
-        <div className="mb-6 rounded-sm border border-[var(--gold)] bg-[var(--gold-soft)] px-5 py-4">
-          <p className="font-serif-display text-lg font-semibold text-[var(--navy)]">Congratulations on your booking!</p>
-          <p className="mt-1 text-sm text-[var(--ink-soft)]">
-            We've emailed your reference code to {booking.email}. Complete payment below to reserve your seat.
+        <div className="relative mb-6 overflow-hidden rounded-xl bg-gradient-to-br from-[var(--navy)] via-[#12325c] to-[var(--navy)] px-5 py-5 text-white ring-1 ring-[var(--gold-bright)]/50">
+          <div className="pointer-events-none absolute -right-8 -top-10 h-32 w-32 rounded-full bg-[var(--gold-bright)]/25 blur-2xl" />
+          <p className="font-serif-display relative text-xl font-semibold">
+            Congratulations on your booking! <span aria-hidden="true">✈</span>
+          </p>
+          <p className="relative mt-1.5 text-sm text-white/80">
+            We&apos;ve emailed your reference code to {booking.email}. Complete payment below to reserve your seat.
           </p>
         </div>
       )}
-      <h1 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">{booking.session.title}</h1>
+      <h2 className="font-serif-display text-2xl font-semibold text-[var(--navy)]">{booking.session.title}</h2>
       <p className="mt-1 text-sm text-[var(--ink-soft)]">Reference: <span className="font-mono">{booking.referenceCode}</span></p>
 
       {booking.paymentStatus === "unpaid" && (
@@ -291,19 +329,19 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
         />
       )}
 
-      {error && <p className="mt-4 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
+      {error && <p className="mt-4 rounded-lg bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
 
       {booking.paymentStatus === "pending_verification" && (
-        <p className="mt-6 rounded-sm bg-[var(--gold-soft)] px-4 py-3 text-sm font-semibold text-[var(--navy)]">
+        <p className="mt-6 rounded-lg bg-[var(--gold-soft)] px-4 py-3 text-sm font-semibold text-[var(--navy)]">
           Payment slip submitted — the office is confirming it landed. Your seat number will appear here once confirmed.
         </p>
       )}
 
       {booking.paymentStatus === "unpaid" && (
-        <div className="mt-6 seal-border rounded-sm bg-[var(--paper-raised)] p-6">
+        <div className="mt-6 seal-border rounded-lg bg-[var(--paper-raised)] p-6">
           <p className="text-sm font-semibold text-[var(--navy)]">Amount due: ₦{booking.feeTotal.toLocaleString()}</p>
           {booking.transferRejectedReason && (
-            <p className="mt-2 rounded-sm bg-[var(--red-soft)] p-3 text-xs text-[var(--red)]">
+            <p className="mt-2 rounded-lg bg-[var(--red-soft)] p-3 text-xs text-[var(--red)]">
               Your last transfer couldn't be confirmed: {booking.transferRejectedReason}
             </p>
           )}
@@ -323,12 +361,12 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
               </label>
               <input
                 type="text" placeholder="Transfer reference (optional)" value={reference} onChange={(e) => setReference(e.target.value)}
-                className="mt-2 w-full rounded-sm border border-[var(--line)] px-3 py-2 text-xs"
+                className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
               />
               <button
                 onClick={submitSlip}
                 disabled={!slipFile || submitting}
-                className="mt-3 rounded-sm bg-[var(--gold)] px-5 py-2.5 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40"
+                className="mt-3 rounded-lg bg-[var(--gold)] px-5 py-2.5 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40"
               >
                 {submitting ? "Submitting…" : "I've paid — submit receipt"}
               </button>
@@ -348,7 +386,7 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
               <button
                 onClick={payByCard}
                 disabled={startingCard}
-                className="mt-3 rounded-sm border border-[var(--navy)] px-5 py-2.5 text-sm font-semibold text-[var(--navy)] disabled:opacity-40"
+                className="mt-3 rounded-lg border border-[var(--navy)] px-5 py-2.5 text-sm font-semibold text-[var(--navy)] disabled:opacity-40"
               >
                 {startingCard ? "Opening checkout…" : "Pay by international card"}
               </button>
@@ -389,11 +427,11 @@ function DocumentsPanel({ booking, email, onChange }: { booking: Booking; email:
   }
 
   return (
-    <div className="mt-8 rounded-sm border border-[var(--line)] bg-[var(--paper-raised)] p-6 print:hidden">
+    <div className="mt-8 rounded-lg border border-[var(--line)] bg-[var(--paper-raised)] p-6 print:hidden">
       <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Documents</p>
       {error && <p className="mt-2 text-xs text-[var(--red)]">{error}</p>}
       {booking.documentRejectedReason && (
-        <p className="mt-2 rounded-sm bg-[var(--red-soft)] p-2 text-xs text-[var(--red)]">{booking.documentRejectedReason}</p>
+        <p className="mt-2 rounded-lg bg-[var(--red-soft)] p-2 text-xs text-[var(--red)]">{booking.documentRejectedReason}</p>
       )}
       {booking.documentStatus === "approved" && <p className="mt-2 text-xs font-semibold text-[var(--green)]">Approved</p>}
       <div className="mt-3 grid gap-3 sm:grid-cols-2">

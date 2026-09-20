@@ -12,10 +12,13 @@ export default function NeedHelp({
   bookingReference,
   defaultName,
   defaultEmail,
+  tone = "light",
 }: {
   bookingReference?: string;
   defaultName?: string;
   defaultEmail?: string;
+  /** "dark" for use on the navy footer, where the default navy link would vanish. */
+  tone?: "light" | "dark";
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(defaultName ?? "");
@@ -49,7 +52,11 @@ export default function NeedHelp({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="text-sm font-semibold text-[var(--navy)] underline underline-offset-4"
+        className={
+          tone === "dark"
+            ? "rounded-full border border-white/25 bg-white/10 px-5 py-2 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20"
+            : "text-sm font-semibold text-[var(--navy)] underline underline-offset-4"
+        }
       >
         Need help?
       </button>
@@ -58,14 +65,14 @@ export default function NeedHelp({
 
   if (sent) {
     return (
-      <p className="rounded-sm bg-[var(--green-soft)] px-4 py-3 text-sm font-semibold text-[var(--green)]">
+      <p className="rounded-lg bg-[var(--green-soft)] px-4 py-3 text-sm font-semibold text-[var(--green)]">
         Message sent — the office will get back to you at {email}.
       </p>
     );
   }
 
   return (
-    <div className="seal-border rounded-sm bg-[var(--paper-raised)] p-4 text-left">
+    <div className="seal-border rounded-lg bg-[var(--paper-raised)] p-4 text-left">
       <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Send a message to the office</p>
       {error && <p className="mt-2 text-xs text-[var(--red)]">{error}</p>}
       <input
@@ -82,14 +89,14 @@ export default function NeedHelp({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Your name"
-          className="rounded-sm border border-[var(--line)] px-3 py-2 text-xs"
+          className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
         />
         <input
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Your email"
-          className="rounded-sm border border-[var(--line)] px-3 py-2 text-xs"
+          className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
         />
       </div>
       <textarea
@@ -97,17 +104,17 @@ export default function NeedHelp({
         onChange={(e) => setMessage(e.target.value)}
         placeholder="What do you need help with?"
         rows={3}
-        className="mt-2 w-full rounded-sm border border-[var(--line)] px-3 py-2 text-xs"
+        className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
       />
       <div className="mt-2 flex gap-2">
         <button
           onClick={send}
           disabled={!name.trim() || !email.trim() || !message.trim() || sending}
-          className="rounded-sm bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+          className="rounded-lg bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
         >
           {sending ? "Sending…" : "Send"}
         </button>
-        <button onClick={() => setOpen(false)} className="rounded-sm border border-[var(--line)] px-4 py-2 text-xs font-semibold text-[var(--ink-soft)]">
+        <button onClick={() => setOpen(false)} className="rounded-lg border border-[var(--line)] px-4 py-2 text-xs font-semibold text-[var(--ink-soft)]">
           Cancel
         </button>
       </div>

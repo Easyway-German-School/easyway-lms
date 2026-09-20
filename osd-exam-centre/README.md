@@ -123,6 +123,31 @@ component library — deliberately small.
   details before paying (`updateBookingDetails` — locked once payment
   starts, so a paid/under-review booking needs the office involved instead).
 
+## Design and photography
+
+The public pages are image-led (Goethe-Institut / travel-site style): a
+full-bleed hero, boarding-pass details, dusk gradients. Everything visual
+lives in `components/home/*`, `components/PageHero.tsx` and the "travel-style
+visual system" block at the bottom of `app/globals.css`.
+
+- **Photos** are in `assets/images/` and imported statically (`import x from
+  "@/assets/images/x.jpg"`) so Next generates blur placeholders and responsive
+  sizes. All are from Wikimedia Commons under permissive licences only — CC0
+  or CC BY, never share-alike. `lib/photo-credits.generated.json` holds the
+  author/licence/source for each and drives the `/credits` page (linked from
+  the footer). **If you add or swap a photo, add its credit there too** — CC BY
+  requires the attribution.
+- **Live data**: the hero "boarding pass" and the "Departures" board read the
+  same public `/api/sessions` the booking wizard uses, so they can never
+  disagree with what is actually bookable.
+- **Honest copy**: the payment-option wording on the landing page follows
+  `cardPaymentsEnabled()` — it only mentions international cards once
+  `FLUTTERWAVE_SECRET_KEY` is set. The landing page is re-rendered hourly
+  (`revalidate = 3600`) so it catches up after a config change.
+- **Link preview** (WhatsApp/Slack/iMessage) is `app/opengraph-image.tsx`.
+- Motion (Ken Burns, ticker, scroll-reveal) is disabled under
+  `prefers-reduced-motion`.
+
 ## Local setup
 
 ```bash

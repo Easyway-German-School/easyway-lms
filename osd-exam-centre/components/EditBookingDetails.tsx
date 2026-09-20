@@ -68,7 +68,7 @@ export default function EditBookingDetails({
   }
 
   return (
-    <div className="mt-2 seal-border rounded-sm bg-[var(--paper-raised)] p-4">
+    <div className="mt-2 seal-border rounded-lg bg-[var(--paper-raised)] p-4">
       <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Edit your details</p>
       <p className="mt-1 text-[11px] text-[var(--red)]">
         Make sure your name matches your passport exactly — this prints on your certificate.
@@ -89,10 +89,10 @@ export default function EditBookingDetails({
         <I label="ID expiry date" type="date" value={form.idExpiry} onChange={(v) => setForm({ ...form, idExpiry: v })} full />
       </div>
       <div className="mt-3 flex gap-2">
-        <button onClick={save} disabled={saving} className="rounded-sm bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">
+        <button onClick={save} disabled={saving} className="rounded-lg bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">
           {saving ? "Saving…" : "Save changes"}
         </button>
-        <button onClick={() => setOpen(false)} className="rounded-sm border border-[var(--line)] px-4 py-2 text-xs font-semibold text-[var(--ink-soft)]">
+        <button onClick={() => setOpen(false)} className="rounded-lg border border-[var(--line)] px-4 py-2 text-xs font-semibold text-[var(--ink-soft)]">
           Cancel
         </button>
       </div>
@@ -108,7 +108,7 @@ function I({ label, value, onChange, type = "text", full }: { label: string; val
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-0.5 w-full rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs focus:border-[var(--navy)] focus:outline-none"
+        className="mt-0.5 w-full rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs focus:border-[var(--navy)] focus:outline-none"
       />
     </label>
   );

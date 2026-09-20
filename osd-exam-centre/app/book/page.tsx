@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
+import { SiteFooter } from "@/components/SiteChrome";
+import PageHero from "@/components/PageHero";
+import vienna from "@/assets/images/vienna.jpg";
 
 type ModulePrice = { module: string; price: number };
 type Session = {
@@ -122,21 +124,31 @@ export default function BookPage() {
 
   return (
     <div className="min-h-screen">
-      <SiteHeader />
-      <main className="mx-auto max-w-2xl px-6 py-12">
-        <h1 className="font-serif-display text-3xl font-semibold text-[var(--navy)]">Register for your exam</h1>
-
-        <div className="mt-6 flex items-center gap-2">
-          {STEP_TITLES.map((title, i) => (
-            <div key={title} className="flex flex-1 items-center gap-2">
-              <span className="step-dot" data-active={i === step} data-done={i < step} />
-              <span className={`text-xs font-medium ${i === step ? "text-[var(--navy)]" : "text-[var(--ink-soft)]"}`}>{title}</span>
-              {i < STEP_TITLES.length - 1 && <span className="h-px flex-1 bg-[var(--line)]" />}
-            </div>
-          ))}
+      <PageHero
+        eyebrow="Registration"
+        title="Register for your exam"
+        subtitle="Four short steps. Your seat is reserved automatically the moment your payment is confirmed."
+        image={vienna}
+        alt="Vienna's skyline reflected in still water at sunset"
+        position="object-[40%_50%]"
+      />
+      <main className="relative z-10 mx-auto -mt-16 max-w-2xl px-5 pb-20 sm:px-6">
+        <div className="rounded-2xl bg-white px-5 py-4 shadow-xl shadow-[var(--navy)]/15 ring-1 ring-black/5">
+          <div className="hidden items-center gap-2 sm:flex">
+            {STEP_TITLES.map((title, i) => (
+              <div key={title} className="flex flex-1 items-center gap-2">
+                <span className="step-dot" data-active={i === step} data-done={i < step} />
+                <span className={`text-xs font-medium ${i === step ? "text-[var(--navy)]" : "text-[var(--ink-soft)]"}`}>{title}</span>
+                {i < STEP_TITLES.length - 1 && <span className="h-px flex-1 bg-[var(--line)]" />}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs font-semibold text-[var(--navy)] sm:hidden">
+            Step {step + 1} of {STEP_TITLES.length} · {STEP_TITLES[step]}
+          </p>
         </div>
 
-        {error && <p className="mt-6 rounded-sm bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
+        {error &&<p className="mt-6 rounded-lg bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
 
         {/* Honeypot: real candidates never see this field. */}
         <input
@@ -150,7 +162,7 @@ export default function BookPage() {
           style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
         />
 
-        <div className="mt-8 seal-border rounded-sm bg-[var(--paper-raised)] p-6">
+        <div className="mt-8 seal-border rounded-lg bg-[var(--paper-raised)] p-6">
           {step === 0 && (
             <div className="space-y-3">
               {!loaded ? (
@@ -161,13 +173,13 @@ export default function BookPage() {
                 sessions.map((s) => (
                   <label
                     key={s.id}
-                    className={`block cursor-pointer rounded-sm border p-4 ${sessionId === s.id ? "border-[var(--gold)] bg-[var(--gold-soft)]/30" : "border-[var(--line)]"}`}
+                    className={`block cursor-pointer rounded-lg border p-4 ${sessionId === s.id ? "border-[var(--gold)] bg-[var(--gold-soft)]/30" : "border-[var(--line)]"}`}
                   >
                     <input type="radio" name="session" className="sr-only" checked={sessionId === s.id} onChange={() => setSessionId(s.id)} />
                     <p className="font-semibold text-[var(--navy)]">{s.title}</p>
                     <p className="mt-1 text-sm text-[var(--ink-soft)]">
                       {s.venueName} · {new Date(s.startDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
-                      {s.endDate !== s.startDate && ` – ${new Date(s.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "long" })}`}
+                      {new Date(s.endDate).toDateString() !== new Date(s.startDate).toDateString() && ` –${new Date(s.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "long" })}`}
                     </p>
                     <p className="mt-1 text-xs text-[var(--ink-soft)]">
                       {s.remaining > 0 ? `${s.remaining} of ${s.capacity} seats left` : "Full"} · from ₦{s.feeWholeExam.toLocaleString()}
@@ -209,7 +221,7 @@ export default function BookPage() {
                 <select
                   value={form.idType}
                   onChange={(e) => setForm({ ...form, idType: e.target.value })}
-                  className="mt-1.5 w-full rounded-sm border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
+                  className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
                 >
                   <option value="">Select…</option>
                   <option value="International Passport">International Passport</option>
@@ -234,7 +246,7 @@ export default function BookPage() {
                   onChange={(e) => setForm({ ...form, specialNeeds: e.target.value })}
                   rows={2}
                   placeholder="Leave blank if none. If you require an accommodation, describe it here — the office will follow up."
-                  className="mt-1.5 w-full rounded-sm border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
+                  className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
                 />
               </label>
             </div>
@@ -246,7 +258,7 @@ export default function BookPage() {
                 <button
                   type="button"
                   onClick={() => setSelection("full")}
-                  className={`flex-1 rounded-sm border px-4 py-3 text-sm font-semibold ${selection === "full" ? "border-[var(--gold)] bg-[var(--gold-soft)]/30" : "border-[var(--line)]"}`}
+                  className={`flex-1 rounded-lg border px-4 py-3 text-sm font-semibold ${selection === "full" ? "border-[var(--gold)] bg-[var(--gold-soft)]/30" : "border-[var(--line)]"}`}
                 >
                   Whole exam — ₦{session.feeWholeExam.toLocaleString()}
                 </button>
@@ -254,7 +266,7 @@ export default function BookPage() {
                   type="button"
                   onClick={() => setSelection("custom")}
                   disabled={session.modulePrices.length === 0}
-                  className={`flex-1 rounded-sm border px-4 py-3 text-sm font-semibold disabled:opacity-40 ${selection === "custom" ? "border-[var(--gold)] bg-[var(--gold-soft)]/30" : "border-[var(--line)]"}`}
+                  className={`flex-1 rounded-lg border px-4 py-3 text-sm font-semibold disabled:opacity-40 ${selection === "custom" ? "border-[var(--gold)] bg-[var(--gold-soft)]/30" : "border-[var(--line)]"}`}
                 >
                   Individual modules
                 </button>
@@ -263,7 +275,7 @@ export default function BookPage() {
               {selection === "custom" && (
                 <div className="space-y-2">
                   {session.modulePrices.map((m) => (
-                    <label key={m.module} className="flex items-center justify-between rounded-sm border border-[var(--line)] px-4 py-2.5">
+                    <label key={m.module} className="flex items-center justify-between rounded-lg border border-[var(--line)] px-4 py-2.5">
                       <span className="flex items-center gap-2 text-sm">
                         <input type="checkbox" checked={modules.has(m.module)} onChange={() => toggleModule(m.module)} />
                         {MODULE_LABEL[m.module] ?? m.module}
@@ -274,7 +286,7 @@ export default function BookPage() {
                 </div>
               )}
 
-              <div className="flex items-center justify-between rounded-sm bg-[var(--gold-soft)]/40 px-4 py-3">
+              <div className="flex items-center justify-between rounded-lg bg-[var(--gold-soft)]/40 px-4 py-3">
                 <span className="text-sm font-semibold text-[var(--navy)]">Total</span>
                 <span className="font-serif-display text-2xl text-[var(--navy)]">₦{feeTotal.toLocaleString()}</span>
               </div>
@@ -292,7 +304,7 @@ export default function BookPage() {
               <Row label="Modules" value={selection === "full" ? "Whole exam" : Array.from(modules).map((m) => MODULE_LABEL[m]).join(", ")} />
               <Row label="Amount due" value={`₦${feeTotal.toLocaleString()}`} strong />
 
-              <div className="rounded-sm bg-[var(--gold-soft)]/30 p-4">
+              <div className="rounded-lg bg-[var(--gold-soft)]/30 p-4">
                 <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Examination rules</p>
                 <ul className="mt-2 space-y-1 text-xs text-[var(--ink-soft)]">
                   <li>• Do not arrive late — latecomers may not be admitted.</li>
@@ -302,7 +314,7 @@ export default function BookPage() {
                 </ul>
               </div>
 
-              <label className="mt-4 flex items-start gap-3 rounded-sm border border-[var(--line)] p-4">
+              <label className="mt-4 flex items-start gap-3 rounded-lg border border-[var(--line)] p-4">
                 <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
                 <span className="text-xs text-[var(--ink-soft)]">
                   I have read the examination rules above, and I understand this booking is{" "}
@@ -311,7 +323,7 @@ export default function BookPage() {
                 </span>
               </label>
 
-              <label className="flex items-start gap-3 rounded-sm border border-[var(--line)] p-4">
+              <label className="flex items-start gap-3 rounded-lg border border-[var(--line)] p-4">
                 <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" />
                 <span className="text-xs text-[var(--ink-soft)]">
                   I consent to Easyway German Language School collecting and processing the personal data above —
@@ -330,7 +342,7 @@ export default function BookPage() {
             type="button"
             onClick={() => setStep((s) => Math.max(0, s - 1))}
             disabled={step === 0}
-            className="rounded-sm border border-[var(--line)] px-5 py-2.5 text-sm font-semibold text-[var(--ink-soft)] disabled:opacity-40"
+            className="rounded-lg border border-[var(--line)] px-5 py-2.5 text-sm font-semibold text-[var(--ink-soft)] disabled:opacity-40"
           >
             Back
           </button>
@@ -339,7 +351,7 @@ export default function BookPage() {
               type="button"
               onClick={() => setStep((s) => s + 1)}
               disabled={!canAdvance()}
-              className="rounded-sm bg-[var(--navy)] px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+              className="rounded-lg bg-[var(--navy)] px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
             >
               Continue
             </button>
@@ -348,7 +360,7 @@ export default function BookPage() {
               type="button"
               onClick={submit}
               disabled={!canAdvance() || submitting}
-              className="rounded-sm bg-[var(--gold)] px-6 py-2.5 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40"
+              className="rounded-lg bg-[var(--gold)] px-6 py-2.5 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40"
             >
               {submitting ? "Submitting…" : "Confirm booking"}
             </button>
@@ -368,7 +380,7 @@ function Field({ label, value, onChange, type = "text" }: { label: string; value
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1.5 w-full rounded-sm border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
+        className="mt-1.5 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2.5 text-sm text-[var(--ink)] focus:border-[var(--navy)] focus:outline-none"
       />
     </label>
   );
