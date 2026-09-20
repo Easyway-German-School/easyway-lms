@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { getStudentAccess } from "@/lib/student-access";
 import { toPlayableUrl } from "@/lib/video-library";
+import { notExpiredForStudents } from "@/lib/retention";
 
 export async function GET() {
   try {
@@ -89,6 +90,9 @@ export async function GET() {
           { OR: [{ branchId: null }, { branchId: student.branchId }] },
           { OR: [{ sessionSlot: null }, { sessionSlot: student.sessionSlot }] },
           { visibleToStudents: true },
+          // A class recording past its 14-day student window must not come back
+          // here (this feeds the dashboard card and the live-room panel).
+          notExpiredForStudents(),
         ],
       },
       include: {

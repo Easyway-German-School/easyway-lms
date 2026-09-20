@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { notExpiredForStudents } from "@/lib/retention";
 import { callModel } from "@/lib/ai";
 import { parseModelJson } from "@/lib/safe-json";
 
@@ -51,6 +52,7 @@ export async function GET() {
       where: {
         kind: { in: ["video", "recording"] },
         OR: [{ level: student.level }, { course: { level: student.level } }],
+        ...notExpiredForStudents(),
       },
       include: {
         course: { select: { title: true, level: true } },

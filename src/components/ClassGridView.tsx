@@ -25,10 +25,10 @@ import {
  */
 
 /**
- * Postponed is PINK and cancelled is RED, deliberately not the same colour.
- * "Come on a different day" and "do not come" are different instructions, and
- * a student scanning a month of small boxes has only the colour to go on.
- * Neither is struck through — a postponed class still happens.
+ * A class that moved is not a colour — it sits on the day it now runs like any
+ * other class and is marked with a ring plus a "Moved from …" line (see
+ * `MOVED_RING`). Cancelled stays RED and struck through: "do not come" is the
+ * one instruction a student must never mistake for a normal day.
  */
 /**
  * Green means "you were there", and nothing else.
@@ -52,9 +52,12 @@ const STATE_STYLE: Record<string, string> = {
   before: "bg-transparent text-[var(--muted)]/50 border-transparent",
   today: "bg-amber-400 text-white border-amber-500 ring-4 ring-amber-200",
   locked: "bg-[var(--border)] text-[var(--muted)] border-[var(--border-strong)]",
-  postponed: "bg-pink-200 text-pink-800 border-pink-400",
+  postponed: "bg-[var(--surface-alt)] text-[var(--muted)] border-dashed border-[var(--border-strong)]",
   cancelled: "bg-red-100 text-red-600 border-red-300 line-through",
 };
+
+/** The mark that says "this class was moved here", on top of whatever state it is in. */
+const MOVED_RING = "ring-2 ring-offset-1 ring-[var(--accent)]";
 
 /** Parse the month label the API sends ("August 2026") back into a real date. */
 function monthStart(label: string): Date | null {
@@ -114,12 +117,18 @@ function DayPopover({
       </p>
       <p className="text-[11px] text-[var(--muted)]">{s.slot} session</p>
 
+      {s.movedFrom && (
+        <p className="mt-2 rounded-lg bg-[var(--accent-soft)] px-2 py-1 text-[11px] font-bold text-[var(--accent)]">
+          Moved from {s.movedFrom}
+        </p>
+      )}
+
       {s.status === "postponed" ? (
-        <div className="mt-2 rounded-lg bg-pink-100 px-2 py-1.5">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-pink-800">Postponed</p>
-          {/* The new date is the whole message. A student told only that
-              their class moved still has to ring the office to ask when to. */}
-          <p className="mt-0.5 text-[11px] font-semibold text-pink-900">
+        <div className="mt-2 rounded-lg bg-[var(--surface-alt)] px-2 py-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">Date to be confirmed</p>
+          {/* Only an old row that never got a new day lands here — a move with a
+              date is shown on that date instead. */}
+          <p className="mt-0.5 text-[11px] font-semibold text-[var(--foreground)]">
             {s.postponedTo
               ? `Now on ${shortDate(parseDayKey(s.postponedTo))}`
               : "Your tutor will confirm the new date"}
@@ -145,7 +154,7 @@ function DayPopover({
 
       {s.tutor && <p className="mt-2 text-[11px] text-[var(--muted)]">with {s.tutor}</p>}
 
-      {/* materialAlways, not material: a postponed class keeps its handout. */}
+      {/* materialAlways, not material: a moved class keeps its handout. */}
       {s.materialAlways && (
         <div className="mt-2">
           <a
@@ -271,10 +280,10 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
                       onBlur={() => setHoverKey((k) => (k === key ? null : k))}
                       aria-label={`${node.weekday} ${shortDate(new Date(node.date))}, ${node.startTime} to ${node.endTime}${
                         node.zoneLabel ? ` ${node.zoneLabel}` : ""
-                      }${node.state === "locked" ? ", topic locked" : ""}`}
+                      }${node.movedFrom ? ", moved from another day" : ""}${node.state === "locked" ? ", topic locked" : ""}`}
                       className={`relative flex aspect-square w-full items-center justify-center rounded-xl border-2 text-sm font-extrabold shadow-sm transition hover:scale-105 ${
                         STATE_STYLE[node.state] ?? STATE_STYLE.locked
-                      }`}
+                      } ${node.movedFrom ? MOVED_RING : ""}`}
                     >
                       {day}
                       {node.isNext && (
@@ -296,7 +305,7 @@ export default function ClassGridView({ months, nodes }: { months: Month[]; node
               <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-emerald-500" /> Held</span>
               <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-amber-400" /> Today</span>
               <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-slate-300" /> Locked</span>
-              <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-pink-300" /> Postponed</span>
+              <span className="flex items-center gap-1.5"><span className={`h-3 w-3 rounded bg-slate-300 ${MOVED_RING}`} /> Moved</span>
               <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-red-200" /> Cancelled</span>
             </div>
           </div>

@@ -12,6 +12,8 @@ type MergedSession = {
   topic: string | null;
   lecturerName: string | null;
   status: string;
+  /** Set when the class was moved here from another day. */
+  movedFrom?: string | null;
 };
 type MergedMonth = { sessions: MergedSession[] };
 type SchedulePayload = { months: MergedMonth[]; classType?: string };
@@ -35,7 +37,7 @@ function dayLabel(date: Date): string {
 
 const STATUS_LABEL: Record<string, string> = {
   cancelled: "Cancelled",
-  postponed: "Postponed",
+  postponed: "Date to be confirmed",
   held: "Completed",
 };
 
@@ -94,6 +96,17 @@ function TimetableBody() {
                       {s.topic || s.title}
                       {s.lecturerName ? ` · ${s.lecturerName}` : ""}
                     </p>
+                    {s.movedFrom ? (
+                      <p className="mt-1 text-xs font-semibold text-[var(--accent)]">
+                        Moved from{" "}
+                        {new Date(s.movedFrom).toLocaleDateString("en-GB", {
+                          weekday: "long",
+                          day: "numeric",
+                          month: "long",
+                          timeZone: "UTC",
+                        })}
+                      </p>
+                    ) : null}
                   </div>
                   {STATUS_LABEL[s.status] ? (
                     <span className="shrink-0 rounded-full bg-[var(--surface-alt)] px-3 py-1 text-xs font-semibold text-[var(--muted)]">

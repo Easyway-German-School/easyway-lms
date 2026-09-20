@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { notExpiredForStudents } from "@/lib/retention";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export async function GET() {
   const since = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
   const [missed, recordings] = await Promise.all([
     prisma.attendance.findMany({ where: { studentId: student.id, date: { gte: since }, present: false }, orderBy: { date: "desc" }, take: 12, select: { date: true, status: true, notes: true } }),
-    prisma.material.findMany({ where: { kind: "recording", level: student.level, tenantId: student.user.tenantId }, orderBy: [{ recordedAt: "desc" }, { createdAt: "desc" }], take: 12, select: { id: true, title: true, description: true, recordedAt: true, createdAt: true } }),
+    prisma.material.findMany({ where: { kind: "recording", level: student.level, tenantId: student.user.tenantId, ...notExpiredForStudents() }, orderBy: [{ recordedAt: "desc" }, { createdAt: "desc" }], take: 12, select: { id: true, title: true, description: true, recordedAt: true, createdAt: true } }),
   ]);
 
   return NextResponse.json({

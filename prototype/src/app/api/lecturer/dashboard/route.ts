@@ -132,7 +132,7 @@ export async function GET() {
       ...sessions.map((item) => ({
         id: `session-${item.id}`,
         kind: item.status,
-        title: item.status === "postponed" ? "Class postponed" : "Class cancelled",
+        title: item.status === "postponed" ? "Class moved" : "Class cancelled",
         detail:
           item.status === "postponed" && item.postponedTo
             ? `${shortDate(item.date)} moved to ${shortDate(item.postponedTo)}`

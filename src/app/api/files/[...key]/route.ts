@@ -55,6 +55,8 @@ import {
   storageConfigured,
   RECORDING_PREFIX,
 } from "@/lib/storage";
+import { prisma } from "@/lib/prisma";
+import { isExpiredForStudents } from "@/lib/retention";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +81,25 @@ export async function GET(request: NextRequest, context: { params: Promise<{ key
   // trying to walk out of the prefix.
   if (!objectKey || objectKey.includes("..")) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // The 14-day student window is a read-side rule, and this route is the one
+  // place that hands out the bytes — so a student who kept an old link (or a
+  // shared one) must not get a recording past its window, by redirect, by
+  // `?signed=1`, or by `?proxy=1`. Staff keep everything. Checked BEFORE any of
+  // those branches so none of them can route around it.
+  if (
+    session.user.role === "student" &&
+    objectKey.startsWith(RECORDING_PREFIX) &&
+    STREAMABLE_VIDEO.test(objectKey)
+  ) {
+    const recording = await prisma.classRecording.findFirst({
+      where: { objectKey },
+      select: { studentExpiresAt: true, keepForever: true },
+    });
+    if (recording && isExpiredForStudents(recording)) {
+      return NextResponse.json({ error: "This recording is no longer available." }, { status: 404 });
+    }
   }
 
   // `?signed=1`: hand back the signed bucket URL as JSON instead of redirecting.
