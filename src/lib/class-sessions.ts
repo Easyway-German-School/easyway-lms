@@ -11,7 +11,7 @@ import { readSchedulePatternSettings } from "@/lib/schedule-pattern-server";
  *
  * The generator decides WHICH days a cohort meets (batch + level rotation).
  * This decides what those days SAY: the real topic, clock times, whether the
- * class was postponed, and which material to bring. A day with no override
+ * class was moved, and which material to bring. A day with no override
  * falls back to the generated defaults, so an unedited timetable still looks
  * complete rather than empty.
  */
@@ -106,6 +106,12 @@ export type MergedSession = {
   notes: string | null;
   status: string;
   postponedTo: string | null;
+  /**
+   * The day this class was originally timetabled for, set only on the student
+   * view once a move has been applied (see `lib/schedule-moves.ts`). Null on the
+   * raw rows the tutor and admin calendars read.
+   */
+  movedFrom: string | null;
   /** True when a tutor has actually touched this day. */
   edited: boolean;
   lecturerName: string | null;
@@ -237,6 +243,7 @@ export async function getMergedSchedule(args: {
       notes: o.notes ?? null,
       status: o.status ?? "scheduled",
       postponedTo: o.postponedTo ? o.postponedTo.toISOString() : null,
+      movedFrom: null,
       edited: true,
       lecturerName: o.lecturer?.user?.name ?? null,
       material: o.material
@@ -282,6 +289,7 @@ export async function getMergedSchedule(args: {
         notes: closedByHoliday ? `School closed — ${holidayLabel}` : override?.notes ?? null,
         status: closedByHoliday ? "cancelled" : override?.status ?? "scheduled",
         postponedTo: override?.postponedTo ? override.postponedTo.toISOString() : null,
+        movedFrom: null,
         edited: Boolean(override) || Boolean(closedByHoliday),
         lecturerName: override?.lecturer?.user?.name ?? null,
         material: override?.material
@@ -337,6 +345,7 @@ function withDefaults(month: ScheduleMonth, slot: TimeSlot): MergedMonth {
       notes: null,
       status: "scheduled",
       postponedTo: null,
+      movedFrom: null,
       edited: false,
       lecturerName: null,
       material: null,

@@ -15,7 +15,7 @@ import {
  *
  * This is the one place a tutor changes what a class day actually is: its
  * topic, its clock times, the material to bring, and — the case this exists
- * for — whether it has been postponed and to when. Students read the same rows
+ * for — whether it has moved and to when. Students read the same rows
  * through /api/schedule, so an edit here is on their calendar immediately, and
  * they are told about it rather than left to notice.
  *
@@ -220,13 +220,45 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "That class is not yours to edit" }, { status: 403 });
     }
 
-    // A postponement without a new date is the thing students complain about:
-    // the class disappears and nobody says when it is. Require the date.
+    // A move without a new date is the thing students complain about: the
+    // class disappears and nobody says when it is. Require the date.
     if (status === "postponed" && !postponedTo) {
       return NextResponse.json(
-        { error: "Tell your students the new date — a postponed class needs one." },
+        { error: "Tell your students the new date — a moved class needs one." },
         { status: 400 },
       );
+    }
+
+    // One class per cohort per day. Moving onto a day that already has this
+    // cohort's class would stack two on one calendar square, and a student can
+    // only read one of them. A row that has itself moved away, or was cancelled,
+    // leaves its day free.
+    if (status === "postponed" && postponedTo) {
+      const target = dayKey(postponedTo);
+      const [occupant, alsoMovingHere] = await Promise.all([
+        prisma.classSession.findUnique({
+          where: { branchId_level_date_timeSlot: { branchId, level: normalisedLevel, date: target, timeSlot: slot } },
+          select: { status: true },
+        }),
+        prisma.classSession.findFirst({
+          where: {
+            branchId,
+            level: normalisedLevel,
+            timeSlot: slot,
+            status: "postponed",
+            postponedTo: target,
+            NOT: { date: day },
+          },
+          select: { id: true },
+        }),
+      ]);
+      const busy = (occupant && occupant.status !== "cancelled" && occupant.status !== "postponed") || alsoMovingHere;
+      if (busy) {
+        return NextResponse.json(
+          { error: "This class already has a session on that day — pick a different day." },
+          { status: 409 },
+        );
+      }
     }
 
     const previous = await prisma.classSession.findUnique({
@@ -384,7 +416,7 @@ const DATE_FORMAT: Intl.DateTimeFormatOptions = {
 /**
  * Tell the class what changed.
  *
- * Only for changes a student would want a message about — a postponement, a
+ * Only for changes a student would want a message about — a move, a
  * cancellation, a new material, a time change. Editing the day's topic is a
  * normal part of preparing a lesson and buzzing two hundred phones for it
  * would train everybody to ignore the notifications that matter.
@@ -415,9 +447,10 @@ async function announceChange(args: {
     const movedTo = saved.postponedTo
       ? saved.postponedTo.toLocaleDateString("en-GB", DATE_FORMAT)
       : null;
-    title = `Your ${level} class on ${when} has been postponed`;
+    // Lead with WHERE it went — that is the only thing the student needs.
+    title = movedTo ? `Your ${level} class has moved to ${movedTo}` : `Your ${level} class on ${when} has moved`;
     message = movedTo
-      ? `It has been moved to ${movedTo}. Your calendar has been updated.`
+      ? `It was on ${when}. Your calendar now shows it on the new day.`
       : "Your tutor will confirm the new date shortly.";
     severity = "warning";
   } else if (saved.status === "cancelled" && statusChanged) {
@@ -425,8 +458,8 @@ async function announceChange(args: {
     message = "It will not be running. Check your calendar for the next session.";
     severity = "warning";
   } else if (saved.status === "scheduled" && previous && previous.status === "postponed") {
-    title = `Your ${level} class on ${when} is back on`;
-    message = "The postponement has been lifted and the class runs as originally timetabled.";
+    title = `Your ${level} class is back on ${when}`;
+    message = "The move has been undone — it runs on its original day again.";
   } else if (materialAdded) {
     title = `New material for your ${level} class on ${when}`;
     message = saved.material?.title
@@ -448,7 +481,7 @@ async function announceChange(args: {
     link: "/calendar",
     push: true,
     // One announcement per day per state. A tutor who saves the same
-    // postponement twice does not send it twice.
+    // move twice does not send it twice.
     dedupeKey: `session:${branchId}:${level}:${day.toISOString()}:${saved.status}:${saved.postponedTo?.toISOString() ?? ""}:${saved.materialId ?? ""}`,
   }).catch((error) => console.error("Class change notification failed", error));
 }

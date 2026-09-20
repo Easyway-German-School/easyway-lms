@@ -7,6 +7,7 @@ import { isPlayableVideo, toPlayableUrl, type LibraryVideo, type VideoKind } fro
 import { isEmbeddedVideo, needsIframe, parseEmbed } from "@/lib/media-embed";
 import { reconcileRecordingsSoon } from "@/lib/class-recorder";
 import { canDownloadOffline } from "@/lib/delivery";
+import { notExpiredForStudents } from "@/lib/retention";
 
 export const dynamic = "force-dynamic";
 
@@ -80,12 +81,8 @@ export async function GET() {
           { course: { level: student.level } },
           { privateClasses: { some: { studentId: student.id } } },
         ],
-        // The 2-week student window: once a recording's `studentExpiresAt` has
-        // passed it drops off the shelf for students (staff keep it forever —
-        // see src/lib/retention.ts). `keepForever` pins it here too. A lesson
-        // video or document has no `recording` relation, so `NOT { recording:
-        // { is: … } }` leaves it untouched.
-        NOT: { recording: { is: { keepForever: false, studentExpiresAt: { lte: now } } } },
+        // The 2-week student window (staff keep it forever — see retention.ts).
+        ...notExpiredForStudents(now),
       },
       include: {
         course: { select: { title: true, level: true } },

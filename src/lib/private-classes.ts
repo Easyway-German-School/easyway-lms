@@ -209,6 +209,7 @@ export async function getPrivateSchedule(args: {
         notes: c.notes,
         status: displayStatus(c.status),
         postponedTo: null,
+        movedFrom: null,
         edited: true,
         lecturerName: c.lecturer?.user?.name ?? null,
         // Shaped the same as a group session's material, so the calendar has

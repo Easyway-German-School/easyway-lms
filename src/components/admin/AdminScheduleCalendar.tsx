@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import ScheduleCalendar, { type DayCell, type Tone } from "@/components/schedule/ScheduleCalendar";
 import UndoToast, { type PendingUndo } from "@/components/schedule/UndoToast";
 import { ymd } from "@/components/schedule/grid";
-import { effectiveDayKey } from "@/components/schedule/effectiveDay";
+import { effectiveDayKey, isMoved } from "@/components/schedule/effectiveDay";
 import { SCHOOL_TIMEZONE, zonedClock, zonedDateKey, zonedTimeToInstant } from "@/lib/school-time";
 import { ClockIcon } from "@/components/icons";
 import type { GroupSession, PrivateClass, PrivateAnalytics } from "@/components/admin/AdminScheduleList";
@@ -22,12 +22,18 @@ import type { GroupSession, PrivateClass, PrivateAnalytics } from "@/components/
 
 type ClosedDay = { id: string; date: string; label: string; branchId: string | null };
 
-const GROUP_LEGEND: { tone: Tone; label: string }[] = [
+/**
+ * A moved group class is just a class on its new day — it carries a "Moved
+ * from …" note in the rail rather than a colour of its own. The only pink left
+ * is a PRIVATE booking that needs a new time (a student asked, or it was set
+ * aside), and that legend entry only appears while one is on screen.
+ */
+const BASE_LEGEND: { tone: Tone; label: string }[] = [
   { tone: "accent", label: "Group class" },
   { tone: "gold", label: "Private class" },
-  { tone: "pink", label: "Postponed" },
   { tone: "red", label: "Cancelled" },
 ];
+const NEEDS_TIME_LEGEND: { tone: Tone; label: string } = { tone: "pink", label: "Needs a new time" };
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: "bg-[var(--surface-alt)] text-[var(--foreground-soft)]",
@@ -43,7 +49,7 @@ const STATUS_STYLES: Record<string, string> = {
 
 function toneForStatus(track: "group" | "private", status: string): Tone {
   if (status === "cancelled" || status === "declined" || status === "cancel_requested") return "red";
-  if (status === "postponed" || status === "reschedule_requested") return "pink";
+  if (track === "private" && (status === "postponed" || status === "reschedule_requested")) return "pink";
   return track === "private" ? "gold" : "accent";
 }
 
@@ -193,26 +199,36 @@ export default function AdminScheduleCalendar({
       list.forEach((g) => cellAt(key).dots.push({ tone: toneForStatus("group", g.status), key: groupDotId(g) }));
     for (const [key, list] of privatesByDay)
       list.forEach((p) => cellAt(key).dots.push({ tone: toneForStatus("private", p.status), key: `p:${p.id}` }));
-    // Ghost on the day a moved group class came from.
-    for (const g of groups) {
-      if (!groupMatches(g) || g.status !== "postponed" || !g.postponedTo) continue;
-      const cell = cellAt(ymd(new Date(g.date)));
-      cell.ghosts = [...(cell.ghosts ?? []), { toLabel: shortDay(ymd(new Date(g.postponedTo))) }];
-    }
     for (const holiday of closedDays) {
       cellAt(ymd(new Date(holiday.date))).closed = { label: holiday.label };
     }
     return map;
-  }, [groupsByDay, privatesByDay, groups, closedDays, branch, tutor, mode, track, level]);
+  }, [groupsByDay, privatesByDay, closedDays, branch, tutor, mode, track, level]);
+
+  const legend = useMemo(
+    () =>
+      privates.some((p) => privateMatches(p) && toneForStatus("private", p.status) === "pink")
+        ? [...BASE_LEGEND, NEEDS_TIME_LEGEND]
+        : BASE_LEGEND,
+    [privates, branch, tutor, mode, track, level],
+  );
 
   const dayGroups = selectedDay ? groupsByDay.get(selectedDay) ?? [] : [];
   const dayPrivates = selectedDay ? privatesByDay.get(selectedDay) ?? [] : [];
   const dayClosed = selectedDay ? closedDays.find((h) => ymd(new Date(h.date)) === selectedDay) : undefined;
-  const movedFromSelected = selectedDay
-    ? groups.filter(
-        (g) => groupMatches(g) && g.status === "postponed" && g.postponedTo && ymd(new Date(g.date)) === selectedDay,
-      )
-    : [];
+
+  /** True when another live class of this same cohort already sits on `dayKey`. */
+  function cohortBusyOn(g: GroupSession, dayKey: string): boolean {
+    return groups.some(
+      (o) =>
+        o !== g &&
+        o.branchId === g.branchId &&
+        o.level === g.level &&
+        o.timeSlot === g.timeSlot &&
+        o.status !== "cancelled" &&
+        effectiveDayKey(o) === dayKey,
+    );
+  }
 
   /* ------------------------------------------------------------- group write */
 
@@ -249,6 +265,10 @@ export default function AdminScheduleCalendar({
 
   async function saveGroup(g: GroupSession) {
     if (!groupDraft) return;
+    if (groupDraft.status !== "cancelled" && groupDraft.day !== effectiveDayKey(g) && cohortBusyOn(g, groupDraft.day)) {
+      setError(`${g.cohort} already has a class on ${shortDay(groupDraft.day)} — pick a different day.`);
+      return;
+    }
     setBusy(true);
     setError("");
     setSaved("");
@@ -324,6 +344,27 @@ export default function AdminScheduleCalendar({
     }
   }
 
+  /** One click to undo a move — puts the class back on the day it was timetabled for. */
+  async function moveBack(g: GroupSession) {
+    setError("");
+    setSaved("");
+    const before = { status: g.status, postponedTo: g.postponedTo };
+    try {
+      await putGroup(g, { status: "scheduled", postponedTo: null });
+      setSaved(`Moved back to ${shortDay(ymd(new Date(g.date)))}. Students are told.`);
+      setUndo({
+        label: `Moved back to ${shortDay(ymd(new Date(g.date)))}`,
+        run: async () => {
+          await putGroup(g, before);
+          onReload();
+        },
+      });
+      onReload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not move this class back");
+    }
+  }
+
   /* --------------------------------------------------------------- drag move */
 
   async function rescheduleDot(dotId: string, _fromDay: string, toDay: string) {
@@ -334,6 +375,11 @@ export default function AdminScheduleCalendar({
     }
     setError("");
     setSaved("");
+    if (entry.kind === "group" && cohortBusyOn(entry.g, toDay)) {
+      setSelectedDay(toDay);
+      setError(`${entry.g.cohort} already has a class on ${shortDay(toDay)} — pick a different day.`);
+      return;
+    }
     try {
       if (entry.kind === "group") {
         const g = entry.g;
@@ -394,22 +440,10 @@ export default function AdminScheduleCalendar({
               {dayClosed.label} · school closed
             </p>
           )}
-          {movedFromSelected.map((g) => (
-            <p key={`moved-${groupDotId(g)}`} className="mt-2 rounded-lg bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--muted)]">
-              {g.cohort} originally here — moved to{" "}
-              <button
-                type="button"
-                onClick={() => g.postponedTo && setSelectedDay(ymd(new Date(g.postponedTo)))}
-                className="font-semibold text-[var(--accent)] hover:underline"
-              >
-                {g.postponedTo ? shortDay(ymd(new Date(g.postponedTo))) : "—"}
-              </button>
-            </p>
-          ))}
           {error && <p className="mt-2 rounded-lg bg-rose-500/10 p-2 text-xs text-rose-600">{error}</p>}
           {saved && <p className="mt-2 rounded-lg bg-emerald-500/10 p-2 text-xs text-emerald-600">{saved}</p>}
 
-          {dayGroups.length === 0 && dayPrivates.length === 0 && !dayClosed && movedFromSelected.length === 0 && (
+          {dayGroups.length === 0 && dayPrivates.length === 0 && !dayClosed && (
             <p className="mt-3 text-sm text-[var(--muted)]">No classes this day.</p>
           )}
 
@@ -421,6 +455,7 @@ export default function AdminScheduleCalendar({
                   const key = groupDotId(g);
                   const isEditing = editingKey === key;
                   const natural = ymd(new Date(g.date));
+                  const moved = isMoved(g);
                   return (
                     <div key={key} className="rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] p-3">
                       <button
@@ -451,18 +486,33 @@ export default function AdminScheduleCalendar({
                             <ClockIcon className="h-3.5 w-3.5" />
                             {g.startTime}–{g.endTime} · {g.tutorName ?? "Unassigned"}
                           </p>
-                          <span
-                            className={`mt-1 inline-block rounded px-2 py-0.5 text-xs font-medium capitalize ${
-                              STATUS_STYLES[g.status] ?? STATUS_STYLES.scheduled
-                            }`}
-                          >
-                            {g.status}
-                          </span>
+                          {moved ? (
+                            <span className="mt-1 inline-block rounded bg-[var(--accent)]/10 px-2 py-0.5 text-xs font-semibold text-[var(--accent)]">
+                              Moved from {shortDay(natural)}
+                            </span>
+                          ) : (
+                            <span
+                              className={`mt-1 inline-block rounded px-2 py-0.5 text-xs font-medium capitalize ${
+                                STATUS_STYLES[g.status] ?? STATUS_STYLES.scheduled
+                              }`}
+                            >
+                              {g.status}
+                            </span>
+                          )}
                         </div>
                         <span className="shrink-0 text-xs font-semibold text-[var(--accent)]">
                           {isEditing ? "Close" : "Edit"}
                         </span>
                       </button>
+                      {moved && !isEditing && (
+                        <button
+                          type="button"
+                          onClick={() => void moveBack(g)}
+                          className="mt-2 text-xs font-semibold text-[var(--accent)] hover:underline"
+                        >
+                          Move back to {shortDay(natural)}
+                        </button>
+                      )}
 
                       {isEditing && groupDraft && (
                         <div className="mt-3 grid gap-3 border-t border-[var(--border)] pt-3">
@@ -483,9 +533,14 @@ export default function AdminScheduleCalendar({
                                 value={groupDraft.day}
                                 onChange={(e) => setGroupDraft({ ...groupDraft, day: e.target.value })}
                                 className={`mt-1 w-full rounded-lg border bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] ${
-                                  groupDraft.day && groupDraft.day !== natural ? "border-pink-400" : "border-[var(--border)]"
+                                  groupDraft.day && groupDraft.day !== natural ? "border-[var(--accent)]" : "border-[var(--border)]"
                                 }`}
                               />
+                              {groupDraft.day && groupDraft.day !== natural && (
+                                <span className="mt-1 block text-[11px] text-[var(--accent)]">
+                                  Moves from {shortDay(natural)} — students are told.
+                                </span>
+                              )}
                             </label>
                             <label>
                               <span className="text-xs font-medium text-[var(--muted)]">Status</span>
@@ -743,7 +798,7 @@ export default function AdminScheduleCalendar({
           setGroupDraft(null);
           setPrivateDraft(null);
         }}
-        legend={GROUP_LEGEND}
+        legend={legend}
         toolbar={toolbar}
         rail={rail}
         onMoveDot={rescheduleDot}

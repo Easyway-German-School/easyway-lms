@@ -4,11 +4,12 @@ import { ymd } from "@/components/schedule/grid";
  * The day a session's dot belongs on — where it *actually* happens, which is
  * not the same as the day it was originally timetabled for.
  *
- * A postponed class keeps its original `date` (that's its identity — the row is
+ * A moved class keeps its original `date` (that's its identity — the row is
  * unique on branch+level+date+slot) and carries `postponedTo` forward. Every
  * calendar was keying its dots by `date`, so a class moved from the 3rd to the
  * 11th stayed drawn on the 3rd. This is the one function that decides "which
- * cell", and both the grid and the day rail read it.
+ * cell", and both the grid and the day rail read it. (Storage still says
+ * "postponed"; nothing a person reads does — see `lib/schedule-moves.ts`.)
  */
 
 type SessionLike = {

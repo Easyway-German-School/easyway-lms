@@ -26,6 +26,7 @@
  * always ask what a manual purge *would* do, and the answer costs nothing.
  */
 
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { deleteRecordingObject } from "@/lib/recording";
 
@@ -46,6 +47,20 @@ export const STUDENT_RECORDING_WINDOW_DAYS = RETENTION.studentWindowDays;
  */
 export function studentExpiryFrom(recordedAt: Date): Date {
   return new Date(recordedAt.getTime() + STUDENT_RECORDING_WINDOW_DAYS * 86_400_000);
+}
+
+/**
+ * The ONE Material filter for "has not aged off students' shelves". Every
+ * student-facing query that can return a recording must include it — the shelf
+ * (`/api/student/videos`), the materials list, catch-up and recommendations all
+ * did their own thing before, and three of them had no expiry at all, so a
+ * recording past its 14 days kept surfacing there.
+ *
+ * A lesson video or document has no `recording` relation, so `NOT { recording:
+ * { is: … } }` leaves it untouched. Staff never use this.
+ */
+export function notExpiredForStudents(now: Date = new Date()): Prisma.MaterialWhereInput {
+  return { NOT: { recording: { is: { keepForever: false, studentExpiresAt: { lte: now } } } } };
 }
 
 /** True when this recording's video should no longer be shown to students. */
