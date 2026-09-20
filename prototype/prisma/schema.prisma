@@ -1933,6 +1933,15 @@ model Grade {
   examId String?
   exam   Exam?   @relation(fields: [examId], references: [id], onDelete: SetNull)
 
+  /**
+   * Who entered this mark — null for a legacy row entered before this column
+   * existed. A hybrid student has two tutors; this is what lets their results
+   * page say which one graded which piece of work instead of a bare "your
+   * tutor". See lib/tutor-attribution.ts.
+   */
+  lecturerId String?
+  lecturer   Lecturer? @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+
   type     String // "essay", "quiz", "speaking", "pronunciation", "exam"
   content  String? // the essay text, quiz answers, etc
   score    Int // 0-100 — for type "exam" this is min(the four skills below)
@@ -2482,6 +2491,7 @@ model Lecturer {
   classes            Class[]
   exams              Exam[]
   materials          Material[]
+  grades             Grade[]
   students           Student[]
   classSessions      ClassSession[]
   assignments        Assignment[]

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { letterFor, PASS_MARK } from "@/lib/grading";
 import { KIND, notify } from "@/lib/notify";
+import { attributeTutorAction, tutorPhrase } from "@/lib/tutor-attribution";
 import {
   ASSESSMENT_TYPES,
   ASSESSMENT_WEIGHTS as WEIGHTS,
@@ -341,6 +342,7 @@ export async function PATCH(request: NextRequest) {
           grade: letterFor(score),
           ...(feedback === undefined ? {} : { feedback }),
           submissionMode: "physical",
+          lecturerId: roster.lecturerId,
         },
       })
     : await prisma.grade.create({
@@ -351,6 +353,7 @@ export async function PATCH(request: NextRequest) {
           grade: letterFor(score),
           feedback: feedback ?? null,
           submissionMode: "physical",
+          lecturerId: roster.lecturerId,
         },
       });
 
@@ -358,12 +361,13 @@ export async function PATCH(request: NextRequest) {
   // through a row they already filled in should not fire a notification per
   // cell they pass over.
   if (!existing || existing.score !== score) {
+    const attribution = await attributeTutorAction(studentId, roster.lecturerId);
     await notify({
       to: { studentIds: [studentId] },
       kind: KIND.resultPublished,
       severity: "info",
       title: `Your ${type} mark is in`,
-      message: "Your tutor has entered a new score. Open your results to see it.",
+      message: `${tutorPhrase(attribution)} has entered a new score. Open your results to see it.`,
       link: "/results",
       push: true,
     }).catch((error) => console.error("Grade notification failed", error));

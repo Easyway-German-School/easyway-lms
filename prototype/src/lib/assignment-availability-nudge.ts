@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { notify, KIND } from "@/lib/notify";
 import { studentHasPortalAccess } from "@/lib/student-access";
 import { assignmentVisibleToWhere } from "@/lib/student-assignments";
+import { resolveOnlineBranchId } from "@/lib/online-branch-server";
 
 /**
  * "You can submit assignments now" — Becca's one-time heads-up for a student
@@ -43,13 +44,25 @@ export async function nudgeStudentsWithAssignmentsAvailable() {
     },
     orderBy: { createdAt: "asc" },
     take: SCAN_LIMIT,
-    select: { id: true, userId: true, level: true, branchId: true, sessionSlot: true },
+    select: {
+      id: true,
+      userId: true,
+      level: true,
+      branchId: true,
+      sessionSlot: true,
+      deliveryMode: true,
+      hybridOnlineSlot: true,
+    },
   });
 
   const candidates = students.filter((s) => s.userId && !notifiedIds.has(s.userId));
   if (candidates.length === 0) {
     return { scanned: students.length, eligible: 0, created: 0 };
   }
+
+  // Once, not per student — a hybrid student's online tutor's homework counts
+  // as "waiting for them" too (see student-assignments.ts).
+  const onlineBranchId = await resolveOnlineBranchId(null);
 
   const eligible: string[] = [];
   for (const student of candidates) {
@@ -58,7 +71,7 @@ export async function nudgeStudentsWithAssignmentsAvailable() {
 
     const pending = await prisma.assignment.count({
       where: {
-        ...assignmentVisibleToWhere(student),
+        ...assignmentVisibleToWhere(student, onlineBranchId),
         submissions: { none: { studentId: student.id, submittedAt: { not: null } } },
       },
     });

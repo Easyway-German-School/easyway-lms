@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveLecturerId } from "@/lib/lecturer";
 import { coerceQuests, type MaterialQuest } from "@/lib/material-ai";
 import { notifyInBackground, KIND } from "@/lib/notify";
+import { groupStudentsByTutorPhrase } from "@/lib/tutor-attribution";
 import {
   MATERIAL_AUDIENCE_SELECT,
   studentIdsForMaterial,
@@ -107,16 +108,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (firstApproval) {
     const studentIds = await studentIdsForMaterial(auth.material);
     if (studentIds.length) {
-      notifyInBackground({
-        to: { studentIds },
-        kind: KIND.studyNotesReady,
-        severity: "info",
-        title: "New quests and notes from your tutor",
-        message: `“${auth.material.title}” now has a quick quest and a written-up study note. Open Materials to start.`,
-        link: "/materials",
-        push: true,
-        dedupeKey: `study-notes-ready:${id}`,
-      });
+      // Whose material this is — a hybrid student has two tutors. Uses the
+      // material's uploader, not the reviewer, since that is who the student
+      // knows the material to be from.
+      const groups = await groupStudentsByTutorPhrase(studentIds, auth.material.lecturerId ?? auth.lecturerId);
+      for (const [phrase, ids] of groups) {
+        if (!ids.length) continue;
+        const lowerPhrase = phrase.charAt(0).toLowerCase() + phrase.slice(1);
+        notifyInBackground({
+          to: { studentIds: ids },
+          kind: KIND.studyNotesReady,
+          severity: "info",
+          title: `New quests and notes from ${lowerPhrase}`,
+          message: `“${auth.material.title}” now has a quick quest and a written-up study note. Open Materials to start.`,
+          link: "/materials",
+          push: true,
+          dedupeKey: `study-notes-ready:${id}`,
+        });
+      }
     }
   }
 
