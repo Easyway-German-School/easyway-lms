@@ -7,8 +7,17 @@ import { SpotlightArrow, SpotlightMask, inflate, useTargetRect } from "@/compone
 import { CheckIcon, CrossIcon, SpeakerIcon, SpeakerOffIcon } from "@/components/icons";
 import type { TutorialStep } from "@/lib/tutorials";
 
-/** After this long with no target found, treat the step as centre-stage rather than spotlighting nothing. */
-const TARGET_TIMEOUT_MS = 2600;
+/**
+ * How long a step waits for its target before giving up and going centre-stage.
+ *
+ * Generous on purpose. A target usually appears late because the page under it
+ * is still fetching (it is showing its own loader), and dimming the screen over
+ * a loader is exactly the glitch this wait exists to prevent: nothing of the
+ * tour is drawn until there is something real to point at. Only when the
+ * target genuinely never turns up — a feature this student does not have — does
+ * the step fall back to speaking without a spotlight.
+ */
+const TARGET_TIMEOUT_MS = 8000;
 
 /**
  * The visible half of a tutorial step: Becca, a spotlight on the real DOM
@@ -28,6 +37,7 @@ export default function TutorialOverlay({
   onBack,
   onExit,
   onToggleMute,
+  onShown,
 }: {
   step: TutorialStep;
   stepNumber: number;
@@ -39,6 +49,8 @@ export default function TutorialOverlay({
   onBack: () => void;
   onExit: () => void;
   onToggleMute: () => void;
+  /** Called once this step is actually on screen — the runtime starts narrating then, not before. */
+  onShown?: (stepId: string) => void;
 }) {
   const reduceMotion = useReducedMotion();
   const [viewport, setViewport] = useState({ width: 1024, height: 768 });
@@ -59,6 +71,13 @@ export default function TutorialOverlay({
   }, [step.id, step.target]);
 
   const hole = rect && !targetMissing ? inflate(rect, 8) : null;
+
+  // Ready = there is something real to show: a target that has been found, a
+  // step that has no target at all, or a target we have waited long enough for.
+  const ready = !step.target || Boolean(rect) || targetMissing;
+  useEffect(() => {
+    if (ready) onShown?.(step.id);
+  }, [ready, step.id, onShown]);
   const guideSize = viewport.width < 640 ? 84 : 124;
 
   // Beside the spotlight when there's room, below it when there isn't; dead
@@ -89,15 +108,19 @@ export default function TutorialOverlay({
       : Math.max(-90, Math.min(90, rawAngle))
     : null;
 
+  // Draw nothing while the page is still getting its target ready: the page
+  // under us shows its own loader, and the tour should not dim it.
+  if (!ready) return null;
+
   return (
     <div className="fixed inset-0 z-[129]" role="dialog" aria-modal="true" aria-label={step.caption}>
       {hole ? (
         <>
-          <SpotlightMask hole={hole} zIndex={0} />
+          <SpotlightMask hole={hole} zIndex={0} dim="rgb(2 6 23 / 0.46)" />
           <SpotlightArrow from={{ x: handX, y: handY }} to={{ x: targetX, y: targetY }} zIndex={0} redrawKey={step.id} />
         </>
       ) : (
-        <div className="fixed inset-0 bg-[rgb(2_6_23_/_0.75)]" />
+        <div className="fixed inset-0 bg-[rgb(2_6_23_/_0.5)]" />
       )}
 
       <motion.div
@@ -114,7 +137,7 @@ export default function TutorialOverlay({
         <motion.div
           initial={reduceMotion ? false : { opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-sm rounded-3xl bg-[var(--surface)] p-5 shadow-2xl"
+          className="max-h-[min(36vh,19rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-[var(--surface)] p-4 shadow-2xl sm:p-5"
         >
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1">

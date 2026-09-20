@@ -22,9 +22,10 @@ let unlocked = false;
 export function unlockSpeechSynthesis() {
   if (unlocked || typeof window === "undefined" || !window.speechSynthesis) return;
   unlocked = true;
-  const silent = new SpeechSynthesisUtterance("");
-  silent.volume = 0;
-  window.speechSynthesis.speak(silent);
+  window.speechSynthesis.resume();
+  // Loading the voices from the gesture is enough to warm the browser's
+  // speech service. An empty utterance can leave the queue stuck on Safari.
+  window.speechSynthesis.getVoices();
 }
 
 export function pickNarratorVoice(): SpeechSynthesisVoice | null {
@@ -50,21 +51,25 @@ export function speak(
   utterance.onerror = () => opts.onError?.();
 
   let spoken = false;
+  let retryTimer: number | null = null;
   const fire = () => {
     if (spoken) return;
     spoken = true;
+    window.speechSynthesis.resume();
     const voice = pickNarratorVoice();
     if (voice) utterance.voice = voice;
     window.speechSynthesis.speak(utterance);
   };
 
-  // Android Chrome (and some others) load the voice list asynchronously —
-  // speaking before it's ready produces a silent no-op with no error.
-  if (window.speechSynthesis.getVoices().length) fire();
-  else {
-    window.speechSynthesis.addEventListener("voiceschanged", fire, { once: true });
-    window.setTimeout(fire, 700);
-  }
+  // Chromium and Safari can ignore speak() when it immediately follows
+  // cancel(), especially after a client-side route change. Give the native
+  // queue one turn to settle, then retry once when voice metadata arrives.
+  retryTimer = window.setTimeout(fire, 80);
+  window.speechSynthesis.addEventListener("voiceschanged", fire, { once: true });
+  window.setTimeout(() => {
+    if (!spoken) fire();
+    if (retryTimer) window.clearTimeout(retryTimer);
+  }, 700);
   return true;
 }
 

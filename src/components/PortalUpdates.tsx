@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertIcon, BellIcon, CommunityIcon } from "@/components/icons";
+import { MOMENT_PREEMPT_EVENT } from "@/lib/moment-queue";
 
 /**
  * MESSAGES THAT REACH YOU WHEREVER YOU ARE IN THE PORTAL.
@@ -104,6 +105,8 @@ function chime() {
 export default function PortalUpdates() {
   const router = useRouter();
   const [visible, setVisible] = useState<Update[]>([]);
+  const [tutorialLocked, setTutorialLocked] = useState(false);
+  const heldRef = useRef<Update[]>([]);
 
   /**
    * The server's clock, not ours.
@@ -120,6 +123,26 @@ export default function PortalUpdates() {
 
   const dismiss = useCallback((id: string) => {
     setVisible((current) => current.filter((update) => update.id !== id));
+  }, []);
+
+  useEffect(() => {
+    const onPreempt = (event: Event) => {
+      const detail = (event as CustomEvent<{ active?: boolean; source?: string }>).detail;
+      if (detail?.source !== "tutorial") return;
+      const locked = Boolean(detail.active);
+      setTutorialLocked(locked);
+      if (locked) {
+        setVisible((current) => {
+          if (current.length) heldRef.current = [...heldRef.current, ...current];
+          return [];
+        });
+      } else {
+        setVisible((current) => [...heldRef.current, ...current].slice(-MAX_VISIBLE));
+        heldRef.current = [];
+      }
+    };
+    window.addEventListener(MOMENT_PREEMPT_EVENT, onPreempt);
+    return () => window.removeEventListener(MOMENT_PREEMPT_EVENT, onPreempt);
   }, []);
 
   useEffect(() => {
@@ -140,11 +163,13 @@ export default function PortalUpdates() {
           if (fresh.length) {
             for (const update of fresh) seenRef.current.add(update.id);
             // Oldest first, so the newest ends up nearest the reader's thumb.
-            setVisible((current) => [...current, ...fresh.reverse()].slice(-MAX_VISIBLE));
+            const ordered = fresh.reverse();
+            if (tutorialLocked) heldRef.current = [...heldRef.current, ...ordered];
+            else setVisible((current) => [...current, ...ordered].slice(-MAX_VISIBLE));
             // A notification earns the bell ping the old NotificationCenter
             // toast used to make; a stream of chat messages does not, or a
             // busy class would chime forty times a minute.
-            if (fresh.some((update) => update.source === "notification")) chime();
+            if (!tutorialLocked && fresh.some((update) => update.source === "notification")) chime();
           }
 
           /**
@@ -176,7 +201,7 @@ export default function PortalUpdates() {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, []);
+  }, [tutorialLocked]);
 
   // Each card retires itself. Kept off the poll so a card's life does not
   // depend on when the next request happens to land.

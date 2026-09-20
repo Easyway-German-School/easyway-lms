@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { joinDob, splitDob } from "@/lib/birthdate";
 import { PencilIcon } from "@/components/icons";
 import { countries, nigerianStates } from "@/app/auth/signup/options";
 import type { BackfillField, BackfillPrefill } from "@/lib/profile-backfill";
@@ -46,7 +47,13 @@ const GOAL_CHIPS = [
 function answersFromPrefill(prefill: Prefill): Answers {
   return {
     whatsapp: prefill.whatsapp ?? "",
-    dateOfBirth: prefill.dateOfBirth ?? "",
+    // Only a real, plausible date survives the prefill — a free-typed legacy
+    // value ("first of May 1990") would otherwise sit in state, count as
+    // answered, and ride along on every save.
+    dateOfBirth: (() => {
+      const p = splitDob(prefill.dateOfBirth ?? "");
+      return joinDob(p.day, p.month, p.year);
+    })(),
     city: prefill.city ?? "",
     stateRegion: prefill.stateRegion ?? "",
     country: prefill.country || "Nigeria",
@@ -87,7 +94,75 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const inputClass =
-  "w-full rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]";
+  "w-full rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-base text-[var(--foreground)] outline-none focus:border-[var(--accent)]";
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * Day · Month · Year, typed — not a calendar popup. Scrolling a date picker
+ * back to 1965 one month at a time is the sort of thing that makes an older
+ * learner close the page; typing "1965" is not.
+ */
+function BirthdateInput({ value, onChange }: { value: string; onChange: (iso: string) => void }) {
+  const [parts, setParts] = useState(() => splitDob(value));
+  const complete = parts.day !== "" && parts.month !== "" && parts.year.length === 4;
+  const invalid = complete && !joinDob(parts.day, parts.month, parts.year);
+
+  function update(patch: Partial<typeof parts>) {
+    const next = { ...parts, ...patch };
+    setParts(next);
+    onChange(joinDob(next.day, next.month, next.year));
+  }
+
+  return (
+    <div>
+      <div className="grid grid-cols-[4.5rem_1fr_6rem] gap-2">
+        <input
+          inputMode="numeric"
+          autoComplete="bday-day"
+          maxLength={2}
+          value={parts.day}
+          onChange={(e) => update({ day: e.target.value.replace(/\D/g, "") })}
+          placeholder="Day"
+          aria-label="Day of birth"
+          className={inputClass}
+        />
+        <select
+          value={parts.month}
+          onChange={(e) => update({ month: e.target.value })}
+          aria-label="Month of birth"
+          autoComplete="bday-month"
+          className={inputClass}
+        >
+          <option value="">Month</option>
+          {MONTHS.map((name, i) => (
+            <option key={name} value={String(i + 1)}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <input
+          inputMode="numeric"
+          autoComplete="bday-year"
+          maxLength={4}
+          value={parts.year}
+          onChange={(e) => update({ year: e.target.value.replace(/\D/g, "") })}
+          placeholder="Year"
+          aria-label="Year of birth"
+          className={inputClass}
+        />
+      </div>
+      {invalid ? (
+        <p className="mt-1.5 text-xs font-semibold text-red-600">That date doesn&apos;t look right — please check it.</p>
+      ) : (
+        <p className="mt-1.5 text-xs text-[var(--muted)]">For example: 14 · June · 1988</p>
+      )}
+    </div>
+  );
+}
 
 export function ProfileDetailsWizard({
   missing,
@@ -114,57 +189,100 @@ export function ProfileDetailsWizard({
   const [answers, setAnswers] = useState<Answers>(() => answersFromPrefill(prefill));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [failures, setFailures] = useState(0);
+  /**
+   * Saves run strictly one after another. Every save carries ALL the answers so
+   * far, so the last one to land is always the complete picture — but two
+   * requests in flight at once would both read the same stored row and the
+   * slower one could overwrite the faster.
+   */
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
 
   const field = steps[index];
   const isLast = index === steps.length - 1;
   const set = (patch: Partial<Answers>) => setAnswers((prev) => ({ ...prev, ...patch }));
 
-  async function save(kind: "next" | "done" | "skip-all") {
-    setBusy(true);
-    setError("");
-    try {
-      const payload: Record<string, unknown> = {
-        whatsapp: answers.whatsapp,
-        dateOfBirth: answers.dateOfBirth,
-        city: answers.country === "Nigeria" ? "" : answers.city,
-        stateRegion: answers.country === "Nigeria" ? answers.stateRegion : "",
-        country: answers.country,
-        emergencyName: answers.emergencyName,
-        emergencyPhone: answers.emergencyPhone,
-        occupation: answers.occupation,
-        goal: answers.goal,
-      };
-      if (kind === "done") payload.complete = true;
-      if (kind === "skip-all") payload.dismiss = true;
+  /** One attempt. Never throws; says why when it fails, in words a student can act on. */
+  async function post(kind: "next" | "done" | "skip-all"): Promise<{ ok: true } | { ok: false; message: string }> {
+    const payload: Record<string, unknown> = {
+      whatsapp: answers.whatsapp,
+      dateOfBirth: answers.dateOfBirth,
+      city: answers.country === "Nigeria" ? "" : answers.city,
+      stateRegion: answers.country === "Nigeria" ? answers.stateRegion : "",
+      country: answers.country,
+      emergencyName: answers.emergencyName,
+      emergencyPhone: answers.emergencyPhone,
+      occupation: answers.occupation,
+      goal: answers.goal,
+    };
+    if (kind === "done") payload.complete = true;
+    if (kind === "skip-all") payload.dismiss = true;
 
+    try {
       const res = await fetch("/api/student/profile/backfill", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || "Could not save that.");
-      }
-      if (kind === "skip-all") onSkipAll();
-      else if (kind === "done") onDone();
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save that.");
-    } finally {
-      setBusy(false);
+      if (res.ok) return { ok: true };
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) return { ok: false, message: "Your session has ended — please sign in again." };
+      return {
+        ok: false,
+        message:
+          (typeof data?.error === "string" && data.error) ||
+          "We could not save that just now. Your answers are kept — please try again.",
+      };
+    } catch {
+      return { ok: false, message: "We can't reach the school right now. Check your internet and try again." };
+    }
+  }
+
+  /** Queue a save behind whatever is already in flight. */
+  function enqueue(kind: "next" | "done" | "skip-all") {
+    const run = queue.current.then(() => post(kind));
+    queue.current = run;
+    return run;
+  }
+
+  async function finish() {
+    setBusy(true);
+    setError("");
+    let result = await enqueue("done");
+    // A dropped connection or a cold database is usually over in a second —
+    // try once more on the student's behalf before ever showing them an error.
+    if (!result.ok) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      result = await enqueue("done");
+    }
+    setBusy(false);
+    if (result.ok) {
+      onDone();
+    } else {
+      setFailures((n) => n + 1);
+      setError(result.message);
     }
   }
 
   function advance() {
     if (isLast) {
-      void save("done");
-    } else {
-      // Persist progress as we go, so a student who closes the tab halfway
-      // keeps what they have answered. Fire-and-forget; the final save is the
-      // one that marks completion.
-      void save("next");
-      setIndex((i) => Math.min(i + 1, steps.length - 1));
+      void finish();
+      return;
     }
+    // Move on at once. The answers are saved in the background and re-sent in
+    // full by the final "Done", so a slow or failed request part-way through
+    // can never hold the student on a question they have already answered.
+    void enqueue("next");
+    setError("");
+    setIndex((i) => Math.min(i + 1, steps.length - 1));
+  }
+
+  async function skipAll() {
+    setBusy(true);
+    await enqueue("skip-all");
+    setBusy(false);
+    // Whether or not the snooze could be recorded, they asked to leave.
+    onSkipAll();
   }
 
   const answered = stepAnswered(field, answers);
@@ -206,12 +324,7 @@ export function ProfileDetailsWizard({
 
       {field === "dateOfBirth" && (
         <Field label="Date of birth">
-          <input
-            type="date"
-            value={answers.dateOfBirth}
-            onChange={(e) => set({ dateOfBirth: e.target.value })}
-            className={inputClass}
-          />
+          <BirthdateInput value={answers.dateOfBirth} onChange={(iso) => set({ dateOfBirth: iso })} />
         </Field>
       )}
 
@@ -323,15 +436,27 @@ export function ProfileDetailsWizard({
         </Field>
       )}
 
-      {error ? <p className="text-sm font-semibold text-red-600">{error}</p> : null}
+      {error ? (
+        <div role="alert" className="grid gap-1">
+          <p className="text-sm font-semibold text-red-600">{error}</p>
+          {failures >= 2 ? (
+            <p className="text-xs text-[var(--muted)]">
+              Still not going through. You can close this and finish later from your profile — nothing is lost.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-3 pt-1">
         {index > 0 ? (
           <button
             type="button"
-            onClick={() => setIndex((i) => Math.max(i - 1, 0))}
+            onClick={() => {
+              setError("");
+              setIndex((i) => Math.max(i - 1, 0));
+            }}
             disabled={busy}
-            className="rounded-full border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--foreground)] disabled:opacity-50"
+            className="rounded-full border border-[var(--border)] px-5 py-3 text-base font-bold text-[var(--foreground)] disabled:opacity-50"
           >
             Back
           </button>
@@ -341,18 +466,18 @@ export function ProfileDetailsWizard({
           type="button"
           onClick={advance}
           disabled={busy}
-          className="rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+          className="rounded-full bg-[var(--accent)] px-7 py-3 text-base font-bold text-white disabled:opacity-50"
         >
-          {busy ? "Saving…" : isLast ? "Done" : answered ? "Next" : "Skip this one"}
+          {busy ? "Saving…" : error && isLast ? "Try again" : isLast ? "Done" : answered ? "Next" : "Skip this one"}
         </button>
 
         <button
           type="button"
-          onClick={() => save("skip-all")}
+          onClick={() => (failures >= 2 ? onSkipAll() : void skipAll())}
           disabled={busy}
-          className="ml-auto text-xs font-semibold text-[var(--muted)] hover:text-[var(--foreground)] disabled:opacity-50"
+          className="ml-auto px-1 py-2 text-sm font-semibold text-[var(--muted)] hover:text-[var(--foreground)] disabled:opacity-50"
         >
-          Skip for now
+          {failures >= 2 ? "Close for now" : "Skip for now"}
         </button>
       </div>
 
