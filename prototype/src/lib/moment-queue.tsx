@@ -120,6 +120,7 @@ export type MomentId =
   | "poster"
   | "game-turn"
   | "profile-details"
+  | "live-feedback"
   | "install-offline-notes";
 
 type Kind = "toast" | "modal";
@@ -317,6 +318,18 @@ const MOMENTS: Record<MomentId, Definition> = {
    * the first slot on a quiet morning and the journey moment follows or docks.
    * Never load-bearing — a missed day costs nothing but a nudge.
    */
+  /**
+   * "How was your last class?" — found a class the student left without rating.
+   * News about something they just did, so it outranks the daily habit
+   * moments, but it is a favour we are asking, so it never preempts earned news
+   * or anything that needs a decision. See components/moment/LiveFeedbackMoment.
+   */
+  "live-feedback": {
+    priority: 56,
+    kind: "modal",
+    dockLabel: "Rate your class",
+    dockBlurb: "Two taps: how was your last live class, and what should we improve?",
+  },
   "daily-briefing": {
     priority: 52,
     kind: "modal",

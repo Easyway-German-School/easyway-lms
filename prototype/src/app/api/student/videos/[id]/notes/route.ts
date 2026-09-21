@@ -54,6 +54,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     return NextResponse.json({
       status: "ready",
       isPrivate: transcript.isPrivate,
+      // Lifted from the transcript with no AI — the panel says so, and the
+      // queue replaces it with a full write-up once a model is reachable.
+      outline: transcript.provider === "extractive",
       notes,
       personalFocus,
       generatedAt: transcript.generatedAt,

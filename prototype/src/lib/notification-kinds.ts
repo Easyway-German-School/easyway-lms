@@ -93,6 +93,8 @@ export const KIND = {
   streakAtRisk: "streak.at_risk",
   /** The transcript + AI notes for a class recording finished generating — see src/lib/class-transcription.ts. */
   classNotesReady: "class.notes_ready",
+  /** "How was that class?" — sent to everyone who was in a class when its tutor ends it. See src/lib/live-feedback.ts. */
+  liveFeedbackAsk: "live_class.feedback_ask",
   /** A class recording is within ~2 days of leaving the student's shelf — download it in the app first. See src/lib/recording-expiry-nudge.ts. */
   recordingExpiring: "recording.expiring",
   /** Becca couldn't write up notes for a tutor's uploaded material — the tutor can retry. See src/lib/material-ai.ts. */

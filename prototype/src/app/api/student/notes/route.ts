@@ -13,6 +13,8 @@ export const dynamic = "force-dynamic";
  *              recap does not.
  *   `notes`  — every notebook entry the student has actually written into,
  *              across recordings AND ready-made notes.
+ *   `own`    — the free-form notes the student started themselves with the "+"
+ *              (see /api/student/my-notes); tied to no recording at all.
  *
  * The ready-made notes list (from tutors' documents) has its own endpoint,
  * `/api/student/study-notes`.
@@ -104,5 +106,18 @@ export async function GET() {
       preview: row.content.trim().slice(0, 160),
     }));
 
-  return NextResponse.json({ recaps, notes });
+  const ownRows = await prisma.studentNote.findMany({
+    // A page opened with "+" and never written in is not a note yet.
+    where: { studentId: student.id, NOT: { title: "", content: "" } },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, title: true, content: true, updatedAt: true },
+  });
+  const own = ownRows.map((row) => ({
+    id: row.id,
+    title: row.title.trim() || "Untitled note",
+    updatedAt: row.updatedAt,
+    preview: row.content.trim().slice(0, 160),
+  }));
+
+  return NextResponse.json({ recaps, notes, own });
 }

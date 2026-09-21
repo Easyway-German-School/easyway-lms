@@ -49,6 +49,7 @@ export default async function ClassRecapPage({ params }: { params: Promise<{ id:
           transcript: {
             select: {
               status: true,
+              provider: true,
               summary: true,
               keyPoints: true,
               actionItems: true,
@@ -75,6 +76,7 @@ export default async function ClassRecapPage({ params }: { params: Promise<{ id:
     // Only a private lesson honestly carries these — see the ClassTranscript schema comment.
     corrections: isPrivate ? (transcript.corrections as Array<{ mistake: string; correction: string; note?: string }> | null) : null,
     progressHighlights: isPrivate ? (transcript.progressHighlights as string[] | null) : null,
+    outline: transcript.provider === "extractive",
   };
 
   return (

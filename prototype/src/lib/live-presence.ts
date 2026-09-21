@@ -148,6 +148,16 @@ export async function openLiveSession(input: OpenLiveSessionInput): Promise<Live
     return toRow(existing, existing.lecturer?.user?.name ?? null);
   }
 
+  // Whatever is still open for this room is, by definition, a class that was
+  // abandoned without being ended (the live one was matched above). Close it now
+  // so it can never be mistaken for this one.
+  await closeSuperseded(
+    await prisma.liveClassSession.findMany({
+      where: { roomName: input.roomName, endedAt: null },
+      select: { id: true, lastSeenAt: true },
+    }),
+  );
+
   const created = await prisma.liveClassSession.create({
     data: {
       roomName: input.roomName,
@@ -223,12 +233,39 @@ export async function addInvites(sessionId: string, studentIds: string[]): Promi
   return touched;
 }
 
-/** The tutor is still here. Cheap enough to call every 45 seconds. */
+/**
+ * The tutor is still here. Cheap enough to call every 45 seconds.
+ *
+ * Touches ONLY the newest open session for the room. It used to touch every open
+ * row for the room, which quietly resurrected an abandoned one: a tutor who
+ * closes the tab without ending a class leaves a row with `endedAt: null` that
+ * goes stale after a few minutes; the next class in that room opens a second
+ * row; and from then on every heartbeat for the new class also refreshed the old
+ * row's `lastSeenAt`, so a class from two days ago read as live forever — two
+ * identical "Online · B1 · Morning" rows on the admin Live classes page, one
+ * 39 hours long with nobody in it.
+ *
+ * Any older open row for the room is therefore a class that was replaced, and is
+ * closed here at the moment it was last actually seen.
+ */
 export async function touchLiveSession(roomName: string): Promise<void> {
-  await prisma.liveClassSession.updateMany({
+  const open = await prisma.liveClassSession.findMany({
     where: { roomName, endedAt: null },
-    data: { lastSeenAt: new Date() },
+    orderBy: { startedAt: "desc" },
+    select: { id: true, lastSeenAt: true },
   });
+  if (open.length === 0) return;
+
+  const [current, ...superseded] = open;
+  await prisma.liveClassSession.update({ where: { id: current.id }, data: { lastSeenAt: new Date() } });
+  await closeSuperseded(superseded);
+}
+
+/** End rows that a newer class in the same room has replaced, at their true last-seen time. */
+async function closeSuperseded(rows: Array<{ id: string; lastSeenAt: Date }>): Promise<void> {
+  for (const row of rows) {
+    await prisma.liveClassSession.update({ where: { id: row.id }, data: { endedAt: row.lastSeenAt } });
+  }
 }
 
 /** The class is over. Closes every open row for the room, not just the newest. */

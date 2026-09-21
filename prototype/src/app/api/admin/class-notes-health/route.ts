@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { ffmpegHealth } from "@/lib/audio-extract";
+import { activeModelName } from "@/lib/ai";
+import { EXTRACTIVE_PROVIDER, transcriptionBacklogWhere } from "@/lib/class-transcription";
 
 export const dynamic = "force-dynamic";
 // Streaming a large recording out of the bucket, extracting its audio, then an
@@ -44,13 +46,15 @@ export async function GET() {
       startedAt: true,
       privateClassId: true,
       material: { select: { title: true, level: true } },
-      transcript: { select: { status: true, error: true, updatedAt: true } },
+      transcript: { select: { status: true, error: true, updatedAt: true, provider: true } },
     },
     orderBy: { startedAt: "desc" },
   });
 
   const byStatus: Record<string, number> = {};
   let noTranscriptYet = 0;
+  /** Ready, but written by plain extraction while no AI model was reachable. */
+  let outlines = 0;
   const failures: Array<{
     title: string;
     level: string | null;
@@ -67,6 +71,7 @@ export async function GET() {
       continue;
     }
     byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
+    if (t.status === "ready" && t.provider === EXTRACTIVE_PROVIDER) outlines += 1;
     if (
       (t.status === "failed" || t.status === "skipped_too_large" || t.status === "none") &&
       failures.length < 8
@@ -118,6 +123,9 @@ export async function GET() {
     eligibleRecordings: eligible.length,
     incompleteRecordings,
     ready: byStatus.ready ?? 0,
+    outlines,
+    // Which model would write the next recap — so "why is it an outline?" has an answer.
+    notesModel: activeModelName("learning-content"),
     inProgress:
       (byStatus.pending ?? 0) +
       (byStatus.transcribing ?? 0) +
@@ -201,18 +209,7 @@ export async function POST() {
   // How many are still waiting, so the UI knows whether to offer another run.
   const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const [recordingsRemaining, materialsRemaining] = await Promise.all([
-    prisma.classRecording.count({
-      where: {
-        status: "completed",
-        materialId: { not: null },
-        startedAt: { gte: since },
-        OR: [
-          { transcript: null },
-          { transcript: { status: "failed" } },
-          { transcript: { status: "skipped_too_large" } },
-        ],
-      },
-    }),
+    prisma.classRecording.count({ where: transcriptionBacklogWhere(since) }),
     prisma.material.count({
       where: {
         kind: { notIn: ["recording", "audio", "video"] },

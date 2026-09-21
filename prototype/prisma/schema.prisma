@@ -247,6 +247,7 @@ model Tenant {
   classTranscripts        ClassTranscript[]
   videoProgresses         VideoProgress[]
   studentClassNotes       StudentClassNote[]
+  studentNotes            StudentNote[]
   completions             Completion[]
   progresses              Progress[]
   enrollments             Enrollment[]
@@ -750,6 +751,7 @@ model Student {
   certificates          Certificate[]
   videoProgress         VideoProgress[]
   studentClassNotes     StudentClassNote[]
+  notes                 StudentNote[]
   convertedFromLead     Lead?
   journeyEvents         JourneyEvent[]
   liveInvites           LiveClassInvite[]
@@ -1817,6 +1819,36 @@ model StudentClassNote {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([studentId, materialId])
+  @@index([tenantId])
+}
+
+/**
+ * A note a student started on their own — the "+" on My Notes.
+ *
+ * `StudentClassNote` above is a student's copy of the notes for ONE recording or
+ * handout, so it cannot exist without a material. This is the other half of a
+ * notebook: a page you open because you want to write something down (a rule you
+ * keep forgetting, the words from a film, a list for Friday's test), tied to
+ * nothing. Plain text, autosaved, private to the student; the office and tutors
+ * never read it.
+ */
+model StudentNote {
+  id String @id @default(cuid())
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  title   String @default("")
+  content String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, updatedAt])
   @@index([tenantId])
 }
 

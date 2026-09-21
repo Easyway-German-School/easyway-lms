@@ -19,6 +19,7 @@ type SpeakerRange = { from: number; to: number; speaker: "tutor" | "student" };
 type NotesResponse = {
   status: string;
   isPrivate?: boolean;
+  outline?: boolean;
   notes?: Notes;
   personalFocus?: string | null;
   transcriptText?: string | null;
@@ -141,6 +142,13 @@ export default function ClassNotesPanel({ materialId, onSeekTo }: { materialId: 
           </a>
         </div>
       </div>
+
+      {data.outline ? (
+        <p className="rounded-2xl bg-[var(--surface-alt)] px-4 py-3 text-xs leading-5 text-[var(--muted)]">
+          Auto-outline: these notes were lifted straight from the class transcript because the AI writer was
+          unavailable. A fuller write-up replaces this automatically.
+        </p>
+      ) : null}
 
       {personalFocus ? (
         <div className="flex items-start gap-3 rounded-2xl border border-[var(--accent)]/25 bg-[var(--accent-soft)] p-4">

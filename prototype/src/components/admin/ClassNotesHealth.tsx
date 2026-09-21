@@ -18,6 +18,10 @@ type Health = {
   eligibleRecordings: number;
   incompleteRecordings: number;
   ready: number;
+  /** Ready, but an auto-outline written while no AI model was reachable. */
+  outlines?: number;
+  /** The model that will write the next recap. */
+  notesModel?: string;
   inProgress: number;
   noTranscriptYet: number;
   failed: number;
@@ -174,7 +178,14 @@ export default function ClassNotesHealth() {
         <div>
           <p className="text-sm font-semibold text-[var(--foreground)]">Class notes &amp; transcripts</p>
           <p className="mt-0.5 text-xs text-[var(--muted)]">
-            AI recaps from recorded classes, last {health.windowDays} days.
+            Recaps from recorded classes, last {health.windowDays} days
+            {health.notesModel && health.notesModel !== "mock" ? <> — written by {health.notesModel}</> : null}.
+            {health.outlines ? (
+              <span className="ml-1">
+                {health.outlines} {health.outlines === 1 ? "is" : "are"} an auto-outline made while the AI was unavailable;
+                {" "}the full write-up replaces {health.outlines === 1 ? "it" : "them"} automatically.
+              </span>
+            ) : null}
             {!health.transcriptionConfigured ? (
               <span className="ml-1 font-semibold text-rose-600">
                 Transcription is off — GROQ_API_KEY is not set, so no recaps are being made.
