@@ -45,8 +45,9 @@ export async function GET() {
       id: true,
       startedAt: true,
       privateClassId: true,
+      durationSeconds: true,
       material: { select: { title: true, level: true } },
-      transcript: { select: { status: true, error: true, updatedAt: true, provider: true } },
+      transcript: { select: { status: true, error: true, updatedAt: true, provider: true, transcribedUntil: true } },
     },
     orderBy: { startedAt: "desc" },
   });
@@ -55,6 +56,10 @@ export async function GET() {
   let noTranscriptYet = 0;
   /** Ready, but written by plain extraction while no AI model was reachable. */
   let outlines = 0;
+  /** Recordings transcribed part of the way — how much of their audio is done. */
+  let partialCount = 0;
+  let partialDone = 0;
+  let partialTotal = 0;
   const failures: Array<{
     title: string;
     level: string | null;
@@ -72,8 +77,16 @@ export async function GET() {
     }
     byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
     if (t.status === "ready" && t.provider === EXTRACTIVE_PROVIDER) outlines += 1;
+    if (t.status === "partial") {
+      partialCount += 1;
+      const total = rec.durationSeconds ?? 0;
+      partialDone += Math.min(t.transcribedUntil ?? 0, total);
+      partialTotal += total;
+    }
     if (
-      (t.status === "failed" || t.status === "skipped_too_large" || t.status === "none") &&
+      // A part-way recording only counts as a problem when it has something to say —
+      // "the read was too slow" — otherwise it is simply still working.
+      (t.status === "failed" || t.status === "skipped_too_large" || t.status === "none" || (t.status === "partial" && t.error)) &&
       failures.length < 8
     ) {
       failures.push({
@@ -124,10 +137,12 @@ export async function GET() {
     incompleteRecordings,
     ready: byStatus.ready ?? 0,
     outlines,
+    partial: { count: partialCount, percent: partialTotal > 0 ? Math.round((partialDone / partialTotal) * 100) : 0 },
     // Which model would write the next recap — so "why is it an outline?" has an answer.
     notesModel: activeModelName("learning-content"),
     inProgress:
       (byStatus.pending ?? 0) +
+      (byStatus.partial ?? 0) +
       (byStatus.transcribing ?? 0) +
       (byStatus.summarizing ?? 0) +
       noTranscriptYet,

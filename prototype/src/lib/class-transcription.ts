@@ -57,7 +57,7 @@ const UPGRADE_RETRY_MS = 60 * 60 * 1000;
  * seconds — and starting one that cannot finish just leaves it half-done until
  * it is reclaimed (see STALE_IN_FLIGHT_MS).
  */
-export const MIN_RECORDING_START_MS = 100_000;
+export const MIN_RECORDING_START_MS = 90_000;
 
 /** Provider tag for notes written with no model at all. */
 export const EXTRACTIVE_PROVIDER = "extractive";
@@ -331,6 +331,110 @@ export async function summariseTranscript(
 }
 
 /**
+ * HOW MUCH OF A RECORDING ONE STEP BITES OFF.
+ *
+ * A class is transcribed a few minutes at a time, and progress is saved after
+ * every step (`ClassTranscript.transcribedUntil`). The whole recording used to be
+ * one indivisible job: read all of a 1–2 GB video, re-encode its audio, transcribe
+ * it. When that took longer than the function may live the platform killed it,
+ * NOTHING was kept, and the next attempt started from zero and died the same way
+ * — which is why some classes never got notes however many times the queue ran.
+ * Now a slow connection just means a recording takes more runs; it is never lost.
+ *
+ * Five minutes of a 1080p recording is ~110 MB to read, and ~2.4 MB of audio.
+ */
+export const SLICE_SECONDS = 300;
+/** Speech-to-text plus saving, after ffmpeg has finished a slice. */
+const SLICE_OVERHEAD_MS = 40_000;
+/** The most one ffmpeg read of a slice may take, whatever time is left. */
+const SLICE_READ_CAP_MS = 150_000;
+/** When the caller gives no deadline (a direct call), how long this attempt may work. */
+const DEFAULT_ATTEMPT_MS = 200_000;
+/** Below this, an ffmpeg result is just the container header: there was no audio left. */
+const MIN_AUDIO_BYTES = 2_000;
+
+/** Whisper timestamps are relative to the slice it was given; put them on the recording's clock. */
+export function offsetSegments(segments: TranscriptSegment[], seconds: number): TranscriptSegment[] {
+  return segments.map((segment) => ({ ...segment, start: segment.start + seconds, end: segment.end + seconds }));
+}
+
+export type SliceResult =
+  | { kind: "done"; text: string; segments: TranscriptSegment[] }
+  /** Stopped before the end. `progressed` = at least one slice was finished this time. */
+  | { kind: "partial"; progressed: boolean; reason: string | null };
+
+/**
+ * Transcribe a recording slice by slice from `until`, saving after each, until it
+ * is finished or the time runs out. Never starts a slice it cannot finish.
+ */
+export async function transcribeInSlices(input: {
+  classRecordingId: string;
+  url: string;
+  /** From the recording row; null when the file never reported one. */
+  totalSeconds: number | null;
+  until: number;
+  text: string;
+  segments: TranscriptSegment[];
+  deadlineAt: number;
+}): Promise<SliceResult> {
+  let { until, text } = input;
+  const segments = [...input.segments];
+  let progressed = false;
+  let reason: string | null = null;
+
+  while (input.totalSeconds === null || until < input.totalSeconds) {
+    const remaining = input.deadlineAt - Date.now();
+    if (remaining < SLICE_OVERHEAD_MS + 45_000) break; // not enough left for another slice
+
+    const length = input.totalSeconds === null ? SLICE_SECONDS : Math.min(SLICE_SECONDS, input.totalSeconds - until);
+    const started = Date.now();
+    const audio = await extractAudioForAsrFromUrl(input.url, {
+      timeoutMs: Math.min(SLICE_READ_CAP_MS, remaining - SLICE_OVERHEAD_MS),
+      startSeconds: until,
+      durationSeconds: length,
+    });
+    if ("error" in audio) {
+      reason = audio.error;
+      break;
+    }
+
+    // Past the end of a recording whose length we did not know: that is "done".
+    if (audio.buffer.length < MIN_AUDIO_BYTES && input.totalSeconds === null) {
+      until = Number.POSITIVE_INFINITY;
+      break;
+    }
+
+    if (audio.buffer.length >= MIN_AUDIO_BYTES) {
+      const heard = await transcribeAudio(audio.buffer, audio.filename); // null = a silent stretch
+      if (heard) {
+        segments.push(...offsetSegments(heard.segments, until));
+        text = text ? `${text} ${heard.text}` : heard.text;
+      }
+    }
+    until += length;
+    progressed = true;
+
+    await prisma.classTranscript.update({
+      where: { classRecordingId: input.classRecordingId },
+      data: {
+        status: "transcribing",
+        transcribedUntil: Number.isFinite(until) ? until : input.totalSeconds,
+        transcriptText: text,
+        segments: segments as unknown as object[],
+        error: null,
+      },
+    });
+    console.log(
+      `[class-notes] ${input.classRecordingId} slice to ${Math.round(until)}s of ${input.totalSeconds ?? "?"}s in ${Math.round((Date.now() - started) / 1000)}s`,
+    );
+  }
+
+  const finished = input.totalSeconds === null ? until === Number.POSITIVE_INFINITY : until >= input.totalSeconds;
+  if (finished) return { kind: "done", text, segments };
+  return { kind: "partial", progressed, reason };
+}
+
+/**
  * Transcribe and summarise one recording. Idempotent: a row already `ready`
  * or mid-flight is left alone, so the queue below can call this freely
  * without tracking what it has already claimed.
@@ -345,7 +449,10 @@ export async function summariseTranscript(
  *     the outline it got while the models were down is replaced by the real
  *     write-up. Never notifies a second time.
  */
-export async function generateTranscriptForRecording(classRecordingId: string): Promise<"created" | "already" | "skipped" | "failed"> {
+export async function generateTranscriptForRecording(
+  classRecordingId: string,
+  options: { deadlineAt?: number } = {},
+): Promise<"created" | "partial" | "already" | "skipped" | "failed"> {
   const recording = await prisma.classRecording.findUnique({
     where: { id: classRecordingId },
     select: {
@@ -356,7 +463,10 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
       branchId: true,
       status: true,
       privateClassId: true,
-      transcript: { select: { status: true, provider: true, updatedAt: true, transcriptText: true, segments: true } },
+      durationSeconds: true,
+      transcript: {
+        select: { status: true, provider: true, updatedAt: true, transcriptText: true, segments: true, transcribedUntil: true },
+      },
       material: { select: { id: true, title: true } },
     },
   });
@@ -371,7 +481,8 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
   // always will be", but the pipeline below no longer pulls the video into
   // memory at all — ffmpeg streams the audio track straight from the bucket —
   // so a row parked at that status before this change deserves another go.
-  const RETRYABLE = new Set(["pending", "failed", "skipped_too_large"]);
+  // `partial` = transcribed some of the way and parked (see transcribeInSlices).
+  const RETRYABLE = new Set(["pending", "failed", "skipped_too_large", "partial"]);
   const inFlight = existing?.status === "transcribing" || existing?.status === "summarizing";
   const abandoned = inFlight && Date.now() - existing!.updatedAt.getTime() > STALE_IN_FLIGHT_MS;
   const upgrading = existing?.status === "ready" && existing.provider === EXTRACTIVE_PROVIDER;
@@ -425,44 +536,54 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
     const objectKey = recording.objectKey;
     const filename = objectKey.split("/").pop() || "class.mp4";
 
-    // A retry after a failed SUMMARY must not pay for the ASR again: the words
-    // were already saved. (The expensive part is streaming the recording out
-    // of the bucket and re-encoding its audio, not the model call.)
-    let asr: { text: string; segments: TranscriptSegment[] } | null =
-      storedSegments && existing?.transcriptText ? { text: existing.transcriptText, segments: storedSegments } : null;
+    // What is already transcribed. A row with segments but no progress marker was
+    // transcribed in one go by the old pipeline and only failed later (summary),
+    // so it is complete; a row WITH a marker is finished only once it reaches the end.
+    const totalSeconds = recording.durationSeconds && recording.durationSeconds > 0 ? recording.durationSeconds : null;
+    const legacyComplete = Boolean(storedSegments) && existing?.transcribedUntil == null;
+    const progress = existing?.transcribedUntil ?? 0;
+    const alreadyComplete =
+      Boolean(storedSegments && existing?.transcriptText) &&
+      (legacyComplete || (totalSeconds !== null && progress >= totalSeconds));
+
+    let asr: { text: string; segments: TranscriptSegment[] } | null = alreadyComplete
+      ? { text: existing!.transcriptText!, segments: storedSegments! }
+      : null;
 
     if (!asr) {
-      /**
-       * FIRST CHOICE: let ffmpeg stream the audio track straight out of the
-       * bucket.
-       *
-       * A class recording is a full video — `videoBitrate: 3000` in
-       * lib/recording.ts, which is a gigabyte-plus for a morning class — and the
-       * ASR call only needs ~14MB/hour of speech. Handing ffmpeg a presigned URL
-       * means it range-requests the container, keeps the audio, discards every
-       * video frame, and the video is NEVER held in this function's memory or on
-       * /tmp. So the file being 1GB (the "Too large" failures on prod) stops
-       * mattering. Falls through to the in-memory path below if there is no
-       * bucket (local dev) or ffmpeg-over-http is unavailable.
-       */
-      let asrInput: { buffer: Buffer; filename: string } | null = null;
-      let streamFailure = "no signed URL available for the recording";
-      const url = await signedGetUrl(objectKey, 3600).catch((e) => {
-        streamFailure = `signedGetUrl threw: ${e instanceof Error ? e.message : String(e)}`;
-        return null;
-      });
-      if (url) {
-        const streamed = await extractAudioForAsrFromUrl(url);
-        if ("buffer" in streamed) asrInput = streamed;
-        else streamFailure = streamed.error;
-      }
+      const url = await signedGetUrl(objectKey, 3600).catch(() => null);
 
-      if (!asrInput) {
-        // FALLBACK: fetch the whole file and work on it in memory. Only safe for
-        // a file a serverless function can actually hold, so the size ceiling
-        // still guards THIS path — but it is no longer the front door, so a big
-        // recording only lands here if streaming extraction was not possible at
-        // all (no ffmpeg, no bucket), which is the genuinely unrecoverable case.
+      if (url) {
+        /**
+         * FIRST CHOICE: read the recording straight out of the bucket, a slice at
+         * a time — see transcribeInSlices for why it is sliced. The video is never
+         * held in this function's memory or on /tmp; only the audio of each slice
+         * (a couple of MB) is.
+         */
+        const result = await transcribeInSlices({
+          classRecordingId,
+          url,
+          totalSeconds,
+          until: progress,
+          text: existing?.transcriptText ?? "",
+          segments: storedSegments ?? [],
+          deadlineAt: options.deadlineAt ?? Date.now() + DEFAULT_ATTEMPT_MS,
+        });
+
+        if (result.kind === "partial") {
+          // Park it, keeping everything transcribed so far, so the next run
+          // resumes instead of starting over. `failed` only if this run got
+          // nowhere at all — the reason says why (usually: the read was too slow).
+          await prisma.classTranscript.update({
+            where: { classRecordingId },
+            data: { status: "partial", error: result.reason },
+          });
+          return result.progressed ? "partial" : "failed";
+        }
+        asr = { text: result.text, segments: result.segments };
+      } else {
+        // NO BUCKET (local dev): fetch the whole file and work on it in memory. Only
+        // safe for a file a function can actually hold, so the size ceiling guards it.
         const file = await getFile(objectKey);
         if (!file) throw new Error("recording file not found in storage");
 
@@ -472,8 +593,7 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
             where: { classRecordingId },
             data: {
               status: "skipped_too_large",
-              // The stream-extraction failure is the actionable part — say it.
-              error: `Streaming audio extraction failed (${streamFailure}); the ${Number(lengthHeader)}-byte file is too large to fall back to the in-memory path`,
+              error: `No signed URL for the recording, and the ${Number(lengthHeader)}-byte file is too large to read into memory`,
             },
           });
           return "skipped";
@@ -481,11 +601,11 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
 
         const buffer = Buffer.from(await file.arrayBuffer());
         const extracted = await extractAudioForAsr(buffer, filename);
-        asrInput = extracted ?? { buffer, filename };
+        const input = extracted ?? { buffer, filename };
+        asr = await transcribeAudio(input.buffer, input.filename);
       }
 
-      asr = await transcribeAudio(asrInput.buffer, asrInput.filename);
-      if (!asr) {
+      if (!asr || asr.segments.length === 0) {
         await prisma.classTranscript.update({
           where: { classRecordingId },
           data: { status: "none", error: "No speech detected" },
@@ -496,7 +616,12 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
 
     await prisma.classTranscript.update({
       where: { classRecordingId },
-      data: { status: "summarizing", transcriptText: asr.text, segments: asr.segments as unknown as object[] },
+      data: {
+        status: "summarizing",
+        transcriptText: asr.text,
+        segments: asr.segments as unknown as object[],
+        transcribedUntil: totalSeconds ?? existing?.transcribedUntil ?? null,
+      },
     });
 
     const result = await summariseTranscript({
@@ -614,6 +739,8 @@ export function transcriptionBacklogWhere(since: Date, now: Date = new Date()): 
       { transcript: null },
       { transcript: { status: "failed" } },
       { transcript: { status: "skipped_too_large" } },
+      // Started and parked part-way — finish what was begun.
+      { transcript: { status: "partial" } },
       { transcript: { status: { in: ["transcribing", "summarizing"] }, updatedAt: { lt: abandonedBefore } } },
       ...(aiTextAvailable()
         ? [{ transcript: { status: "ready", provider: EXTRACTIVE_PROVIDER, updatedAt: { lt: upgradeBefore } } }]
@@ -635,44 +762,57 @@ export function transcriptionBacklogWhere(since: Date, now: Date = new Date()): 
 export async function processTranscriptionQueue(
   limit = 2,
   options: { deadlineAt?: number } = {},
-): Promise<{ attempted: number; created: number; failed: number }> {
+): Promise<{ attempted: number; created: number; failed: number; partial: number }> {
   const where = transcriptionBacklogWhere(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
 
-  // Never-attempted first (newest first), then whichever retryable row was
-  // touched longest ago — so a recording that keeps failing cannot hog every
-  // slot and starve the ones queued behind it.
-  const fresh = await prisma.classRecording.findMany({
-    where: { AND: [where, { transcript: null }] },
-    orderBy: { startedAt: "desc" },
+  // Finish what was started first: a recording that is half transcribed is worth
+  // more done than another one begun. Then never-attempted (newest first), then
+  // whichever other retryable row was touched longest ago — so one that keeps
+  // failing cannot hog every slot and starve the ones queued behind it.
+  const started = await prisma.classRecording.findMany({
+    where: { AND: [where, { transcript: { status: "partial" } }] },
+    orderBy: { transcript: { updatedAt: "asc" } },
     take: limit,
     select: { id: true },
   });
-  const retries =
-    fresh.length < limit
+  const fresh =
+    started.length < limit
       ? await prisma.classRecording.findMany({
-          where: { AND: [where, { transcript: { isNot: null } }] },
-          orderBy: { transcript: { updatedAt: "asc" } },
-          take: limit - fresh.length,
+          where: { AND: [where, { transcript: null }] },
+          orderBy: { startedAt: "desc" },
+          take: limit - started.length,
           select: { id: true },
         })
       : [];
-  const pending = [...fresh, ...retries];
+  const taken = started.length + fresh.length;
+  const retries =
+    taken < limit
+      ? await prisma.classRecording.findMany({
+          where: { AND: [where, { transcript: { isNot: null } }, { NOT: { transcript: { status: "partial" } } }] },
+          orderBy: { transcript: { updatedAt: "asc" } },
+          take: limit - taken,
+          select: { id: true },
+        })
+      : [];
+  const pending = [...started, ...fresh, ...retries];
 
   let created = 0;
   let failed = 0;
+  let partial = 0;
   let attempted = 0;
   for (const row of pending) {
     // A caller with a wall-clock limit (the admin button, the background runner)
-    // must never be handed a recording it cannot finish: past this point the
-    // rest simply wait for the next run.
+    // must never be handed a recording it cannot make progress on: past this
+    // point the rest simply wait for the next run.
     if (options.deadlineAt && options.deadlineAt - Date.now() < MIN_RECORDING_START_MS) break;
     attempted += 1;
-    const outcome = await generateTranscriptForRecording(row.id);
+    const outcome = await generateTranscriptForRecording(row.id, { deadlineAt: options.deadlineAt });
     if (outcome === "created") created += 1;
+    else if (outcome === "partial") partial += 1;
     else if (outcome === "failed") failed += 1;
   }
 
-  return { attempted, created, failed };
+  return { attempted, created, failed, partial };
 }
 
 /**

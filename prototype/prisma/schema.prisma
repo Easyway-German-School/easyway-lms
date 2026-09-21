@@ -1704,6 +1704,16 @@ model ClassTranscript {
   status String @default("pending")
 
   /**
+   * How far into the recording the speech-to-text has got, in seconds. A class
+   * recording is transcribed a few minutes at a time (see transcribeInSlices in
+   * lib/class-transcription.ts), so a slow read or a run that runs out of time
+   * loses nothing: `segments` holds everything transcribed so far, the row is
+   * parked as `partial`, and the next run carries on from here. Null on a row
+   * transcribed in one go (the old way).
+   */
+  transcribedUntil Float?
+
+  /**
    * Flattened ASR output, capped at prompt size for the summarizer — see
    * MAX_TRANSCRIPT_PROMPT_CHARS in class-transcription.ts. Kept in full here
    * (not just the capped version) since the PDF export and a future

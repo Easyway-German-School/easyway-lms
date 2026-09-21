@@ -34,9 +34,9 @@ describe("runClassNotes", () => {
 
   it("works recordings one at a time until the queue is empty, then releases the lease", async () => {
     processTranscriptionQueue
-      .mockResolvedValueOnce({ attempted: 1, created: 1, failed: 0 })
-      .mockResolvedValueOnce({ attempted: 1, created: 1, failed: 0 })
-      .mockResolvedValueOnce({ attempted: 0, created: 0, failed: 0 });
+      .mockResolvedValueOnce({ attempted: 1, created: 1, failed: 0, partial: 0 })
+      .mockResolvedValueOnce({ attempted: 1, created: 1, failed: 0, partial: 0 })
+      .mockResolvedValueOnce({ attempted: 0, created: 0, failed: 0, partial: 0 });
 
     const { runClassNotes } = await import("./class-notes-runner");
     const summary = await runClassNotes({ budgetMs: 240_000 });
@@ -51,14 +51,30 @@ describe("runClassNotes", () => {
     expect(released).toBeTruthy();
   });
 
-  it("stops after two rounds that produced nothing instead of hammering a rate limit", async () => {
-    processTranscriptionQueue.mockResolvedValue({ attempted: 1, created: 0, failed: 1 });
+  it("stops after three rounds that produced nothing instead of hammering a rate limit", async () => {
+    processTranscriptionQueue.mockResolvedValue({ attempted: 1, created: 0, failed: 1, partial: 0 });
 
     const { runClassNotes } = await import("./class-notes-runner");
     const summary = await runClassNotes({ budgetMs: 240_000 });
 
-    expect(processTranscriptionQueue).toHaveBeenCalledTimes(2);
+    // Three empty rounds in a row is "stuck", not "slow".
+    expect(processTranscriptionQueue).toHaveBeenCalledTimes(3);
     expect(summary.progressed).toBe(false);
+  });
+
+  it("counts getting further into a recording as progress, even before it is finished", async () => {
+    processTranscriptionQueue
+      .mockResolvedValueOnce({ attempted: 1, created: 0, failed: 0, partial: 1 })
+      .mockResolvedValueOnce({ attempted: 1, created: 0, failed: 0, partial: 1 })
+      .mockResolvedValueOnce({ attempted: 1, created: 0, failed: 0, partial: 1 })
+      .mockResolvedValueOnce({ attempted: 0, created: 0, failed: 0, partial: 0 });
+
+    const { runClassNotes } = await import("./class-notes-runner");
+    const summary = await runClassNotes({ budgetMs: 240_000 });
+
+    expect(processTranscriptionQueue).toHaveBeenCalledTimes(4); // did not stall out after three
+    expect(summary).toMatchObject({ progressed: true });
+    expect(summary.recordings.partial).toBe(3);
   });
 
   it("does not start a recording when the time left is too short to finish one", async () => {
@@ -86,7 +102,7 @@ describe("runClassNotes", () => {
     const { Prisma } = await import("@prisma/client");
     aiCache.create.mockRejectedValue(new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "x" }));
     aiCache.updateMany.mockResolvedValue({ count: 1 });
-    processTranscriptionQueue.mockResolvedValue({ attempted: 0, created: 0, failed: 0 });
+    processTranscriptionQueue.mockResolvedValue({ attempted: 0, created: 0, failed: 0, partial: 0 });
 
     const { runClassNotes } = await import("./class-notes-runner");
     const summary = await runClassNotes({ budgetMs: 240_000 });

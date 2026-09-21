@@ -34,13 +34,14 @@ import { processMaterialQueue } from "@/lib/material-ai";
 const LEASE_KEY = "lock:class-notes-runner";
 const BACKLOG_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 /** Two rounds in a row that produced nothing means "stuck", not "slow". */
-const STALL_LIMIT = 2;
+const STALL_LIMIT = 3;
 
 export type RunSummary = {
   ran: boolean;
   /** Why it did not run, when it did not. */
   reason?: string;
-  recordings: { attempted: number; created: number; failed: number };
+  /** `partial` = recordings moved forward but not finished (resumed by the next run). */
+  recordings: { attempted: number; created: number; failed: number; partial: number };
   documents: { attempted: number; ready: number; skipped: number };
   /** Recordings and handouts still waiting after this run. */
   remaining: number;
@@ -94,7 +95,7 @@ export async function runClassNotes(options: { budgetMs: number }): Promise<RunS
   const deadlineAt = started + options.budgetMs;
   const empty: RunSummary = {
     ran: false,
-    recordings: { attempted: 0, created: 0, failed: 0 },
+    recordings: { attempted: 0, created: 0, failed: 0, partial: 0 },
     documents: { attempted: 0, ready: 0, skipped: 0 },
     remaining: 0,
     progressed: false,
@@ -117,8 +118,10 @@ export async function runClassNotes(options: { budgetMs: number }): Promise<RunS
         summary.recordings.attempted += round.attempted;
         summary.recordings.created += round.created;
         summary.recordings.failed += round.failed;
+        summary.recordings.partial += round.partial;
         if (round.attempted === 0) break;
-        stalls = round.created > 0 ? 0 : stalls + 1;
+        // Getting further into a recording counts as progress even before it is finished.
+        stalls = round.created > 0 || round.partial > 0 ? 0 : stalls + 1;
         if (stalls >= STALL_LIMIT) break;
       }
 
@@ -137,7 +140,7 @@ export async function runClassNotes(options: { budgetMs: number }): Promise<RunS
 
       const left = await countBacklog();
       summary.remaining = left.recordings + left.documents;
-      summary.progressed = summary.recordings.created > 0 || summary.documents.ready > 0;
+      summary.progressed = summary.recordings.created > 0 || summary.recordings.partial > 0 || summary.documents.ready > 0;
     } finally {
       await releaseLease();
     }
