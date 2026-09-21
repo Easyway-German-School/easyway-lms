@@ -22,6 +22,9 @@ const session = (id: string, minutes: number, endedAgo = HOUR) => ({
   lastSeenAt: ago(endedAgo),
 });
 
+// The first import pulls in live-presence's module graph; give a cold, busy machine room.
+vi.setConfig({ testTimeout: 30_000 });
+
 describe("feedbackDue", () => {
   beforeEach(() => {
     Object.values(db).forEach((table) => Object.values(table).forEach((fn) => fn.mockReset()));

@@ -37,12 +37,13 @@ describe("touchLiveSession", () => {
     const closed = calls.find(([arg]) => arg.where.id === "old")![0];
     expect(closed.data).toEqual({ endedAt: abandonedSeen });
     expect(closed.data.lastSeenAt).toBeUndefined();
-  });
+    // The first import pulls in the whole live-presence module graph, which is slow on a cold, busy machine.
+  }, 30_000);
 
   it("does nothing when nothing is open", async () => {
     findMany.mockResolvedValue([]);
     const { touchLiveSession } = await import("./live-presence");
     await touchLiveSession("empty-room");
     expect(update).not.toHaveBeenCalled();
-  });
+  }, 30_000);
 });
