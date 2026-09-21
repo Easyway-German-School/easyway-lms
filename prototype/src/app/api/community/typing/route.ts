@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 import { authorizeChannel, canPostInChannel } from "@/lib/community-spaces";
+import { clearTyping, stampTyping, typersInChannel } from "@/lib/community-typing";
 
 export const dynamic = "force-dynamic";
 
@@ -9,24 +9,18 @@ export const dynamic = "force-dynamic";
  * "Someone is typing in this room."
  *
  * The cheapest thing that reads like a real messaging app. There is no stream
- * and no socket — the room is already polling `/api/community/messages` every
- * few seconds, and this rides the same cadence:
+ * and no socket — the room is already polling, and this rides the same idea:
  *
- *   POST { channelId }   the client re-stamps its own ping while a draft is
- *                        non-empty, throttled to one call every few seconds.
- *   GET  ?channelId=     the poll asks who has stamped one in the last few
- *                        seconds, and shows their names above the composer.
+ *   POST { channelId }                  the client re-stamps its own ping while
+ *                                       a draft is non-empty, throttled.
+ *   POST { channelId, typing: false }   "I stopped" — box emptied, message sent.
+ *   GET  ?channelId=                    who has stamped one in the last few
+ *                                       seconds, for the room the viewer has open.
  *
- * A ping is live for {@link LIVE_MS} past its `updatedAt`. Nothing here is
- * worth keeping: the POST sweeps rows older than {@link STALE_MS} for the same
- * channel on its way through, so a member who closed the tab mid-sentence
- * stops showing without a cron.
+ * The portal-wide "somebody is typing in one of your rooms" pill reads
+ * /api/community/typing/feed instead. The model both share — stamp, live
+ * window, no expiry job — is written up in lib/typing.ts.
  */
-
-/** How long after its last stamp a ping still counts as "typing". */
-const LIVE_MS = 7_000;
-/** Older than this and the row is swept on the next POST to the channel. */
-const STALE_MS = 60_000;
 
 type Viewer = { userId: string; role: string };
 
@@ -37,7 +31,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { channelId } = await request.json().catch(() => ({}));
+    const { channelId, typing } = await request.json().catch(() => ({}));
     if (!channelId) {
       return NextResponse.json({ error: "channelId is required" }, { status: 400 });
     }
@@ -49,6 +43,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Channel not found in your community" }, { status: 403 });
     }
 
+    if (typing === false) {
+      await clearTyping(channel.id, viewer.userId);
+      return NextResponse.json({ ok: true });
+    }
+
     // Nobody "types" in an announcement channel — students cannot post there and
     // staff posts are rare and deliberate. Accept the call so the client needs
     // no special-casing, but write nothing.
@@ -56,22 +55,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, ignored: true });
     }
 
-    const now = new Date();
-
-    await prisma.typingPing.upsert({
-      where: { channelId_userId: { channelId: channel.id, userId: viewer.userId } },
-      update: { updatedAt: now },
-      create: { channelId: channel.id, userId: viewer.userId },
-    });
-
-    // Opportunistic sweep — keeps the table from carrying rows for people who
-    // closed the tab three lessons ago, without a scheduled job.
-    await prisma.typingPing
-      .deleteMany({
-        where: { channelId: channel.id, updatedAt: { lt: new Date(now.getTime() - STALE_MS) } },
-      })
-      .catch(() => {});
-
+    await stampTyping(channel.id, viewer.userId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Community typing ping error:", error);
@@ -99,24 +83,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Channel not found in your community" }, { status: 403 });
     }
 
-    const rows = await prisma.typingPing.findMany({
-      where: {
-        channelId: channel.id,
-        userId: { not: viewer.userId },
-        updatedAt: { gt: new Date(Date.now() - LIVE_MS) },
-      },
-      select: { user: { select: { id: true, name: true } } },
-      orderBy: { updatedAt: "desc" },
-      take: 8,
-    });
-
-    return NextResponse.json({
-      typers: rows.map((row) => ({
-        id: row.user.id,
-        // First name only, same as every name shown in the room.
-        name: (row.user.name ?? "Someone").trim().split(/\s+/)[0] || "Someone",
-      })),
-    });
+    return NextResponse.json({ typers: await typersInChannel(channel.id, viewer.userId) });
   } catch (error) {
     console.error("Community typing read error:", error);
     return NextResponse.json({ error: "Unable to load typing state" }, { status: 500 });

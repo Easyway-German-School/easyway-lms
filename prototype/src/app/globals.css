@@ -985,3 +985,40 @@ html.theme-custom ::selection {
 @media (prefers-reduced-motion: reduce) {
   .ew-live-glow { animation: none; box-shadow: 0 0 12px 2px rgba(244, 63, 94, 0.45); }
 }
+
+/* ---------------------------------------------------------------------------
+   TYPING + CHAT MOTION — shared by the class chat, the help desk and the
+   floating "Anna is typing" pill (components/typing/TypingUI.tsx).
+   --------------------------------------------------------------------------- */
+@keyframes ew-typing-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-3px); opacity: 1; }
+}
+.ew-typing-dot { animation: ew-typing-dot 1.2s ease-in-out infinite; }
+
+/* A message (or the typing bubble) arriving: a short rise and settle. */
+@keyframes ew-msg-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+.ew-msg-in { animation: ew-msg-in 0.22s ease-out both; }
+
+/* The soft pulse around an avatar that is typing right now. */
+@keyframes ew-typing-ring {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  50%      { box-shadow: 0 0 0 5px transparent; }
+}
+.ew-typing-ring { animation: ew-typing-ring 1.6s ease-in-out infinite; }
+
+/* Send button popping in the moment there is something to send. */
+@keyframes ew-pop {
+  from { transform: scale(0.6); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.ew-pop { animation: ew-pop 0.16s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ew-typing-dot { animation: none; opacity: 0.8; }
+  .ew-msg-in, .ew-pop { animation: none; }
+  .ew-typing-ring { animation: none; }
+}

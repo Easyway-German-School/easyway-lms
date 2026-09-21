@@ -6,6 +6,7 @@ import { activeMuteFor, muteMessage } from "@/lib/community-moderation";
 import { isStickerId, stickerById } from "@/lib/community-stickers";
 import { markChannelRead } from "@/lib/community-unread";
 import { announceChatMessage } from "@/lib/community-notify";
+import { clearTyping } from "@/lib/community-typing";
 import { notify, KIND } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
@@ -355,6 +356,11 @@ export async function POST(request: Request) {
 
     // Your own message must never leave a badge on your own sidebar.
     await markChannelRead(viewer.userId, channel.id);
+
+    // Sending ends "is typing" on the spot. The client also says so, but this is
+    // the one that always happens — otherwise the dots outlive the message they
+    // were announcing by the rest of the seven-second window.
+    await clearTyping(channel.id, viewer.userId);
 
     /**
      * Tell the rest of the room, on their phones and on whatever page of the

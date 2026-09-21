@@ -8,7 +8,21 @@ import { useRouter } from "next/navigation";
 import LecturerShell from "@/components/LecturerShell";
 import { ArrowLeftIcon, InboxIcon, MailIcon, SendIcon } from "@/components/icons";
 import BrandLoader from "@/components/BrandLoader";
-import { AttachmentPicker, MessageAttachments } from "@/components/support/TicketAttachments";
+import { MessageAttachments } from "@/components/support/TicketAttachments";
+import {
+  ChatBubbleRow,
+  ChatComposer,
+  ChatHeader,
+  ChatScroller,
+  ChatStamp,
+  ChatTypingRow,
+  needsStamp,
+  stampLabel,
+} from "@/components/support/ChatKit";
+import { TypingDots } from "@/components/typing/TypingUI";
+import { useTicketLive, useTicketTypingMap } from "@/lib/client/use-ticket-live";
+import { useTypingSender } from "@/lib/client/use-typing-sender";
+import { describeTypers } from "@/lib/typing";
 import type { TicketAttachment } from "@/lib/support-copy";
 
 type InboxTicket = {
@@ -94,21 +108,64 @@ export default function LecturerMessagesPage() {
     }
   }, []);
 
-  const openThread = useCallback(async (id: string, subject: string) => {
-    setActiveTicket(id);
-    setActiveSubject(subject);
-    setThread([]);
-    try {
-      const res = await fetch(`/api/support/tickets/${id}`, { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setThread(data.messages ?? []);
-      setInbox((current) => current.map((t) => (t.id === id ? { ...t, unread: false } : t)));
-      setInboxUnread((n) => Math.max(0, n - 1));
-    } catch {
-      // The list is still there; the student can just click it again.
-    }
+  const [threadStatus, setThreadStatus] = useState("open");
+  const [threadLoaded, setThreadLoaded] = useState(false);
+
+  /** Pull the open thread without disturbing the reply box. */
+  const refreshThread = useCallback(async (id: string) => {
+    const res = await fetch(`/api/support/tickets/${id}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    setThread(data.messages ?? []);
+    if (data.status) setThreadStatus(data.status);
+    setThreadLoaded(true);
+    return data;
   }, []);
+
+  const openThread = useCallback(
+    async (id: string, subject: string) => {
+      setActiveTicket(id);
+      setActiveSubject(subject);
+      setThread([]);
+      setThreadLoaded(false);
+      try {
+        const data = await refreshThread(id);
+        if (!data) return;
+        setInbox((current) => current.map((t) => (t.id === id ? { ...t, unread: false } : t)));
+        setInboxUnread((n) => Math.max(0, n - 1));
+      } catch {
+        // The list is still there; the student can just click it again.
+      }
+    },
+    [refreshThread],
+  );
+
+  // A student typing in one of my threads lights up its row, and inside an open
+  // thread shows the dots (lib/typing.ts). Both ends of the conversation.
+  const typingByTicket = useTicketTypingMap(true);
+  const live = useTicketLive({
+    ticketId: activeTicket,
+    known: threadLoaded ? { count: thread.length, status: threadStatus } : null,
+    onStale: () => (activeTicket ? refreshThread(activeTicket) : undefined),
+  });
+  const { onDraftChange: onTypingDraftChange, stop: stopTyping } = useTypingSender(activeTicket, (typing) =>
+    fetch("/api/support/typing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticketId: activeTicket, typing }),
+      keepalive: true,
+    }),
+  );
+
+  // A full-screen thread on a phone must not let the page behind it scroll.
+  useEffect(() => {
+    if (!activeTicket || window.innerWidth >= 640) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [activeTicket]);
 
   async function sendReply() {
     if ((!reply.trim() && replyFiles.length === 0) || !activeTicket) return;
@@ -122,7 +179,8 @@ export default function LecturerMessagesPage() {
       if (res.ok) {
         setReply("");
         setReplyFiles([]);
-        await openThread(activeTicket, activeSubject);
+        stopTyping();
+        await refreshThread(activeTicket);
         await loadInbox();
       }
     } finally {
@@ -347,67 +405,68 @@ export default function LecturerMessagesPage() {
             </form>
           )}
 
+          {activeTicket ? (
+            /*
+              A student's question, as a chat. Full-screen on a phone, a card
+              from `sm` up — the same shape as the student's own help panel, so
+              both ends of a conversation look like the same thing. Typing goes
+              both ways (lib/typing.ts).
+            */
+            <div className="fixed inset-0 z-[65] flex h-[100dvh] flex-col overflow-hidden bg-[var(--surface)] sm:static sm:z-auto sm:h-[34rem] sm:rounded-2xl sm:border sm:border-[var(--border)]">
+              <ChatHeader
+                fullScreen
+                onBack={() => setActiveTicket(null)}
+                title={activeSubject || "A student's question"}
+                subtitle={
+                  <span className="truncate text-[11px] text-[var(--muted)]">
+                    {thread.find((entry) => !entry.mine)?.authorName ?? "Student"}
+                  </span>
+                }
+              />
+
+              <ChatScroller resetKey={activeTicket} watch={`${thread.length}:${live.typers.length}`}>
+                <div className="space-y-3">
+                  {thread.map((entry, index) => {
+                    const previous = thread[index - 1];
+                    const firstOfRun = !previous || previous.mine !== entry.mine;
+                    return (
+                      <div key={entry.id} className="space-y-3">
+                        {needsStamp(previous?.createdAt, entry.createdAt) ? (
+                          <ChatStamp>{stampLabel(entry.createdAt)}</ChatStamp>
+                        ) : null}
+                        <ChatBubbleRow
+                          mine={entry.mine}
+                          authorName={entry.mine ? "You" : (entry.authorName ?? "Student").split(/\s+/)[0]}
+                          staff={entry.mine}
+                          showAvatar={firstOfRun}
+                          showName={firstOfRun}
+                          body={entry.body}
+                          extras={
+                            <MessageAttachments attachments={entry.attachments} align={entry.mine ? "end" : "start"} />
+                          }
+                        />
+                      </div>
+                    );
+                  })}
+                  <ChatTypingRow typers={live.typers} />
+                </div>
+              </ChatScroller>
+
+              <ChatComposer
+                value={reply}
+                onChange={(next) => {
+                  setReply(next);
+                  onTypingDraftChange(next);
+                }}
+                onSend={sendReply}
+                busy={threadBusy}
+                files={replyFiles}
+                onFilesChange={setReplyFiles}
+                placeholder="Reply…"
+              />
+            </div>
+          ) : (
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
-            {activeTicket ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setActiveTicket(null)}
-                    aria-label="Back to your students' questions"
-                    className="rounded-lg p-1 text-[var(--muted)] transition hover:text-[var(--foreground)]"
-                  >
-                    <ArrowLeftIcon className="h-4 w-4" />
-                  </button>
-                  <h2 className="min-w-0 flex-1 truncate text-lg font-bold text-[var(--foreground)]">
-                    {activeSubject || "A student's question"}
-                  </h2>
-                </div>
-
-                <div className="mt-4 max-h-[26rem] space-y-3 overflow-y-auto">
-                  {thread.map((entry) => (
-                    <div key={entry.id} className={`flex flex-col ${entry.mine ? "items-end" : "items-start"}`}>
-                      <span className="px-1 text-[10px] font-medium text-[var(--muted)]">
-                        {entry.mine ? "You" : entry.authorName ?? "Student"}
-                      </span>
-                      {entry.body ? (
-                        <div
-                          className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
-                            entry.mine
-                              ? "bg-[var(--accent)] text-white"
-                              : "bg-[var(--background)] text-[var(--foreground)]"
-                          }`}
-                        >
-                          {entry.body}
-                        </div>
-                      ) : null}
-                      <MessageAttachments
-                        attachments={entry.attachments}
-                        align={entry.mine ? "end" : "start"}
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-3 flex items-end gap-2">
-                  <AttachmentPicker value={replyFiles} onChange={setReplyFiles} disabled={threadBusy} compact />
-                  <textarea
-                    value={reply}
-                    onChange={(event) => setReply(event.target.value.slice(0, 4000))}
-                    rows={1}
-                    placeholder="Reply…"
-                    className="max-h-24 min-h-[2.5rem] flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
-                  />
-                  <button
-                    onClick={sendReply}
-                    disabled={threadBusy || (!reply.trim() && replyFiles.length === 0)}
-                    aria-label="Send reply"
-                    className="shrink-0 rounded-xl bg-[var(--accent)] p-2.5 text-white transition hover:brightness-110 disabled:opacity-40"
-                  >
-                    <SendIcon className="h-4 w-4" />
-                  </button>
-                </div>
-              </>
-            ) : (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="flex items-center gap-2 text-lg font-bold text-[var(--foreground)]">
@@ -428,31 +487,41 @@ export default function LecturerMessagesPage() {
                   <p className="mt-4 text-sm text-[var(--muted)]">No questions yet.</p>
                 ) : (
                   <div className="mt-4 space-y-2">
-                    {inbox.map((ticket) => (
-                      <button
-                        key={ticket.id}
-                        onClick={() => openThread(ticket.id, ticket.subject)}
-                        className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] p-3 text-left transition hover:border-[var(--border-strong)]"
-                      >
-                        <div className="flex items-start gap-2">
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--foreground)]">
-                            {ticket.studentName ?? "A student"} — {ticket.subject}
-                          </span>
-                          {ticket.unread ? (
-                            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />
-                          ) : null}
-                        </div>
-                        <span className="mt-1 block text-xs text-[var(--muted)]">
-                          {ticket.level ? `${ticket.level} · ` : ""}
-                          {new Date(ticket.lastMessageAt).toLocaleString()}
-                        </span>
-                      </button>
-                    ))}
+                    {inbox.map((ticket) => {
+                      const typers = typingByTicket[ticket.id] ?? [];
+                      return (
+                        <button
+                          key={ticket.id}
+                          onClick={() => openThread(ticket.id, ticket.subject)}
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] p-3 text-left transition hover:border-[var(--border-strong)] active:scale-[0.99]"
+                        >
+                          <div className="flex items-start gap-2">
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--foreground)]">
+                              {ticket.studentName ?? "A student"} — {ticket.subject}
+                            </span>
+                            {ticket.unread ? (
+                              <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />
+                            ) : null}
+                          </div>
+                          {typers.length > 0 ? (
+                            <span className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-[var(--accent)]">
+                              <TypingDots />
+                              {describeTypers(typers.map((t) => t.name))}
+                            </span>
+                          ) : (
+                            <span className="mt-1 block text-xs text-[var(--muted)]">
+                              {ticket.level ? `${ticket.level} · ` : ""}
+                              {new Date(ticket.lastMessageAt).toLocaleString()}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </>
-            )}
           </div>
+          )}
 
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
             <h2 className="text-lg font-bold text-[var(--foreground)]">Sent</h2>

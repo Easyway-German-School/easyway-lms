@@ -23,19 +23,15 @@ import { useLightbox } from "@/components/ImageLightbox";
 import { uploadErrorMessage, uploadFile, validateImageFile } from "@/lib/upload";
 import { MAX_ATTACHMENTS, type TicketAttachment } from "@/lib/support-copy";
 
-export function AttachmentPicker({
-  value,
-  onChange,
-  disabled,
-  compact,
-}: {
-  value: TicketAttachment[];
-  onChange: (next: TicketAttachment[]) => void;
-  disabled?: boolean;
-  /** A single icon button rather than a labelled one — for the reply row. */
-  compact?: boolean;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
+/**
+ * The upload half of attaching images, shared by the labelled picker and the
+ * chat composer's camera / gallery buttons so they cannot drift apart:
+ * validation, upload, the six-image cap and the error line all live here.
+ */
+export function useAttachmentUploader(
+  value: TicketAttachment[],
+  onChange: (next: TicketAttachment[]) => void,
+) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,8 +69,30 @@ export function AttachmentPicker({
       if (added.length) onChange([...value, ...added]);
     } finally {
       setBusy(false);
-      if (inputRef.current) inputRef.current.value = "";
     }
+  }
+
+  return { busy, error, room, onFiles };
+}
+
+export function AttachmentPicker({
+  value,
+  onChange,
+  disabled,
+  compact,
+}: {
+  value: TicketAttachment[];
+  onChange: (next: TicketAttachment[]) => void;
+  disabled?: boolean;
+  /** A single icon button rather than a labelled one — for the reply row. */
+  compact?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const { busy, error, room, onFiles: uploadFiles } = useAttachmentUploader(value, onChange);
+
+  async function onFiles(fileList: FileList | null) {
+    await uploadFiles(fileList);
+    if (inputRef.current) inputRef.current.value = "";
   }
 
   return (
