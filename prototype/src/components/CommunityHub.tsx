@@ -2053,7 +2053,8 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                   }
                 }}
                 rows={1}
-                placeholder={uploading ? "Uploading…" : `Message #${active?.name ?? ""}`}
+                // Short on purpose: at 16px on a 375px phone, "Message #Homework & help" wraps.
+                placeholder={uploading ? "Uploading…" : "Message…"}
                 // 16px on a phone: anything smaller makes iOS zoom the page on focus.
                 className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5 text-base text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] sm:text-sm"
               />

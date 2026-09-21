@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { COMMUNITY_PANEL_EVENT, useTypingFeed } from "@/lib/client/typing-feed";
-import { describeTypers } from "@/lib/typing";
+import { describeTypersShort } from "@/lib/typing";
 import { TypingAvatars, TypingDots } from "@/components/typing/TypingUI";
 import { CrossIcon } from "@/components/icons";
 
@@ -74,12 +74,12 @@ export default function TypingNudge() {
               type="button"
               onClick={() => router.push(`/community?channel=${room.channelId}`)}
               className="flex min-w-0 items-center gap-2.5 text-left"
-              aria-label={`${describeTypers(room.typers.map((t) => t.name))} in ${room.channelName}. Open the chat.`}
+              aria-label={`${describeTypersShort(room.typers.map((t) => t.name))} in ${room.channelName}. Open the chat.`}
             >
               <TypingAvatars typers={room.typers} size={28} />
               <span className="min-w-0 pr-1">
                 <span className="block truncate text-xs font-semibold text-[var(--foreground)]">
-                  {describeTypers(room.typers.map((t) => t.name))}
+                  {describeTypersShort(room.typers.map((t) => t.name))}
                 </span>
                 <span className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
                   <span className="truncate">in {room.channelName}</span>

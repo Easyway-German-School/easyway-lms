@@ -537,7 +537,8 @@ function EnquiriesInner() {
                       className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-[var(--accent)] transition hover:bg-[var(--accent-soft)] disabled:opacity-50"
                     >
                       <CheckCircleIcon className="h-4 w-4" />
-                      <span className="hidden sm:inline">Mark </span>resolved
+                      <span className="sm:hidden">Resolve</span>
+                      <span className="hidden sm:inline">Mark resolved</span>
                     </button>
                   )
                 }
