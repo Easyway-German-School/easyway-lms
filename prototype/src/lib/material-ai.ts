@@ -370,6 +370,7 @@ export async function generateForMaterial(
 export async function processMaterialQueue(
   limit = 3,
   reasons?: string[],
+  options: { deadlineAt?: number } = {},
 ): Promise<{
   attempted: number;
   ready: number;
@@ -377,7 +378,12 @@ export async function processMaterialQueue(
 }> {
   // A `failed` material is retried, but not on every run — a model that was
   // briefly down or returned junk deserves another go; hammering it does not.
-  const RETRY_FAILED_AFTER_MS = 12 * 60 * 60 * 1000;
+  // Mostly a rate limit or a brief outage rather than a bad document, so a short
+  // wait: 12 hours meant one bad minute cost a handout its whole day.
+  const RETRY_FAILED_AFTER_MS = 90 * 60 * 1000;
+  // Roughly the longest one document takes (a pause for the free-tier token
+  // budget, then the model call). Do not start one that cannot finish.
+  const MIN_START_MS = 45_000;
 
   const pending = await prisma.material.findMany({
     where: {
@@ -401,12 +407,15 @@ export async function processMaterialQueue(
 
   let ready = 0;
   let skipped = 0;
+  let attempted = 0;
 
   for (const material of pending) {
+    if (options.deadlineAt && options.deadlineAt - Date.now() < MIN_START_MS) break;
+    attempted += 1;
     const insight = await generateForMaterial(material.id, { reasons });
     if (insight) ready += 1;
     else skipped += 1;
   }
 
-  return { attempted: pending.length, ready, skipped };
+  return { attempted, ready, skipped };
 }

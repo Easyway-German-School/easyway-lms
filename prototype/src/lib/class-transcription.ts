@@ -49,7 +49,15 @@ const SMALL_PROMPT_CHARS = 9_000;
 const STALE_IN_FLIGHT_MS = 10 * 60 * 1000;
 
 /** How long to leave an auto-outline alone after a failed attempt to upgrade it. */
-const UPGRADE_RETRY_MS = 6 * 60 * 60 * 1000;
+const UPGRADE_RETRY_MS = 60 * 60 * 1000;
+
+/**
+ * The least time worth starting another recording with. One is a stream out of
+ * the bucket, an ffmpeg pass, a speech-to-text call and a summary — minutes, not
+ * seconds — and starting one that cannot finish just leaves it half-done until
+ * it is reclaimed (see STALE_IN_FLIGHT_MS).
+ */
+export const MIN_RECORDING_START_MS = 100_000;
 
 /** Provider tag for notes written with no model at all. */
 export const EXTRACTIVE_PROVIDER = "extractive";
@@ -394,11 +402,24 @@ export async function generateTranscriptForRecording(classRecordingId: string): 
     return "created";
   }
 
-  await prisma.classTranscript.upsert({
-    where: { classRecordingId },
-    create: { classRecordingId, status: "transcribing" },
-    update: { status: "transcribing", error: null },
-  });
+  // CLAIM IT, atomically. The cron, the admin button and the after-a-class kick
+  // can all reach the same recording; a blind upsert let two of them both
+  // download, transcribe and summarise it. The row's own `updatedAt` is the
+  // ticket: only the runner that still sees the row exactly as it read it wins.
+  if (!existing) {
+    try {
+      await prisma.classTranscript.create({ data: { classRecordingId, status: "transcribing" } });
+    } catch (error) {
+      if ((error as { code?: string })?.code === "P2002") return "already"; // somebody else created it first
+      throw error;
+    }
+  } else {
+    const claimed = await prisma.classTranscript.updateMany({
+      where: { classRecordingId, updatedAt: existing.updatedAt },
+      data: { status: "transcribing", error: null },
+    });
+    if (claimed.count === 0) return "already";
+  }
 
   try {
     const objectKey = recording.objectKey;
@@ -611,7 +632,10 @@ export function transcriptionBacklogWhere(since: Date, now: Date = new Date()): 
  * queue is, so a small number per tick clearing the backlog over a few runs
  * is the right trade.
  */
-export async function processTranscriptionQueue(limit = 2): Promise<{ attempted: number; created: number; failed: number }> {
+export async function processTranscriptionQueue(
+  limit = 2,
+  options: { deadlineAt?: number } = {},
+): Promise<{ attempted: number; created: number; failed: number }> {
   const where = transcriptionBacklogWhere(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
 
   // Never-attempted first (newest first), then whichever retryable row was
@@ -636,13 +660,19 @@ export async function processTranscriptionQueue(limit = 2): Promise<{ attempted:
 
   let created = 0;
   let failed = 0;
+  let attempted = 0;
   for (const row of pending) {
+    // A caller with a wall-clock limit (the admin button, the background runner)
+    // must never be handed a recording it cannot finish: past this point the
+    // rest simply wait for the next run.
+    if (options.deadlineAt && options.deadlineAt - Date.now() < MIN_RECORDING_START_MS) break;
+    attempted += 1;
     const outcome = await generateTranscriptForRecording(row.id);
     if (outcome === "created") created += 1;
     else if (outcome === "failed") failed += 1;
   }
 
-  return { attempted: pending.length, created, failed };
+  return { attempted, created, failed };
 }
 
 /**

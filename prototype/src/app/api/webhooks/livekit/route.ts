@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { WebhookReceiver } from "livekit-server-sdk";
 import { finaliseRecording } from "@/lib/class-recorder";
 
@@ -118,6 +118,15 @@ export async function POST(request: Request) {
           fileResults: info.fileResults,
         })
       );
+      // A class has just been filed: start writing its notes now, instead of
+      // leaving them for tomorrow's cron. `after()` so LiveKit gets its answer
+      // at once; the kick itself only asks the notes route to begin.
+      if (outcome === "created") {
+        after(async () => {
+          const { kickClassNotes } = await import("@/lib/class-notes-runner");
+          await kickClassNotes(new URL(request.url).origin);
+        });
+      }
       return NextResponse.json({ ok: true, outcome });
     }
 
