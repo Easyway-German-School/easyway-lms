@@ -942,3 +942,18 @@ html.theme-custom ::selection {
   .cine-spin { animation-duration: 1.6s; }
   .voice-wave span, .voice-core, .voice-orbit { animation: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   LIVE NOW — the red broadcast glow on a sidebar entry while a class is on air.
+   Shared by the student, tutor and admin shells (components/LiveNavBadge.tsx).
+   Deliberately the only glowing thing in any sidebar, so it keeps meaning
+   "something is happening right now".
+   --------------------------------------------------------------------------- */
+@keyframes ew-live-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.55), 0 0 10px 1px rgba(244, 63, 94, 0.35); }
+  50%      { box-shadow: 0 0 0 5px rgba(244, 63, 94, 0), 0 0 18px 3px rgba(244, 63, 94, 0.6); }
+}
+.ew-live-glow { animation: ew-live-glow 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .ew-live-glow { animation: none; box-shadow: 0 0 12px 2px rgba(244, 63, 94, 0.45); }
+}

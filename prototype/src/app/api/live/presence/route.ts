@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
@@ -149,7 +149,24 @@ export async function POST(request: Request) {
     }
 
     if (action === "end") {
+      // Everything open for the room is about to be closed; those are the classes
+      // whose people we ask "how was it?" once they are.
+      const closing = await prisma.liveClassSession.findMany({
+        where: { roomName: owned.roomName, endedAt: null },
+        select: { id: true },
+      });
       await closeLiveSession(owned.roomName);
+      // After the response, so ending the class is instant, and inside `after()`
+      // so the serverless function is kept alive until the asks have gone out.
+      // A failing notification must never stop a tutor from ending their class.
+      after(async () => {
+        try {
+          const { askAboutClass } = await import("@/lib/live-feedback");
+          await Promise.all(closing.map((row) => askAboutClass(row.id)));
+        } catch (error) {
+          console.error("Could not ask for class feedback", error);
+        }
+      });
       // The recording follows the class. Best effort — a stuck egress must not
       // leave the session open, because an open session keeps inviting people.
       void stopRecordingForRoom(owned.roomName).catch(() => {});
