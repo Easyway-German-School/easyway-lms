@@ -4,6 +4,7 @@ import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { onTrackPlanStudentIds } from "@/lib/payment-plans";
 import { KIND, notify } from "@/lib/notify";
+import { studentIdsSilenced } from "@/lib/fee-reminder-settings";
 import { batchFromAdmission } from "@/lib/batch";
 import { batchLockFloor, resolveUpcomingBatch, withBatchFloor } from "@/lib/batch-reservation";
 
@@ -137,7 +138,15 @@ export async function runPaymentWarnings(options?: { now?: Date; dryRun?: boolea
 
   const run: WarningRun = { checked: students.length, atRisk: 0, created: [], skipped: 0 };
 
+  // Schools that have switched the bell / push warnings off on the Reminders tab.
+  const silenced = await studentIdsSilenced("notifications", students.map((student) => student.id));
+
   for (const student of students) {
+    if (silenced.has(student.id)) {
+      run.skipped++;
+      continue;
+    }
+
     // Placed in an intake that has not opened: there is nothing to be "locked
     // out" of yet, so the deposit and balance warnings would be wrong on their
     // face. Becca's seat-reservation nudges (lib/seat-nudges.ts) speak to these

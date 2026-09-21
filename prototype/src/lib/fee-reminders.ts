@@ -23,6 +23,7 @@ import { batchLockFloor, withBatchFloor } from "@/lib/batch-reservation";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
 import { onTrackPlanStudentIds } from "@/lib/payment-plans";
+import { studentIdsSilenced } from "@/lib/fee-reminder-settings";
 
 export type FeeReminderResult = {
   sentCount: number;
@@ -83,6 +84,12 @@ export async function sendDueFeeReminders(options: {
     return true;
   });
 
+  // Schools that have switched the email reminders off on the Reminders tab.
+  // "Send now" (forceSend) is an explicit act and ignores the switch.
+  const silenced = forceSend
+    ? new Set<string>()
+    : await studentIdsSilenced("emails", invoices.map((invoice) => invoice.studentId));
+
   let sentCount = 0;
   const errors: string[] = [];
 
@@ -93,6 +100,7 @@ export async function sendDueFeeReminders(options: {
       const studentName = student.user?.name;
 
       if (!studentEmail) continue;
+      if (silenced.has(student.id)) continue;
 
       // An admin grace date in the future silences every stage.
       const graceUntil = student.paymentGraceUntil ? new Date(student.paymentGraceUntil) : null;

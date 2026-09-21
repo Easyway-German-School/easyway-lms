@@ -16,6 +16,20 @@ import { packageOptions, countries } from "@/app/auth/signup/options";
 import { uploadImage, uploadErrorMessage, validateImageFile } from "@/lib/upload";
 import { DERIVED_SEGMENT_IDS, SEGMENT_LABELS, STUDENT_STATUSES } from "@/lib/student-segments";
 import SchedulePreview from "@/components/admin/SchedulePreview";
+import { describePhone, studentPhoneRaw } from "@/lib/phone-display";
+
+/**
+ * The chase list, as one-tap views. These ids are the `FOCUS_PRESETS` in
+ * lib/finance/receivables.ts — the same rule the Reminders tab counts, the call
+ * sheet downloads and the mass reminder sends to.
+ */
+const CHASE_CHIPS: Array<{ id: string; label: string }> = [
+  { id: "chase_all", label: "All owing" },
+  { id: "chase_nothing", label: "Paid nothing" },
+  { id: "chase_under_deposit", label: "Under the deposit" },
+  { id: "chase_balance", label: "Balance owing" },
+  { id: "chase_on_hold", label: "Access on hold" },
+];
 
 /**
  * Pathway choices for the manual "Add student" form only. Mirrors the signup
@@ -351,6 +365,21 @@ function StudentsRoster() {
     if (focusIds) params.set("ids", focusIds);
     const query = params.toString();
     return query ? `/api/admin/students/export?${query}` : "/api/admin/students/export";
+  }
+
+  /** The call sheet for exactly what this view is filtered to — only the students who owe. */
+  function callSheetUrl(): string {
+    const base = exportUrl();
+    return `${base}${base.includes("?") ? "&" : "?"}layout=chase`;
+  }
+
+  function applyChaseFocus(id: string) {
+    setFocus(id);
+    setAgingBucket("");
+    setPage(1);
+    setSelectedStudentIds(new Set());
+    setSelectAllMatching(false);
+    window.history.replaceState(null, "", id ? `/admin/students?focus=${id}` : "/admin/students");
   }
 
   function clearFocus() {
@@ -1012,6 +1041,44 @@ function StudentsRoster() {
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent)]">Admin</p>
           <h1 className="text-3xl font-bold">Students</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">Filter, edit, and manage student enrollment records.</p>
+        </div>
+
+        {/* CHASING FEES. One tap to the people who owe, their phone numbers sit
+            under their names, and the call sheet is the same list as a CSV. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--muted)]">To chase</span>
+          {CHASE_CHIPS.map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              onClick={() => applyChaseFocus(focus === chip.id ? "" : chip.id)}
+              className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                focus === chip.id
+                  ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                  : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-alt)]"
+              }`}
+            >
+              {chip.label}
+            </button>
+          ))}
+          {focus.startsWith("chase_") ? (
+            <>
+              <a
+                href={callSheetUrl()}
+                className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
+              >
+                Download call sheet
+              </a>
+              {canSeeMoney ? (
+                <Link
+                  href="/admin/finance?tab=reminders"
+                  className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold"
+                >
+                  Send a reminder…
+                </Link>
+              ) : null}
+            </>
+          ) : null}
         </div>
 
         {/* One filter per cell, each cell at least wide enough for its label
@@ -1916,6 +1983,32 @@ function StudentsRoster() {
                           No photo · portal locked
                         </span>
                       ) : null}
+                      {/* The number to ring, right under the name — a tap on a
+                          phone dials it, and WhatsApp opens the chat. */}
+                      {(() => {
+                        const contact = studentPhoneRaw(student);
+                        const phone = describePhone(contact.phone);
+                        const whatsapp = describePhone(contact.whatsapp || contact.phone);
+                        return phone ? (
+                          <p className="mt-0.5 text-xs font-semibold">
+                            <a href={`tel:${phone.tel}`} className="hover:text-[var(--accent)] hover:underline">
+                              {phone.display}
+                            </a>
+                            {whatsapp?.whatsapp ? (
+                              <a
+                                href={whatsapp.whatsapp}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-2 font-medium text-emerald-700 hover:underline"
+                              >
+                                WhatsApp
+                              </a>
+                            ) : null}
+                          </p>
+                        ) : (
+                          <p className="mt-0.5 text-xs font-semibold text-amber-700">No phone on file</p>
+                        );
+                      })()}
                       {highlighted && money && (
                         <p className={`mt-0.5 text-xs font-semibold ${tone.text}`}>
                           {money.daysEnrolled}d enrolled

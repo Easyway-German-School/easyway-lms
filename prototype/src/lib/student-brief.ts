@@ -8,6 +8,7 @@ import { receivedPaymentFilter } from "@/lib/payment";
 import { accessFromStudent } from "@/lib/student-access";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { schoolDayStart } from "@/lib/school-time";
+import { studentIdsSilenced } from "@/lib/fee-reminder-settings";
 
 /**
  * Becca's brief — daily / weekly / monthly, hosted rather than generated.
@@ -151,7 +152,10 @@ export async function buildBrief(userId: string, period: BriefPeriod): Promise<B
     activitySummary: describeActivity(lessonsDone, quizzesPlayed, missionsDone),
   }).catch(() => null);
 
-  return { period, headline, lines, personalNote, paymentNote: buildPaymentNote(access) };
+  // The office can switch Becca's fee pop-ups off on the Reminders tab.
+  const beccaSilenced = (await studentIdsSilenced("becca", [student.id])).has(student.id);
+
+  return { period, headline, lines, personalNote, paymentNote: beccaSilenced ? null : buildPaymentNote(access) };
 }
 
 /**

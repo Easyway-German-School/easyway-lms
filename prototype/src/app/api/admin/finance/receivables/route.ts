@@ -8,9 +8,12 @@ import {
   computeAll,
   focusPreset,
   summariseReceivables,
+  CHASE_LABELS,
+  chaseCategoryOf,
   type Cohort,
   type StudentFinance,
 } from "@/lib/finance/receivables";
+import { describePhone, phoneForSheet, studentPhoneRaw } from "@/lib/phone-display";
 
 export const dynamic = "force-dynamic";
 
@@ -49,9 +52,12 @@ export async function GET(request: Request) {
 
   const students = await prisma.student.findMany({
     where,
-    select: FINANCE_STUDENT_SELECT,
+    // The phone numbers ride along so a chase list can show them under the name.
+    select: { ...FINANCE_STUDENT_SELECT, profile: { select: { phone: true, whatsapp: true } } },
     orderBy: { createdAt: "desc" },
   });
+
+  const contactById = new Map(students.map((student) => [student.id, studentPhoneRaw(student)]));
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -91,7 +97,7 @@ export async function GET(request: Request) {
   rows = sortRows(rows, sort);
 
   if (format === "csv") {
-    return csvResponse(rows);
+    return csvResponse(rows, contactById);
   }
 
   return NextResponse.json({
@@ -110,7 +116,18 @@ export async function GET(request: Request) {
       sort,
     },
     totalCount: rows.length,
-    rows: rows.slice(0, limit),
+    rows: rows.slice(0, limit).map((row) => {
+      const contact = contactById.get(row.id);
+      const phone = describePhone(contact?.phone);
+      const whatsapp = describePhone(contact?.whatsapp || contact?.phone);
+      return {
+        ...row,
+        phone: phone?.display ?? null,
+        phoneTel: phone?.tel ?? null,
+        whatsappUrl: whatsapp?.whatsapp ?? null,
+        chaseCategory: chaseCategoryOf(row),
+      };
+    }),
   });
 }
 
@@ -135,9 +152,20 @@ function sortRows(rows: StudentFinance[], sort: string): StudentFinance[] {
 
 /* -------------------------------------------------------------------------- */
 
-const CSV_COLUMNS: Array<{ header: string; value: (row: StudentFinance) => string | number }> = [
+type Contacts = Map<string, { phone: string; whatsapp: string }>;
+
+const CSV_COLUMNS: Array<{ header: string; value: (row: StudentFinance, contacts: Contacts) => string | number }> = [
   { header: "Student", value: (row) => row.name },
+  { header: "Phone", value: (row, contacts) => phoneForSheet(contacts.get(row.id)?.phone) },
+  { header: "WhatsApp", value: (row, contacts) => phoneForSheet(contacts.get(row.id)?.whatsapp) },
   { header: "Email", value: (row) => row.email },
+  {
+    header: "Chase group",
+    value: (row) => {
+      const category = chaseCategoryOf(row);
+      return category ? CHASE_LABELS[category].label : "";
+    },
+  },
   { header: "Branch", value: (row) => row.branch },
   { header: "Level", value: (row) => row.level },
   { header: "Class type", value: (row) => row.classType },
@@ -179,10 +207,10 @@ const CSV_COLUMNS: Array<{ header: string; value: (row: StudentFinance) => strin
   },
 ];
 
-function csvResponse(rows: StudentFinance[]): Response {
+function csvResponse(rows: StudentFinance[], contacts: Contacts): Response {
   const lines = [
     CSV_COLUMNS.map((column) => csvCell(column.header)).join(","),
-    ...rows.map((row) => CSV_COLUMNS.map((column) => csvCell(column.value(row))).join(",")),
+    ...rows.map((row) => CSV_COLUMNS.map((column) => csvCell(column.value(row, contacts))).join(",")),
   ];
 
   /**

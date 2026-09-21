@@ -8,6 +8,10 @@ import {
   ROSTER_INCLUDE,
   scoreAndFilterRoster,
 } from "@/lib/student-roster-query";
+import { buildCsv, csvDateStamp } from "@/lib/csv";
+import { chaseCategoryOf } from "@/lib/finance/receivables";
+import { chaseSheetHeaders, chaseSheetRow, sortChaseEntries } from "@/lib/finance/chase";
+import { phoneForSheet, studentPhoneRaw } from "@/lib/phone-display";
 
 /**
  * THE ROSTER, DOWNLOADABLE.
@@ -25,14 +29,13 @@ import {
  * Money columns follow the `payments` capability, same split as the roster
  * and the student dossier — a Secretary can export the roster without
  * exporting the ledger.
+ *
+ * `?layout=chase` swaps the full roster columns for the CALL SHEET: only the
+ * students who owe, most urgent first, phone number up front, with blank
+ * columns for whoever is ringing round to note the outcome. It runs the same
+ * filters, so "Download call sheet" on a filtered roster is exactly the people
+ * on screen. See lib/finance/chase.ts.
  */
-
-function escapeCsv(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  const str = String(value);
-  if (/[,"\n\r]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
-  return str;
-}
 
 function isoDate(value: Date | null | undefined): string {
   return value ? value.toISOString().slice(0, 10) : "";
@@ -45,6 +48,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const filters = parseRosterFilters(url);
   const format = url.searchParams.get("format") === "json" ? "json" : "csv";
+  const layout = url.searchParams.get("layout") === "chase" ? "chase" : "roster";
 
   const allowedBranchIds = scopedBranchIds(gate.admin);
   const whereClause = buildRosterWhereClause(filters, {
@@ -66,6 +70,40 @@ export async function GET(request: Request) {
   const matched = scoreAndFilterRoster(students, filters, now);
   const canSeeMoney = gate.admin.can("payments");
 
+  if (layout === "chase") {
+    // Only people who actually owe — a call sheet with a paid-up student on it
+    // is a wasted call, and a filter like "level A1" would otherwise put one there.
+    const entries = sortChaseEntries(
+      matched
+        .filter((entry) => chaseCategoryOf(entry.finance) !== null)
+        .map((entry) => ({ student: entry.student, finance: entry.finance })),
+      now,
+    );
+
+    const headers = chaseSheetHeaders(canSeeMoney);
+    const body = entries.map((entry) => chaseSheetRow(entry, canSeeMoney, now));
+
+    if (format === "json") {
+      return NextResponse.json({ headers, rows: body, totalCount: body.length, canSeeMoney });
+    }
+    if (body.length === 0) {
+      return new NextResponse("Nobody on this list owes anything.", {
+        status: 200,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
+
+    const focusSlug = (filters.focus ?? "all").replace(/[^a-z0-9_]+/gi, "-");
+    return new NextResponse(buildCsv(headers, body), {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="call-sheet-${focusSlug}-${csvDateStamp()}.csv"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   const rows = matched.map(({ student, finance, risk, segments }) => {
     const profile = student.profile;
     const admission = (student.admission ?? {}) as Record<string, unknown>;
@@ -83,8 +121,10 @@ export async function GET(request: Request) {
       "Delivery mode": student.deliveryMode,
       Branch: student.branch?.name ?? "",
       Tutor: student.tutor?.user?.name ?? "",
-      Phone: profile?.phone ?? (typeof admission.phone === "string" ? admission.phone : ""),
-      WhatsApp: profile?.whatsapp ?? "",
+      // Formatted, not raw: a bare "08123456789" opens in Excel as the number
+      // 8123456789 — the leading zero is gone before anyone can dial it.
+      Phone: phoneForSheet(studentPhoneRaw({ profile, admission }).phone),
+      WhatsApp: phoneForSheet(profile?.whatsapp),
       City: profile?.city ?? "",
       "State/Region": profile?.stateRegion ?? "",
       Country: profile?.country ?? "",
@@ -93,9 +133,9 @@ export async function GET(request: Request) {
       Nationality: profile?.nationality ?? "",
       "Gov. ID type": profile?.govIdType ?? "",
       "Guardian name": profile?.guardianName ?? "",
-      "Guardian phone": profile?.guardianPhone ?? "",
+      "Guardian phone": phoneForSheet(profile?.guardianPhone),
       "Emergency contact": profile?.emergencyName ?? "",
-      "Emergency phone": profile?.emergencyPhone ?? "",
+      "Emergency phone": phoneForSheet(profile?.emergencyPhone),
       "Heard from": profile?.heardFrom ?? "",
       "Enrolled on": isoDate(student.createdAt),
       "Classes started": isoDate(student.classesStartedAt),
@@ -133,12 +173,9 @@ export async function GET(request: Request) {
   }
 
   const headers = Object.keys(rows[0]);
-  const lines = [
-    headers.map(escapeCsv).join(","),
-    ...rows.map((row) => headers.map((key) => escapeCsv(row[key])).join(",")),
-  ];
-
-  const csv = lines.join("\r\n");
+  // The shared writer: UTF-8 BOM (Excel reads names with diacritics correctly),
+  // every field quoted, and a formula guard on hand-typed names.
+  const csv = buildCsv(headers, rows.map((row) => headers.map((key) => row[key])));
   const stamp = now.toISOString().slice(0, 10);
   return new NextResponse(csv, {
     status: 200,

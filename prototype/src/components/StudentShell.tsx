@@ -17,6 +17,7 @@ import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
 import LiveFeedbackMoment from "@/components/moment/LiveFeedbackMoment";
 import TravelPackageNotifyNudge from "@/components/moment/TravelPackageNotifyNudge";
 import HybridComboMoment from "@/components/moment/HybridComboMoment";
+import FeeReminderMoment from "@/components/moment/FeeReminderMoment";
 import AssignmentsOpenMoment from "@/components/moment/AssignmentsOpenMoment";
 import PortalUpdates from "@/components/PortalUpdates";
 import HelpLauncher from "@/components/HelpLauncher";
@@ -697,6 +698,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           for students actually in the portal — an unpaid lock screen has no
           missions to brief. */}
       {hasAccess && <DailyBriefing />}
+
+      {/* The other half of the fee reminder: a student who is LOCKED OUT for money
+          (paid nothing, under the deposit, or paused for a balance) never sees the
+          briefing above, so this is their card. Checks lock state itself, shows
+          at most once a day, last in the queue, and the office can switch it off.
+          See components/moment/FeeReminderMoment.tsx. */}
+      <FeeReminderMoment />
 
       {/* Lowest-priority nudge: physical students can't download video, but
           they can keep their notes offline if they install the app. */}
