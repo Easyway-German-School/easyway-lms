@@ -14,6 +14,7 @@ import CohortCheckMoment from "@/components/moment/CohortCheckMoment";
 import ExamCampaignMoment from "@/components/moment/ExamCampaignMoment";
 import LoginUpgradeMoment from "@/components/moment/LoginUpgradeMoment";
 import ProfileDetailsMoment from "@/components/moment/ProfileDetailsMoment";
+import LiveFeedbackMoment from "@/components/moment/LiveFeedbackMoment";
 import TravelPackageNotifyNudge from "@/components/moment/TravelPackageNotifyNudge";
 import HybridComboMoment from "@/components/moment/HybridComboMoment";
 import AssignmentsOpenMoment from "@/components/moment/AssignmentsOpenMoment";
@@ -39,6 +40,7 @@ import SignOutButton from "@/components/SignOutButton";
 import { MomentQueueProvider } from "@/lib/moment-queue";
 import { canAttendLive, isLiveOnlyRoute, isPhotoGatedRoute, isTuitionGatedRoute } from "@/lib/access";
 import { LiveClassProvider, useLiveClass } from "@/lib/useLiveClass";
+import { LiveDot, LivePill, LIVE_ICON_TILE } from "@/components/LiveNavBadge";
 import { useStudentAccess } from "@/lib/useStudentAccess";
 import {
   AssignmentIcon,
@@ -452,18 +454,13 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
                 >
                   <span className={`relative flex h-9 w-9 items-center justify-center rounded-xl border text-base shadow-sm transition ${
                     isLiveNow
-                      ? "border-[#0D7C7E]/40 bg-[#0D7C7E]/10 text-[#0D7C7E]"
+                      ? LIVE_ICON_TILE
                       : active
                       ? "border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]"
                       : "border-[var(--border)] bg-[var(--surface-alt)] group-hover:border-[var(--border-strong)]"
                   }`}>
                     {item.icon}
-                    {isLiveNow && (
-                      <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400" />
-                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-[var(--surface)]" />
-                      </span>
-                    )}
+                    {isLiveNow && <LiveDot />}
                     {collapsed && communityBadge > 0 && !isLiveNow && (
                       <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--surface-alt)]" />
                     )}
@@ -474,11 +471,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
                       {communityBadge > 99 ? "99+" : communityBadge}
                     </span>
                   )}
-                  {!collapsed && isLiveNow && (
-                    <span className="shrink-0 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-600">
-                      Live
-                    </span>
-                  )}
+                  {!collapsed && isLiveNow && <LivePill />}
                   {!collapsed && locked && !isLiveNow && <LockIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]/70" strokeWidth={2.2} />}
                 </button>
               );
@@ -722,6 +715,9 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
       {/* Outranks all of the above, and knows it. A class that has started is
           the only thing in this portal that expires while you look at it. */}
       <LiveClassCall />
+      {/* A class that has ended and was never rated — asked once they are back,
+          and never while one is on air. See LiveFeedbackMoment. */}
+      <LiveFeedbackMoment suspended={Boolean(live)} />
       <BetaFeedbackPrompt />
       <StudentUsageTracker />
     </div>
