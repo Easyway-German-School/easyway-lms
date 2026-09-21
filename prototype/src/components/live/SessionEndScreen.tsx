@@ -253,11 +253,11 @@ export default function SessionEndScreen({
       </div>
 
       {/*
-        Only once the class is genuinely over for this student — not a drop or
-        a device switch they might still rejoin — and only for a student who
-        has never answered before. See LiveClassFeedbackCard.
+        Only once the class is genuinely over — not a drop or a device switch
+        they might still rejoin. Students AND the tutor are asked; who is due,
+        and how often, is the server's call. See LiveClassFeedbackCard.
       */}
-      {!isTutor && classOver ? (
+      {classOver ? (
         <LiveClassFeedbackCard liveSessionId={liveSessionId} sessionTitle={recap?.title ?? title} />
       ) : null}
 
