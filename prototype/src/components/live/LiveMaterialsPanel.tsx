@@ -21,6 +21,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { currentInstallEnv } from "@/lib/client/platform";
 import { motion } from "framer-motion";
 import {
   AudioIcon,
@@ -349,9 +350,43 @@ function MaterialReader({ material, onClose }: { material: Material; onClose: ()
   return createPortal(overlay, document.body);
 }
 
+/**
+ * A PDF inside the class.
+ *
+ * On iPhone, Safari draws a PDF in an iframe as a single still page: page one
+ * shows, the rest cannot be scrolled to, and nothing says so — a student sees
+ * "the slides stopped at page 1". Everywhere else the iframe is a real scrolling
+ * viewer, so it stays as it was. On iOS the same iframe is kept (page one is
+ * still useful and shows instantly) with a clear bar underneath that opens the
+ * whole file in Safari's own PDF viewer, in a new tab, so the class keeps
+ * running behind it. The header already has an "open in a new tab" icon, but an
+ * unlabelled icon is not something a student finds in the middle of a lesson.
+ */
+function PdfBody({ material }: { material: Material }) {
+  // Read once on the client. This component only mounts after a tap, never during
+  // server render, so there is no hydration mismatch to guard against.
+  const isIos = useMemo(() => currentInstallEnv().ios, []);
+  return (
+    <div className="flex h-full w-full flex-col">
+      <iframe src={`${material.url}#view=FitH`} title={material.title} className="min-h-0 w-full flex-1 border-0 bg-white" />
+      {isIos ? (
+        <a
+          href={material.url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex shrink-0 items-center justify-center gap-2 bg-[var(--accent)] px-4 py-3 text-sm font-bold text-white"
+        >
+          <ExternalLinkIcon className="h-4 w-4" />
+          Only page 1 shows here. Tap to open the full PDF
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 function ReaderBody({ material }: { material: Material }) {
   if (material.kind === "pdf") {
-    return <iframe src={`${material.url}#view=FitH`} title={material.title} className="h-full w-full border-0 bg-white" />;
+    return <PdfBody material={material} />;
   }
   if (material.kind === "video") {
     return (
