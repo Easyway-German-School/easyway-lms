@@ -943,6 +943,34 @@ html.theme-custom ::selection {
   .voice-wave span, .voice-core, .voice-orbit { animation: none; }
 }
 
+/*
+ * iPhone auto-zoom on text fields.
+ *
+ * Safari on iOS zooms the whole page into any text field whose font-size is
+ * under 16px, the moment it is focused — and does not zoom back out. Almost
+ * every field in the portal is `text-sm` (14px), so tapping the live-class
+ * chat box, a sign-in field or the profile form left a student looking at a
+ * magnified, half-cropped screen. Blocking pinch-zoom (maximum-scale=1) would
+ * fix it too, but it also removes an accessibility feature for everyone.
+ *
+ * `-webkit-touch-callout` is only understood by iOS WebKit (Safari, Chrome and
+ * every other iPhone browser, and the Home Screen app), so this whole block is
+ * inert on Android, Windows and Mac — nothing changes anywhere else.
+ *
+ * The :not() chain does two jobs. Checkboxes, radios and buttons have no text
+ * to zoom into. And the `text-lg`... `text-4xl` exclusions leave fields that
+ * are already 16px or larger (an amount box, say) at their designed size
+ * instead of shrinking them to 16px. The selector is more specific than a
+ * single Tailwind utility class, so it wins without needing !important.
+ */
+@supports (-webkit-touch-callout: none) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):not([class~="text-base"]):not([class~="text-lg"]):not([class~="text-xl"]):not([class~="text-2xl"]):not([class~="text-3xl"]):not([class~="text-4xl"]),
+  select:not([class~="text-base"]):not([class~="text-lg"]):not([class~="text-xl"]):not([class~="text-2xl"]),
+  textarea:not([class~="text-base"]):not([class~="text-lg"]):not([class~="text-xl"]):not([class~="text-2xl"]) {
+    font-size: 16px;
+  }
+}
+
 /* ---------------------------------------------------------------------------
    LIVE NOW — the red broadcast glow on a sidebar entry while a class is on air.
    Shared by the student, tutor and admin shells (components/LiveNavBadge.tsx).
