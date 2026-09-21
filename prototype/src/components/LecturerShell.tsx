@@ -10,6 +10,7 @@ import { homePathForRole } from '@/lib/portal';
 import BrandLogo from "@/components/BrandLogo";
 import HelpLauncher from "@/components/HelpLauncher";
 import PortalUpdates from "@/components/PortalUpdates";
+import TypingNudge from "@/components/TypingNudge";
 import LiveFeedbackMoment from "@/components/moment/LiveFeedbackMoment";
 import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
@@ -478,6 +479,7 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
         See PortalUpdates for why the card carries the real message text.
       */}
       <PortalUpdates />
+      <TypingNudge />
       {/* "How did the class go?" for a tutor who ended one without rating it. */}
       <LiveFeedbackMoment />
       <HelpLauncher />

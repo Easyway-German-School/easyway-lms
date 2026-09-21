@@ -34,6 +34,10 @@ import {
   TrashIcon,
 } from "@/components/icons";
 import { ZoomableImage } from "@/components/ImageLightbox";
+import { TypingAvatars, TypingBubble, TypingDots } from "@/components/typing/TypingUI";
+import { useTypingFeed } from "@/lib/client/typing-feed";
+import { useTypingSender } from "@/lib/client/use-typing-sender";
+import { describeTypers, describeTypersShort, type Typer } from "@/lib/typing";
 
 /**
  * THE COHORT'S GROUP CHAT.
@@ -360,10 +364,25 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const recordTimerRef = useRef<number | null>(null);
   /** Set true by stopAndSend / false by cancel, so recorder.onstop knows which it was. */
   const recordKeepRef = useRef(false);
-  /** Names of classmates typing in the open room right now. */
-  const [typers, setTypers] = useState<Array<{ id: string; name: string }>>([]);
-  /** Epoch ms of our last "I'm typing" POST — throttles the write. */
-  const typingPostRef = useRef(0);
+  /**
+   * Who is typing, from two sources. Students and tutors read the portal-wide
+   * feed (one shared 2.5s poll, which also drives the room list below); the
+   * office gets `enabled: false` from it and falls back to asking about the one
+   * room it has open. See lib/client/typing-feed.ts.
+   */
+  const typingFeed = useTypingFeed({ fast: true });
+  const [officeTypers, setOfficeTypers] = useState<Typer[]>([]);
+  const feedEnabledRef = useRef(true);
+  useEffect(() => {
+    feedEnabledRef.current = typingFeed.enabled;
+  }, [typingFeed.enabled]);
+  /**
+   * People whose message just landed, keyed by author id. Their dots are held
+   * back for a moment: the message and the "…" that announced it must never sit
+   * on screen together, and the feed can lag a poll behind the transcript.
+   */
+  const justPostedRef = useRef<Record<string, number>>({});
+  const [, bumpTyping] = useState(0);
   /** The one-time "how a story works" coach: null until checked, then the flag. */
   const [storyTourSeen, setStoryTourSeen] = useState<boolean | null>(null);
   const [showStoryTour, setShowStoryTour] = useState(false);
@@ -376,6 +395,24 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const cursorRef = useRef<string | null>(null);
 
   const push = usePushNotifications();
+
+  /**
+   * Tell the room we're typing — throttled while there is text in the box, and
+   * cleared the moment it is emptied, sent, or we leave the room (see
+   * lib/client/use-typing-sender.ts). The channel id is the "conversation key",
+   * so switching rooms mid-sentence clears the room we left. Declared up here
+   * because `send` (below) needs `stopTyping` in its dependency list.
+   */
+  const { onDraftChange: onTypingDraftChange, stop: stopTyping } = useTypingSender(
+    activeId && canPost ? activeId : null,
+    (typing) =>
+      fetch("/api/community/typing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: activeId, typing }),
+        keepalive: true,
+      }),
+  );
 
   // Read the saved chat theme once the component is mounted — never during
   // render, so server and first client paint agree and there is nothing to
@@ -491,7 +528,8 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
     setLoadingRoom(true);
     setMessages([]);
     setReplyTo(null);
-    setTypers([]);
+    // Leaving one room for another must not show the last room's dots for a beat.
+    setOfficeTypers([]);
     cursorRef.current = null;
 
     (async () => {
@@ -550,26 +588,34 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           });
           cursorRef.current = incoming[incoming.length - 1].id;
           if (document.visibilityState === "visible") void markRead(activeId!);
+
+          // Somebody's message just arrived, so their dots are over.
+          const stamp = Date.now();
+          for (const m of incoming) justPostedRef.current[m.author.id] = stamp;
+          window.setTimeout(() => bumpTyping((n) => n + 1), 3_100);
+          bumpTyping((n) => n + 1);
         }
 
-        // Who else is typing, on the same cadence — a held-open stream is the
-        // wrong shape here (see /api/portal/updates), so it rides the poll.
-        // Skipped while hidden: nobody is watching the dots on a background tab.
-        if (!cancelled && document.visibilityState === "visible") {
-          try {
-            const typingRes = await fetch(
-              `/api/community/typing?channelId=${activeId}`,
-              { cache: "no-store" },
-            );
-            if (typingRes.ok) {
-              const typingData = await typingRes.json();
-              if (!cancelled) setTypers(Array.isArray(typingData.typers) ? typingData.typers : []);
+        // The OFFICE has no portal-wide feed, so it asks about the room it has
+        // open, on this same cadence. Everyone else reads the shared feed.
+        // Skipped while hidden: nobody is watching dots on a background tab.
+        if (!cancelled && !feedEnabledRef.current) {
+          if (document.visibilityState === "visible") {
+            try {
+              const typingRes = await fetch(
+                `/api/community/typing?channelId=${activeId}`,
+                { cache: "no-store" },
+              );
+              if (typingRes.ok) {
+                const typingData = await typingRes.json();
+                if (!cancelled) setOfficeTypers(Array.isArray(typingData.typers) ? typingData.typers : []);
+              }
+            } catch {
+              // A missed typing poll just leaves the dots as they were.
             }
-          } catch {
-            // A missed typing poll just leaves the dots as they were.
+          } else {
+            setOfficeTypers([]);
           }
-        } else if (!cancelled) {
-          setTypers([]);
         }
       } catch {
         // A failed poll is a blip. The next one is four seconds away.
@@ -710,6 +756,8 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
       },
     ]);
     setDraft("");
+    // Sent, so no longer "typing" — resets the throttle for the next message.
+    stopTyping();
     setReplyTo(null);
     setAttachment(null);
     setStickerTrayOpen(false);
@@ -746,7 +794,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
       setMessages((current) => current.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)));
       setError(sendError instanceof Error ? sendError.message : "Message not sent");
     }
-  }, [draft, activeId, replyTo, attachment]);
+  }, [draft, activeId, replyTo, attachment, stopTyping]);
 
   /* ---------------------------------------------------------- voice notes */
 
@@ -875,31 +923,37 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
 
   /* -------------------------------------------------------------- typing */
 
-  /**
-   * Tell the room we're typing. Throttled hard — one write every few seconds
-   * while there is something in the box — because the value is "somebody is
-   * composing", not a keystroke log, and the reader only refreshes every four
-   * seconds anyway.
-   */
-  const notifyTyping = useCallback(() => {
-    if (!activeId || !canPost) return;
-    const now = Date.now();
-    if (now - typingPostRef.current < 2_800) return;
-    typingPostRef.current = now;
-    void fetch("/api/community/typing", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channelId: activeId }),
-    }).catch(() => {});
-  }, [activeId, canPost]);
-
+  // Every keystroke in the box: keep the draft, and let the sender decide
+  // whether it is time to re-stamp "typing" (see useTypingSender above).
   const handleDraftChange = useCallback(
     (value: string) => {
       setDraft(value);
-      if (value.trim()) notifyTyping();
+      onTypingDraftChange(value);
     },
-    [notifyTyping],
+    [onTypingDraftChange],
   );
+
+  /**
+   * The people typing in the OPEN room, minus anyone whose message just landed.
+   * A muted or read-only viewer never sees dots they could not answer.
+   */
+  const roomTypers: Typer[] = (
+    typingFeed.enabled ? (activeId ? typingFeed.byChannel[activeId] ?? [] : []) : officeTypers
+  ).filter((typer) => {
+    const posted = justPostedRef.current[typer.id];
+    return !posted || Date.now() - posted > 3_000;
+  });
+
+  // Somebody starts typing while I am at the bottom: keep the bubble in view.
+  useEffect(() => {
+    if (roomTypers.length === 0) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomTypers.length]);
 
   /* ---------------------------------------------------- story-game coach */
 
@@ -1176,6 +1230,11 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
 
                 {space.channels.map((channel) => {
                   const selected = channel.id === activeId;
+                  // Live, per room: "Anna is typing…" replaces the description on
+                  // the row, the way a chat list does — a reason to open a room
+                  // that is not the one you are in.
+                  const rowTypers = typingFeed.byChannel[channel.id] ?? [];
+                  const typingHere = rowTypers.length > 0;
                   return (
                     <button
                       key={channel.id}
@@ -1187,18 +1246,49 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                         // at the list.
                         setShowRail(false);
                       }}
-                      className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition ${
-                        selected
-                          ? "bg-[var(--accent)] font-semibold text-white"
-                          : "text-[var(--foreground)] hover:bg-[var(--surface)]"
+                      className={`flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition active:scale-[0.99] ${
+                        selected ? "bg-[var(--accent)] text-white" : "text-[var(--foreground)] hover:bg-[var(--surface)]"
                       }`}
                     >
-                      <span className={selected ? "text-white/70" : "text-[var(--muted)]"}>
-                        {isDmGroup ? "@" : "#"}
+                      <span
+                        className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-base font-bold ${
+                          selected ? "bg-white/20 text-white" : "bg-[var(--accent-soft)] text-[var(--accent)]"
+                        } ${typingHere ? "ew-typing-ring" : ""}`}
+                        aria-hidden
+                      >
+                        {isDmGroup ? "@" : channel.kind === "announcement" ? "!" : "#"}
                       </span>
-                      <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={`block truncate text-sm ${
+                            selected || channel.unreadCount > 0 ? "font-bold" : "font-semibold"
+                          }`}
+                        >
+                          {channel.name}
+                        </span>
+                        <span
+                          className={`mt-0.5 flex items-center gap-1.5 truncate text-xs ${
+                            typingHere
+                              ? selected
+                                ? "font-semibold text-white"
+                                : "font-semibold text-[var(--accent)]"
+                              : selected
+                                ? "text-white/75"
+                                : "text-[var(--muted)]"
+                          }`}
+                        >
+                          {typingHere ? (
+                            <>
+                              <TypingDots />
+                              <span className="truncate">{describeTypersShort(rowTypers.map((t) => t.name))}</span>
+                            </>
+                          ) : (
+                            <span className="truncate">{channel.description || (isDmGroup ? "Private thread" : "")}</span>
+                          )}
+                        </span>
+                      </span>
                       {channel.unreadCount > 0 && !selected ? (
-                        <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold text-white">
+                        <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-bold text-white shadow-sm">
                           {channel.unreadCount > 99 ? "99+" : channel.unreadCount}
                         </span>
                       ) : null}
@@ -1246,15 +1336,25 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
             <p className="truncate text-sm font-semibold text-[var(--foreground)]">
               {isDm ? "@" : "#"} {active?.name ?? "Community"}
             </p>
-            <p className="truncate text-xs text-[var(--muted)]">
-              {isDm
-                ? "Private — visible only to the office and this student"
-                : activeSpace
-                  ? `${activeSpace.branch?.name} · ${activeSpace.level} · ${
-                      SLOT_LABEL[activeSpace.sessionSlot] ?? activeSpace.sessionSlot
-                    }`
-                  : active?.description}
-            </p>
+            {/* Who is typing takes over the subtitle, the way a chat app's header
+                does — visible even when the transcript is scrolled up. */}
+            {roomTypers.length > 0 ? (
+              <p className="flex items-center gap-1.5 truncate text-xs font-semibold text-[var(--accent)]" aria-live="polite">
+                <TypingAvatars typers={roomTypers} size={16} max={3} live={false} />
+                <span className="truncate">{describeTypers(roomTypers.map((t) => t.name))}</span>
+                <TypingDots />
+              </p>
+            ) : (
+              <p className="truncate text-xs text-[var(--muted)]">
+                {isDm
+                  ? "Private — visible only to the office and this student"
+                  : activeSpace
+                    ? `${activeSpace.branch?.name} · ${activeSpace.level} · ${
+                        SLOT_LABEL[activeSpace.sessionSlot] ?? activeSpace.sessionSlot
+                      }`
+                    : active?.description}
+              </p>
+            )}
           </div>
 
           {/*
@@ -1368,6 +1468,15 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                 previous?.author.id === message.author.id &&
                 new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() < 5 * 60_000;
 
+              // The last bubble of a run gets the chat-app "tail" (a squared
+              // corner on the speaker's side); the rest of the run stay round.
+              const following = messages[index + 1];
+              const lastInRun =
+                !following ||
+                following.author.id !== message.author.id ||
+                dayLabel(following.createdAt) !== dayLabel(message.createdAt) ||
+                new Date(following.createdAt).getTime() - new Date(message.createdAt).getTime() >= 5 * 60_000;
+
               return (
                 <div key={message.id}>
                   {newDay ? (
@@ -1380,7 +1489,14 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                     </div>
                   ) : null}
 
-                  <div className={`group flex gap-2 ${message.mine ? "flex-row-reverse" : ""}`}>
+                  {/* Incoming messages and a message being sent rise in; a message of
+                      mine that has just been confirmed (temp id → real id, so React
+                      remounts it) must not pop a second time. */}
+                  <div
+                    className={`${message.mine && !message.pending ? "" : "ew-msg-in"} group flex gap-2 ${
+                      message.mine ? "flex-row-reverse" : ""
+                    }`}
+                  >
                     {!message.mine ? (
                       <div className="w-8 shrink-0">
                         {!grouped ? (
@@ -1441,7 +1557,9 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                             ? "p-0"
                             : isSticker && !message.hidden
                             ? "bg-transparent p-0"
-                            : `rounded-2xl px-3 py-2 ${
+                            : `rounded-2xl px-3.5 py-2 ${
+                                lastInRun ? (message.mine ? "rounded-br-md" : "rounded-bl-md") : ""
+                              } ${
                                 message.hidden
                                   ? "border border-dashed border-[var(--border)] bg-transparent italic text-[var(--muted)]"
                                   : message.mine
@@ -1702,34 +1820,22 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
               );
             })
           )}
-          <div ref={bottomRef} />
-        </div>
-
-        {/*
-          "Anna is typing…" — folded off the same poll as the messages, so it
-          costs no extra timer. Sits on the seam between the transcript and the
-          composer, where every messaging app puts it, and reserves its own line
-          height so the composer does not hop when it appears.
-        */}
-        <div className="min-h-[1.25rem] px-4 text-[11px] text-[var(--muted)]" aria-live="polite">
-          {typers.length > 0 ? (
-            <span className="inline-flex items-center gap-1.5">
-              <span className="inline-flex gap-0.5">
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    className="inline-block h-1 w-1 animate-bounce rounded-full bg-[var(--muted)]"
-                    style={{ animationDelay: `${i * 140}ms` }}
-                  />
-                ))}
-              </span>
-              {typers.length === 1
-                ? `${typers[0].name} is typing`
-                : typers.length === 2
-                  ? `${typers[0].name} and ${typers[1].name} are typing`
-                  : "Several people are typing"}
-            </span>
+          {/*
+            THE TYPING BUBBLE — at the end of the transcript, exactly where the
+            message will land, with the typers' avatars and who they are. It
+            lives in the scroll area (not on a line above the composer) so it is
+            part of the conversation rather than a status bar, which is what
+            makes a chat feel inhabited.
+          */}
+          {roomTypers.length > 0 ? (
+            <div className="pt-1">
+              <TypingBubble
+                typers={roomTypers}
+                label={roomTypers.length > 1 ? describeTypers(roomTypers.map((t) => t.name)) : undefined}
+              />
+            </div>
           ) : null}
+          <div ref={bottomRef} />
         </div>
 
         {/* ------------------------------------------------------- composer */}
@@ -1948,10 +2054,12 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                 }}
                 rows={1}
                 placeholder={uploading ? "Uploading…" : `Message #${active?.name ?? ""}`}
-                className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                // 16px on a phone: anything smaller makes iOS zoom the page on focus.
+                className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-3xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2.5 text-base text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] sm:text-sm"
               />
               {draft.trim() || attachment ? (
                 <button
+                  key="send"
                   onClick={() => void send()}
                   // A picture with no caption is a perfectly good message, so the
                   // button lives off either one. It stays down while the upload
@@ -1959,7 +2067,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
                   // without the photograph it was written about.
                   disabled={uploading}
                   aria-label="Send"
-                  className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white transition hover:brightness-110 disabled:opacity-30"
+                  className="ew-pop grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-white shadow-md transition hover:brightness-110 active:scale-90 disabled:opacity-30"
                 >
                   <SendIcon className="h-4 w-4" />
                 </button>

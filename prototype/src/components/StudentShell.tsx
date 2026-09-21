@@ -5,6 +5,7 @@ import Link from "next/link";
 import { signOut, useSession } from "next-auth/react";
 import { useEffect, useState, type ReactNode } from "react";
 import CommunityLauncher from "@/components/CommunityLauncher";
+import TypingNudge from "@/components/TypingNudge";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import OfflineBanner from "@/components/OfflineBanner";
 import InstallForNotesMoment from "@/components/moment/InstallForNotesMoment";
@@ -582,6 +583,8 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           badge) is one tap away from anywhere in the portal. The community is
           itself a paid feature, so it goes away entirely while locked. */}
       {pathname !== "/community" && hasAccess && <CommunityLauncher />}
+      {/* "Anna is typing in General" — only for a student who can open the chat. */}
+      {hasAccess && <TypingNudge />}
 
       {/*
         Deliberately NOT behind `hasAccess`. A student who cannot get into the

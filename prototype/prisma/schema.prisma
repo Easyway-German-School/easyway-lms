@@ -144,6 +144,7 @@ model User {
   supportTickets        SupportTicket[]          @relation("SupportTicketAuthor")
   assignedTickets       SupportTicket[]          @relation("SupportTicketAssignee")
   supportReplies        SupportTicketMessage[]
+  supportTypingPings    SupportTypingPing[]
   gameMatches           GameMatch[]
   gameTurnsAssigned     GameTurn[]               @relation("GameTurnAssignee")
   gameTurnsWritten      GameTurn[]               @relation("GameTurnAuthor")
@@ -268,6 +269,7 @@ model Tenant {
   channels                Channel[]
   channelReads            ChannelRead[]
   typingPings             TypingPing[]
+  supportTypingPings      SupportTypingPing[]
   pushSubscriptions       PushSubscription[]
   messages                Message[]
   classSessions           ClassSession[]
@@ -4219,7 +4221,8 @@ model SupportTicket {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  messages SupportTicketMessage[]
+  messages    SupportTicketMessage[]
+  typingPings SupportTypingPing[]
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
@@ -4228,6 +4231,31 @@ model SupportTicket {
   @@index([status, lastMessageAt])
   @@index([userId, createdAt])
   @@index([unreadForAdmin, status])
+  @@index([tenantId])
+}
+
+/// "Somebody is typing in this enquiry right now" — the help desk's twin of
+/// TypingPing (which belongs to a community Channel). Same idea and same rules:
+/// a disposable row, one per (ticket, person), live for a few seconds past
+/// `updatedAt`, swept by whoever stamps next, and deleted the moment the
+/// message is actually sent. Kept as its own table rather than columns on
+/// SupportTicket so a keystroke-rate write never touches the row the queue
+/// sorts and counts on.
+model SupportTypingPing {
+  id        String        @id @default(cuid())
+  ticketId  String
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt DateTime      @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, userId])
+  @@index([ticketId, updatedAt])
+  @@index([userId])
   @@index([tenantId])
 }
 

@@ -111,6 +111,7 @@ export const TENANT_OWNED_MODELS = [
    */
   "SupportTicket",
   "SupportTicketMessage",
+  "SupportTypingPing",
   "BetaFeedback",
   "LearnerUsageEvent",
   "LearnerBehaviourProfile",

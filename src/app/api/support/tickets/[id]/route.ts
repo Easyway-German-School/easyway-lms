@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { adminCan, capabilitiesForUser } from "@/lib/admin-roles";
+import { adminCan } from "@/lib/admin-roles";
 import {
   deleteTicketMessage,
   editTicketMessage,
   replyToTicket,
   sanitizeTicketAttachments,
+  ticketAccess,
 } from "@/lib/support";
 
 export const dynamic = "force-dynamic";
@@ -34,27 +35,10 @@ async function resolveAccess(userId: string, role: string, ticketId: string) {
   });
   if (!ticket) return { ticket: null, isAdmin: false, allowed: false };
 
-  const isAdmin = role === "admin";
-  if (isAdmin) {
-    // The same capability the Enquiries screen sits behind. An accountant who
-    // types the URL gets the same refusal the sidebar would have given them.
-    const admin = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { adminRole: true, adminCapabilities: true },
-    });
-    const capabilities = capabilitiesForUser(admin?.adminRole, admin?.adminCapabilities);
-    return { ticket, isAdmin: true, allowed: capabilities.includes("students") };
-  }
-
-  /**
-   * A tutor gets in two ways: it is their own question (same as a student),
-   * or it is a "Ask my tutor" thread routed to them — `assignedToId` is set
-   * at creation for exactly that case (see openTicket in support.ts) and never
-   * by the tutor themselves, so there is nothing here for a tutor to forge
-   * their way into somebody else's thread with.
-   */
-  const allowed = ticket.userId === userId || ticket.assignedToId === userId;
-  return { ticket, isAdmin: false, allowed };
+  // Who may open it is decided in one place (lib/support.ts) so this route and
+  // the typing route can never disagree about who is in the conversation.
+  const { allowed, isAdmin } = await ticketAccess(userId, role, ticket);
+  return { ticket, isAdmin, allowed };
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {

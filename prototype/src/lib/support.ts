@@ -8,6 +8,8 @@ import {
   type TicketTopic,
 } from "@/lib/support-copy";
 import { isAssigned, readAssignment } from "@/lib/lecturer-assignment";
+import { capabilitiesForUser } from "@/lib/admin-roles";
+import { TYPING_LIVE_MS, TYPING_STALE_MS, firstName, type Typer } from "@/lib/typing";
 
 /**
  * The help desk, on the server.
@@ -84,6 +86,114 @@ export function sanitizeTicketAttachments(raw: unknown): TicketAttachment[] {
       size: Number.isFinite(Number(record.size)) ? Math.max(0, Math.trunc(Number(record.size))) : 0,
     });
     if (out.length >= MAX_ATTACHMENTS) break;
+  }
+  return out;
+}
+
+/**
+ * WHO MAY OPEN A TICKET — the one rule, in one place.
+ *
+ * Used by the thread route (read / reply) and the typing route, so the two can
+ * never disagree about who is in the conversation. Pass whatever you already
+ * loaded of the ticket; only `userId` and `assignedToId` are read.
+ *
+ *  - An admin, if their role carries the `students` capability — the same one
+ *    the Enquiries screen sits behind. An accountant who types the URL gets the
+ *    refusal the sidebar would have given them.
+ *  - Anyone else: the person who asked, or the tutor an "Ask my tutor" thread
+ *    was routed to. `assignedToId` is set at creation for exactly that case
+ *    (see openTicket) and never by the tutor themselves, so there is nothing
+ *    here for a tutor to forge their way into somebody else's thread with.
+ *
+ * `isStaff` means "the answering side": an admin, or the assigned tutor. It is
+ * what decides which unread flag clears and which side a typing dot is for.
+ */
+export async function ticketAccess(
+  userId: string,
+  role: string,
+  ticket: { userId: string; assignedToId: string | null },
+): Promise<{ allowed: boolean; isAdmin: boolean; isStaff: boolean }> {
+  const isAdmin = role === "admin";
+  if (isAdmin) {
+    const admin = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { adminRole: true, adminCapabilities: true },
+    });
+    const capabilities = capabilitiesForUser(admin?.adminRole, admin?.adminCapabilities);
+    return { allowed: capabilities.includes("students"), isAdmin: true, isStaff: true };
+  }
+  const isAssignee = ticket.assignedToId === userId;
+  return { allowed: ticket.userId === userId || isAssignee, isAdmin: false, isStaff: isAssignee };
+}
+
+/* ------------------------------------------------------------- typing signals */
+
+/**
+ * "Somebody is typing in this enquiry" — the help desk's version of the
+ * community room's typing dots (lib/community-typing.ts; the stamp / live
+ * window model is explained in lib/typing.ts). Same table shape, keyed on the
+ * ticket instead of a channel.
+ */
+export async function stampTicketTyping(ticketId: string, userId: string) {
+  const now = new Date();
+  await prisma.supportTypingPing.upsert({
+    where: { ticketId_userId: { ticketId, userId } },
+    update: { updatedAt: now },
+    create: { ticketId, userId },
+  });
+  if (Math.random() < 0.125) {
+    await prisma.supportTypingPing
+      .deleteMany({ where: { ticketId, updatedAt: { lt: new Date(now.getTime() - TYPING_STALE_MS) } } })
+      .catch(() => {});
+  }
+}
+
+/** Sending a message, or emptying the box, ends "is typing" immediately. */
+export async function clearTicketTyping(ticketId: string, userId: string) {
+  await prisma.supportTypingPing.deleteMany({ where: { ticketId, userId } }).catch(() => {});
+}
+
+/** Who else is typing in one enquiry right now. */
+export async function ticketTypers(ticketId: string, exceptUserId: string): Promise<Typer[]> {
+  const rows = await prisma.supportTypingPing.findMany({
+    where: {
+      ticketId,
+      userId: { not: exceptUserId },
+      updatedAt: { gt: new Date(Date.now() - TYPING_LIVE_MS) },
+    },
+    select: { user: { select: { id: true, name: true, role: true } } },
+    orderBy: { updatedAt: "desc" },
+    take: 5,
+  });
+  return rows.map((row) => ({ id: row.user.id, name: firstName(row.user.name), role: row.user.role }));
+}
+
+/**
+ * Every enquiry the viewer is a party to where somebody ELSE is typing, keyed
+ * by ticket. The office sees all of them (that is what lights up its queue);
+ * anyone else sees only their own questions and the threads routed to them.
+ * Callers must already have checked an admin holds the `students` capability.
+ */
+export async function ticketTypingFor(viewer: {
+  userId: string;
+  isAdmin: boolean;
+}): Promise<Record<string, Typer[]>> {
+  const rows = await prisma.supportTypingPing.findMany({
+    where: {
+      userId: { not: viewer.userId },
+      updatedAt: { gt: new Date(Date.now() - TYPING_LIVE_MS) },
+      ticket: viewer.isAdmin
+        ? { status: { not: "resolved" } }
+        : { OR: [{ userId: viewer.userId }, { assignedToId: viewer.userId }] },
+    },
+    select: { ticketId: true, user: { select: { id: true, name: true, role: true } } },
+    orderBy: { updatedAt: "desc" },
+    take: 100,
+  });
+
+  const out: Record<string, Typer[]> = {};
+  for (const row of rows) {
+    (out[row.ticketId] ??= []).push({ id: row.user.id, name: firstName(row.user.name), role: row.user.role });
   }
   return out;
 }
@@ -424,6 +534,10 @@ export async function replyToTicket(input: {
       attachments,
     },
   });
+
+  // The message is out, so "is typing" is over — otherwise the other side's
+  // dots would outlive the very message they were announcing.
+  await clearTicketTyping(ticket.id, input.authorId);
 
   // For the notification line and the marketing-email fallback, a wordless
   // message needs a stand-in the recipient can read.

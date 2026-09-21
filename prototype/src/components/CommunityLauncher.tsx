@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import CommunityHub from "@/components/CommunityHub";
+import { TypingDots } from "@/components/typing/TypingUI";
+import { COMMUNITY_PANEL_EVENT, useTypingFeed } from "@/lib/client/typing-feed";
 
 /**
  * Floating launcher: a smiley button that opens the community hub inline,
@@ -31,6 +33,9 @@ function CloseIcon({ className }: { className?: string }) {
 export default function CommunityLauncher() {
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
+  // Somebody mid-sentence in one of my rooms → a live bubble on the button.
+  const typingFeed = useTypingFeed();
+  const someoneTyping = !open && typingFeed.rooms.length > 0;
 
   // Keep the badge current: poll while the panel is shut, and re-check on tab
   // focus so someone coming back to the browser sees the truth immediately.
@@ -61,6 +66,15 @@ export default function CommunityLauncher() {
       window.removeEventListener("easyway:unread-changed", refresh);
     };
   }, []);
+
+  // Tell the floating typing pill to step aside while the chat itself is open —
+  // the room shows its own dots.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent(COMMUNITY_PANEL_EVENT, { detail: { open } }));
+    return () => {
+      window.dispatchEvent(new CustomEvent(COMMUNITY_PANEL_EVENT, { detail: { open: false } }));
+    };
+  }, [open]);
 
   // Escape closes the panel.
   useEffect(() => {
@@ -124,6 +138,16 @@ export default function CommunityLauncher() {
         >
           {open ? <CloseIcon className="h-6 w-6" /> : <SmileyIcon className="h-7 w-7" />}
         </button>
+
+        {someoneTyping && (
+          <span
+            className="ew-msg-in pointer-events-none absolute -left-3 -top-3 rounded-full rounded-br-sm border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[var(--accent)] shadow-md"
+            role="status"
+            aria-label="Someone is typing in your class chat"
+          >
+            <TypingDots />
+          </span>
+        )}
 
         {!open && unread > 0 && (
           <span className="pointer-events-none absolute -right-1 -top-1 flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-white bg-red-500 px-1.5 text-[11px] font-bold text-white shadow-sm">
