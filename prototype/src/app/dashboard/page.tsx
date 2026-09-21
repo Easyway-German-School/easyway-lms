@@ -99,6 +99,8 @@ type Student = {
   tutorPhotoUrl?: string | null;
   tutorSpecialization?: string | null;
   tutorBio?: string | null;
+  /** Extra tutors beyond the primary — online / hybrid students only. */
+  coTutors?: Array<{ id: string; name: string | null; role: string | null }>;
   pathway?: string;
   germanyGoal?: string | null;
   germanyGoalNote?: string | null;
@@ -147,6 +149,7 @@ import NewMaterialsCard from "@/components/NewMaterialsCard";
 import SkillMasteryPanel from "@/components/SkillMasteryPanel";
 import Leaderboard from "@/components/Leaderboard";
 import TutorBioCard from "@/components/TutorBioCard";
+import TeachingTeamCard from "@/components/TeachingTeamCard";
 import TutorMessagesCard from "@/components/TutorMessagesCard";
 import SessionNotesCard from "@/components/SessionNotesCard";
 import JourneyMapPoster from "@/components/JourneyMapPoster";
@@ -1207,6 +1210,23 @@ function DashboardContent() {
                   <TutorMessagesCard tutorName={resolvedStudent?.tutorName} />
                   <SessionNotesCard />
                 </>
+              )}
+              {/* Group students: who teaches them. Shown once the deposit is in
+                  — the same moment the tutor is announced (lib/tutor-reveal.ts). */}
+              {!isPrivateStudent && paymentUnlocked && (
+                <TeachingTeamCard
+                  deliveryMode={resolvedStudent?.deliveryMode}
+                  primary={
+                    resolvedStudent?.tutorName
+                      ? {
+                          id: resolvedStudent.tutorId ?? null,
+                          name: resolvedStudent.tutorName,
+                          photoUrl: resolvedStudent.tutorPhotoUrl,
+                        }
+                      : null
+                  }
+                  coTutors={resolvedStudent?.coTutors ?? []}
+                />
               )}
               {/* Bookings made on the public exam-centre page appear here too —
                   both write the same registrations. */}

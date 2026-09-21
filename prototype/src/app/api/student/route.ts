@@ -95,6 +95,18 @@ export async function GET() {
       take: 8,
     });
 
+    // The extra tutors on this student (online / hybrid). The dashboard used to
+    // show only the primary, so a student the office had put with two tutors
+    // saw one — and a hybrid student never saw their online tutor at all.
+    const coTutorRows = await prisma.studentCoTutor.findMany({
+      where: { studentId: student.id },
+      orderBy: { createdAt: "asc" },
+      select: { role: true, lecturer: { select: { id: true, user: { select: { name: true } } } } },
+    });
+    const coTutors = coTutorRows
+      .filter((row) => row.lecturer && row.lecturer.id !== student.tutor?.id)
+      .map((row) => ({ id: row.lecturer.id, name: row.lecturer.user?.name ?? null, role: row.role }));
+
     const feeLookup = { level: student.level, branch: student.branch?.name ?? null, classType: student.classType, pathway: student.pathway };
     const tuitionFee = tuitionFeeFor(feeLookup);
     const registrationFee = REGISTRATION_FEE;
@@ -131,6 +143,7 @@ export async function GET() {
       tutorPhotoUrl: student.tutor?.photoUrl ?? null,
       tutorSpecialization: student.tutor?.specialization ?? null,
       tutorBio: student.tutor?.bio ?? null,
+      coTutors,
       pathway: student.pathway,
       germanyGoal: student.germanyGoal,
       germanyGoalNote: student.germanyGoalNote,
