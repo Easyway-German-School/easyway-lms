@@ -253,7 +253,7 @@ export default function PricingSettingsPage() {
 
   return (
     <AdminShell>
-      <div className="mx-auto max-w-6xl space-y-6 p-6 pb-28">
+      <div className="mx-auto max-w-6xl space-y-6 p-6">
         <div className="space-y-2">
           <div className="flex items-center gap-3">
             <WalletIcon className="h-8 w-8 text-[var(--accent)]" />
@@ -369,6 +369,41 @@ export default function PricingSettingsPage() {
             </label>
           </div>
         </section>
+
+        {/* Save bar */}
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="mr-auto text-sm text-[var(--muted)]">
+              {dirty
+                ? `${changes.length} unsaved change${changes.length === 1 ? "" : "s"}: ${changes
+                    .slice(0, 3)
+                    .map((c) => `${c.label} ${naira(c.from)} → ${naira(c.to)}`)
+                    .join("; ")}${changes.length > 3 ? "; …" : ""}`
+                : "No unsaved changes."}
+            </p>
+            <button
+              onClick={resetToDefaults}
+              disabled={saving}
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--foreground)] disabled:opacity-50"
+            >
+              Original prices
+            </button>
+            <button
+              onClick={() => setDraft(clone(saved))}
+              disabled={!dirty || saving}
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--foreground)] disabled:opacity-50"
+            >
+              Discard
+            </button>
+            <button
+              onClick={save}
+              disabled={!dirty || saving}
+              className="rounded-lg bg-[var(--accent)] px-6 py-2.5 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save prices"}
+            </button>
+          </div>
+        </div>
 
         {/* Students on an old price */}
         <section className={cardClass}>
@@ -486,41 +521,6 @@ export default function PricingSettingsPage() {
             </>
           )}
         </section>
-      </div>
-
-      {/* Save bar */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--border)] bg-[var(--surface)]/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3">
-          <p className="mr-auto text-sm text-[var(--muted)]">
-            {dirty
-              ? `${changes.length} unsaved change${changes.length === 1 ? "" : "s"}: ${changes
-                  .slice(0, 3)
-                  .map((c) => `${c.label} ${naira(c.from)} → ${naira(c.to)}`)
-                  .join("; ")}${changes.length > 3 ? "; …" : ""}`
-              : "No unsaved changes."}
-          </p>
-          <button
-            onClick={resetToDefaults}
-            disabled={saving}
-            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--foreground)] disabled:opacity-50"
-          >
-            Original prices
-          </button>
-          <button
-            onClick={() => setDraft(clone(saved))}
-            disabled={!dirty || saving}
-            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--foreground)] disabled:opacity-50"
-          >
-            Discard
-          </button>
-          <button
-            onClick={save}
-            disabled={!dirty || saving}
-            className="rounded-lg bg-[var(--accent)] px-6 py-2.5 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Save prices"}
-          </button>
-        </div>
       </div>
     </AdminShell>
   );
