@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { SparklesIcon, ArrowRightIcon, StarIcon, CheckCircleIcon } from "@/components/icons";
-import { PRIVATE_CLASS_UPGRADE_PRICE } from "@/lib/payment";
+import { privateClassPriceForLevel } from "@/lib/payment";
+import { usePriceBook } from "@/lib/use-price-book";
 
 /**
  * Premium upsell card for private one-to-one classes.
@@ -35,6 +36,10 @@ const BENEFITS = [
 
 export default function PremiumPrivateClasses({ student }: { student: StudentInfo }) {
   const { data: session } = useSession();
+  // Live price for THIS student's level. Null until it loads — show a dash, never
+  // the built-in default, which is the number that may just have been changed.
+  const priceBook = usePriceBook();
+  const price = priceBook ? privateClassPriceForLevel(student.level, priceBook) : null;
   const [isProcessing, setIsProcessing] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -150,7 +155,7 @@ export default function PremiumPrivateClasses({ student }: { student: StudentInf
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/40">One-time upgrade</p>
               <p className="mt-1 bg-gradient-to-r from-[#F4E3B2] to-[#D4AF37] bg-clip-text text-3xl font-bold text-transparent">
-                ₦{PRIVATE_CLASS_UPGRADE_PRICE.toLocaleString("en-NG")}
+                {price === null ? "₦—" : `₦${price.toLocaleString("en-NG")}`}
               </p>
               <p className="mt-1 text-xs text-white/40">
                 Paid once. The office pairs you with your tutor as soon as it clears.

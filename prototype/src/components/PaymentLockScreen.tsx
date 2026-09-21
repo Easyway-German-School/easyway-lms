@@ -8,7 +8,6 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { StudentAccess } from "@/lib/access";
 import Mascot from "@/components/Mascot";
 import GermanyJourney from "@/components/journey/GermanyJourney";
-import { PRIVATE_CLASS_UPGRADE_PRICE } from "@/lib/payment";
 
 /**
  * The one-to-one option, offered on the locked screen.
@@ -17,7 +16,7 @@ import { PRIVATE_CLASS_UPGRADE_PRICE } from "@/lib/payment";
  * lock screen's animation tree — this panel can be mid-request while the
  * mascot is still walking in, and neither should re-render the other.
  */
-function PrivateClassAlternative() {
+function PrivateClassAlternative({ price }: { price?: number | null }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -55,7 +54,7 @@ function PrivateClassAlternative() {
       </p>
       <p className="mt-2 text-sm leading-6 text-white/70">
         Private tuition is a tutor to yourself, at times you choose, instead of a seat in
-        the group class — {naira(PRIVATE_CLASS_UPGRADE_PRICE)} for your level.
+        the group class{price ? ` — ${naira(price)} for your level` : ""}.
       </p>
       <button
         onClick={start}
@@ -133,7 +132,8 @@ export default function PaymentLockScreen({
 }: {
   /** Which part of the portal is locked, e.g. "Classes" — names the padlock. */
   areaLabel: string;
-  access: StudentAccess | null;
+  /** `privateClassPrice` comes from /api/student/access — the live price for this student's level. */
+  access: (StudentAccess & { privateClassPrice?: number }) | null;
 }) {
   const [revealed, setRevealed] = useState(false);
   const reduceMotion = useReducedMotion();
@@ -425,7 +425,7 @@ export default function PaymentLockScreen({
                   on a track, so switching them to private here makes no sense —
                   they just need to settle what they owe.
                 */}
-                {!balanceLock && <PrivateClassAlternative />}
+                {!balanceLock && <PrivateClassAlternative price={access?.privateClassPrice} />}
               </motion.div>
             </motion.div>
           )}

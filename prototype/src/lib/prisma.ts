@@ -3,9 +3,11 @@ import { createGuardExtension } from "@/lib/prisma-guard";
 import { createTenantExtension } from "@/lib/tenant/extension";
 import { currentScope } from "@/lib/tenant/context";
 import { createColdStartRetryExtension } from "@/lib/prisma-cold-start-retry";
+import { createPriceBookExtension, type PriceBookReader } from "@/lib/price-book-refresh";
 
 const globalForPrisma = global as unknown as {
   prismaBase: PrismaClient | undefined;
+  prismaWoken: PriceBookReader | undefined;
   prismaGuarded: ReturnType<typeof buildGuarded> | undefined;
   prisma: ReturnType<typeof buildClient> | undefined;
 };
@@ -29,6 +31,17 @@ function buildGuarded() {
    * short retry here, rather than a keep-alive ping, is the fix.
    */
   const woken = base.$extends(createColdStartRetryExtension());
+  globalForPrisma.prismaWoken = woken;
+
+  /**
+   * Makes sure the school's price book is loaded before any query runs, so the
+   * synchronous fee lookups (`tuitionFeeFor` and friends) always see current
+   * prices — see src/lib/price-book-refresh.ts. Sits directly above the
+   * cold-start retry so a Neon wake-up is absorbed BEFORE the price read, and
+   * hands `woken` (not the extended client) to the refresher so the read of the
+   * price row does not itself wait on a price refresh.
+   */
+  const priced = woken.$extends(createPriceBookExtension(woken as unknown as PriceBookReader));
 
   /**
    * Every query in the application goes through the guard.
@@ -38,7 +51,7 @@ function buildGuarded() {
    * somebody adds in a hurry, and the routes most likely to be written in a
    * hurry are the ones that delete things. See src/lib/prisma-guard.ts.
    */
-  return woken.$extends(createGuardExtension(base));
+  return priced.$extends(createGuardExtension(base));
 }
 
 function buildClient() {
@@ -88,3 +101,13 @@ globalForPrisma.prisma = prisma;
  * and every use of it should be obvious in review.
  */
 export const unguardedPrisma: PrismaClient = globalForPrisma.prismaBase!;
+
+/**
+ * The client the price-book refresher reads through: cold-start retry, but no
+ * price hook, guard or tenant filter. Only price-book-server.ts should need it.
+ * Falls back to the bare client if a hot-reloaded module cached an older
+ * guarded client that predates this field (development only).
+ */
+export function priceBookReader(): PriceBookReader {
+  return globalForPrisma.prismaWoken ?? (globalForPrisma.prismaBase as unknown as PriceBookReader);
+}

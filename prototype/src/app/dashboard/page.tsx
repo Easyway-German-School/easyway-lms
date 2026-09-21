@@ -17,6 +17,7 @@ import { ArrowRightIcon, BookOpenIcon, CheckCircleIcon, ChevronDownIcon, Compass
 import { summarizeGamification } from "@/lib/gamification";
 import { isReceivedPayment, isRegistrationFeePayment, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { useGamification } from "@/lib/useGamification";
+import { usePriceBook } from "@/lib/use-price-book";
 import { useLiveClass } from "@/lib/useLiveClass";
 
 /** Paystack transaction statuses that will never become "success". A stored
@@ -240,6 +241,9 @@ function DashboardContent() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null);
   const [fastFallback, setFastFallback] = useState(false);
+  // Primes the browser's live price book. The fee fallbacks below run inside callbacks
+  // and read it lazily, so they quote the school's current prices, not the bundled ones.
+  usePriceBook();
 
   // Lightweight fetch wrapper that logs timing for debugging slow endpoints.
   const fetchWithTiming = async (url: string, opts?: RequestInit, label?: string) => {

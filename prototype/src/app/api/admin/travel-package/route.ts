@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { computeStudentFinance, FINANCE_STUDENT_SELECT, type FinanceStudentInput } from "@/lib/finance/receivables";
-import { isTravelPackagePathway, TRAVEL_PACKAGE_MIN_FIRST_PAYMENT, TRAVEL_PACKAGE_PATHWAY, TRAVEL_PACKAGE_PRICE } from "@/lib/payment";
+import { isTravelPackagePathway, travelPackageMinFirstPayment, TRAVEL_PACKAGE_PATHWAY, travelPackagePrice } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
 import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
 
@@ -11,7 +11,7 @@ import { travelPackagePartPaymentNotice } from "@/lib/travel-package-notice";
  * same finance figures (owed, progress, cohort) every other screen computes,
  * because this reads through `computeStudentFinance` rather than
  * re-deriving anything. `tuitionFeeFor`/`requiredDepositFor` already know
- * this pathway prices at a flat ₦980,000 with a ₦200,000 floor — see
+ * this pathway prices at a flat price with a first-payment floor (both editable in the price book) — see
  * src/lib/payment.ts — so this route is almost entirely plumbing.
  */
 export async function GET() {
@@ -24,13 +24,17 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
   });
 
+  // After the query above, so the price book has been refreshed.
+  const packagePrice = travelPackagePrice();
+  const minFirstPayment = travelPackageMinFirstPayment();
+
   const rows = students.map((student) => {
     const finance = computeStudentFinance(student as unknown as FinanceStudentInput);
     // What the balance SHOULD be for a flat ₦980,000 programme. When the live
     // `owed` disagrees, the student's tuition ledger still carries a per-level
     // charge (onboarded before flat pricing, a failed charge-create, or the
     // pathway switched after the charge was raised) and needs reconciling.
-    const expectedOwed = Math.max(0, TRAVEL_PACKAGE_PRICE - finance.paid);
+    const expectedOwed = Math.max(0, packagePrice - finance.paid);
     return {
       id: student.id,
       studentCode: student.studentCode,
@@ -38,7 +42,7 @@ export async function GET() {
       email: finance.email,
       level: finance.level,
       branch: finance.branch,
-      firstPaymentMet: finance.paid >= TRAVEL_PACKAGE_MIN_FIRST_PAYMENT,
+      firstPaymentMet: finance.paid >= minFirstPayment,
       paid: finance.paid,
       owed: finance.owed,
       progressPercent: finance.progressPercent,
@@ -49,8 +53,8 @@ export async function GET() {
   });
 
   return NextResponse.json({
-    packagePrice: TRAVEL_PACKAGE_PRICE,
-    minFirstPayment: TRAVEL_PACKAGE_MIN_FIRST_PAYMENT,
+    packagePrice: packagePrice,
+    minFirstPayment: minFirstPayment,
     students: rows,
   });
 }

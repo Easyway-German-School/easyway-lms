@@ -5,16 +5,16 @@ import {
   isRegistrationFeePayment,
   isTravelPackagePathway,
   tuitionFeeFor,
-  TRAVEL_PACKAGE_MIN_FIRST_PAYMENT,
+  travelPackageMinFirstPayment,
   TRAVEL_PACKAGE_PATHWAY,
-  TRAVEL_PACKAGE_PRICE,
+  travelPackagePrice,
 } from "@/lib/payment";
 
 /**
  * PUTTING A TRAVEL PACKAGE STUDENT'S LEDGER STRAIGHT.
  *
- * Travel Package is a flat ₦980,000 that REPLACES the per-level tuition ladder
- * (see the block comment on TRAVEL_PACKAGE_PRICE in src/lib/payment.ts). Every
+ * Travel Package is one flat price (price book, default ₦980,000) that REPLACES the per-level tuition ladder
+ * (see the Travel Package block in src/lib/payment.ts). Every
  * fee surface in the app already knows this — but only through the student's
  * `pathway` column, and only if the ledger carries the right charge.
  *
@@ -142,6 +142,10 @@ export async function reconcileTravelPackageStudent({
     return ladderIndex(a.level) - ladderIndex(b.level);
   });
 
+  // Read after the student fetch above: that query is what refreshes the price book.
+  const packagePrice = travelPackagePrice();
+  const minFirstPayment = travelPackageMinFirstPayment();
+
   let chargeFixed = false;
   let chargesRetired = 0;
   const stamp = now.toISOString().slice(0, 10);
@@ -151,11 +155,11 @@ export async function reconcileTravelPackageStudent({
       data: {
         studentId: student.id,
         level: String(student.level ?? "A1").trim().toUpperCase() || "A1",
-        amount: TRAVEL_PACKAGE_PRICE,
+        amount: packagePrice,
         classType: student.classType ?? "group",
         branchName: student.branch?.name ?? null,
         origin: "admin",
-        note: `Travel Package flat ₦${TRAVEL_PACKAGE_PRICE.toLocaleString("en-NG")} — reconciled ${stamp}`,
+        note: `Travel Package flat ₦${packagePrice.toLocaleString("en-NG")} — reconciled ${stamp}`,
         ...(student.tenantId ? { tenantId: student.tenantId } : {}),
       },
     });
@@ -163,14 +167,14 @@ export async function reconcileTravelPackageStudent({
   } else {
     const survivor = charges[0];
     const net = Math.max(0, survivor.amount - (survivor.waivedAmount ?? 0));
-    if (net !== TRAVEL_PACKAGE_PRICE) {
+    if (net !== packagePrice) {
       await prisma.tuitionCharge.update({
         where: { id: survivor.id },
         data: {
           // Set the gross so that gross − existing waiver lands on ₦980,000;
           // a genuine negotiated write-off the office entered is preserved.
-          amount: TRAVEL_PACKAGE_PRICE + (survivor.waivedAmount ?? 0),
-          note: `${survivor.note ? `${survivor.note} · ` : ""}Reconciled to Travel Package flat ₦${TRAVEL_PACKAGE_PRICE.toLocaleString("en-NG")} on ${stamp}`,
+          amount: packagePrice + (survivor.waivedAmount ?? 0),
+          note: `${survivor.note ? `${survivor.note} · ` : ""}Reconciled to Travel Package flat ₦${packagePrice.toLocaleString("en-NG")} on ${stamp}`,
         },
       });
       chargeFixed = true;
@@ -184,7 +188,7 @@ export async function reconcileTravelPackageStudent({
     }
   }
 
-  const owed = Math.max(0, TRAVEL_PACKAGE_PRICE - paid);
+  const owed = Math.max(0, packagePrice - paid);
 
   return {
     studentId: student.id,
@@ -194,9 +198,9 @@ export async function reconcileTravelPackageStudent({
     paid,
     owed,
     wasFullPaidBefore,
-    fullPaidAfter: paid >= TRAVEL_PACKAGE_PRICE,
-    floorMet: paid >= TRAVEL_PACKAGE_MIN_FIRST_PAYMENT,
-    packagePrice: TRAVEL_PACKAGE_PRICE,
-    minFirstPayment: TRAVEL_PACKAGE_MIN_FIRST_PAYMENT,
+    fullPaidAfter: paid >= packagePrice,
+    floorMet: paid >= minFirstPayment,
+    packagePrice: packagePrice,
+    minFirstPayment: minFirstPayment,
   };
 }
