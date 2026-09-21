@@ -4,26 +4,33 @@ import { requireCapability } from "@/lib/admin-roles";
 import {
   belongsToLecturer,
   isAssigned,
-  readAssignment,
   studentWhereForLecturer,
 } from "@/lib/lecturer-assignment";
 import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { accessFromStudent } from "@/lib/student-access";
 import { setStudentTutor } from "@/lib/tutor-pairing";
+import {
+  compareByAction,
+  summarizePlans,
+  type LinkAction,
+  type LinkPlan,
+} from "@/lib/tutor-class-match";
+import { loadLinkContext, planFor, unlinkStudentFromTutor } from "@/lib/tutor-link";
 
 /**
  * Which students a tutor teaches, from the office's side.
  *
- * This replaces the private-students screen, which could only ever pair
- * one-to-one students. That limit was wrong in both directions. It left the
- * office unable to say "this group student is in Frau Mami's class" when the
- * class description did not reach them — an online A2 student whose tutor
- * takes the afternoon sitting, say — and it hid the pairing UI entirely unless
- * "Private" was ticked, so nobody knew the mechanism existed at all.
+ * GET answers the question the office actually has when it opens a tutor: WHO
+ * FITS THIS CLASS, and what would linking each of them do? Not "who are the 25
+ * newest students in the school" — which is what this used to return whenever
+ * nothing was typed, and is why the list looked like a random sample of the
+ * whole LMS instead of the class being set up.
  *
- * GET answers two questions at once, because the office needs both on one
- * screen: who is in this tutor's class already (and by which of the two
- * routes), and who else could be added.
+ * `roster` is the class as it stands PLUS everybody who fits it but is not
+ * linked yet, each with a `plan` from `lib/tutor-class-match.ts` — the one rule
+ * that decides primary vs co-tutor. `results` is a whole-school search, and
+ * only runs when the office types something: the way to add somebody OUTSIDE
+ * the class (cover, a sitting that moved, a one-to-one).
  */
 
 export const dynamic = "force-dynamic";
@@ -31,6 +38,8 @@ export const dynamic = "force-dynamic";
 function money(amount: number) {
   return Number.isFinite(amount) ? amount : 0;
 }
+
+type RowPlan = { action: LinkAction; role: LinkPlan["role"] | null; reason: string };
 
 type StudentRow = {
   id: string;
@@ -47,19 +56,27 @@ type StudentRow = {
   hasPaid: boolean;
   /** "October 2026" while placed in an intake that has not opened. */
   waitingBatch: string | null;
+  /** Intake month, e.g. "September" — shown so batch is visible next to level and sitting. */
+  batch: string | null;
   currentTutorId: string | null;
   currentTutorName: string | null;
-  /** In this tutor's class because the office named them, not by matching. */
+  /** Extra tutors already on this student. */
+  coTutorIds: string[];
+  /** In this tutor's class because the office named them (primary or co-tutor), not by matching. */
   namedByOffice: boolean;
+  /** How linking this student to THIS tutor would work — see lib/tutor-class-match.ts. */
+  plan: RowPlan | null;
 };
 
 const STUDENT_SHAPE = {
   id: true,
+  branchId: true,
   level: true,
   sessionSlot: true,
   classType: true,
   pathway: true,
   deliveryMode: true,
+  hybridOnlineSlot: true,
   studentCode: true,
   admission: true,
   tutorId: true,
@@ -74,15 +91,18 @@ const STUDENT_SHAPE = {
     select: { id: true, level: true, amount: true, waivedAmount: true, legacyArrears: true, createdAt: true, settledAt: true },
   },
   tutor: { select: { id: true, user: { select: { name: true, email: true } } } },
+  coTutors: { select: { lecturerId: true } },
 } as const;
 
 type RawStudent = {
   id: string;
+  branchId: string | null;
   level: string;
   sessionSlot: string;
   classType: string;
   pathway: string;
   deliveryMode: string;
+  hybridOnlineSlot: string | null;
   studentCode: string | null;
   tutorId: string | null;
   classesStartedAt: Date | null;
@@ -103,9 +123,15 @@ type RawStudent = {
     settledAt: Date | null;
   }>;
   tutor: { id: string; user: { name: string | null; email: string } } | null;
+  coTutors: { lecturerId: string }[];
 };
 
-function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
+function batchOf(admission: unknown): string | null {
+  const record = admission && typeof admission === "object" ? (admission as Record<string, unknown>) : {};
+  return typeof record.batch === "string" && record.batch ? record.batch : null;
+}
+
+function toRow(student: RawStudent, lecturerId: string | null, plan: LinkPlan | null): StudentRow {
   const receivedTuitionPayments = student.payments.filter(
     (payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description),
   );
@@ -118,6 +144,7 @@ function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
   const accessInput = { ...student, payments: receivedTuitionPayments };
   const access = accessFromStudent(accessInput);
   const totalPaid = access.totalPaid;
+  const coTutorIds = student.coTutors.map((link) => link.lecturerId);
 
   return {
     id: student.id,
@@ -135,13 +162,16 @@ function toRow(student: RawStudent, lecturerId: string | null): StudentRow {
     // not paid for it without at least seeing that first.
     hasPaid: access.hasAccess,
     waitingBatch: access.batchLocked ? access.batchLabel : null,
+    batch: batchOf(student.admission),
     currentTutorId: student.tutor?.id ?? null,
     currentTutorName: student.tutor ? student.tutor.user.name || student.tutor.user.email : null,
-    namedByOffice: Boolean(lecturerId && student.tutorId === lecturerId),
+    coTutorIds,
+    namedByOffice: Boolean(lecturerId && (student.tutorId === lecturerId || coTutorIds.includes(lecturerId))),
+    plan: plan ? { action: plan.action, role: plan.role ?? null, reason: plan.reason } : null,
   };
 }
 
-/** GET ?lecturerId=&q= — this tutor's roster, plus search results to add from. */
+/** GET ?lecturerId=&q= — the class as it stands, who fits it but isn't linked, and (only when asked) a whole-school search. */
 export async function GET(request: NextRequest) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
@@ -149,18 +179,16 @@ export async function GET(request: NextRequest) {
   const lecturerId = (request.nextUrl.searchParams.get("lecturerId") ?? "").trim();
   const query = (request.nextUrl.searchParams.get("q") ?? "").trim();
 
-  const lecturer = lecturerId
-    ? await prisma.lecturer.findUnique({ where: { id: lecturerId } })
-    : null;
-
-  if (lecturerId && !lecturer) {
+  const context = lecturerId ? await loadLinkContext(lecturerId) : null;
+  if (lecturerId && !context) {
     return NextResponse.json({ error: "Tutor not found" }, { status: 404 });
   }
 
-  const assignment = lecturer ? readAssignment(lecturer) : null;
-  const rosterWhere = lecturer && assignment ? studentWhereForLecturer(assignment, lecturer.id) : null;
+  const assignment = context?.assignment ?? null;
+  const assigned = assignment ? isAssigned(assignment) : false;
+  const rosterWhere = context && assignment ? studentWhereForLecturer(assignment, context.lecturerId) : null;
 
-  const [rosterRaw, searchRaw] = await Promise.all([
+  const [rosterRaw, fitRaw, searchRaw] = await Promise.all([
     rosterWhere
       ? prisma.student.findMany({
           where: { ...(rosterWhere as Record<string, unknown>), status: "active" } as never,
@@ -168,40 +196,95 @@ export async function GET(request: NextRequest) {
           orderBy: { createdAt: "asc" },
         })
       : Promise.resolve([]),
-    // The search reaches every student on purpose. The old private-only limit
-    // is exactly what stopped the office recording a real pairing.
-    prisma.student.findMany({
-      where: query
-        ? {
+    // Everybody at the levels this tutor teaches. The exact branch / sitting /
+    // batch / hybrid-half decision is made in memory by `planLink`, because the
+    // online half of a hybrid student lives on fields the SQL roster never
+    // looks at. Capped so a mis-set tutor cannot pull the whole school.
+    assigned && assignment
+      ? prisma.student.findMany({
+          where: { status: "active", level: { in: assignment.levels } } as never,
+          select: STUDENT_SHAPE,
+          orderBy: { createdAt: "asc" },
+          take: 1500,
+        })
+      : Promise.resolve([]),
+    // Typed searches only. An empty box used to return the 25 newest students
+    // in the school, which read as "the students we picked for this tutor".
+    query
+      ? prisma.student.findMany({
+          where: {
             OR: [
               { studentCode: { contains: query, mode: "insensitive" as const } },
               { user: { name: { contains: query, mode: "insensitive" as const } } },
               { user: { email: { contains: query, mode: "insensitive" as const } } },
             ],
-          }
-        : {},
-      select: STUDENT_SHAPE,
-      orderBy: { createdAt: "desc" },
-      take: 25,
-    }),
+          },
+          select: STUDENT_SHAPE,
+          orderBy: { createdAt: "desc" },
+          take: 25,
+        })
+      : Promise.resolve([]),
   ]);
 
-  const roster = (rosterRaw as unknown as RawStudent[])
-    .filter((student) => (assignment ? belongsToLecturer(assignment, lecturerId, student) : false))
-    .map((student) => toRow(student, lecturerId || null));
+  const matchedRoster = (rosterRaw as unknown as RawStudent[]).filter((student) =>
+    assignment ? belongsToLecturer(assignment, lecturerId, student) : false,
+  );
+
+  // The class = what the roster query returns + everybody the rule says fits
+  // (which adds the online half of hybrid students). De-duplicated by id.
+  const classById = new Map<string, RawStudent>();
+  for (const student of matchedRoster) classById.set(student.id, student);
+  if (context) {
+    for (const student of fitRaw as unknown as RawStudent[]) {
+      if (classById.has(student.id)) continue;
+      const plan = planFor(context, student);
+      if (plan.action !== "no_fit" && plan.action !== "linked") classById.set(student.id, student);
+    }
+  }
+
+  const roster = [...classById.values()]
+    .map((student) => {
+      const plan = context ? planFor(context, student) : null;
+      // A student the roster query matched but the rule cannot place (an edge
+      // case, e.g. a sitting typo) is still on the roster — show them as plain
+      // "matched" rather than inventing an action.
+      return toRow(student, lecturerId || null, plan && plan.action !== "no_fit" ? plan : null);
+    })
+    .sort(
+      (a, b) =>
+        compareByAction(a.plan?.action ?? "linked", b.plan?.action ?? "linked") ||
+        a.level.localeCompare(b.level) ||
+        a.name.localeCompare(b.name),
+    );
+
+  const results = (searchRaw as unknown as RawStudent[]).map((student) =>
+    toRow(student, lecturerId || null, context ? planFor(context, student) : null),
+  );
+
+  const summary = summarizePlans(roster.map((row) => ({ action: row.plan?.action ?? "linked" })));
 
   return NextResponse.json({
     roster,
-    results: (searchRaw as unknown as RawStudent[]).map((student) => toRow(student, lecturerId || null)),
+    results,
+    summary,
+    /** With this off the school allows ONE extra tutor per student, not more. */
+    sharedStudentsEnabled: context?.sharedStudentsEnabled ?? false,
     // So the panel can say "12 of these come from the class description" and
     // make the difference between the two routes visible rather than folklore.
     matchedByAssignment: roster.filter((student) => !student.namedByOffice).length,
     namedCount: roster.filter((student) => student.namedByOffice).length,
-    hasClassAssignment: assignment ? isAssigned(assignment) : false,
+    hasClassAssignment: assigned,
   });
 }
 
-/** POST — name a student onto a tutor, or clear the pairing with lecturerId: null. */
+/**
+ * POST — put a student on a tutor as PRIMARY (replacing whoever it was), or take
+ * them off THIS tutor with `unlink: true`.
+ *
+ * `lecturerId: null` (clear the primary, whoever it is) is kept for the student
+ * roster and the dossier, which call it. The tutor's own panel now sends
+ * `unlink` so removing a co-tutor cannot clear somebody else's primary.
+ */
 export async function POST(request: NextRequest) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
@@ -212,6 +295,13 @@ export async function POST(request: NextRequest) {
 
   if (!studentId) {
     return NextResponse.json({ error: "studentId is required" }, { status: 400 });
+  }
+
+  if (body?.unlink === true) {
+    if (!lecturerId) return NextResponse.json({ error: "lecturerId is required to unlink" }, { status: 400 });
+    const result = await unlinkStudentFromTutor({ studentId, lecturerId, assignedById: gate.session.user.id });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+    return NextResponse.json({ success: true, changed: result.changed, was: result.was });
   }
 
   const result = await setStudentTutor({ studentId, lecturerId });

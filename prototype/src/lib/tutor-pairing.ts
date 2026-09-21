@@ -30,8 +30,14 @@ export async function setStudentTutor(input: {
   lecturerId: string | null;
   /** Skip the notifications — used by bulk paths that send their own summary. */
   quiet?: boolean;
+  /**
+   * Skip only the tutor's own "a student was added" message. A bulk link of
+   * forty students should tell the tutor once, not forty times; each student
+   * is still told who their tutor is.
+   */
+  notifyTutor?: boolean;
 }): Promise<TutorPairingResult> {
-  const { studentId, lecturerId, quiet = false } = input;
+  const { studentId, lecturerId, quiet = false, notifyTutor = true } = input;
 
   const student = await prisma.student.findUnique({
     where: { id: studentId },
@@ -64,6 +70,33 @@ export async function setStudentTutor(input: {
 
   await prisma.student.update({ where: { id: studentId }, data: { tutorId: lecturerId } });
 
+  // The primary tutor is never also a co-tutor (see setStudentCoTutors): a
+  // co-tutor who is promoted must not stay behind as a second row, or every
+  // roster query counts the student twice and "Remove" clears only one of them.
+  if (lecturerId) {
+    await prisma.studentCoTutor.deleteMany({ where: { studentId, lecturerId } });
+  }
+
+  // A student moved OFF one tutor onto another used to leave the first tutor
+  // finding out from a roster that quietly got shorter.
+  if (!quiet && student.tutorId && lecturerId && student.tutorId !== lecturerId) {
+    const previous = await prisma.lecturer.findUnique({
+      where: { id: student.tutorId },
+      select: { user: { select: { id: true } } },
+    });
+    if (previous) {
+      await notify({
+        to: { userIds: [previous.user.id] },
+        kind: KIND.announcement,
+        severity: "info",
+        title: "A student was moved to another tutor",
+        message: `The office moved ${studentName} to ${tutorName}. They no longer appear on your register or gradebook.`,
+        link: "/lecturer/students",
+        push: true,
+      }).catch((error) => console.error("Tutor pairing notification failed", error));
+    }
+  }
+
   if (quiet) return { ok: true, tutorName, studentName, changed: true };
 
   if (lecturer) {
@@ -82,15 +115,17 @@ export async function setStudentTutor(input: {
       push: true,
     }).catch((error) => console.error("Tutor pairing notification failed", error));
 
-    await notify({
-      to: { userIds: [lecturer.user.id] },
-      kind: KIND.announcement,
-      severity: "info",
-      title: "A student was added to your class",
-      message: `The office assigned ${studentName} to you. They are on your roster, your register and your gradebook from now.`,
-      link: "/lecturer/students",
-      push: true,
-    }).catch((error) => console.error("Tutor pairing notification failed", error));
+    if (notifyTutor) {
+      await notify({
+        to: { userIds: [lecturer.user.id] },
+        kind: KIND.announcement,
+        severity: "info",
+        title: "A student was added to your class",
+        message: `The office assigned ${studentName} to you. They are on your roster, your register and your gradebook from now.`,
+        link: "/lecturer/students",
+        push: true,
+      }).catch((error) => console.error("Tutor pairing notification failed", error));
+    }
 
     /**
      * ASSIGNED MID-LESSON.
@@ -192,8 +227,10 @@ export async function setStudentCoTutors(input: {
    * kept in sync on rows that already exist.
    */
   roles?: Record<string, string | null>;
+  /** Skip only the added tutor's own message — see `setStudentTutor`. */
+  notifyTutor?: boolean;
 }): Promise<CoTutorResult> {
-  const { studentId, assignedById = null, quiet = false } = input;
+  const { studentId, assignedById = null, quiet = false, notifyTutor = true } = input;
 
   const student = await prisma.student.findUnique({
     where: { id: studentId },
@@ -298,7 +335,7 @@ export async function setStudentCoTutors(input: {
   ];
 
   if (!quiet) {
-    for (const lecturer of validToAdd) {
+    for (const lecturer of notifyTutor ? validToAdd : []) {
       await notify({
         to: { userIds: [lecturer.user.id] },
         kind: KIND.announcement,
