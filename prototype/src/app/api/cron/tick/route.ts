@@ -423,6 +423,12 @@ async function handleGET(request: NextRequest) {
    */
   register("class-transcription", async () => {
     try {
+      // Hand the work to its own function (and its own 300s), which then keeps
+      // going by itself while it is making progress — see class-notes-runner.ts.
+      // The old "two a day, inline" pass is only the fallback for when that call
+      // cannot be made (no public address configured).
+      const { kickClassNotes } = await import("@/lib/class-notes-runner");
+      if (await kickClassNotes()) return { kicked: true };
       const { processTranscriptionQueue } = await import("@/lib/class-transcription");
       return await processTranscriptionQueue(2);
     } catch (error) {

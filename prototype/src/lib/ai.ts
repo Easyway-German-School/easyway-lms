@@ -163,6 +163,61 @@ export const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 const GROQ_FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "openai/gpt-oss-20b";
 
 /**
+ * Groq's free tier meters tokens per minute PER MODEL (8,000, input plus the
+ * reply we ask for). Two queues drawing on it at once — the class-notes queue
+ * and the handout queue — used to spend each other's minute, and whichever
+ * lost got a 429 and quietly fell back to worse output (or, for a handout,
+ * was marked failed). Every call now books its estimated tokens against a
+ * one-minute window first, and waits for room rather than being refused.
+ *
+ * Kept a little under the real ceiling because the estimate is a guess. Held in
+ * memory, so it is exact within one run of the queue (which is sequential) and
+ * a best effort across separate serverless instances — the 429 handling in
+ * callGroq stays as the backstop.
+ */
+export const GROQ_TOKENS_PER_MINUTE = 7_000;
+const GROQ_WINDOW_MS = 60_000;
+/** Never sit waiting for room longer than this inside one request. */
+const GROQ_MAX_PACING_WAIT_MS = 25_000;
+
+const groqUsage = new Map<string, Array<{ at: number; tokens: number }>>();
+
+/**
+ * How long until `tokens` more fit inside the model's one-minute budget.
+ * 0 when they fit now — and also when they can never fit (one request larger
+ * than the whole budget): waiting would not help, and Groq will answer that one
+ * with a 413 straight away.
+ */
+export function groqPacingWaitMs(
+  entries: Array<{ at: number; tokens: number }>,
+  tokens: number,
+  now: number,
+  limit: number = GROQ_TOKENS_PER_MINUTE,
+): number {
+  if (tokens > limit) return 0;
+  const live = entries.filter((entry) => now - entry.at < GROQ_WINDOW_MS);
+  let used = live.reduce((sum, entry) => sum + entry.tokens, 0);
+  if (used + tokens <= limit) return 0;
+  // Oldest first: the wait is until enough of the window has aged out.
+  for (const entry of [...live].sort((a, b) => a.at - b.at)) {
+    used -= entry.tokens;
+    if (used + tokens <= limit) return Math.max(0, entry.at + GROQ_WINDOW_MS - now);
+  }
+  return GROQ_WINDOW_MS;
+}
+
+function groqWait(model: string, tokens: number): number {
+  return groqPacingWaitMs(groqUsage.get(model) ?? [], tokens, Date.now());
+}
+
+function groqBook(model: string, tokens: number): void {
+  const now = Date.now();
+  const kept = (groqUsage.get(model) ?? []).filter((entry) => now - entry.at < GROQ_WINDOW_MS);
+  kept.push({ at: now, tokens });
+  groqUsage.set(model, kept);
+}
+
+/**
  * Groq's free tier, spoken with the same OpenAI-shaped chat-completions body
  * every hosted provider but Anthropic uses.
  *
@@ -233,17 +288,37 @@ async function callGroq(prompt: string, maxTokens: number): Promise<string | nul
     }
   };
 
-  const first = await attempt(GROQ_MODEL);
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const hasSibling = Boolean(GROQ_FALLBACK_MODEL) && GROQ_FALLBACK_MODEL !== GROQ_MODEL;
+
+  // Roughly three characters a token for German, plus the reply we ask for —
+  // which Groq counts against the minute whether or not it is all used.
+  const estimate = Math.ceil(prompt.length / 3) + maxTokens;
+
+  // Start on whichever model has room soonest (each has its own bucket), and if
+  // neither does yet, wait for the sooner one instead of being refused.
+  const primary =
+    hasSibling && groqWait(GROQ_FALLBACK_MODEL, estimate) < groqWait(GROQ_MODEL, estimate) ? GROQ_FALLBACK_MODEL : GROQ_MODEL;
+  const secondary = primary === GROQ_MODEL ? (hasSibling ? GROQ_FALLBACK_MODEL : null) : GROQ_MODEL;
+
+  const wait = Math.min(groqWait(primary, estimate), GROQ_MAX_PACING_WAIT_MS);
+  if (wait > 0) await sleep(wait);
+  groqBook(primary, estimate);
+
+  const first = await attempt(primary);
   if (first.text || first.retryAfterMs === null) return first.text;
 
   // Only worth waiting for a short window; a long one means "come back later".
-  if (first.retryAfterMs <= 20_000) {
-    await new Promise((resolve) => setTimeout(resolve, first.retryAfterMs!));
-    const second = await attempt(GROQ_MODEL);
+  if (first.retryAfterMs <= 10_000) {
+    await sleep(first.retryAfterMs);
+    groqBook(primary, estimate);
+    const second = await attempt(primary);
     if (second.text || second.retryAfterMs === null) return second.text;
   }
 
-  return GROQ_FALLBACK_MODEL && GROQ_FALLBACK_MODEL !== GROQ_MODEL ? (await attempt(GROQ_FALLBACK_MODEL)).text : null;
+  if (!secondary) return null;
+  groqBook(secondary, estimate);
+  return (await attempt(secondary)).text;
 }
 
 /**

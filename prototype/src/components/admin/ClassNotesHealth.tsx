@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 /**
  * A compact read-out of the class-notes / transcript pipeline, so "there is
- * nothing in My Notes" has a visible cause — plus a "Drain the backlog" button
- * that keeps running the two queues until they are empty (or clearly stuck),
- * the same idea as the email queue's post-response drain. Sits on the Live
- * classes page. Read-only otherwise; hides itself if the read fails.
+ * nothing in My Notes" has a visible cause. The queue works itself — after every
+ * recorded class and every morning — so "Run now" only starts it a little sooner;
+ * it runs on the server and does not need this page to stay open. Sits on the
+ * Live classes page. Hides itself if the read fails.
  */
 
 type Health = {
@@ -23,6 +23,8 @@ type Health = {
   /** The model that will write the next recap. */
   notesModel?: string;
   inProgress: number;
+  /** Everything still waiting for the queue: recordings and handouts. */
+  backlog?: { recordings: number; documents: number };
   noTranscriptYet: number;
   failed: number;
   skippedTooLarge: number;
@@ -44,38 +46,19 @@ type Health = {
   };
 };
 
-type DrainRound = {
-  materials: { attempted: number; ready: number; skipped: number };
-  recordings: { attempted: number; created: number; failed: number };
-  roundProcessed: number;
-  roundFailures: string[];
-  remaining: number;
-  recordingsRemaining: number;
-  materialsRemaining: number;
-};
-
 const STATUS_LABEL: Record<string, string> = {
   failed: "Failed",
   skipped_too_large: "Too large",
   none: "No speech",
 };
 
-/** Hard stops so the loop can never spin forever. */
-const MAX_ROUNDS = 40;
-const STALL_ROUNDS = 2;
-
 export default function ClassNotesHealth() {
   const [health, setHealth] = useState<Health | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
 
-  const [draining, setDraining] = useState(false);
-  const [remaining, setRemaining] = useState<number | null>(null);
-  const [recapsMade, setRecapsMade] = useState(0);
-  const [docsMade, setDocsMade] = useState(0);
-  const [drainNote, setDrainNote] = useState<string | null>(null);
-  const [drainFailures, setDrainFailures] = useState<string[]>([]);
-  const stopRef = useRef(false);
+  const [starting, setStarting] = useState(false);
+  const [startNote, setStartNote] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -88,77 +71,38 @@ export default function ClassNotesHealth() {
   };
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!cancelled) await load();
-    })();
-    return () => {
-      cancelled = true;
-      stopRef.current = true;
-    };
+    void load();
   }, []);
 
-  const drain = async () => {
-    setDraining(true);
-    setDrainNote(null);
-    setDrainFailures([]);
-    setRecapsMade(0);
-    setDocsMade(0);
-    stopRef.current = false;
+  // While anything is waiting, keep the numbers fresh so the page shows the
+  // background run working. Purely cosmetic: the run does not need this page.
+  const waiting = health ? (health.backlog?.recordings ?? 0) + (health.backlog?.documents ?? 0) : 0;
+  useEffect(() => {
+    if (waiting === 0) return;
+    const timer = window.setInterval(() => void load(), 15_000);
+    return () => window.clearInterval(timer);
+  }, [waiting]);
 
-    let recaps = 0;
-    let docs = 0;
-    let stalls = 0;
-    const seenFailures = new Set<string>();
-
-    for (let round = 0; round < MAX_ROUNDS; round += 1) {
-      if (stopRef.current) {
-        setDrainNote("Stopped.");
-        break;
-      }
-      let r: DrainRound;
-      try {
-        const res = await fetch("/api/admin/class-notes-health", { method: "POST" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        r = (await res.json()) as DrainRound;
-      } catch (e) {
-        setDrainNote(`Stopped — the run failed (${e instanceof Error ? e.message : "unknown"}). Try again in a minute.`);
-        break;
-      }
-
-      recaps += r.recordings?.created ?? 0;
-      docs += r.materials?.ready ?? 0;
-      setRecapsMade(recaps);
-      setDocsMade(docs);
-      setRemaining(r.remaining);
-
-      for (const f of r.roundFailures ?? []) {
-        if (!seenFailures.has(f)) {
-          seenFailures.add(f);
-          setDrainFailures((cur) => [...cur, f]);
-        }
-      }
-
-      if (r.remaining <= 0) {
-        setDrainNote("Backlog clear.");
-        break;
-      }
-      // Nothing moved this round — count it; two in a row means we are stuck
-      // on things that cannot be processed, so stop rather than hammer.
-      stalls = r.roundProcessed > 0 ? 0 : stalls + 1;
-      if (stalls >= STALL_ROUNDS) {
-        setDrainNote(
-          `Stopped with ${r.remaining} left — the last ${STALL_ROUNDS} passes produced nothing. See the reasons below.`,
-        );
-        break;
-      }
-      if (round === MAX_ROUNDS - 1) {
-        setDrainNote(`Paused after ${MAX_ROUNDS} passes with ${r.remaining} left — press again to keep going.`);
-      }
+  // Starts the same self-driving run that follows every recorded class and the
+  // morning cron. It happens on the server, so closing this page is fine.
+  const start = async () => {
+    setStarting(true);
+    setStartNote(null);
+    try {
+      const res = await fetch("/api/admin/class-notes-health", { method: "POST" });
+      const r = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(r?.error || `HTTP ${res.status}`);
+      setStartNote(
+        r.started
+          ? "Started. It works through the queue by itself now — you can close this page."
+          : `Ran a short pass here: ${r.recordings?.created ?? 0} class recap${r.recordings?.created === 1 ? "" : "s"} written.`,
+      );
+    } catch (e) {
+      setStartNote(`Could not start it (${e instanceof Error ? e.message : "unknown"}). Try again in a minute.`);
+    } finally {
+      setStarting(false);
+      await load();
     }
-
-    setDraining(false);
-    await load();
   };
 
   if (failed || !health) return null;
@@ -208,49 +152,30 @@ export default function ClassNotesHealth() {
               {open ? "Hide" : `Show ${health.failures.length} problem${health.failures.length === 1 ? "" : "s"}`}
             </button>
           ) : null}
-          {draining ? (
-            <button
-              onClick={() => {
-                stopRef.current = true;
-              }}
-              className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--muted)] transition hover:bg-[var(--surface-alt)]"
-            >
-              Stop
-            </button>
-          ) : null}
           <button
-            onClick={drain}
-            disabled={draining || !health.transcriptionConfigured}
+            onClick={start}
+            disabled={starting || !health.transcriptionConfigured}
             title={
               !health.transcriptionConfigured
                 ? "Transcription is off — set GROQ_API_KEY first"
-                : "Keep running the queues until the backlog is empty"
+                : "Start working through the queue now. It also runs by itself after every class and every morning."
             }
             className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
           >
-            {draining
-              ? `Draining… ${remaining ?? "?"} left`
-              : "Drain the backlog"}
+            {starting ? "Starting…" : "Run now"}
           </button>
         </div>
       </div>
 
-      {draining || drainNote ? (
+      {startNote || waiting > 0 ? (
         <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--foreground)]">
-          <p>
-            {recapsMade} class recap{recapsMade === 1 ? "" : "s"} published
-            {recapsMade ? " (students notified)" : ""}; {docsMade} document{docsMade === 1 ? "" : "s"} written up
-            {docsMade ? " (awaiting tutor sign-off)" : ""}.
-            {drainNote ? <span className="font-semibold"> {drainNote}</span> : draining ? " Working…" : null}
-          </p>
-          {drainFailures.length > 0 ? (
-            <ul className="mt-2 space-y-1">
-              {drainFailures.slice(0, 12).map((f, i) => (
-                <li key={i} className="break-words text-[var(--muted)]">
-                  • {f}
-                </li>
-              ))}
-            </ul>
+          {startNote ? <p className="font-semibold">{startNote}</p> : null}
+          {waiting > 0 ? (
+            <p className={startNote ? "mt-1 text-[var(--muted)]" : "text-[var(--muted)]"}>
+              {waiting} waiting — {health.backlog?.recordings ?? 0} class recording{(health.backlog?.recordings ?? 0) === 1 ? "" : "s"}
+              {(health.backlog?.documents ?? 0) > 0 ? `, ${health.backlog?.documents} handout${health.backlog?.documents === 1 ? "" : "s"}` : ""}.
+              This works itself down after every class and every morning; the numbers refresh here every few seconds.
+            </p>
           ) : null}
         </div>
       ) : null}
