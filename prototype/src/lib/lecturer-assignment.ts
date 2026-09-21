@@ -189,13 +189,19 @@ export function studentWhereForAssignment(assignment: LecturerAssignment): Recor
   // student's deliveryMode; "private" maps onto their classType. A tutor who
   // takes private students only should not see the group cohort, and vice
   // versa. Selecting all three (or none) restricts nothing.
+  //
+  // COMBINED WITH `AND`, NEVER BY ASSIGNING `where.OR`. When the tutor has
+  // teaching groups, `where.OR` already holds the group clauses; assigning the
+  // class-type clauses to the same key threw the groups away, so a tutor set to
+  // "Online / hybrid" matched every online student at every level and branch —
+  // the "it selected all 454 students" bug.
   const types = assignment.classTypes.map((type) => type.toLowerCase());
   if (types.length && types.length < CLASS_TYPES.length) {
     const clauses: Array<Record<string, unknown>> = [];
     if (types.includes("physical")) clauses.push({ classType: "group", deliveryMode: { in: ["physical", "hybrid"] } });
     if (types.includes("online")) clauses.push({ classType: "group", deliveryMode: { in: ["online", "hybrid"] } });
     if (types.includes("private")) clauses.push({ classType: "private" });
-    if (clauses.length) where.OR = clauses;
+    if (clauses.length) where.AND = [{ OR: clauses }];
   }
 
   return where;
@@ -452,8 +458,11 @@ export function belongsToLecturer(
 
 export type MatchClassType = "physical" | "online";
 
+/** A seat a student occupies: one side of a hybrid combo, or the whole of a physical / online / private student. */
+export type SeatClassType = MatchClassType | "private";
+
 /** Does this tutor's coverage reach this delivery mode? Empty, or every class type selected, both mean "no restriction". */
-export function coversClassType(assignment: LecturerAssignment, classType: MatchClassType): boolean {
+export function coversClassType(assignment: LecturerAssignment, classType: SeatClassType): boolean {
   const types = assignment.classTypes.map((type) => type.toLowerCase());
   return !types.length || types.length >= CLASS_TYPES.length || types.includes(classType);
 }
@@ -478,7 +487,7 @@ export type AssignmentAttemptStudent = {
  */
 export function assignmentMatchesStudent(
   assignment: LecturerAssignment,
-  classType: MatchClassType,
+  classType: SeatClassType,
   student: AssignmentAttemptStudent,
 ): boolean {
   if (!isAssigned(assignment)) return false;
