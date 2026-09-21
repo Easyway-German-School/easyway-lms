@@ -969,6 +969,7 @@ html.theme-custom ::selection {
   textarea:not([class~="text-base"]):not([class~="text-lg"]):not([class~="text-xl"]):not([class~="text-2xl"]) {
     font-size: 16px;
   }
+}
 
 /* ---------------------------------------------------------------------------
    LIVE NOW — the red broadcast glow on a sidebar entry while a class is on air.
