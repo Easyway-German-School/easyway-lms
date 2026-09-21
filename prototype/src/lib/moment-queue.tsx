@@ -121,6 +121,7 @@ export type MomentId =
   | "game-turn"
   | "profile-details"
   | "live-feedback"
+  | "fee-reminder"
   | "install-offline-notes";
 
 type Kind = "toast" | "modal";
@@ -324,6 +325,20 @@ const MOMENTS: Record<MomentId, Definition> = {
    * moments, but it is a favour we are asking, so it never preempts earned news
    * or anything that needs a decision. See components/moment/LiveFeedbackMoment.
    */
+  /**
+   * "Your seat is waiting." Commerce goes LAST, always — see the module note at
+   * the top. Below Becca's hello, the journey and the poster, and only ever
+   * shown once a day to a student who is locked out for money; if the two-modal
+   * cap is already spent it waits in the dock. Not offered to a student whose
+   * portal is open — the daily briefing carries their balance. See
+   * components/moment/FeeReminderMoment.tsx; the office can switch it off.
+   */
+  "fee-reminder": {
+    priority: 20,
+    kind: "modal",
+    dockLabel: "Your tuition",
+    dockBlurb: "What it takes to open your classes.",
+  },
   "live-feedback": {
     priority: 56,
     kind: "modal",

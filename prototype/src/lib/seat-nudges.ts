@@ -4,6 +4,7 @@ import { batchFromAdmission } from "@/lib/batch";
 import { resolveBatchStart, schoolDaysUntil } from "@/lib/batch-reservation";
 import { loadUpcomingBatchRows, type SeatRow } from "@/lib/batch-reservation-server";
 import { getStudentAccess } from "@/lib/student-access";
+import { studentIdsSilenced } from "@/lib/fee-reminder-settings";
 
 /**
  * Becca's seat-reservation nudges.
@@ -145,7 +146,15 @@ export async function runSeatNudges(
     if (row.seat !== "unpaid") securedByIntake.set(row.batchLabel, (securedByIntake.get(row.batchLabel) ?? 0) + 1);
   }
 
+  // The automatic run honours the Reminders-tab switch for bell / push / email.
+  // The manual "nudge these learners" button below does not — it is a deliberate send.
+  const silenced = await studentIdsSilenced("notifications", rows.map((row) => row.studentId));
+
   for (const row of rows) {
+    if (silenced.has(row.studentId)) {
+      run.skipped++;
+      continue;
+    }
     const daysUntil = schoolDaysUntil(new Date(row.startsOn), now);
     const needsPayment = row.seat === "unpaid" || row.seat === "registration_only";
     const tier = tierFor(daysUntil, needsPayment ? RESERVE_TIERS : COUNTDOWN_TIERS);
