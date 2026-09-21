@@ -20,6 +20,8 @@ type Health = {
   ready: number;
   /** Ready, but an auto-outline written while no AI model was reachable. */
   outlines?: number;
+  /** Recordings part-way through being transcribed, and how much of their audio is done. */
+  partial?: { count: number; percent: number };
   /** The model that will write the next recap. */
   notesModel?: string;
   inProgress: number;
@@ -50,6 +52,7 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "Failed",
   skipped_too_large: "Too large",
   none: "No speech",
+  partial: "Slow — resuming",
 };
 
 export default function ClassNotesHealth() {
@@ -174,7 +177,10 @@ export default function ClassNotesHealth() {
             <p className={startNote ? "mt-1 text-[var(--muted)]" : "text-[var(--muted)]"}>
               {waiting} waiting — {health.backlog?.recordings ?? 0} class recording{(health.backlog?.recordings ?? 0) === 1 ? "" : "s"}
               {(health.backlog?.documents ?? 0) > 0 ? `, ${health.backlog?.documents} handout${health.backlog?.documents === 1 ? "" : "s"}` : ""}.
-              This works itself down after every class and every morning; the numbers refresh here every few seconds.
+              {(health.partial?.count ?? 0) > 0
+                ? ` ${health.partial!.count} part-way through (${health.partial!.percent}% of their audio done).`
+                : ""}
+              {" "}This works itself down after every class and every morning; the numbers refresh here every few seconds.
             </p>
           ) : null}
         </div>

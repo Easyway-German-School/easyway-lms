@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
+import { withRangedProxy } from "@/lib/ranged-proxy";
 
 const run = promisify(execFile);
 
@@ -118,15 +119,32 @@ export type UrlExtractResult =
   | { buffer: Buffer; filename: string }
   | { error: string };
 
-export async function extractAudioForAsrFromUrl(url: string): Promise<UrlExtractResult> {
+/**
+ * How long ffmpeg may take when the caller does not say. Deliberately UNDER the
+ * platform's 300 s function limit: the old 12-minute allowance was longer than
+ * the function could live, so a slow recording was killed by the platform
+ * (nothing saved, no reason recorded) instead of failing with a message.
+ */
+const DEFAULT_EXTRACT_TIMEOUT_MS = 200_000;
+
+export async function extractAudioForAsrFromUrl(
+  url: string,
+  options: {
+    timeoutMs?: number;
+    /** Only this stretch of the recording: seek to `startSeconds`, keep `durationSeconds`. */
+    startSeconds?: number;
+    durationSeconds?: number;
+  } = {},
+): Promise<UrlExtractResult> {
   const ready = ensureFfmpeg();
   if ("error" in ready) return { error: ready.error };
 
+  const timeout = Math.max(15_000, options.timeoutMs ?? DEFAULT_EXTRACT_TIMEOUT_MS);
   const dir = await mkdtemp(path.join(tmpdir(), "easyway-asr-url-"));
   const outPath = path.join(dir, "out.ogg");
 
-  try {
-    await run(
+  const extract = (input: string) =>
+    run(
       ready.path,
       [
         "-y",
@@ -137,15 +155,45 @@ export async function extractAudioForAsrFromUrl(url: string): Promise<UrlExtract
         "-reconnect", "1",
         "-reconnect_streamed", "1",
         "-reconnect_delay_max", "30",
-        "-i", url,
+        // INPUT options (before -i): jump straight to the stretch using the
+        // recording's index, so only that stretch is read instead of everything
+        // before it.
+        ...(options.startSeconds ? ["-ss", String(options.startSeconds)] : []),
+        ...(options.durationSeconds ? ["-t", String(options.durationSeconds)] : []),
+        "-i", input,
         "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libopus", "-b:a", "32k",
         outPath,
       ],
-      { timeout: 12 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 },
+      { timeout, maxBuffer: 16 * 1024 * 1024 },
     );
 
+  const started = Date.now();
+  let served = 0;
+  try {
+    try {
+      // The recording's index is at the END of the file, so ffmpeg reads the whole
+      // thing — over one connection that was slower than the function may live.
+      // Through the local parallel window it is a dozen connections.
+      await withRangedProxy(url, async (localUrl, stats) => {
+        try {
+          await extract(localUrl);
+        } finally {
+          served = stats.bytesServed;
+        }
+      });
+    } catch (error) {
+      // Only a failure to SET UP the window (no size, no port) falls back to the
+      // single connection; a real ffmpeg failure or timeout is reported as itself.
+      const setup = error instanceof Error && /could not read the recording's size|EADDRINUSE|listen/i.test(error.message);
+      if (!setup) throw error;
+      console.error("[audio-extract] parallel window unavailable, reading directly:", error.message);
+      await extract(url);
+    }
+
     const buffer = await readFile(outPath);
-    if (buffer.length === 0) return { error: "ffmpeg produced an empty audio file" };
+    // A slice that starts at or past the end of the recording legitimately yields
+    // (almost) nothing — an empty buffer, not an error. The caller decides.
+    if (buffer.length === 0 && !options.startSeconds) return { error: "ffmpeg produced an empty audio file" };
     return { buffer, filename: "audio.ogg" };
   } catch (error) {
     // execFile's error carries ffmpeg's own stderr on `.stderr`.
@@ -154,7 +202,11 @@ export async function extractAudioForAsrFromUrl(url: string): Promise<UrlExtract
       (err.stderr && String(err.stderr).trim().split("\n").slice(-3).join(" | ")) ||
       err.message ||
       String(error);
-    const reason = err.killed ? `ffmpeg timed out: ${detail}` : `ffmpeg failed (code ${err.code ?? "?"}): ${detail}`;
+    const seconds = Math.round((Date.now() - started) / 1000);
+    const megabytes = Math.round(served / 1e6);
+    const reason = err.killed
+      ? `Reading the recording took longer than the ${Math.round(timeout / 1000)}s available (${megabytes} MB in ${seconds}s) — will retry with more time`
+      : `ffmpeg failed (code ${err.code ?? "?"}) after ${megabytes} MB: ${detail}`;
     console.error("[audio-extract] URL extraction failed:", reason);
     return { error: reason.slice(0, 400) };
   } finally {
