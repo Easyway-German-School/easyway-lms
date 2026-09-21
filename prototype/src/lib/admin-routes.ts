@@ -99,6 +99,9 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // it must match the capability its API asks for — a nav entry visible to
   // somebody the route will refuse renders as a broken page, not a locked one.
   { prefix: "/admin/settings", capability: "staff" },
+  // The price list is what the school charges — the fee book, not general setup — so it
+  // sits behind `payments` like /admin/finance, matching /api/admin/settings/pricing.
+  { prefix: "/admin/settings/pricing", capability: "payments" },
 
   { prefix: "/admin/security", capability: "security" },
   // Mission control: incidents, drift and the backend map. Incident samples carry

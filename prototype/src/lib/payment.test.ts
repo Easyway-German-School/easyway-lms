@@ -6,8 +6,8 @@ import {
   isTravelPackagePathway,
   tuitionFeeFor,
   requiredDepositFor,
-  TRAVEL_PACKAGE_PRICE,
-  TRAVEL_PACKAGE_MIN_FIRST_PAYMENT,
+  travelPackagePrice,
+  travelPackageMinFirstPayment,
 } from "./payment";
 
 /**
@@ -18,6 +18,10 @@ import {
  * Figures throughout use the launch A1 standard-tier numbers: ₦150,000 fee,
  * ₦90,000 (60%) deposit.
  */
+
+// The built-in defaults, pinned: if either moves, this file should say so.
+const TRAVEL_PACKAGE_PRICE = travelPackagePrice();
+const TRAVEL_PACKAGE_MIN_FIRST_PAYMENT = travelPackageMinFirstPayment();
 
 const FEE = 150_000;
 const DEPOSIT = 90_000;

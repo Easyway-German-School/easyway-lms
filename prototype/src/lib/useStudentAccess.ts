@@ -15,7 +15,7 @@ export const studentAccessQueryKey = ["student", "access"] as const;
  * change and flash the lock screen at students who have in fact paid.
  */
 export function useStudentAccess() {
-  const query = useQuery<StudentAccess & { hasPhoto: boolean; verdict?: PortalVerdict; computedAt?: number }>({
+  const query = useQuery<StudentAccess & { hasPhoto: boolean; privateClassPrice?: number; verdict?: PortalVerdict; computedAt?: number }>({
     queryKey: studentAccessQueryKey,
     queryFn: async () => {
       const response = await fetch("/api/student/access", { cache: "no-store" });

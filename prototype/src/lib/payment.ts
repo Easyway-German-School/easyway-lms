@@ -136,7 +136,9 @@ export function isTuitionPayment(payment: { status?: string | null; description?
  * Everything now reads from here.
  */
 
-export type FeeTier = "premium" | "standard" | "online";
+import { getActivePriceBook, type FeeTier, type PriceBook } from "@/lib/price-book";
+
+export type { FeeTier };
 
 /**
  * Branch name → fee tier. Matched on a normalised substring rather than an
@@ -151,84 +153,68 @@ const PREMIUM_BRANCH_KEYWORDS = ["abuja"] as const;
 const ONLINE_BRANCH_KEYWORDS = ["online", "virtual", "remote"] as const;
 
 /**
- * Prices confirmed 2026-09 for the live launch. A1–B2 vary by tier; C1 is a
- * flat ₦350,000 at every branch (it runs as private / online tuition). C2 is
- * retired — not offered (see OFFERED_LEVELS in levels.ts) and deliberately not
- * priced here. Edit ONLY this table: checkout, the paywall, admin price lists,
- * invoices and reminder emails all read from it.
+ * THE PRICES THEMSELVES ARE NOT IN THIS FILE.
+ *
+ * Group tuition per tier and level, private (one-to-one) tuition per level, and
+ * the Travel Package price all live in the price book — see price-book.ts. The
+ * office edits them on /admin/settings/pricing and they go live within seconds,
+ * with no deploy. `DEFAULT_PRICE_BOOK` holds only what applies until somebody
+ * saves a change.
+ *
+ * Every lookup below takes an optional `book`, and otherwise reads the ACTIVE
+ * book: the server keeps that fresh from the database (price-book-refresh.ts)
+ * and the browser fills it from /api/pricing (use-price-book.ts). Pass a book
+ * explicitly only in tests, or when the caller already holds one.
+ *
+ * There is deliberately no exported price constant any more. One used to exist
+ * (`PRIVATE_CLASS_UPGRADE_PRICE`), and anything importing it would have kept
+ * quoting the old number after an edit. Ask for a price by level instead.
+ *
+ * The rule that made the earlier flat-price change necessary still holds: a
+ * QUOTED price and a BILLED price must come from the same lookup. The upsell
+ * card, the paywall's second option, the checkout and the ledger charge all
+ * call `privateClassPriceForLevel`, so they cannot disagree.
  */
-const FEE_TABLE: Record<FeeTier, Record<string, number>> = {
-  // Abuja
-  premium: {
-    A1: 180000,
-    A2: 180000,
-    B1: 200000,
-    B2: 200000,
-    C1: 350000,
-  },
-  // Lagos, Port Harcourt, Ghana, and any campus branch added later
-  standard: {
-    A1: 150000,
-    A2: 150000,
-    B1: 180000,
-    B2: 180000,
-    C1: 350000,
-  },
-  // Online cohort. A1–B2 currently match the standard campus tier.
-  online: {
-    A1: 150000,
-    A2: 150000,
-    B1: 180000,
-    B2: 180000,
-    C1: 350000,
-  },
-};
 
 /** Online-tier prices were confirmed for launch (2026-09), no longer provisional. */
 export const ONLINE_PRICES_ARE_PLACEHOLDER = false;
 
 /**
- * PRIVATE (one-to-one) TUITION — ONE FLAT PRICE.
+ * PRIVATE (one-to-one) TUITION — priced by level, whatever the branch.
  *
- * ₦350,000 whatever the branch and whatever the level (confirmed 2026-09).
- * Change this constant and the upsell card, the paywall's second option, the
- * checkout, the webhook and the receivables ledger all follow — it is the
- * single number private tuition is worth anywhere in the app.
- *
- * ---------------------------------------------------------------------------
- * THIS REPLACED A 2x MULTIPLIER, and the two could not coexist.
- *
- * `tuitionFeeFor` used to price private tuition at twice the group fee for that
- * branch and level, which is ₦300,000 in Lagos but ₦360,000 in Abuja and up to
- * ₦480,000 at C2. The upsell advertised a flat ₦300,000 and the checkout
- * charged it. So an Abuja student paid exactly what they were shown and the
- * ledger still recorded them ₦60,000 short: a permanent outstanding balance
- * they could not clear, fee-chaser emails they did not deserve, and a
- * PROVISIONAL stamp on their certificate — because that stamp reads the live
- * balance.
- *
- * A quoted price and a billed price that disagree is not a pricing question,
- * it is a bug that only appears at one branch. One number now serves both.
- * ---------------------------------------------------------------------------
+ * A level with no entry of its own (junk input, retired C2) falls back to the
+ * C1 price, the top of the ladder, so an advanced level is never under-quoted —
+ * the same rule the group table follows.
  */
-export const PRIVATE_CLASS_UPGRADE_PRICE = 350000;
+export function privateClassPriceForLevel(level?: string | null, book: PriceBook = getActivePriceBook()): number {
+  return book.private[normaliseLevel(level)] ?? book.private.C1;
+}
 
 /** Private tuition price was confirmed for launch (2026-09), no longer provisional. */
 export const PRIVATE_PRICES_ARE_PLACEHOLDER = false;
 
 /**
  * TRAVEL PACKAGE — a premium, admin-onboarded-only product that REPLACES the
- * per-level tuition ladder entirely, not a level on top of it. One flat
- * ₦980,000 covers the whole program, whatever level or branch the student is
- * in, so a Travel Package student never also owes A1/A2/B1/... fees. The
- * minimum first payment is ₦200,000 rather than the usual 60% deposit — after
- * that floor is met, top-ups are free-form down to MIN_PART_PAYMENT like any
- * other account. There is no self-service checkout for this pathway; staff
- * set `Student.pathway` to this value by hand in the admin.
+ * per-level tuition ladder entirely, not a level on top of it. One flat price
+ * covers the whole program, whatever level or branch the student is in, so a
+ * Travel Package student never also owes A1/A2/B1/... fees. The minimum first
+ * payment is a flat floor rather than the usual 60% deposit — after that floor
+ * is met, top-ups are free-form down to MIN_PART_PAYMENT like any other
+ * account. There is no self-service checkout for this pathway; staff set
+ * `Student.pathway` to this value by hand in the admin. Both figures are in the
+ * price book (default ₦980,000 / ₦200,000).
  */
 export const TRAVEL_PACKAGE_PATHWAY = "Travel Package";
-export const TRAVEL_PACKAGE_PRICE = 980000;
-export const TRAVEL_PACKAGE_MIN_FIRST_PAYMENT = 200000;
+
+/** The flat Travel Package price, from the price book. */
+export function travelPackagePrice(book: PriceBook = getActivePriceBook()): number {
+  return book.travelPackage.price;
+}
+
+/** The smallest first payment that opens a Travel Package student's portal. */
+export function travelPackageMinFirstPayment(book: PriceBook = getActivePriceBook()): number {
+  return book.travelPackage.minFirstPayment;
+}
 
 export function isTravelPackagePathway(pathway?: string | null): boolean {
   return String(pathway ?? "").trim().toLowerCase() === TRAVEL_PACKAGE_PATHWAY.toLowerCase();
@@ -288,27 +274,29 @@ export function isPrivateClassType(classType?: string | null): boolean {
   return String(classType ?? "").trim().toLowerCase() === "private";
 }
 
-export function tuitionFeeFor({ level, branch, classType, pathway }: FeeLookup): number {
+export function tuitionFeeFor(
+  { level, branch, classType, pathway }: FeeLookup,
+  book: PriceBook = getActivePriceBook(),
+): number {
   // Travel Package is a flat whole-program price that replaces the per-level
   // ladder outright, so it is checked before even the private-class price.
-  if (isTravelPackagePathway(pathway)) return TRAVEL_PACKAGE_PRICE;
+  if (isTravelPackagePathway(pathway)) return travelPackagePrice(book);
 
-  // One flat price for one-to-one, at every branch and every level — the same
-  // figure the upsell quotes and the checkout charges. See the note on
-  // PRIVATE_CLASS_UPGRADE_PRICE for why these must not be computed separately.
-  if (isPrivateClassType(classType)) return PRIVATE_CLASS_UPGRADE_PRICE;
+  // One-to-one is priced by level at every branch — the same figure the upsell
+  // quotes and the checkout charges (see the note at the top of this section).
+  if (isPrivateClassType(classType)) return privateClassPriceForLevel(level, book);
 
-  const tier = FEE_TABLE[feeTierForBranch(branch)];
+  const tier = book.group[feeTierForBranch(branch)];
   // A level not in the table is either junk input or retired C2. Fall back to
   // the C1 price rather than A1 so an advanced level is never under-quoted.
   return tier[normaliseLevel(level)] ?? tier.C1 ?? tier.A1;
 }
 
-export function requiredDepositFor(lookup: FeeLookup): number {
+export function requiredDepositFor(lookup: FeeLookup, book: PriceBook = getActivePriceBook()): number {
   // Travel Package's minimum first payment is a flat floor, not 60% of the
-  // ₦980,000 package price — this must short-circuit BEFORE the multiply.
-  if (isTravelPackagePathway(lookup.pathway)) return TRAVEL_PACKAGE_MIN_FIRST_PAYMENT;
-  return Math.round(tuitionFeeFor(lookup) * DEPOSIT_RATE);
+  // package price — this must short-circuit BEFORE the multiply.
+  if (isTravelPackagePathway(lookup.pathway)) return travelPackageMinFirstPayment(book);
+  return Math.round(tuitionFeeFor(lookup, book) * DEPOSIT_RATE);
 }
 
 const naira = (value: number) => `₦${Math.round(value).toLocaleString("en-NG")}`;
@@ -379,12 +367,16 @@ export function resolvePartialPaymentAmount({
 }
 
 /** Every level and its price at one branch — for checkout and admin price lists. */
-export function priceListForBranch(branchName?: string | null, classType?: string | null) {
+export function priceListForBranch(
+  branchName?: string | null,
+  classType?: string | null,
+  book: PriceBook = getActivePriceBook(),
+) {
   const tier = feeTierForBranch(branchName);
   const isPrivate = isPrivateClassType(classType);
-  return Object.entries(FEE_TABLE[tier]).map(([level, groupFee]) => {
-    // Private is one flat price per level, not a scaled group fee.
-    const fee = isPrivate ? PRIVATE_CLASS_UPGRADE_PRICE : groupFee;
+  return Object.entries(book.group[tier]).map(([level, groupFee]) => {
+    // Private has its own price per level, not a scaled group fee.
+    const fee = isPrivate ? privateClassPriceForLevel(level, book) : groupFee;
     return {
       level,
       tuitionFee: fee,

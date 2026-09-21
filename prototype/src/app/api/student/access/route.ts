@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { hasProfilePhoto } from "@/lib/access";
+import { privateClassPriceForLevel } from "@/lib/payment";
 import { portalVerdict } from "@/lib/portal-verdict";
 import { accessFromStudent, STUDENT_ACCESS_SELECT } from "@/lib/student-access";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
@@ -83,6 +84,11 @@ export async function GET() {
 
   return NextResponse.json({
     ...access,
+    // What one-to-one tuition costs at THIS student's level, from the live price
+    // book, for the lock screen's second option. Read here (after the student
+    // query, which refreshes the book) so the figure it shows is the figure the
+    // checkout will charge.
+    privateClassPrice: privateClassPriceForLevel(student.level),
     // Piggybacks on this endpoint rather than a second round trip — the
     // shell already calls this once per navigation for the payment gate.
     hasPhoto,
