@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// callGroq now consults the durable cross-instance cooldown (lib/ai-cooldown.ts,
+// backed by Prisma) before every request. This file is about the fallback
+// ORDER, not the cooldown store, so it stands in as "never cooling, never asked
+// to remember one" — exactly like a fresh, never-rate-limited account.
+vi.mock("@/lib/ai-cooldown", () => ({
+  groqCoolingDown: vi.fn(async () => false),
+  markGroqCooldown: vi.fn(async () => {}),
+  parseGroqRetrySeconds: vi.fn(() => null),
+}));
+
 /**
  * A Claude key that is present but has run out of credit used to make every
  * model call return null — even with a working Groq key beside it. These pin

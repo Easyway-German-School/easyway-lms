@@ -51,6 +51,20 @@ export async function transcribeAudio(
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return null;
 
+  /**
+   * Whisper's free-tier budget is audio-SECONDS, both an hourly and a daily
+   * cap, account-wide — and there is no sibling model to fall over to the way
+   * the chat models have one another. A class recording's backlog can easily
+   * ask for more audio-seconds than the daily cap holds, and every fresh
+   * function invocation (the self-kicking runner chief among them) would
+   * otherwise re-learn that by spending a real upload on a request that was
+   * always going to be refused. See lib/ai-cooldown.ts.
+   */
+  const { groqCoolingDown, markGroqCooldown, parseGroqRetrySeconds } = await import("@/lib/ai-cooldown");
+  if (await groqCoolingDown("groq-asr")) {
+    throw new Error("Groq's speech-to-text free-tier limit is in use — resuming automatically once it frees up.");
+  }
+
   try {
     const form = new FormData();
     form.append("file", new Blob([new Uint8Array(buffer)]), filename);
@@ -68,6 +82,10 @@ export async function transcribeAudio(
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
+      if (response.status === 429) {
+        const seconds = parseGroqRetrySeconds(detail);
+        if (seconds) void markGroqCooldown("groq-asr", seconds);
+      }
       throw new Error(`Groq transcription ${response.status}: ${detail.slice(0, 500)}`);
     }
 

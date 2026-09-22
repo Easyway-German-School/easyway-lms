@@ -119,6 +119,26 @@ describe("transcribeInSlices", () => {
     expect(update).not.toHaveBeenCalled(); // nothing to save
   });
 
+  it("parks cleanly (never throws) when speech-to-text itself fails, keeping every earlier slice", async () => {
+    const { transcribeInSlices, SLICE_SECONDS } = await import("./class-transcription");
+    // Slice one succeeds; slice two's ASR call rejects (a quota refusal, in practice)
+    // — the caller must not see an uncaught throw, or generateTranscriptForRecording's
+    // outer catch mislabels the whole row `failed` and discards the "partial" distinction.
+    transcribe
+      .mockResolvedValueOnce({ text: "Hallo Klasse.", segments: [{ start: 0, end: 4, text: "Hallo Klasse." }] })
+      .mockRejectedValueOnce(new Error("Groq transcription 429: rate limit exceeded"));
+
+    const result = await transcribeInSlices({
+      classRecordingId: "r1", url: "u", totalSeconds: SLICE_SECONDS * 3, until: 0, text: "", segments: [], deadlineAt: soon(),
+    });
+
+    expect(result).toMatchObject({ kind: "partial", progressed: true, reason: expect.stringContaining("429") });
+    if (result.kind === "partial") {
+      // The first slice's save is still there — nothing rolled back because a LATER slice failed.
+      expect(update.mock.calls).toHaveLength(1);
+    }
+  });
+
   it("skips a silent stretch but still moves on", async () => {
     const { transcribeInSlices, SLICE_SECONDS } = await import("./class-transcription");
     transcribe.mockResolvedValueOnce(null); // whisper heard nothing in slice one

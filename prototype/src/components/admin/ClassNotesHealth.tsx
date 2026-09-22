@@ -27,6 +27,8 @@ type Health = {
   inProgress: number;
   /** Everything still waiting for the queue: recordings and handouts. */
   backlog?: { recordings: number; documents: number };
+  /** Groq's free-tier quotas known to be out right now, and roughly when they free up. */
+  coolingDown?: { asrUntil: number | null; chatUntil: number | null };
   noTranscriptYet: number;
   failed: number;
   skippedTooLarge: number;
@@ -47,6 +49,12 @@ type Health = {
     awaitingTutorReview: number;
   };
 };
+
+/** "in 9 min" / "in under a minute" — never a clock time, since the wait itself may be a mis-parsed guess. */
+function inAbout(until: number): string {
+  const minutes = Math.ceil((until - Date.now()) / 60_000);
+  return minutes <= 1 ? "in under a minute" : `in about ${minutes} min`;
+}
 
 const STATUS_LABEL: Record<string, string> = {
   failed: "Failed",
@@ -169,6 +177,25 @@ export default function ClassNotesHealth() {
           </button>
         </div>
       </div>
+
+      {health.coolingDown?.asrUntil ? (
+        <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-[var(--foreground)]">
+          <p className="font-semibold">
+            Groq&rsquo;s free transcription limit is used up for now — resuming automatically {inAbout(health.coolingDown.asrUntil)}.
+          </p>
+          <p className="mt-1 text-[var(--muted)]">
+            This is an hourly or daily allowance on the free plan, not a bug — a backlog this size can genuinely need
+            more speech-to-text time than a day of the free tier holds. It will keep chipping away on its own; to
+            clear it faster today, Groq&rsquo;s paid tier (their own suggestion, cents per hour of audio) removes the cap.
+          </p>
+        </div>
+      ) : null}
+      {!health.coolingDown?.asrUntil && health.coolingDown?.chatUntil ? (
+        <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--muted)]">
+          Groq&rsquo;s free write-up limit is used up for now — new recaps resuming {inAbout(health.coolingDown.chatUntil)}.
+          Recordings keep transcribing either way; ready notes just arrive as a plain outline in the meantime.
+        </div>
+      ) : null}
 
       {startNote || waiting > 0 ? (
         <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-xs text-[var(--foreground)]">
