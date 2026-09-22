@@ -144,6 +144,7 @@ model User {
   supportTickets        SupportTicket[]          @relation("SupportTicketAuthor")
   assignedTickets       SupportTicket[]          @relation("SupportTicketAssignee")
   supportReplies        SupportTicketMessage[]
+  supportTypingPings    SupportTypingPing[]
   gameMatches           GameMatch[]
   gameTurnsAssigned     GameTurn[]               @relation("GameTurnAssignee")
   gameTurnsWritten      GameTurn[]               @relation("GameTurnAuthor")
@@ -247,6 +248,7 @@ model Tenant {
   classTranscripts        ClassTranscript[]
   videoProgresses         VideoProgress[]
   studentClassNotes       StudentClassNote[]
+  studentNotes            StudentNote[]
   completions             Completion[]
   progresses              Progress[]
   enrollments             Enrollment[]
@@ -267,6 +269,7 @@ model Tenant {
   channels                Channel[]
   channelReads            ChannelRead[]
   typingPings             TypingPing[]
+  supportTypingPings      SupportTypingPing[]
   pushSubscriptions       PushSubscription[]
   messages                Message[]
   classSessions           ClassSession[]
@@ -750,6 +753,7 @@ model Student {
   certificates          Certificate[]
   videoProgress         VideoProgress[]
   studentClassNotes     StudentClassNote[]
+  notes                 StudentNote[]
   convertedFromLead     Lead?
   journeyEvents         JourneyEvent[]
   liveInvites           LiveClassInvite[]
@@ -1700,6 +1704,16 @@ model ClassTranscript {
   status String @default("pending")
 
   /**
+   * How far into the recording the speech-to-text has got, in seconds. A class
+   * recording is transcribed a few minutes at a time (see transcribeInSlices in
+   * lib/class-transcription.ts), so a slow read or a run that runs out of time
+   * loses nothing: `segments` holds everything transcribed so far, the row is
+   * parked as `partial`, and the next run carries on from here. Null on a row
+   * transcribed in one go (the old way).
+   */
+  transcribedUntil Float?
+
+  /**
    * Flattened ASR output, capped at prompt size for the summarizer — see
    * MAX_TRANSCRIPT_PROMPT_CHARS in class-transcription.ts. Kept in full here
    * (not just the capped version) since the PDF export and a future
@@ -1817,6 +1831,36 @@ model StudentClassNote {
   tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([studentId, materialId])
+  @@index([tenantId])
+}
+
+/**
+ * A note a student started on their own — the "+" on My Notes.
+ *
+ * `StudentClassNote` above is a student's copy of the notes for ONE recording or
+ * handout, so it cannot exist without a material. This is the other half of a
+ * notebook: a page you open because you want to write something down (a rule you
+ * keep forgetting, the words from a film, a list for Friday's test), tied to
+ * nothing. Plain text, autosaved, private to the student; the office and tutors
+ * never read it.
+ */
+model StudentNote {
+  id String @id @default(cuid())
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  title   String @default("")
+  content String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, updatedAt])
   @@index([tenantId])
 }
 
@@ -4187,7 +4231,8 @@ model SupportTicket {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  messages SupportTicketMessage[]
+  messages    SupportTicketMessage[]
+  typingPings SupportTypingPing[]
 
   /// Tenant that owns this row. See src/lib/tenant/registry.ts.
   tenantId  String?
@@ -4196,6 +4241,31 @@ model SupportTicket {
   @@index([status, lastMessageAt])
   @@index([userId, createdAt])
   @@index([unreadForAdmin, status])
+  @@index([tenantId])
+}
+
+/// "Somebody is typing in this enquiry right now" — the help desk's twin of
+/// TypingPing (which belongs to a community Channel). Same idea and same rules:
+/// a disposable row, one per (ticket, person), live for a few seconds past
+/// `updatedAt`, swept by whoever stamps next, and deleted the moment the
+/// message is actually sent. Kept as its own table rather than columns on
+/// SupportTicket so a keystroke-rate write never touches the row the queue
+/// sorts and counts on.
+model SupportTypingPing {
+  id        String        @id @default(cuid())
+  ticketId  String
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt DateTime      @updatedAt
+
+  /// Tenant that owns this row. See src/lib/tenant/registry.ts.
+  tenantId  String?
+  tenantRef Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, userId])
+  @@index([ticketId, updatedAt])
+  @@index([userId])
   @@index([tenantId])
 }
 

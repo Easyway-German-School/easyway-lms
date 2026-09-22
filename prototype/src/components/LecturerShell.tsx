@@ -4,10 +4,14 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import { useEffect, useState, type ReactNode } from 'react';
+import { useLiveCount } from '@/lib/useLiveCount';
+import { LiveDot, LivePill, LIVE_ICON_TILE } from '@/components/LiveNavBadge';
 import { homePathForRole } from '@/lib/portal';
 import BrandLogo from "@/components/BrandLogo";
 import HelpLauncher from "@/components/HelpLauncher";
 import PortalUpdates from "@/components/PortalUpdates";
+import TypingNudge from "@/components/TypingNudge";
+import LiveFeedbackMoment from "@/components/moment/LiveFeedbackMoment";
 import NotificationCenter from "@/components/NotificationCenter";
 import ThemeToggle, { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import SignOutButton from "@/components/SignOutButton";
@@ -147,6 +151,8 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
    * uses; `easyway:unread-changed` lets opening a room clear it early.
    */
   const [unreadCommunity, setUnreadCommunity] = useState(0);
+  /** This tutor's class is on air. Lights the Live classroom entry. Not polled inside /live, where they are already in it. */
+  const liveNow = useLiveCount(!pathname?.startsWith('/live'));
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
@@ -350,6 +356,7 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
               const active = pathname === item.href || pathname.startsWith(item.href + '/');
               const communityBadge =
                 item.href === '/community' && !active ? unreadCommunity : 0;
+              const isLive = item.href === '/live' && liveNow > 0;
               return (
                 <button
                   key={item.href}
@@ -363,8 +370,9 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
                       : 'text-[var(--foreground-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]'
                   }`}
                 >
-                  <span className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'}`}>
+                  <span className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-base shadow-sm transition ${isLive ? LIVE_ICON_TILE : active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'border-[var(--border)] bg-[var(--surface-alt)] group-hover:border-[var(--border-strong)]'}`}>
                     {item.icon}
+                    {isLive && <LiveDot />}
                     {collapsed && communityBadge > 0 && (
                       <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--surface-alt)]" />
                     )}
@@ -375,6 +383,7 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
                       {communityBadge > 99 ? '99+' : communityBadge}
                     </span>
                   )}
+                  {!collapsed && isLive && <LivePill />}
                 </button>
               );
                   })}
@@ -470,6 +479,9 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
         See PortalUpdates for why the card carries the real message text.
       */}
       <PortalUpdates />
+      <TypingNudge />
+      {/* "How did the class go?" for a tutor who ended one without rating it. */}
+      <LiveFeedbackMoment />
       <HelpLauncher />
     </div>
   );

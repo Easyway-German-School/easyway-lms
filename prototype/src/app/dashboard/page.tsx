@@ -17,6 +17,7 @@ import { ArrowRightIcon, BookOpenIcon, CheckCircleIcon, ChevronDownIcon, Compass
 import { summarizeGamification } from "@/lib/gamification";
 import { isReceivedPayment, isRegistrationFeePayment, REGISTRATION_FEE, requiredDepositFor, tuitionFeeFor } from "@/lib/payment";
 import { useGamification } from "@/lib/useGamification";
+import { usePriceBook } from "@/lib/use-price-book";
 import { useLiveClass } from "@/lib/useLiveClass";
 
 /** Paystack transaction statuses that will never become "success". A stored
@@ -98,6 +99,8 @@ type Student = {
   tutorPhotoUrl?: string | null;
   tutorSpecialization?: string | null;
   tutorBio?: string | null;
+  /** Extra tutors beyond the primary — online / hybrid students only. */
+  coTutors?: Array<{ id: string; name: string | null; role: string | null }>;
   pathway?: string;
   germanyGoal?: string | null;
   germanyGoalNote?: string | null;
@@ -146,6 +149,7 @@ import NewMaterialsCard from "@/components/NewMaterialsCard";
 import SkillMasteryPanel from "@/components/SkillMasteryPanel";
 import Leaderboard from "@/components/Leaderboard";
 import TutorBioCard from "@/components/TutorBioCard";
+import TeachingTeamCard from "@/components/TeachingTeamCard";
 import TutorMessagesCard from "@/components/TutorMessagesCard";
 import SessionNotesCard from "@/components/SessionNotesCard";
 import JourneyMapPoster from "@/components/JourneyMapPoster";
@@ -240,6 +244,9 @@ function DashboardContent() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null);
   const [fastFallback, setFastFallback] = useState(false);
+  // Primes the browser's live price book. The fee fallbacks below run inside callbacks
+  // and read it lazily, so they quote the school's current prices, not the bundled ones.
+  usePriceBook();
 
   // Lightweight fetch wrapper that logs timing for debugging slow endpoints.
   const fetchWithTiming = async (url: string, opts?: RequestInit, label?: string) => {
@@ -1203,6 +1210,23 @@ function DashboardContent() {
                   <TutorMessagesCard tutorName={resolvedStudent?.tutorName} />
                   <SessionNotesCard />
                 </>
+              )}
+              {/* Group students: who teaches them. Shown once the deposit is in
+                  — the same moment the tutor is announced (lib/tutor-reveal.ts). */}
+              {!isPrivateStudent && paymentUnlocked && (
+                <TeachingTeamCard
+                  deliveryMode={resolvedStudent?.deliveryMode}
+                  primary={
+                    resolvedStudent?.tutorName
+                      ? {
+                          id: resolvedStudent.tutorId ?? null,
+                          name: resolvedStudent.tutorName,
+                          photoUrl: resolvedStudent.tutorPhotoUrl,
+                        }
+                      : null
+                  }
+                  coTutors={resolvedStudent?.coTutors ?? []}
+                />
               )}
               {/* Bookings made on the public exam-centre page appear here too —
                   both write the same registrations. */}

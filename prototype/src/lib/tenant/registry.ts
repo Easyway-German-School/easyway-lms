@@ -89,6 +89,7 @@ export const TENANT_OWNED_MODELS = [
   "ClassRecording",
   "ClassTranscript",
   "StudentClassNote",
+  "StudentNote",
   "VideoProgress",
   /**
    * The live classroom. Added by the presence work and never classified, so
@@ -110,6 +111,7 @@ export const TENANT_OWNED_MODELS = [
    */
   "SupportTicket",
   "SupportTicketMessage",
+  "SupportTypingPing",
   "BetaFeedback",
   "LearnerUsageEvent",
   "LearnerBehaviourProfile",

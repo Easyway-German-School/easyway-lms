@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import StudentShell from "@/components/StudentShell";
 import BrandLoader from "@/components/BrandLoader";
-import { PencilIcon, BookOpenIcon, FilmIcon } from "@/components/icons";
+import { PencilIcon, BookOpenIcon, FilmIcon, PlusIcon } from "@/components/icons";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,13 @@ type NoteRow = {
   preview: string;
 };
 
+type OwnRow = {
+  id: string;
+  title: string;
+  updatedAt: string;
+  preview: string;
+};
+
 function PrivateTag() {
   return (
     <span className="rounded-full bg-gradient-to-r from-[#FF6600] to-[#FFC46B] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
@@ -43,6 +51,9 @@ function PrivateTag() {
 }
 
 export default function MyNotesPage() {
+  const router = useRouter();
+  const [own, setOwn] = useState<OwnRow[]>([]);
+  const [creating, setCreating] = useState(false);
   const [study, setStudy] = useState<StudyRow[] | null>(null);
   const [preparing, setPreparing] = useState(0);
   const [recaps, setRecaps] = useState<RecapRow[]>([]);
@@ -59,13 +70,37 @@ export default function MyNotesPage() {
         setPreparing(studyData.preparing ?? 0);
         setRecaps(notesData.recaps ?? []);
         setNotes(notesData.notes ?? []);
+        setOwn(notesData.own ?? []);
       })
       .catch(() => setError("Could not load your notes."));
   }, []);
 
   const loading = study === null && !error;
   const everythingEmpty =
-    !loading && !error && (study?.length ?? 0) === 0 && recaps.length === 0 && notes.length === 0 && preparing === 0;
+    !loading &&
+    !error &&
+    (study?.length ?? 0) === 0 &&
+    recaps.length === 0 &&
+    notes.length === 0 &&
+    own.length === 0 &&
+    preparing === 0;
+
+  // The "+": make a blank page and open it. The server hands back the id first,
+  // so the editor always has somewhere real to autosave into.
+  const newNote = async () => {
+    if (creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/student/my-notes", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.id) throw new Error(data.error || "Could not start a new note.");
+      router.push(`/notes/mine/${data.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start a new note.");
+      setCreating(false);
+    }
+  };
 
   const noteHref = (row: NoteRow) =>
     row.kind === "recording"
@@ -78,13 +113,25 @@ export default function MyNotesPage() {
     <StudentShell>
       <div className="min-h-screen bg-[var(--background)] px-6 py-10 text-[var(--foreground)]">
         <div className="mx-auto max-w-3xl space-y-8">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--accent)]">My Notes</p>
-            <h1 className="mt-2 text-2xl font-bold">Your notebook</h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Ready-made notes from your tutors&rsquo; materials, a recap of every class you attended, and everything
-              you have written yourself — in one place.
-            </p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-[var(--accent)]">My Notes</p>
+              <h1 className="mt-2 text-2xl font-bold">Your notebook</h1>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                Ready-made notes from your tutors&rsquo; materials, a recap of every class you attended, and everything
+                you have written yourself — in one place.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={newNote}
+              disabled={creating}
+              aria-label="Write a new note"
+              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(255,102,0,0.25)] transition hover:brightness-110 disabled:opacity-60"
+            >
+              <PlusIcon className="h-4 w-4" strokeWidth={2.4} />
+              <span className="hidden sm:inline">{creating ? "Opening…" : "New note"}</span>
+            </button>
           </div>
 
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
@@ -95,15 +142,19 @@ export default function MyNotesPage() {
               <PencilIcon className="mx-auto h-8 w-8 text-[var(--muted)]" />
               <p className="mt-3 text-base font-semibold">Nothing here yet</p>
               <p className="mt-2 text-sm text-[var(--muted)]">
-                Notes appear here as your tutors upload materials and your classes are recorded. You can also open any
-                video in Materials and start writing.
+                Tap <span className="font-semibold text-[var(--foreground)]">New note</span> to write your own — a rule,
+                some new words, a list for the test. Notes from your tutors&rsquo; materials and class recaps appear
+                here too as they are ready.
               </p>
-              <Link
-                href="/materials"
-                className="mt-5 inline-flex rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white"
+              <button
+                type="button"
+                onClick={newNote}
+                disabled={creating}
+                className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
               >
-                Go to Materials
-              </Link>
+                <PlusIcon className="h-4 w-4" strokeWidth={2.4} />
+                {creating ? "Opening…" : "Write your first note"}
+              </button>
             </div>
           ) : null}
 
@@ -166,11 +217,26 @@ export default function MyNotesPage() {
           ) : null}
 
           {/* 3 — The student's own writing */}
-          {!loading && !error && notes.length > 0 ? (
+          {!loading && !error && (notes.length > 0 || own.length > 0) ? (
             <section className="space-y-3">
               <h2 className="inline-flex items-center gap-2 text-lg font-semibold">
                 <PencilIcon className="h-5 w-5 text-[var(--accent)]" /> Your notebook
               </h2>
+              {own.map((note) => (
+                <Link
+                  key={note.id}
+                  href={`/notes/mine/${note.id}`}
+                  className="block rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 transition hover:border-[var(--accent)]/40"
+                >
+                  <p className="font-semibold">{note.title}</p>
+                  {note.preview ? (
+                    <p className="mt-1.5 whitespace-pre-line text-sm text-[var(--muted)]">{note.preview}</p>
+                  ) : null}
+                  <p className="mt-2 text-xs text-[var(--muted)]">
+                    Last edited {new Date(note.updatedAt).toLocaleDateString()}
+                  </p>
+                </Link>
+              ))}
               {notes.map((note) => (
                 <Link
                   key={note.materialId}

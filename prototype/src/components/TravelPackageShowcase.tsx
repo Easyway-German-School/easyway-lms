@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { PlaneIcon, CheckCircleIcon, StarIcon, SparklesIcon } from "@/components/icons";
-import { TRAVEL_PACKAGE_MIN_FIRST_PAYMENT, TRAVEL_PACKAGE_PRICE } from "@/lib/payment";
+import { travelPackageMinFirstPayment, travelPackagePrice } from "@/lib/payment";
+import { usePriceBook } from "@/lib/use-price-book";
 
 /**
  * The Travel Package marketing card — the school's premium, walk-in-only
@@ -31,6 +32,8 @@ const BENEFITS = [
 
 export default function TravelPackageShowcase({ student }: { student: StudentInfo }) {
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  // Live prices; null until loaded so the card never flashes a stale figure.
+  const priceBook = usePriceBook();
 
   if (student.pathway === "Travel Package") return null;
 
@@ -123,10 +126,10 @@ export default function TravelPackageShowcase({ student }: { student: StudentInf
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/40">Full programme, one fee</p>
               <p className="mt-1 bg-gradient-to-r from-[#BFDCFF] to-[#D4AF37] bg-clip-text text-3xl font-bold text-transparent">
-                ₦{TRAVEL_PACKAGE_PRICE.toLocaleString("en-NG")}
+                {priceBook ? `₦${travelPackagePrice(priceBook).toLocaleString("en-NG")}` : "₦—"}
               </p>
               <p className="mt-1 text-xs text-white/40">
-                From ₦{TRAVEL_PACKAGE_MIN_FIRST_PAYMENT.toLocaleString("en-NG")} to begin — the rest in
+                From {priceBook ? `₦${travelPackageMinFirstPayment(priceBook).toLocaleString("en-NG")}` : "₦—"} to begin — the rest in
                 flexible instalments, arranged with the office. Onboarded in person, not online.
               </p>
             </div>

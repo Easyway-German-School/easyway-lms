@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { ffmpegHealth } from "@/lib/audio-extract";
+import { activeModelName } from "@/lib/ai";
+import { EXTRACTIVE_PROVIDER } from "@/lib/class-transcription";
 
 export const dynamic = "force-dynamic";
 // Streaming a large recording out of the bucket, extracting its audio, then an
 // ASR + summary call each — the slowest thing the app does. 300s is the Pro
 // plan's ceiling and this needs most of it when a class ran to a full GB.
-export const maxDuration = 300;
+export const maxDuration = 120;
 
 /**
  * "Why is there nothing in My Notes?" — answered for the office.
@@ -43,20 +45,37 @@ export async function GET() {
       id: true,
       startedAt: true,
       privateClassId: true,
+      durationSeconds: true,
       material: { select: { title: true, level: true } },
-      transcript: { select: { status: true, error: true, updatedAt: true } },
+      transcript: { select: { status: true, error: true, updatedAt: true, provider: true, transcribedUntil: true } },
     },
     orderBy: { startedAt: "desc" },
   });
 
   const byStatus: Record<string, number> = {};
   let noTranscriptYet = 0;
+  /** Ready, but written by plain extraction while no AI model was reachable. */
+  let outlines = 0;
+  /** Recordings transcribed part of the way — how much of their audio is done. */
+  let partialCount = 0;
+  let partialDone = 0;
+  let partialTotal = 0;
   const failures: Array<{
+    id: string;
     title: string;
     level: string | null;
     isPrivate: boolean;
     status: string;
     error: string | null;
+    when: string;
+  }> = [];
+  /** The most recently finished recaps, so the office can open one and see what it actually says. */
+  const recentReady: Array<{
+    id: string;
+    title: string;
+    level: string | null;
+    isPrivate: boolean;
+    outline: boolean;
     when: string;
   }> = [];
 
@@ -67,11 +86,34 @@ export async function GET() {
       continue;
     }
     byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
+    if (t.status === "ready") {
+      const isOutline = t.provider === EXTRACTIVE_PROVIDER;
+      if (isOutline) outlines += 1;
+      if (recentReady.length < 8) {
+        recentReady.push({
+          id: rec.id,
+          title: rec.material?.title ?? "Untitled class",
+          level: rec.material?.level ?? null,
+          isPrivate: Boolean(rec.privateClassId),
+          outline: isOutline,
+          when: (t.updatedAt ?? rec.startedAt).toISOString(),
+        });
+      }
+    }
+    if (t.status === "partial") {
+      partialCount += 1;
+      const total = rec.durationSeconds ?? 0;
+      partialDone += Math.min(t.transcribedUntil ?? 0, total);
+      partialTotal += total;
+    }
     if (
-      (t.status === "failed" || t.status === "skipped_too_large" || t.status === "none") &&
+      // A part-way recording only counts as a problem when it has something to say —
+      // "the read was too slow" — otherwise it is simply still working.
+      (t.status === "failed" || t.status === "skipped_too_large" || t.status === "none" || (t.status === "partial" && t.error)) &&
       failures.length < 8
     ) {
       failures.push({
+        id: rec.id,
         title: rec.material?.title ?? "Untitled class",
         level: rec.material?.level ?? null,
         isPrivate: Boolean(rec.privateClassId),
@@ -118,8 +160,13 @@ export async function GET() {
     eligibleRecordings: eligible.length,
     incompleteRecordings,
     ready: byStatus.ready ?? 0,
+    outlines,
+    partial: { count: partialCount, percent: partialTotal > 0 ? Math.round((partialDone / partialTotal) * 100) : 0 },
+    // Which model would write the next recap — so "why is it an outline?" has an answer.
+    notesModel: activeModelName("learning-content"),
     inProgress:
       (byStatus.pending ?? 0) +
+      (byStatus.partial ?? 0) +
       (byStatus.transcribing ?? 0) +
       (byStatus.summarizing ?? 0) +
       noTranscriptYet,
@@ -129,6 +176,12 @@ export async function GET() {
     noSpeech: byStatus.none ?? 0,
     byStatus,
     failures,
+    recentReady,
+    // Everything still waiting for the queue — what the background run is working down.
+    backlog: await (await import("@/lib/class-notes-runner")).countBacklog(),
+    // Groq's free-tier quotas known to be out right now, and roughly when they
+    // free up — the honest answer to "why has nothing moved in the last hour".
+    coolingDown: await (await import("@/lib/class-notes-runner")).groqCooldownStatus(),
     documents: {
       byState: docsByState,
       ready: docsByState.ready ?? 0,
@@ -141,102 +194,35 @@ export async function GET() {
 }
 
 /**
- * POST — run the notes generation NOW, instead of waiting for the 06:00 cron.
+ * POST — start working the backlog NOW, in the background.
  *
- * The cron tick clears a deliberately small number per day (2 recordings, 3
- * documents) because each one is a real ASR + LLM call on the box that also
- * serves the site. That is fine for keeping up day-to-day, but the first time
- * the office turns this on there is a backlog, and "wait until tomorrow" is
- * not an answer. This does a larger batch in one press; call it again while
- * `remaining` is non-zero.
+ * This used to run a batch inside the request and rely on the browser to keep
+ * pressing until the queue was empty, so closing the tab stopped it and a batch
+ * that took too long came back as a 504. It now just STARTS the same
+ * self-driving run the daily tick and the end of every recorded class start
+ * (lib/class-notes-runner.ts): the run happens in its own function, works one
+ * item at a time inside a time budget, and keeps re-starting itself while it is
+ * getting somewhere. Pressing this and closing the page is fine.
  *
- * Same two queues the cron runs, unchanged — `generateTranscriptForRecording`
- * still fires the "class notes are ready" notification to the cohort as each
- * recap lands, and `processMaterialQueue` still routes a written-up document
- * to its tutor for sign-off (students are notified when the tutor approves,
- * `KIND.studyNotesReady`). Nothing here bypasses that review gate.
+ * Nothing about WHAT gets written changes: `generateTranscriptForRecording`
+ * still notifies the class as each recap lands, and `processMaterialQueue`
+ * still routes a written-up handout to its tutor for sign-off (students are
+ * told when the tutor approves, `KIND.studyNotesReady`). No review gate is
+ * bypassed.
  */
 export async function POST() {
   const gate = await requireCapability("classes");
   if (!gate.ok) return gate.response;
 
-  const [{ processTranscriptionQueue }, { processMaterialQueue }] = await Promise.all([
-    import("@/lib/class-transcription"),
-    import("@/lib/material-ai"),
-  ]);
+  const { kickClassNotes, runClassNotes, countBacklog } = await import("@/lib/class-notes-runner");
 
-  const roundFailures: string[] = [];
-
-  // Documents first — cheaper and faster than ASR, so a press that times out
-  // mid-recording still got the written-up handouts done.
-  const materials = await processMaterialQueue(12, roundFailures).catch((error) => {
-    roundFailures.push(`document queue threw: ${error instanceof Error ? error.message : String(error)}`);
-    return { attempted: 0, ready: 0, skipped: 0 };
-  });
-
-  // 4 recordings, not more: each can be a full-GB stream + extract + ASR +
-  // summary, and even at 300s a bigger batch risks the wall. Press again for
-  // the rest — `remaining` says whether to.
-  const recordingsBefore = new Set(
-    (
-      await prisma.classTranscript.findMany({
-        where: { status: { in: ["failed", "skipped_too_large", "none"] } },
-        select: { classRecordingId: true },
-      })
-    ).map((t) => t.classRecordingId),
-  );
-  const recordings = await processTranscriptionQueue(4).catch((error) => {
-    roundFailures.push(`recording queue threw: ${error instanceof Error ? error.message : String(error)}`);
-    return { attempted: 0, created: 0, failed: 0 };
-  });
-  // Pull the specific error off any recording that failed THIS round.
-  for (const row of await prisma.classTranscript.findMany({
-    where: { status: { in: ["failed", "skipped_too_large", "none"] } },
-    select: { classRecordingId: true, error: true, status: true, classRecording: { select: { material: { select: { title: true } } } } },
-  })) {
-    if (recordingsBefore.has(row.classRecordingId)) continue;
-    roundFailures.push(`“${row.classRecording?.material?.title ?? "class"}” (${row.status}): ${row.error ?? "no detail"}`);
+  if (await kickClassNotes()) {
+    const left = await countBacklog();
+    return NextResponse.json({ started: true, remaining: left.recordings + left.documents });
   }
 
-  // How many are still waiting, so the UI knows whether to offer another run.
-  const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  const [recordingsRemaining, materialsRemaining] = await Promise.all([
-    prisma.classRecording.count({
-      where: {
-        status: "completed",
-        materialId: { not: null },
-        startedAt: { gte: since },
-        OR: [
-          { transcript: null },
-          { transcript: { status: "failed" } },
-          { transcript: { status: "skipped_too_large" } },
-        ],
-      },
-    }),
-    prisma.material.count({
-      where: {
-        kind: { notIn: ["recording", "audio", "video"] },
-        createdAt: { gte: since },
-        aiState: { in: ["none", "pending"] },
-      },
-    }),
-  ]);
-
-  // "Did this round change anything" — the drain loop stops when two rounds in
-  // a row move nothing, rather than spinning against a stuck backlog.
-  const roundProcessed =
-    (materials.ready ?? 0) +
-    (materials.skipped ?? 0) +
-    (recordings.created ?? 0) +
-    (recordings.failed ?? 0);
-
-  return NextResponse.json({
-    materials,
-    recordings,
-    roundProcessed,
-    roundFailures: [...new Set(roundFailures)].slice(0, 12),
-    remaining: recordingsRemaining + materialsRemaining,
-    recordingsRemaining,
-    materialsRemaining,
-  });
+  // No secret or public address to call ourselves on (local dev): do a short,
+  // bounded run right here instead, so the button still does something.
+  const summary = await runClassNotes({ budgetMs: 100_000 });
+  return NextResponse.json({ started: false, inline: true, ...summary });
 }

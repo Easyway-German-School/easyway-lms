@@ -205,6 +205,14 @@ export type StudentFinance = {
 
   daysEnrolled: number;
   behindOnTuition: boolean;
+  /**
+   * Their intake has not opened yet ("October learners") — the portal is a
+   * waiting room and `behindOnTuition` deliberately stays false. Kept on the
+   * row so a chase list can still show them, marked, rather than lose them.
+   */
+  awaitingBatch: boolean;
+  /** "October" — the intake they are waiting for; null when not waiting. */
+  batchLabel: string | null;
   agingBucket: AgingBucketId;
   lastPaymentAt: string | null;
   paymentCount: number;
@@ -343,6 +351,12 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     now.getTime() >= lockAt.getTime() &&
     !(graceDate && now.getTime() < graceDate.getTime());
 
+  const upcomingBatch = resolveUpcomingBatch(batchFromAdmission(student.admission), {
+    registeredAt: student.createdAt,
+    classesStartedAt: student.classesStartedAt,
+    now,
+  });
+
   return {
     id: student.id,
     name: student.user?.name ?? "Unnamed",
@@ -368,14 +382,9 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
     daysEnrolled,
     // Not "behind" while their intake has not opened — nothing has been taught
     // yet. They are tracked on the Upcoming intake console instead.
-    behindOnTuition:
-      !depositPaid &&
-      daysEnrolled >= BEHIND_TUITION_MIN_DAYS &&
-      !resolveUpcomingBatch(batchFromAdmission(student.admission), {
-        registeredAt: student.createdAt,
-        classesStartedAt: student.classesStartedAt,
-        now,
-      }),
+    behindOnTuition: !depositPaid && daysEnrolled >= BEHIND_TUITION_MIN_DAYS && !upcomingBatch,
+    awaitingBatch: Boolean(upcomingBatch),
+    batchLabel: upcomingBatch ? batchFromAdmission(student.admission) : null,
     agingBucket: agingBucketFor(agingAnchorDays),
     lastPaymentAt: lastPaymentAt?.toISOString() ?? null,
     paymentCount: received.length,
@@ -399,6 +408,82 @@ export function computeStudentFinance(student: FinanceStudentInput, now: Date = 
 
 export function computeAll(students: FinanceStudentInput[], now: Date = new Date()): StudentFinance[] {
   return students.map((student) => computeStudentFinance(student, now));
+}
+
+/* -------------------------------------------------------------------------- */
+/* The chase list                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * WHO THE OFFICE PHONES, sorted into the four conversations they have.
+ *
+ * The cohorts above describe money (nothing paid / under the deposit / deposit
+ * met / paid up). Chasing is a different question: what do you SAY to this
+ * person? Each category is a different call, so each gets its own list, its own
+ * sheet and its own reminder wording:
+ *
+ *   nothing        Registered, no tuition at all. "Your seat is waiting."
+ *   under_deposit  Paid something, not enough to open classes.
+ *   balance        Classes are open; the rest of the tuition is owed.
+ *   legacy         Nothing owed on their current level — only an old balance
+ *                  from a level passed before the ledger existed. Gentle.
+ *
+ * ACTIVE STUDENTS ONLY. A graduate or a withdrawn student with a balance is a
+ * collections matter for the accountant, not a reason to ring somebody who has
+ * left. Everything else is one rule, so the tab's counts, the roster filter,
+ * the call sheet and the mass reminder cannot disagree about who is on the list.
+ */
+export const CHASE_CATEGORIES = ["nothing", "under_deposit", "balance", "legacy"] as const;
+export type ChaseCategory = (typeof CHASE_CATEGORIES)[number];
+
+export const CHASE_LABELS: Record<ChaseCategory, { label: string; hint: string }> = {
+  nothing: { label: "Registered, paid nothing", hint: "Account shows ₦0 — classes have not opened" },
+  under_deposit: { label: "Paid, but under the deposit", hint: "Some money in, not enough to open classes" },
+  balance: { label: "Classes open, balance owing", hint: "Deposit paid, tuition still outstanding" },
+  legacy: { label: "Old balance only", hint: "Owes on an earlier level, current level is clear" },
+};
+
+export function chaseCategoryOf(row: StudentFinance): ChaseCategory | null {
+  if (row.status !== "active") return null;
+  if (row.owed <= 0) return null;
+  if (row.cohort === "unpaid") return "nothing";
+  if (!row.depositPaid) return "under_deposit";
+  const goForward = row.ledgerPopulated ? row.goForwardOutstanding : row.owed;
+  return goForward > 0 ? "balance" : "legacy";
+}
+
+/**
+ * The order to work the list in. Lower is more urgent.
+ *
+ *   1  Access on hold   — a part-payer past the 30-day line. Locked and owing.
+ *   2  Overdue          — enrolled 14+ days, still under the deposit.
+ *   3  Locks soon       — balance owing, the access pause is within a week.
+ *   4  Balance owing    — classes open, the rest is owed.
+ *   5  Waiting / new    — intake not open yet, or under two weeks in.
+ *
+ * Someone waiting for an October batch is last on purpose: they are not late,
+ * they are early. They stay on the list (the office does want them paid before
+ * classes open) but they should never crowd out somebody whose access has
+ * already been paused.
+ */
+export const CHASE_PRIORITY_LABELS: Record<number, string> = {
+  1: "1 · Access on hold",
+  2: "2 · Overdue",
+  3: "3 · Locks within a week",
+  4: "4 · Balance owing",
+  5: "5 · Waiting / new",
+};
+
+export function chasePriorityOf(row: StudentFinance, now: Date = new Date()): number {
+  if (row.lockActive) return 1;
+  if (row.behindOnTuition) return 2;
+  if (row.lockAt && !row.awaitingBatch) {
+    const daysToLock = (new Date(row.lockAt).getTime() - now.getTime()) / DAY_MS;
+    if (daysToLock <= 7) return 3;
+  }
+  if (row.awaitingBatch) return 5;
+  if (row.cohort === "unpaid" || row.cohort === "registered_only") return 5;
+  return 4;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -509,6 +594,49 @@ export const FOCUS_PRESETS: Record<string, FocusPreset> = {
     tone: "warn",
     matches: (row) => row.owed > 0,
   },
+  // The chase list — see chaseCategoryOf. Active students only, by rule.
+  chase_all: {
+    id: "chase_all",
+    label: "To chase — everyone owing",
+    hint: "Active students with any tuition outstanding, including those who have paid nothing",
+    tone: "danger",
+    matches: (row) => chaseCategoryOf(row) !== null,
+  },
+  chase_nothing: {
+    id: "chase_nothing",
+    label: CHASE_LABELS.nothing.label,
+    hint: `${CHASE_LABELS.nothing.hint}. Active students only`,
+    tone: "danger",
+    matches: (row) => chaseCategoryOf(row) === "nothing",
+  },
+  chase_under_deposit: {
+    id: "chase_under_deposit",
+    label: CHASE_LABELS.under_deposit.label,
+    hint: `${CHASE_LABELS.under_deposit.hint}. Active students only`,
+    tone: "warn",
+    matches: (row) => chaseCategoryOf(row) === "under_deposit",
+  },
+  chase_balance: {
+    id: "chase_balance",
+    label: CHASE_LABELS.balance.label,
+    hint: `${CHASE_LABELS.balance.hint}. Active students only`,
+    tone: "warn",
+    matches: (row) => chaseCategoryOf(row) === "balance",
+  },
+  chase_legacy: {
+    id: "chase_legacy",
+    label: CHASE_LABELS.legacy.label,
+    hint: `${CHASE_LABELS.legacy.hint}. Active students only`,
+    tone: "info",
+    matches: (row) => chaseCategoryOf(row) === "legacy",
+  },
+  chase_on_hold: {
+    id: "chase_on_hold",
+    label: "Access on hold",
+    hint: "Part-payers whose portal is paused until the balance is cleared. Active students only",
+    tone: "danger",
+    matches: (row) => row.status === "active" && row.lockActive,
+  },
   new_this_month: {
     id: "new_this_month",
     label: "Enrolled this month",
@@ -588,6 +716,25 @@ export function summariseReceivables(rows: StudentFinance[]) {
   const byBranch = groupRollup(rows, (row) => row.branchId ?? "unassigned", (row) => row.branch);
   const byLevel = groupRollup(rows, (row) => row.level, (row) => row.level);
 
+  // The chase list, counted by the same rule the roster filters and the call
+  // sheet use — see chaseCategoryOf.
+  const chase = CHASE_CATEGORIES.reduce(
+    (acc, category) => {
+      const inCategory = rows.filter((row) => chaseCategoryOf(row) === category);
+      acc[category] = {
+        students: inCategory.length,
+        owed: inCategory.reduce((sum, row) => sum + row.owed, 0),
+        owedOnDeposit: inCategory.reduce((sum, row) => sum + row.owedOnDeposit, 0),
+      };
+      return acc;
+    },
+    {} as Record<ChaseCategory, { students: number; owed: number; owedOnDeposit: number }>,
+  );
+  const chaseAll = {
+    students: CHASE_CATEGORIES.reduce((sum, category) => sum + chase[category].students, 0),
+    owed: CHASE_CATEGORIES.reduce((sum, category) => sum + chase[category].owed, 0),
+  };
+
   return {
     students: rows.length,
     expected,
@@ -603,6 +750,8 @@ export function summariseReceivables(rows: StudentFinance[]) {
     lockedOut: rows.filter((row) => row.lockedOut).length,
     behindOnTuition: rows.filter((row) => row.behindOnTuition).length,
     owesPriorLevel: rows.filter((row) => row.owesPriorLevel).length,
+    chase,
+    chaseAll,
     aging,
     byBranch,
     byLevel,

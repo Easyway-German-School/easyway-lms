@@ -78,9 +78,51 @@ type RosterStudent = {
   tuitionFee: number;
   hasPaid: boolean;
   waitingBatch?: string | null;
+  /** Intake month, so batch sits next to level and sitting on every row. */
+  batch?: string | null;
   currentTutorId: string | null;
   currentTutorName: string | null;
+  /** Extra tutors already on this student. */
+  coTutorIds?: string[];
   namedByOffice: boolean;
+  /** What linking this student to THIS tutor would do — decided server-side by lib/tutor-class-match.ts. */
+  plan?: {
+    action: "linked" | "add_primary" | "add_co_tutor" | "shares_class" | "conflict" | "blocked" | "no_fit";
+    role: "online" | null;
+    reason: string;
+  } | null;
+};
+
+type LinkSummary = {
+  linked: number;
+  add_primary: number;
+  add_co_tutor: number;
+  shares_class: number;
+  conflict: number;
+  blocked: number;
+  no_fit: number;
+};
+
+/** One row of `/api/admin/lecturers/coverage-preview`'s named list — the draft-assignment twin of `RosterStudent`. */
+type DraftPreviewStudent = {
+  id: string;
+  name: string;
+  studentCode: string | null;
+  level: string;
+  sessionSlot: string;
+  branchName: string | null;
+  action: "linked" | "add_primary" | "add_co_tutor" | "shares_class" | "conflict" | "blocked";
+  role: "online" | null;
+  reason: string;
+};
+
+const DRAFT_PREVIEW_ACTION_LABEL: Record<DraftPreviewStudent["action"], string> = {
+  linked: "Already theirs",
+  add_primary: "No tutor yet — would become primary",
+  add_co_tutor: "Has a tutor — would be added beside them",
+  shares_class: "Already has a tutor — stays as is",
+  conflict: "One-to-one — already has a tutor",
+  blocked: "Fits, but multi-tutor mode is off",
 };
 
 const EMPTY_ASSIGNMENT: LecturerAssignment = {
@@ -133,6 +175,26 @@ function pruneGroup(value: LecturerAssignment, group: LecturerAssignment["groups
     levels: [...new Set(groups.map((item) => item.level))],
     sessionSlots: [...new Set(groups.map((item) => item.sessionSlot))],
   };
+}
+
+/**
+ * An order-independent fingerprint of an assignment, for "has the form changed
+ * from what is saved?" and for reloading the student list when the saved class
+ * changes. Comparing raw JSON would call a class "changed" just because the
+ * server returned the same lists in another order.
+ */
+function assignmentSignature(value: LecturerAssignment): string {
+  const sorted = (list: string[]) => [...list].map((item) => item.toLowerCase()).sort();
+  return JSON.stringify({
+    branchIds: [...value.branchIds].sort(),
+    levels: sorted(value.levels),
+    sessionSlots: sorted(value.sessionSlots),
+    classTypes: sorted(value.classTypes),
+    batches: sorted(value.batches),
+    groups: value.groups
+      .map((group) => `${group.branchId}|${group.level}|${group.sessionSlot}|${group.batch ?? ""}`.toLowerCase())
+      .sort(),
+  });
 }
 
 /** The five pickers, shared by the create form and every edit panel. */
@@ -496,9 +558,14 @@ function StudentLine({
         <p className="truncate text-sm font-medium text-[var(--foreground)]">{student.name}</p>
         <p className="truncate text-xs text-[var(--muted)]">
           {student.studentCode || student.email} · {student.level} · {student.sessionSlot}
+          {student.batch ? ` · ${student.batch}` : ""}
           {student.branchName ? ` · ${student.branchName}` : ""}
+          {student.deliveryMode === "hybrid" ? " · hybrid" : student.deliveryMode === "online" ? " · online" : ""}
           {student.classType === "private" ? " · private" : ""}
         </p>
+        {student.currentTutorName ? (
+          <p className="truncate text-[11px] text-[var(--muted)]">Tutor: {student.currentTutorName}</p>
+        ) : null}
       </div>
 
       <span
@@ -726,36 +793,169 @@ function TutorRosterPanel({
 }
 
 /**
+ * What saving the form above would cover, read live off the fields in it —
+ * before the office commits to anything.
+ *
+ * `ClassRoster` below only ever shows the SAVED class, with an "unsaved
+ * changes" nag once the form drifts from it — right, but it left no way to
+ * actually see who a new teaching group would reach until after clicking
+ * Save. The broad-coverage confirm dialog (`checkCoverageThenSave`) covers
+ * the dangerous end of that gap — 2+ levels or 25+ students — but everything
+ * smaller, the ordinary "one branch, one level, one sitting" case this page
+ * exists for, saved with no eyes on it at all. This is that missing look:
+ * same rule (`planLink`), same names the roster panel will show, fetched
+ * fresh (debounced) every time a field changes, never written anywhere.
+ */
+function DraftClassPreview({
+  lecturerId,
+  assignment,
+  active,
+}: {
+  lecturerId: string;
+  assignment: LecturerAssignment;
+  active: boolean;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [count, setCount] = useState(0);
+  const [students, setStudents] = useState<DraftPreviewStudent[]>([]);
+  const signature = assignmentSignature(assignment);
+
+  useEffect(() => {
+    if (!active) {
+      setLoadedOnce(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/admin/lecturers/coverage-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...assignment, assignmentGroups: assignment.groups, lecturerId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        setCount(data.count ?? 0);
+        setStudents(data.students ?? []);
+      } catch {
+        // A failed preview just leaves the last good list on screen.
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadedOnce(true);
+        }
+      }
+      // Debounced so picking a level then a sitting then a batch does not
+      // fire three requests in a row.
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // signature is the real dependency — assignment is a new object every
+    // render, and re-fetching on that would defeat the debounce entirely.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, signature, lecturerId]);
+
+  if (!active) return null;
+
+  return (
+    <div className="rounded-2xl border border-dashed border-[var(--accent)]/50 bg-[var(--surface)] p-4">
+      <p className="text-sm font-semibold text-[var(--foreground)]">Preview — before you save</p>
+      <p className="mt-1 text-xs text-[var(--muted)]">
+        Who the class above covers right now, so a wrong branch, level or sitting shows up here instead of after
+        saving.
+      </p>
+
+      {!loadedOnce ? (
+        <p className="mt-3 text-xs text-[var(--muted)]">Checking…</p>
+      ) : (
+        <>
+          <p className="mt-3 text-xs font-semibold text-[var(--foreground)]">
+            {count} student{count === 1 ? "" : "s"} would fit{loading ? " · checking…" : ""}
+          </p>
+          {students.length ? (
+            <div className="mt-2 max-h-72 space-y-1.5 overflow-y-auto pr-1">
+              {students.map((student) => (
+                <div
+                  key={student.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs"
+                >
+                  <span className="min-w-0 truncate text-[var(--foreground)]">
+                    {student.name}
+                    <span className="text-[var(--muted)]">
+                      {" "}
+                      · {student.level} · {student.sessionSlot}
+                      {student.branchName ? ` · ${student.branchName}` : ""}
+                    </span>
+                  </span>
+                  <span
+                    className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[var(--accent)]"
+                    title={student.reason}
+                  >
+                    {DRAFT_PREVIEW_ACTION_LABEL[student.action]}
+                  </span>
+                </div>
+              ))}
+              {count > students.length ? (
+                <p className="pt-1 text-[11px] text-[var(--muted)]">…and {count - students.length} more.</p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-[var(--muted)]">Nobody active matches this yet — check the branch, level and sitting above.</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
  * Who this tutor teaches, and the one place to change it.
  *
- * REPLACES A PRIVATE-ONLY PANEL THAT WAS HIDDEN MOST OF THE TIME. The old
- * version only appeared once "Private" was ticked in the class types, on the
- * theory that a one-to-one student is the only kind who needs naming. That
- * theory is wrong the first time a real class does not line up with its
- * description — an online A2 student whose only tutor takes the afternoon
- * sitting is in nobody's class, and the office had no way to say otherwise.
+ * THE LIST IS THE CLASS, NOT THE SCHOOL. Opening a tutor used to show the 25
+ * newest students in the whole LMS under "Add a student", whatever the tutor
+ * taught. Now it shows exactly the students who fit this tutor's branch, level,
+ * sitting, intake month and delivery mode — including the online half of
+ * hybrid students — and each one carries what linking them would do, decided
+ * on the server by the one rule in `lib/tutor-class-match.ts`:
  *
- * So it is always shown, it lists the class as it actually stands, and it
- * marks which students arrived by which route: matched by the class
- * description above, or named here. Naming is reversible from the same line,
- * which is the part that makes it safe to use.
+ *   no tutor yet                      → this tutor becomes their tutor
+ *   already has a tutor, online       → this tutor is added BESIDE them (co-tutor)
+ *   physical / one-to-one with tutor  → left alone unless the office clicks "Move"
+ *
+ * "Link all" applies the first two in one go and never replaces anybody. The
+ * search box is only for the exceptions — cover, a sitting that moved, a
+ * one-to-one — and it is the only thing that reaches outside the class.
  */
 function ClassRoster({
   lecturerId,
   tutorName,
   onChanged,
+  refreshKey,
+  unsavedChanges,
 }: {
   lecturerId: string;
   tutorName: string;
   onChanged: () => void;
+  /** Changes whenever the tutor's SAVED class changes, so this list reloads after "Save assignment". */
+  refreshKey: string;
+  /** The form above differs from what is saved — this list still reflects the saved class. */
+  unsavedChanges: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [roster, setRoster] = useState<RosterStudent[]>([]);
   const [results, setResults] = useState<RosterStudent[]>([]);
+  const [summary, setSummary] = useState<LinkSummary | null>(null);
+  const [sharedStudentsEnabled, setSharedStudentsEnabled] = useState(false);
   const [hasClassAssignment, setHasClassAssignment] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
+  const [skipped, setSkipped] = useState<Array<{ studentName: string | null; reason: string }>>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -767,11 +967,15 @@ function ClassRoster({
       const data = await res.json().catch(() => ({}));
       setRoster(data.roster || []);
       setResults(data.results || []);
+      setSummary(data.summary || null);
+      setSharedStudentsEnabled(Boolean(data.sharedStudentsEnabled));
       setHasClassAssignment(Boolean(data.hasClassAssignment));
     } finally {
       setLoading(false);
     }
-  }, [lecturerId, query]);
+    // refreshKey is a dependency on purpose: a saved class change must reload the list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lecturerId, query, refreshKey]);
 
   useEffect(() => {
     // Debounced so typing a name does not fire a request per keystroke.
@@ -779,22 +983,20 @@ function ClassRoster({
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  async function pair(student: RosterStudent, lecturer: string | null) {
+  /** Replace the student's primary tutor with this one — the explicit "Move", never automatic. */
+  async function pair(student: RosterStudent) {
     setBusyId(student.id);
     setMessage("");
+    setSkipped([]);
     try {
       const res = await fetch("/api/admin/lecturers/students", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId: student.id, lecturerId: lecturer }),
+        body: JSON.stringify({ studentId: student.id, lecturerId }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not change this student's tutor");
-      setMessage(
-        lecturer
-          ? `${student.name} is now assigned to ${tutorName}. Both have been notified.`
-          : `${student.name} has been removed from ${tutorName}'s class.`,
-      );
+      setMessage(`${student.name} is now assigned to ${tutorName}. Both have been notified.`);
       await load();
       // The tutor card above shows a student count, and it is now wrong.
       onChanged();
@@ -805,108 +1007,342 @@ function ClassRoster({
     }
   }
 
-  const named = roster.filter((student) => student.namedByOffice);
-  const matched = roster.filter((student) => !student.namedByOffice);
+  /** Take the student off THIS tutor only — a co-tutor removal must not clear somebody else's primary. */
+  async function unlink(student: RosterStudent) {
+    setBusyId(student.id);
+    setMessage("");
+    setSkipped([]);
+    try {
+      const res = await fetch("/api/admin/lecturers/students", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: student.id, lecturerId, unlink: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not remove this student");
+      setMessage(`${student.name} has been removed from ${tutorName}'s class.`);
+      await load();
+      onChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not remove this student");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  /** Link students by the rule: primary if they have no tutor, co-tutor if they do and are online/hybrid. Sent in small chunks. */
+  async function link(students: RosterStudent[]) {
+    if (!students.length) return;
+    setMessage("");
+    setSkipped([]);
+    const ids = students.map((student) => student.id);
+    const single = ids.length === 1;
+    if (single) setBusyId(ids[0]);
+    else setBulk({ done: 0, total: ids.length });
+
+    let primary = 0;
+    let coTutor = 0;
+    const notDone: Array<{ studentName: string | null; reason: string }> = [];
+    try {
+      for (let i = 0; i < ids.length; i += 25) {
+        const chunk = ids.slice(i, i + 25);
+        const res = await fetch("/api/admin/lecturers/students/link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lecturerId, studentIds: chunk }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Could not link these students");
+        primary += data.linked?.primary ?? 0;
+        coTutor += data.linked?.coTutor ?? 0;
+        notDone.push(...(data.skipped ?? []));
+        if (!single) setBulk({ done: Math.min(i + chunk.length, ids.length), total: ids.length });
+      }
+      const parts = [
+        primary ? `${primary} now have ${tutorName} as their tutor` : "",
+        coTutor ? `${coTutor} have ${tutorName} added alongside their current tutor` : "",
+      ].filter(Boolean);
+      setMessage(
+        parts.length
+          ? `${parts.join(" · ")}. They can see it on their dashboard, and ${tutorName} has been told.`
+          : "Nothing was linked.",
+      );
+      setSkipped(notDone);
+      await load();
+      onChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not link these students");
+    } finally {
+      setBusyId("");
+      setBulk(null);
+    }
+  }
+
+  /** Outside the class: add as an extra tutor by hand, keeping the current primary. */
+  async function addCoTutorManually(student: RosterStudent) {
+    setBusyId(student.id);
+    setMessage("");
+    setSkipped([]);
+    try {
+      const res = await fetch("/api/admin/students", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: student.id,
+          coTutorIds: [...new Set([...(student.coTutorIds ?? []), lecturerId])],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not add this tutor");
+      setMessage(`${student.name} is now also assigned to ${tutorName}.`);
+      await load();
+      onChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not add this tutor");
+    } finally {
+      setBusyId("");
+    }
+  }
+
   const rosterIds = new Set(roster.map((student) => student.id));
+  const linkable = roster.filter(
+    (student) => student.plan?.action === "add_primary" || student.plan?.action === "add_co_tutor",
+  );
+  const linkedCount = roster.filter((student) => student.namedByOffice).length;
+  const needDecision = (summary?.shares_class ?? 0) + (summary?.conflict ?? 0) + (summary?.blocked ?? 0);
+  const outsideResults = results.filter((student) => !rosterIds.has(student.id));
+
+  const buttonBase = "rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-60";
+  const primaryButton = `${buttonBase} bg-[var(--accent)] text-white`;
+  const quietButton = `${buttonBase} border border-[var(--border)] text-[var(--foreground)]`;
+
+  function rowAction(student: RosterStudent, outside: boolean) {
+    const busy = busyId === student.id || Boolean(bulk);
+    const plan = student.plan;
+    const moveLabel = student.currentTutorName ? `Move from ${student.currentTutorName}` : "Add as primary tutor";
+
+    if (student.namedByOffice) {
+      const isPrimary = student.currentTutorId === lecturerId;
+      return (
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[var(--accent)]">
+            {isPrimary ? "Primary tutor" : "Co-tutor"}
+          </span>
+          <button type="button" onClick={() => unlink(student)} disabled={busy} className={`${quietButton} text-[var(--muted)]`}>
+            {busyId === student.id ? "Removing…" : "Remove"}
+          </button>
+        </div>
+      );
+    }
+
+    if (plan?.action === "add_primary") {
+      return (
+        <button type="button" onClick={() => link([student])} disabled={busy} className={primaryButton} title={plan.reason}>
+          {busyId === student.id ? "Assigning…" : "Assign as tutor"}
+        </button>
+      );
+    }
+
+    if (plan?.action === "add_co_tutor") {
+      return (
+        <button
+          type="button"
+          onClick={() => link([student])}
+          disabled={busy}
+          className={primaryButton}
+          title={`${plan.reason} ${student.currentTutorName ? `${student.currentTutorName} stays as their tutor.` : ""}`}
+        >
+          {busyId === student.id ? "Adding…" : plan.role === "online" ? "Add as online tutor" : "Add as co-tutor"}
+        </button>
+      );
+    }
+
+    if (plan?.action === "blocked") {
+      return (
+        <span className="max-w-[16rem] text-right text-[11px] text-amber-800" title={plan.reason}>
+          Needs multi-tutor mode on — see /platform
+        </span>
+      );
+    }
+
+    if (plan?.action === "shares_class" || plan?.action === "conflict") {
+      return (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="text-[11px] text-[var(--muted)]" title={plan.reason}>
+            {plan.action === "conflict" ? "One-to-one" : "Also in this class"}
+          </span>
+          <button
+            type="button"
+            onClick={() => pair(student)}
+            disabled={busy}
+            className={quietButton}
+            title="Replace their current primary tutor with this one"
+          >
+            {busyId === student.id ? "Moving…" : moveLabel}
+          </button>
+        </div>
+      );
+    }
+
+    if (outside) {
+      // Not a fit for this tutor's class — an exception the office is choosing to make.
+      const canShare =
+        student.classType === "group" &&
+        ["online", "hybrid"].includes(student.deliveryMode) &&
+        Boolean(student.currentTutorId) &&
+        student.currentTutorId !== lecturerId;
+      return (
+        <div className="flex flex-wrap justify-end gap-2">
+          {canShare ? (
+            <button
+              type="button"
+              onClick={() => addCoTutorManually(student)}
+              disabled={busy}
+              className={primaryButton}
+              title="Keep their current tutor and add this tutor beside them"
+            >
+              {busyId === student.id ? "Adding…" : "Add as co-tutor"}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => pair(student)}
+            disabled={busy}
+            className={canShare ? quietButton : primaryButton}
+            title="Make this tutor their primary tutor"
+          >
+            {busyId === student.id ? "Assigning…" : moveLabel}
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <span
+        className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-semibold text-[var(--accent)]"
+        title="In this class because they match the branch, level and sitting set above."
+      >
+        Matched
+      </span>
+    );
+  }
 
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
-      <p className="text-sm font-semibold text-[var(--foreground)]">Students in this tutor&apos;s class</p>
+    <div id={`class-roster-${lecturerId}`} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-5">
+      <p className="text-sm font-semibold text-[var(--foreground)]">Students who fit this tutor&apos;s class</p>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        Students matching the class above are added automatically. Anyone else can be named here — use it for a student
-        whose sitting or branch does not line up, for one-to-one students, and for cover.
+        Only students in the exact branch, level, sitting and intake month set above. A student with no tutor gets{" "}
+        {tutorName}; an online or hybrid student who already has a tutor gets {tutorName} added beside them. Nobody&apos;s
+        current tutor is replaced unless you click Move.
       </p>
 
-      {loading && !roster.length ? <p className="mt-3 text-xs text-[var(--muted)]">Loading the class…</p> : null}
+      {unsavedChanges ? (
+        <p className="mt-3 rounded-xl bg-amber-500/10 px-4 py-2.5 text-xs text-amber-800">
+          You have changed the class above. This list still shows the saved class — press Save assignment to update it.
+        </p>
+      ) : null}
+
+      {loading && !roster.length ? <p className="mt-3 text-xs text-[var(--muted)]">Finding students who fit…</p> : null}
 
       {message ? (
         <p className="mt-3 rounded-xl bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-800">{message}</p>
       ) : null}
+      {skipped.length ? (
+        <div className="mt-3 rounded-xl bg-amber-500/10 px-4 py-2.5 text-xs text-amber-800">
+          <p className="font-semibold">Left for you to decide ({skipped.length}):</p>
+          <ul className="mt-1 list-disc pl-4">
+            {skipped.slice(0, 8).map((item, index) => (
+              <li key={index}>
+                {item.studentName ?? "A student"} — {item.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
         <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[var(--accent)]">
-          {matched.length} from the class description
+          {roster.length} fit this class
         </span>
         <span className="rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)]">
-          {named.length} named individually
+          {linkedCount} already linked
         </span>
+        {(summary?.add_primary ?? 0) > 0 ? (
+          <span className="rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)]">
+            {summary?.add_primary} with no tutor
+          </span>
+        ) : null}
+        {(summary?.add_co_tutor ?? 0) > 0 ? (
+          <span className="rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)]">
+            {summary?.add_co_tutor} to add as co-tutor
+          </span>
+        ) : null}
+        {needDecision > 0 ? (
+          <span className="rounded-full bg-amber-500/15 px-3 py-1 text-amber-800">{needDecision} need your decision</span>
+        ) : null}
       </div>
 
-      {!hasClassAssignment && !named.length ? (
+      {!hasClassAssignment && !linkedCount ? (
         <p className="mt-3 rounded-xl bg-amber-500/10 px-4 py-2.5 text-xs text-amber-800">
           This tutor has no branch and level set above, and nobody named below — so their portal will tell them they
           have no class. Set the class, name a student, or both.
         </p>
       ) : null}
 
-      {roster.length ? (
-        <div className="mt-4 space-y-2">
-          {roster.map((student) => (
-            <StudentLine
-              key={student.id}
-              student={student}
-              right={
-                student.namedByOffice ? (
-                  <button
-                    type="button"
-                    onClick={() => pair(student, null)}
-                    disabled={busyId === student.id}
-                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)] disabled:opacity-60"
-                  >
-                    {busyId === student.id ? "Removing…" : "Remove"}
-                  </button>
-                ) : (
-                  <span
-                    className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-semibold text-[var(--accent)]"
-                    title="In this class because they match the branch, level and sitting set above."
-                  >
-                    Matched
-                  </span>
-                )
-              }
-            />
-          ))}
+      {linkable.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] px-4 py-3">
+          <p className="text-xs text-[var(--foreground)]">
+            <span className="font-semibold">
+              {linkable.length} student{linkable.length === 1 ? "" : "s"} fit this class but are not linked to {tutorName}{" "}
+              yet.
+            </span>{" "}
+            Until they are, their dashboard may still say &ldquo;Tutor being assigned&rdquo;.
+            {!sharedStudentsEnabled ? " Multi-tutor mode is off, so only one extra tutor per student can be added." : ""}
+          </p>
+          <button
+            type="button"
+            onClick={() => link(linkable)}
+            disabled={Boolean(bulk) || Boolean(busyId)}
+            className={primaryButton}
+          >
+            {bulk ? `Linking ${bulk.done} / ${bulk.total}…` : `Link all ${linkable.length}`}
+          </button>
         </div>
       ) : null}
 
-      <p className="mt-5 text-sm font-semibold text-[var(--foreground)]">Add a student</p>
+      {roster.length ? (
+        <div className="mt-4 space-y-2">
+          {roster.map((student) => (
+            <StudentLine key={student.id} student={student} right={rowAction(student, false)} />
+          ))}
+        </div>
+      ) : !loading && hasClassAssignment ? (
+        <p className="mt-4 text-xs text-[var(--muted)]">
+          Nobody active fits this class yet. New students who match will appear here as they enrol.
+        </p>
+      ) : null}
+
+      <p className="mt-5 text-sm font-semibold text-[var(--foreground)]">Add someone outside this class</p>
+      <p className="mt-1 text-xs text-[var(--muted)]">
+        For cover, a sitting that moved, or a one-to-one. Search the whole school by name, email or student code.
+      </p>
       <input
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search the whole school by name, email or student code…"
+        placeholder="Search the whole school…"
         className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm"
       />
 
-      <div className="mt-3 space-y-2">
-        {results.filter((student) => !rosterIds.has(student.id)).length === 0 ? (
-          <p className="text-xs text-[var(--muted)]">
-            {query ? "Nobody else matches that search." : "Search to find a student to add."}
-          </p>
-        ) : null}
-
-        {results
-          .filter((student) => !rosterIds.has(student.id))
-          .map((student) => (
-            <StudentLine
-              key={student.id}
-              student={student}
-              right={
-                <button
-                  type="button"
-                  onClick={() => pair(student, lecturerId)}
-                  disabled={busyId === student.id}
-                  className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-                >
-                  {busyId === student.id
-                    ? "Assigning…"
-                    : student.currentTutorName
-                      ? `Move from ${student.currentTutorName}`
-                      : "Add to class"}
-                </button>
-              }
-            />
+      {query ? (
+        <div className="mt-3 space-y-2">
+          {outsideResults.length === 0 ? (
+            <p className="text-xs text-[var(--muted)]">Nobody outside this class matches that search.</p>
+          ) : null}
+          {outsideResults.map((student) => (
+            <StudentLine key={student.id} student={student} right={rowAction(student, true)} />
           ))}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -951,7 +1387,12 @@ export default function AdminTutorsPage() {
    * is what would have caught the coverage pattern that swept in the entire
    * A1-B2 online/hybrid cohort onto one tutor before it ever saved.
    */
-  const [coveragePreview, setCoveragePreview] = useState<{ count: number; levels: string[] } | null>(null);
+  const [coveragePreview, setCoveragePreview] = useState<{
+    count: number;
+    levels: string[];
+    byLevel?: Record<string, number>;
+    toLink?: { primary: number; coTutor: number; other: number };
+  } | null>(null);
   const [checkingCoverage, setCheckingCoverage] = useState(false);
 
   /**
@@ -1139,12 +1580,17 @@ export default function AdminTutorsPage() {
       const res = await fetch("/api/admin/lecturers/coverage-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...editAssignment, assignmentGroups: editAssignment.groups }),
+        body: JSON.stringify({ ...editAssignment, assignmentGroups: editAssignment.groups, lecturerId: editingId }),
       });
       const data = await res.json().catch(() => ({ count: 0, levels: [] }));
       const broad = (data.levels?.length ?? 0) >= BROAD_COVERAGE_LEVELS || (data.count ?? 0) >= BROAD_COVERAGE_STUDENTS;
       if (broad) {
-        setCoveragePreview({ count: data.count ?? 0, levels: data.levels ?? [] });
+        setCoveragePreview({
+          count: data.count ?? 0,
+          levels: data.levels ?? [],
+          byLevel: data.byLevel,
+          toLink: data.toLink,
+        });
         return;
       }
       await saveAssignment();
@@ -1183,11 +1629,19 @@ export default function AdminTutorsPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save the assignment");
-      setSuccess("Assignment saved. The tutor has been notified and their roster is already updated.");
-      setEditingId("");
+      setSuccess(
+        "Assignment saved and the tutor has been told. The students who fit this class are listed below — link them to finish.",
+      );
+      // Stay on the tutor instead of closing: the very next thing the office
+      // wants is the list of students who fit the class they just saved.
+      setCoveragePreview(null);
       setEditPhotoFile(null);
       setEditPhotoUrl(null);
       await load();
+      const targetId = editingId;
+      window.setTimeout(() => {
+        document.getElementById(`class-roster-${targetId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 250);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save the assignment");
     } finally {
@@ -1434,6 +1888,12 @@ export default function AdminTutorsPage() {
                         }}
                       />
 
+                      <DraftClassPreview
+                        lecturerId={tutor.id}
+                        assignment={editAssignment}
+                        active={assignmentSignature(editAssignment) !== assignmentSignature(tutor.assignment)}
+                      />
+
                       <div className="mt-5">
                         <PortalAccessFields value={editFeatures} onChange={setEditFeatures} />
                       </div>
@@ -1446,17 +1906,30 @@ export default function AdminTutorsPage() {
                         lecturerId={tutor.id}
                         tutorName={tutor.user.name || tutor.user.email}
                         onChanged={load}
+                        refreshKey={assignmentSignature(tutor.assignment)}
+                        unsavedChanges={assignmentSignature(editAssignment) !== assignmentSignature(tutor.assignment)}
                       />
 
                       {coveragePreview ? (
                         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
                           <p className="font-semibold">
                             This covers {coveragePreview.count} student{coveragePreview.count === 1 ? "" : "s"}
-                            {coveragePreview.levels.length ? ` across ${coveragePreview.levels.join(", ")}` : ""}.
+                            {coveragePreview.byLevel
+                              ? ` (${Object.entries(coveragePreview.byLevel)
+                                  .sort(([a], [b]) => a.localeCompare(b))
+                                  .map(([level, count]) => `${level}: ${count}`)
+                                  .join(", ")})`
+                              : coveragePreview.levels.length
+                                ? ` across ${coveragePreview.levels.join(", ")}`
+                                : ""}
+                            .
                           </p>
                           <p className="mt-1 text-xs text-amber-800">
-                            That is a lot of ground for one tutor's coverage — double-check the levels, sessions and
+                            That is a lot of ground for one tutor&apos;s coverage — double-check the levels, sessions and
                             class type above before confirming.
+                            {coveragePreview.toLink
+                              ? ` Saving does not link anyone yet: afterwards ${coveragePreview.toLink.primary} would get this tutor as their tutor, ${coveragePreview.toLink.coTutor} would get them added beside a current tutor, and ${coveragePreview.toLink.other} already have a tutor and stay as they are.`
+                              : ""}
                           </p>
                           <div className="mt-3 flex flex-wrap gap-2">
                             <button

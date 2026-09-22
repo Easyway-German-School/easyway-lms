@@ -942,3 +942,83 @@ html.theme-custom ::selection {
   .cine-spin { animation-duration: 1.6s; }
   .voice-wave span, .voice-core, .voice-orbit { animation: none; }
 }
+
+/*
+ * iPhone auto-zoom on text fields.
+ *
+ * Safari on iOS zooms the whole page into any text field whose font-size is
+ * under 16px, the moment it is focused — and does not zoom back out. Almost
+ * every field in the portal is `text-sm` (14px), so tapping the live-class
+ * chat box, a sign-in field or the profile form left a student looking at a
+ * magnified, half-cropped screen. Blocking pinch-zoom (maximum-scale=1) would
+ * fix it too, but it also removes an accessibility feature for everyone.
+ *
+ * `-webkit-touch-callout` is only understood by iOS WebKit (Safari, Chrome and
+ * every other iPhone browser, and the Home Screen app), so this whole block is
+ * inert on Android, Windows and Mac — nothing changes anywhere else.
+ *
+ * The :not() chain does two jobs. Checkboxes, radios and buttons have no text
+ * to zoom into. And the `text-lg`... `text-4xl` exclusions leave fields that
+ * are already 16px or larger (an amount box, say) at their designed size
+ * instead of shrinking them to 16px. The selector is more specific than a
+ * single Tailwind utility class, so it wins without needing !important.
+ */
+@supports (-webkit-touch-callout: none) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):not([class~="text-base"]):not([class~="text-lg"]):not([class~="text-xl"]):not([class~="text-2xl"]):not([class~="text-3xl"]):not([class~="text-4xl"]),
+  select:not([class~="text-base"]):not([class~="text-lg"]):not([class~="text-xl"]):not([class~="text-2xl"]),
+  textarea:not([class~="text-base"]):not([class~="text-lg"]):not([class~="text-xl"]):not([class~="text-2xl"]) {
+    font-size: 16px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   LIVE NOW — the red broadcast glow on a sidebar entry while a class is on air.
+   Shared by the student, tutor and admin shells (components/LiveNavBadge.tsx).
+   Deliberately the only glowing thing in any sidebar, so it keeps meaning
+   "something is happening right now".
+   --------------------------------------------------------------------------- */
+@keyframes ew-live-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.55), 0 0 10px 1px rgba(244, 63, 94, 0.35); }
+  50%      { box-shadow: 0 0 0 5px rgba(244, 63, 94, 0), 0 0 18px 3px rgba(244, 63, 94, 0.6); }
+}
+.ew-live-glow { animation: ew-live-glow 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .ew-live-glow { animation: none; box-shadow: 0 0 12px 2px rgba(244, 63, 94, 0.45); }
+}
+
+/* ---------------------------------------------------------------------------
+   TYPING + CHAT MOTION — shared by the class chat, the help desk and the
+   floating "Anna is typing" pill (components/typing/TypingUI.tsx).
+   --------------------------------------------------------------------------- */
+@keyframes ew-typing-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-3px); opacity: 1; }
+}
+.ew-typing-dot { animation: ew-typing-dot 1.2s ease-in-out infinite; }
+
+/* A message (or the typing bubble) arriving: a short rise and settle. */
+@keyframes ew-msg-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+.ew-msg-in { animation: ew-msg-in 0.22s ease-out both; }
+
+/* The soft pulse around an avatar that is typing right now. */
+@keyframes ew-typing-ring {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  50%      { box-shadow: 0 0 0 5px transparent; }
+}
+.ew-typing-ring { animation: ew-typing-ring 1.6s ease-in-out infinite; }
+
+/* Send button popping in the moment there is something to send. */
+@keyframes ew-pop {
+  from { transform: scale(0.6); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.ew-pop { animation: ew-pop 0.16s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ew-typing-dot { animation: none; opacity: 0.8; }
+  .ew-msg-in, .ew-pop { animation: none; }
+  .ew-typing-ring { animation: none; }
+}

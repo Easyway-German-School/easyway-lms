@@ -102,12 +102,14 @@ describe("computeStudentFinance", () => {
     expect(overdue.behindOnTuition).toBe(true);
   });
 
-  it("charges the flat private-tuition price for a private student", () => {
-    // Private is one flat fee at every branch and level (₦350,000, confirmed
-    // 2026-09) — no longer a 2x multiple of the group fee. See
-    // PRIVATE_CLASS_UPGRADE_PRICE in src/lib/payment.ts.
-    const row = computeStudentFinance(student({ id: "a", classType: "private" }), NOW);
-    expect(row.tuitionFee).toBe(350_000);
+  it("charges the level-based private-tuition price for a private student", () => {
+    // Private is priced by level at every branch (A1/A2 ₦300,000, B1/B2
+    // ₦360,000 by default) — not a multiple of the group fee. The figures live
+    // in the price book (src/lib/price-book.ts), editable without a deploy.
+    const a1 = computeStudentFinance(student({ id: "a", classType: "private" }), NOW);
+    expect(a1.tuitionFee).toBe(300_000);
+    const b1 = computeStudentFinance(student({ id: "b", classType: "private", level: "B1" }), NOW);
+    expect(b1.tuitionFee).toBe(360_000);
   });
 
   it("does not compute a lock for a fully-paid or unpaid student", () => {

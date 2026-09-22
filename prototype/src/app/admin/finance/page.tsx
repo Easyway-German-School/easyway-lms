@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import AdminShell from "@/components/AdminShell";
 import { DownloadIcon, TrendingDownIcon, TrendingUpIcon } from "@/components/icons";
+import FeeRemindersPanel from "@/components/admin/FeeRemindersPanel";
 
 /**
  * The finance workspace.
@@ -99,6 +100,10 @@ type DebtorRow = {
   behindOnTuition: boolean;
   lastPaymentAt: string | null;
   paymentCount: number;
+  /** Printed under the name so the list can be phoned straight down. */
+  phone?: string | null;
+  phoneTel?: string | null;
+  whatsappUrl?: string | null;
 };
 
 type ReceivablesPayload = {
@@ -112,6 +117,7 @@ type ReceivablesPayload = {
 const TABS = [
   { id: "book", label: "The book" },
   { id: "receivables", label: "Receivables" },
+  { id: "reminders", label: "Reminders" },
   { id: "cash", label: "Cash" },
   { id: "branches", label: "Branches & levels" },
 ] as const;
@@ -439,8 +445,35 @@ function FinanceWorkspace() {
       )}
 
       {/* ---------------------------------------------------------------- */}
+      {tab === "reminders" && <FeeRemindersPanel />}
+
       {tab === "receivables" && receivables && (
         <div className="space-y-5">
+          {/* The chase list — the same groups the Reminders tab counts and the
+              call sheet downloads. One tap to work a single conversation. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--muted)]">To chase</span>
+            {[
+              ["", "Everyone"],
+              ["chase_all", "All owing"],
+              ["chase_nothing", "Paid nothing"],
+              ["chase_under_deposit", "Under the deposit"],
+              ["chase_balance", "Balance owing"],
+              ["chase_on_hold", "Access on hold"],
+            ].map(([id, label]) => (
+              <button
+                key={id || "everyone"}
+                type="button"
+                onClick={() => setFocus(id)}
+                className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                  focus === id ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border)] bg-[var(--surface)]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {receivables.filters.focus && (
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-red-300 bg-red-50 p-5 text-red-800">
               <div>
@@ -545,6 +578,25 @@ function FinanceWorkspace() {
                       <tr key={row.id} className={row.behindOnTuition ? "bg-red-50/70" : undefined}>
                         <td className="px-5 py-3">
                           <p className={`font-semibold ${row.behindOnTuition ? "text-red-700" : ""}`}>{row.name}</p>
+                          {row.phone ? (
+                            <p className="text-xs font-semibold">
+                              <a href={`tel:${row.phoneTel ?? row.phone}`} className="hover:text-[var(--accent)] hover:underline">
+                                {row.phone}
+                              </a>
+                              {row.whatsappUrl ? (
+                                <a
+                                  href={row.whatsappUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="ml-2 font-medium text-emerald-700 hover:underline"
+                                >
+                                  WhatsApp
+                                </a>
+                              ) : null}
+                            </p>
+                          ) : (
+                            <p className="text-xs font-semibold text-amber-700">No phone on file</p>
+                          )}
                           <p className="text-xs text-[var(--muted)]">{row.email}</p>
                         </td>
                         <td className="px-5 py-3 text-[var(--muted)]">{row.branch}</td>

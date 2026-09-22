@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { safeJson } from "@/lib/safe-json";
 import {
   isLevelSellable,
-  PRIVATE_CLASS_UPGRADE_PRICE,
+  privateClassPriceForLevel,
   receivedPaymentFilter,
   REGISTRATION_FEE,
   requiredDepositFor,
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
 
     /**
      * PRIVATE CLASS UPGRADE — a separate, simpler checkout from the tuition
-     * flow below. One flat price, no stages, no deposit — a student either
+     * flow below. One price (by level), no stages, no deposit — a student either
      * pays for one-to-one tuition or does not. Branched here, before the
      * tuition-specific lookups, because none of that logic (sellable levels,
      * deposit stages, pathway enrolment) applies to this purchase.
@@ -77,6 +77,10 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
+
+      // Server-derived from the student's own level — the same lookup the upsell card
+      // and the lock screen quote from, so the price shown is the price charged.
+      const privatePrice = privateClassPriceForLevel(studentRecord.level);
 
       const secretKey = process.env.PAYSTACK_SECRET_KEY;
       if (!secretKey) {
@@ -101,7 +105,7 @@ export async function POST(request: Request) {
         },
         body: JSON.stringify({
           email: userEmail,
-          amount: PRIVATE_CLASS_UPGRADE_PRICE * 100,
+          amount: privatePrice * 100,
           currency: "NGN",
           reference: `easyway-private-${Date.now()}-${session.user.id}`,
           callback_url: callbackUrl,
@@ -123,7 +127,7 @@ export async function POST(request: Request) {
         authorizationUrl: paystackData.data.authorization_url,
         authorization_url: paystackData.data.authorization_url,
         reference: paystackData.data.reference,
-        amount: PRIVATE_CLASS_UPGRADE_PRICE,
+        amount: privatePrice,
       });
     }
 

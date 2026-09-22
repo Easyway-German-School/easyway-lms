@@ -19,6 +19,7 @@ type SpeakerRange = { from: number; to: number; speaker: "tutor" | "student" };
 type NotesResponse = {
   status: string;
   isPrivate?: boolean;
+  outline?: boolean;
   notes?: Notes;
   personalFocus?: string | null;
   transcriptText?: string | null;
@@ -93,9 +94,11 @@ export default function ClassNotesPanel({ materialId, onSeekTo }: { materialId: 
   if (loading) return null; // The video itself is the thing worth showing first; notes fade in quietly.
 
   if (!data || data.status !== "ready" || !data.notes) {
-    // "pending"/"transcribing"/"summarizing" all read as "still coming" to a
-    // student — the distinction only matters to whoever is debugging the queue.
-    const stillGenerating = ["pending", "transcribing", "summarizing"].includes(data?.status ?? "");
+    // "pending"/"transcribing"/"summarizing"/"partial" all read as "still coming"
+    // to a student — the distinction only matters to whoever is debugging the
+    // queue. `partial` is a long class picked back up between runs (see
+    // lib/class-transcription.ts) — still very much on its way, not stalled.
+    const stillGenerating = ["pending", "transcribing", "summarizing", "partial"].includes(data?.status ?? "");
     if (!stillGenerating) return null;
     return (
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-[var(--muted)]">
@@ -141,6 +144,13 @@ export default function ClassNotesPanel({ materialId, onSeekTo }: { materialId: 
           </a>
         </div>
       </div>
+
+      {data.outline ? (
+        <p className="rounded-2xl bg-[var(--surface-alt)] px-4 py-3 text-xs leading-5 text-[var(--muted)]">
+          Auto-outline: these notes were lifted straight from the class transcript because the AI writer was
+          unavailable. A fuller write-up replaces this automatically.
+        </p>
+      ) : null}
 
       {personalFocus ? (
         <div className="flex items-start gap-3 rounded-2xl border border-[var(--accent)]/25 bg-[var(--accent-soft)] p-4">

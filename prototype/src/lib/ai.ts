@@ -105,6 +105,48 @@ export function claudeFailureHint(): string | null {
   return lastClaudeFailure;
 }
 
+/**
+ * When Claude last told us its account is unusable (no credit, key rejected),
+ * and so when it is worth asking again.
+ *
+ * Without this, an unfunded account costs a wasted round trip on every single
+ * call before the fallback even starts — for a background queue working through
+ * twenty class recordings, that is twenty pointless requests. Module-level, so
+ * it lives per warm serverless instance; an instance that boots cold simply
+ * learns it again on its first failure.
+ */
+let claudeDownUntil = 0;
+const CLAUDE_DOWN_MS = 30 * 60 * 1000;
+
+/** A Claude key is configured AND has not recently said the account is unusable. */
+function claudeUsable(): boolean {
+  return hasKey(process.env.ANTHROPIC_API_KEY) && Date.now() >= claudeDownUntil;
+}
+
+/**
+ * Is ANY model reachable right now - Claude, Groq, DeepSeek or a local runtime?
+ * The notes queue uses this to decide whether an auto-outline made while the
+ * models were down is worth upgrading yet.
+ */
+export function aiTextAvailable(): boolean {
+  return (
+    claudeUsable() ||
+    hasKey(process.env.GROQ_API_KEY) ||
+    hasKey(process.env.DEEPSEEK_API_KEY) ||
+    localModelAvailable()
+  );
+}
+
+/**
+ * Roughly how many characters of input one request to the model that will
+ * actually answer can carry, for a caller that must size its prompt (the class
+ * notes). Groq's free tier allows ~8k tokens a minute INCLUDING the reply, so
+ * a whole class does not fit; a funded Claude does.
+ */
+export function promptCharBudget(workload: AiWorkload = "learning-content"): number {
+  return getAIProvider(workload) === "claude" ? 22_000 : 9_000;
+}
+
 // Exported so assistant-brain.ts (the admin assistant's brain) can name the
 // same model rather than hardcoding a second copy of this default that would
 // silently drift from this one.
@@ -117,6 +159,63 @@ export function claudeFailureHint(): string | null {
 // model Groq currently serves with tool calling, which is the one property
 // this brain cannot do without (see assistant-brain.ts's groqTurn()).
 export const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+/** Sibling model with its own per-minute token bucket — see callGroq. */
+const GROQ_FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "openai/gpt-oss-20b";
+
+/**
+ * Groq's free tier meters tokens per minute PER MODEL (8,000, input plus the
+ * reply we ask for). Two queues drawing on it at once — the class-notes queue
+ * and the handout queue — used to spend each other's minute, and whichever
+ * lost got a 429 and quietly fell back to worse output (or, for a handout,
+ * was marked failed). Every call now books its estimated tokens against a
+ * one-minute window first, and waits for room rather than being refused.
+ *
+ * Kept a little under the real ceiling because the estimate is a guess. Held in
+ * memory, so it is exact within one run of the queue (which is sequential) and
+ * a best effort across separate serverless instances — the 429 handling in
+ * callGroq stays as the backstop.
+ */
+export const GROQ_TOKENS_PER_MINUTE = 7_000;
+const GROQ_WINDOW_MS = 60_000;
+/** Never sit waiting for room longer than this inside one request. */
+const GROQ_MAX_PACING_WAIT_MS = 25_000;
+
+const groqUsage = new Map<string, Array<{ at: number; tokens: number }>>();
+
+/**
+ * How long until `tokens` more fit inside the model's one-minute budget.
+ * 0 when they fit now — and also when they can never fit (one request larger
+ * than the whole budget): waiting would not help, and Groq will answer that one
+ * with a 413 straight away.
+ */
+export function groqPacingWaitMs(
+  entries: Array<{ at: number; tokens: number }>,
+  tokens: number,
+  now: number,
+  limit: number = GROQ_TOKENS_PER_MINUTE,
+): number {
+  if (tokens > limit) return 0;
+  const live = entries.filter((entry) => now - entry.at < GROQ_WINDOW_MS);
+  let used = live.reduce((sum, entry) => sum + entry.tokens, 0);
+  if (used + tokens <= limit) return 0;
+  // Oldest first: the wait is until enough of the window has aged out.
+  for (const entry of [...live].sort((a, b) => a.at - b.at)) {
+    used -= entry.tokens;
+    if (used + tokens <= limit) return Math.max(0, entry.at + GROQ_WINDOW_MS - now);
+  }
+  return GROQ_WINDOW_MS;
+}
+
+function groqWait(model: string, tokens: number): number {
+  return groqPacingWaitMs(groqUsage.get(model) ?? [], tokens, Date.now());
+}
+
+function groqBook(model: string, tokens: number): void {
+  const now = Date.now();
+  const kept = (groqUsage.get(model) ?? []).filter((entry) => now - entry.at < GROQ_WINDOW_MS);
+  kept.push({ at: now, tokens });
+  groqUsage.set(model, kept);
+}
 
 /**
  * Groq's free tier, spoken with the same OpenAI-shaped chat-completions body
@@ -135,33 +234,108 @@ async function callGroq(prompt: string, maxTokens: number): Promise<string | nul
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return null;
 
-  try {
-    const response = await guardedFetch("groq", "https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        max_tokens: maxTokens,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+  /**
+   * The DAILY quota (tokens per day, per model) is a different animal from the
+   * per-minute one this function already paces around: it is account-wide, it
+   * can only be learned by actually being refused, and once it is gone it stays
+   * gone for a real stretch (Groq: "please try again in 18m25s", not 8s). A
+   * durable, cross-instance flag (see lib/ai-cooldown.ts) is what stops every
+   * fresh function — the self-kicking notes runner chief among them — from
+   * re-discovering that refusal one wasted request at a time.
+   */
+  const { groqCoolingDown, markGroqCooldown, parseGroqRetrySeconds } = await import("@/lib/ai-cooldown");
+  if (await groqCoolingDown("groq-chat")) return null;
 
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      console.error("Groq API error:", response.status, detail);
-      return null;
+  /**
+   * The free tier's real ceiling is tokens PER MINUTE, per model — 8,000 for
+   * both models below, input and requested output together (confirmed against
+   * the account's own `x-ratelimit-limit-tokens` header). Two consecutive
+   * requests in a burst can therefore trip a 429 on a perfectly good key.
+   *
+   * So a 429 is not a verdict: wait out the (short) window Groq itself
+   * advertises and try once more, and if that model's bucket is still empty
+   * try the sibling model, which has a bucket of its own. Only then give up.
+   * A 413 ("request too large") is the caller's problem — it will be exactly
+   * as large on every retry — so it is not retried at all.
+   */
+  const attempt = async (model: string): Promise<{ text: string | null; retryAfterMs: number | null }> => {
+    try {
+      const response = await guardedFetch("groq", "https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          // gpt-oss reasons before it answers and the reasoning is billed against
+          // max_tokens. Low effort keeps a tight budget from being spent thinking.
+          ...(model.includes("gpt-oss") ? { reasoning_effort: "low" } : {}),
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        console.error("Groq API error:", model, response.status, detail.slice(0, 300));
+        if (response.status === 429) {
+          // Groq's own message names the real wait ("please try again in 13m27s") for
+          // an hourly/daily cap; the header is the short, genuine per-minute case. Both
+          // routes exist because neither alone is honest about both kinds of limit.
+          const fromMessage = parseGroqRetrySeconds(detail);
+          if (fromMessage) void markGroqCooldown("groq-chat", fromMessage);
+          const seconds = Number(response.headers.get("retry-after"));
+          return { text: null, retryAfterMs: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 8000 };
+        }
+        return { text: null, retryAfterMs: null };
+      }
+
+      const data = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+      };
+      const text = data.choices?.[0]?.message?.content?.trim() || null;
+      // gpt-oss models spend part of `max_tokens` on hidden reasoning, so a tight
+      // budget can come back 200 OK with nothing in it. Say so in the log rather
+      // than leaving an empty answer looking like a network failure.
+      if (!text) console.warn("Groq returned no content:", model, data.choices?.[0]?.finish_reason);
+      return { text, retryAfterMs: null };
+    } catch {
+      return { text: null, retryAfterMs: null };
     }
+  };
 
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    return data.choices?.[0]?.message?.content?.trim() || null;
-  } catch {
-    return null;
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const hasSibling = Boolean(GROQ_FALLBACK_MODEL) && GROQ_FALLBACK_MODEL !== GROQ_MODEL;
+
+  // Roughly three characters a token for German, plus the reply we ask for —
+  // which Groq counts against the minute whether or not it is all used.
+  const estimate = Math.ceil(prompt.length / 3) + maxTokens;
+
+  // Start on whichever model has room soonest (each has its own bucket), and if
+  // neither does yet, wait for the sooner one instead of being refused.
+  const primary =
+    hasSibling && groqWait(GROQ_FALLBACK_MODEL, estimate) < groqWait(GROQ_MODEL, estimate) ? GROQ_FALLBACK_MODEL : GROQ_MODEL;
+  const secondary = primary === GROQ_MODEL ? (hasSibling ? GROQ_FALLBACK_MODEL : null) : GROQ_MODEL;
+
+  const wait = Math.min(groqWait(primary, estimate), GROQ_MAX_PACING_WAIT_MS);
+  if (wait > 0) await sleep(wait);
+  groqBook(primary, estimate);
+
+  const first = await attempt(primary);
+  if (first.text || first.retryAfterMs === null) return first.text;
+
+  // Only worth waiting for a short window; a long one means "come back later".
+  if (first.retryAfterMs <= 10_000) {
+    await sleep(first.retryAfterMs);
+    groqBook(primary, estimate);
+    const second = await attempt(primary);
+    if (second.text || second.retryAfterMs === null) return second.text;
   }
+
+  if (!secondary) return null;
+  groqBook(secondary, estimate);
+  return (await attempt(secondary)).text;
 }
 
 /**
@@ -179,8 +353,26 @@ async function callHostedText(
   maxTokens: number,
   workload: AiWorkload = "interactive",
 ): Promise<string | null> {
-  if (hasKey(process.env.ANTHROPIC_API_KEY)) return callClaude(prompt, maxTokens, workload);
-  if (hasKey(process.env.GROQ_API_KEY)) return callGroq(prompt, maxTokens);
+  /**
+   * FAIL OVER, don't fail.
+   *
+   * This used to be "the first key that is configured wins, and if that
+   * provider says no, that is the answer". A Claude key that is PRESENT but has
+   * run out of credit therefore returned null on every call — silently taking
+   * down every feature that reaches a model, class notes included — while a
+   * perfectly good free Groq key sat next to it unused. Now a provider that
+   * fails hands over to the next: Claude -> Groq -> DeepSeek. A provider with
+   * no key is skipped, and Claude is skipped outright for a while once it has
+   * said its account is unfunded (see `claudeUsable`).
+   */
+  if (claudeUsable()) {
+    const answer = await callClaude(prompt, maxTokens, workload);
+    if (answer) return answer;
+  }
+  if (hasKey(process.env.GROQ_API_KEY)) {
+    const answer = await callGroq(prompt, maxTokens);
+    if (answer) return answer;
+  }
   if (hasKey(process.env.DEEPSEEK_API_KEY)) return callDeepSeekText(prompt, maxTokens);
   return null;
 }
@@ -293,11 +485,16 @@ async function callClaude(
       // unfunded looks identical to a working one from every check we can
       // make without spending money, so this is the only place the truth
       // becomes available.
-      lastClaudeFailure = /credit balance is too low/i.test(detail)
+      const noCredit = /credit balance is too low/i.test(detail);
+      const rejected = response.status === 401 || response.status === 403;
+      lastClaudeFailure = noCredit
         ? "Claude has no credit on the account. Top it up, or draft with the local model instead."
-        : response.status === 401 || response.status === 403
+        : rejected
           ? "Claude rejected the API key."
           : `Claude returned ${response.status}.`;
+      // An unfunded or rejected account will say the same thing to the very next
+      // caller - stop asking for a while so the fallback is not delayed by it.
+      if (noCredit || rejected) claudeDownUntil = Date.now() + CLAUDE_DOWN_MS;
       return null;
     }
 
@@ -1803,7 +2000,7 @@ function hasKey(value: string | undefined): boolean {
  * with no server budget — then DeepSeek.
  */
 function hostedProvider(): Provider | null {
-  if (hasKey(process.env.ANTHROPIC_API_KEY)) return "claude";
+  if (claudeUsable()) return "claude";
   if (hasKey(process.env.GROQ_API_KEY)) return "groq";
   if (hasKey(process.env.DEEPSEEK_API_KEY)) return "deepseek";
   return null;
@@ -1857,7 +2054,7 @@ function getAIProvider(workload: AiWorkload = "interactive"): Provider {
   // Claude powers the learner-facing intelligence: personalized plans,
   // daily missions, and the transformation of tutor material into learning.
   if (workload === "student" || workload === "learning-content") {
-    return hasKey(process.env.ANTHROPIC_API_KEY)
+    return claudeUsable()
       ? "claude"
       : (hasKey(process.env.GROQ_API_KEY) ? "groq" : null) ??
           (hasKey(process.env.DEEPSEEK_API_KEY) ? "deepseek" : "mock");

@@ -22,6 +22,7 @@ import BrandLoader from "@/components/BrandLoader";
 import { ROOM_MODE_COPY } from "@/lib/live-room-protocol";
 import { useRoomInteractions } from "./useRoomInteractions";
 import { mediaErrorMessage } from "./media-errors";
+import { useWakeLock } from "@/lib/client/use-wake-lock";
 import {
   ChatPanel,
   FloorBanner,
@@ -516,6 +517,10 @@ export default function LiveKitClassroom({
   const router = useRouter();
   const roomRef = useRef<Room | null>(null);
   const [status, setStatus] = useState<Status>("connecting");
+  // Keep the phone awake for as long as this person is in the room, so an
+  // iPhone that auto-locks after a quiet minute does not drop them from class.
+  // Best-effort and silent on failure; see the hook for why.
+  useWakeLock(status === "connected" || status === "reconnecting");
   const [error, setError] = useState<string | null>(null);
   /**
    * Bumped to force the connect effect below to run again from scratch.
@@ -1034,8 +1039,25 @@ export default function LiveKitClassroom({
     const room = roomRef.current;
     if (!room) return;
     const next = !screenSharing;
-    await room.localParticipant.setScreenShareEnabled(next);
-    setScreenSharing(next);
+    // iPhones (and some tablets) have no getDisplayMedia. Starting a share there
+    // used to throw an unhandled rejection and the button just did nothing, which
+    // a tutor reads as a broken class. Stopping is always allowed.
+    if (next && !navigator.mediaDevices?.getDisplayMedia) {
+      setDeviceNotice("Sharing your screen isn't possible on this phone. Use a laptop or computer to share slides.");
+      return;
+    }
+    try {
+      await room.localParticipant.setScreenShareEnabled(next);
+      setScreenSharing(next);
+      setDeviceNotice(null);
+    } catch (shareError) {
+      // Most often the tutor closing the browser's "choose what to share" picker.
+      // That is a choice, not a fault: stay off and say nothing alarming.
+      setScreenSharing(false);
+      if (!(shareError instanceof DOMException && shareError.name === "NotAllowedError")) {
+        setDeviceNotice("Couldn't start screen sharing. Try again, or reload the page.");
+      }
+    }
   }, [screenSharing]);
 
   /**

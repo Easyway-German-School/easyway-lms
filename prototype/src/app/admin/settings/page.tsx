@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import AdminShell from "@/components/AdminShell";
 import { SlidersIcon } from "@/components/icons";
 import {
@@ -333,6 +334,19 @@ export default function SettingsPage() {
           </div>
           <p className="text-[var(--muted)]">Configure which sessions run — and in which mode — for each level</p>
         </div>
+
+        <Link
+          href="/admin/settings/pricing"
+          className="flex items-center justify-between gap-4 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm transition hover:border-[var(--accent)]"
+        >
+          <span>
+            <span className="block text-lg font-bold text-[var(--foreground)]">Prices & programs</span>
+            <span className="block text-sm text-[var(--muted)]">
+              Edit what each class and programme costs — live within seconds, no deploy. For admins with fee-book access.
+            </span>
+          </span>
+          <span aria-hidden className="text-xl text-[var(--accent)]">→</span>
+        </Link>
 
         {message && (
           <div

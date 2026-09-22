@@ -12,6 +12,8 @@ export type ClassRecapData = {
   vocabulary?: Array<{ de: string; en: string; note?: string }> | null;
   corrections?: Array<{ mistake: string; correction: string; note?: string }> | null;
   progressHighlights?: string[] | null;
+  /** Written by plain extraction while no AI model was reachable — see lib/extractive-notes.ts. */
+  outline?: boolean;
 };
 
 function Bullets({ title, items }: { title: string; items: string[] }) {
@@ -40,6 +42,11 @@ export default function ClassRecap({ data }: { data: ClassRecapData }) {
 
   return (
     <div className="space-y-6">
+      {data.outline ? (
+        <p className="rounded-2xl bg-[var(--surface-alt)] px-4 py-3 text-xs leading-5 text-[var(--muted)]">
+          Auto-outline: these notes were lifted straight from the class transcript because the AI writer was unavailable. A fuller write-up replaces this automatically.
+        </p>
+      ) : null}
       {data.summary ? (
         <p className="text-sm leading-7 text-[var(--muted)]">{data.summary}</p>
       ) : null}

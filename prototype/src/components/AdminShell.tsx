@@ -4,6 +4,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useLiveCount } from '@/lib/useLiveCount';
+import { LiveDot, LivePill, LIVE_ICON_TILE } from '@/components/LiveNavBadge';
 import BrandLogo from '@/components/BrandLogo';
 import AdminAssistantLauncher from '@/components/AdminAssistantLauncher';
 import AdminDailyBriefing from '@/components/AdminDailyBriefing';
@@ -164,6 +166,7 @@ const navItems: NavItem[] = [
   { label: 'Study plan health', href: '/admin/personalization', icon: <PaletteIcon />, group: 'Intelligence' },
 
   { label: 'General settings', href: '/admin/settings', icon: <SlidersIcon />, group: 'Settings' },
+  { label: 'Prices & programs', href: '/admin/settings/pricing', icon: <WalletIcon />, group: 'Settings' },
   { label: 'Email centre', href: '/admin/emails', icon: <MailIcon />, group: 'Settings' },
   { label: 'Compose email', href: '/admin/emails/compose', icon: <SendIcon />, group: 'Settings' },
   { label: 'Notifications', href: '/admin/notifications', icon: <BellIcon />, group: 'Settings' },
@@ -205,6 +208,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const [unreadEnquiries, setUnreadEnquiries] = useState(0);
   /** Unread community messages across every room in the school. */
   const [unreadCommunity, setUnreadCommunity] = useState(0);
+  /** Classes on air right now. Lights the Live classes entry. */
+  const liveNow = useLiveCount();
 
   useEffect(() => {
     let cancelled = false;
@@ -548,6 +553,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                         : item.href === '/admin/community'
                           ? unreadCommunity
                           : 0;
+                    const isLive = item.href === '/admin/live' && liveNow > 0;
                     return (
                       <button
                         key={item.href}
@@ -565,11 +571,16 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                         }`}
                       >
                         <span
-                          className={`relative flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-base shadow-sm transition ${
-                            active ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]' : 'group-hover:border-[var(--border-strong)]'
+                          className={`relative flex h-9 w-9 items-center justify-center rounded-xl border text-base shadow-sm transition ${
+                            isLive
+                              ? LIVE_ICON_TILE
+                              : active
+                                ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)]'
+                                : 'border-[var(--border)] bg-[var(--surface-alt)] group-hover:border-[var(--border-strong)]'
                           }`}
                         >
                           {item.icon}
+                          {isLive && <LiveDot />}
                           {/* Collapsed, the label is gone and the count with
                               it — so the icon itself carries a dot, which is
                               the only thing that still fits. */}
@@ -583,6 +594,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                             {badge > 99 ? '99+' : badge}
                           </span>
                         ) : null}
+                        {!collapsed && isLive ? <LivePill count={liveNow} /> : null}
                       </button>
                     );
                   })}
