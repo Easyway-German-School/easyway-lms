@@ -28,6 +28,7 @@ import {
   FloorBanner,
   HandQueue,
   ModeSwitch,
+  OfficeNoticeBanner,
   ReactionBar,
   ReactionLayer,
 } from "./ClassroomInteractions";
@@ -130,6 +131,15 @@ const TILE_SIZE: Record<QualityMode, string> = {
 function isTutor(participant: Participant): boolean {
   try {
     return JSON.parse(participant.metadata || "{}")?.role === "tutor";
+  } catch {
+    return false;
+  }
+}
+
+/** The anonymous "Office" announcement connection — see `/api/admin/live/speak`. */
+function isOffice(participant: Participant): boolean {
+  try {
+    return JSON.parse(participant.metadata || "{}")?.role === "admin";
   } catch {
     return false;
   }
@@ -293,6 +303,7 @@ function ParticipantTile({
 
   const micMuted = !participant.isMicrophoneEnabled;
   const tutor = isTutor(participant);
+  const office = isOffice(participant);
   const initials = (participant.name || participant.identity || "?").slice(0, 1).toUpperCase();
 
   /**
@@ -302,9 +313,11 @@ function ParticipantTile({
    * aimed at yourself is a trap, not a feature. Not another tutor's tile
    * either: the server enforces this too (`/api/live/moderate` rejects a
    * tutor-on-tutor target), but hiding the menu is what stops a co-teacher
-   * from seeing a button that only ever errors.
+   * from seeing a button that only ever errors. Not the office's tile either —
+   * that connection stops itself, and the server refuses to moderate it
+   * regardless of what this menu would have offered.
    */
-  const canModerate = viewerRole === "tutor" && !(participant instanceof LocalParticipant) && !tutor;
+  const canModerate = viewerRole === "tutor" && !(participant instanceof LocalParticipant) && !tutor && !office;
   const busy = moderationBusy.has(participant.identity);
 
   /**
@@ -385,6 +398,9 @@ function ParticipantTile({
         </span>
         {tutor ? (
           <span className="shrink-0 rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">Tutor</span>
+        ) : null}
+        {office ? (
+          <span className="shrink-0 rounded-full bg-amber-500 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">Office</span>
         ) : null}
 
         {canModerate ? (
@@ -1638,6 +1654,10 @@ export default function LiveKitClassroom({
       ) : (
         <div className={`flex min-h-0 flex-1 gap-3 ${panel && !focusMode ? "lg:flex-row" : ""} flex-col`}>
           <div className="flex min-w-0 flex-1 flex-col gap-3">
+            <AnimatePresence>
+              {interactions.officeNotice !== null ? <OfficeNoticeBanner key={interactions.officeNotice} /> : null}
+            </AnimatePresence>
+
             {!focusMode && interactions.floor && interactions.floorName ? (
               <FloorBanner
                 name={interactions.floorName}

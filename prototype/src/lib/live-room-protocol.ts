@@ -212,7 +212,18 @@ export type LiveMessage =
    * currently are. Cheap, and it converges even if a message is dropped,
    * because the next arrival triggers another one.
    */
-  | { t: "state"; mode: RoomMode; floor: string | null; present: PresentedMaterial };
+  | { t: "state"; mode: RoomMode; floor: string | null; present: PresentedMaterial }
+  /**
+   * Admin only (the anonymous announcement identity, never a tutor or
+   * student token). Sent the instant an office admin connects to speak,
+   * before they turn on a camera or microphone — the whole point is that the
+   * class gets a beat to pay attention before anything is actually said,
+   * which is the difference between an announcement and someone talking over
+   * the lesson. Ephemeral like a reaction: anyone not in the room at that
+   * instant has nothing to catch up on, because the notice was about a
+   * moment, not a fact.
+   */
+  | { t: "officeNotice" };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -290,6 +301,12 @@ export function decodeMessage(payload: Uint8Array, senderRole: RoomRole): LiveMe
     case "present":
       return tutorOnly && isPresentedMaterial(message.material) ? { t: "present", material: message.material } : null;
 
+    // Gated on the admin role rather than tutor: only the anonymous
+    // announcement token's metadata claims it, so a student forging this
+    // frame gets nothing — there is no student-visible way to earn that role.
+    case "officeNotice":
+      return senderRole === "admin" ? { t: "officeNotice" } : null;
+
     default:
       return null;
   }
@@ -303,7 +320,10 @@ export function decodeMessage(payload: Uint8Array, senderRole: RoomRole): LiveMe
  */
 export function roleOfMetadata(metadata: string | undefined): RoomRole {
   try {
-    return JSON.parse(metadata || "{}")?.role === "tutor" ? "tutor" : "student";
+    const role = JSON.parse(metadata || "{}")?.role;
+    if (role === "tutor") return "tutor";
+    if (role === "admin") return "admin";
+    return "student";
   } catch {
     return "student";
   }
