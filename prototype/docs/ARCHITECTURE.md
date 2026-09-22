@@ -413,6 +413,57 @@ but not *creep* toward failing.
   (`Production – easyway-lms: success`) — *not* by HTTP status codes. (A nonexistent admin route
   also returns 401/307 because a blanket gate answers first; that "proof" proved nothing.)
 
+### 5.8 Diagnose & repair — fixing DATA from the console, with an algorithm  (`lib/diagnose.ts`, `lib/diagnose-server.ts`)
+
+**The question it answers.** "A student complains. Can the console find the cause and fix it — without AI?" Yes, for one
+class of problem, and knowing where the line is matters more than the tool:
+
+| Kind of problem | Can a button fix it? |
+|---|---|
+| **Data / state** — a payment that reached Paystack but not our database, a missing student ID, a stale cached answer | **Yes.** The cause is a fact in the database; the repair is an idempotent write. This is what the tool does. |
+| **Code** — a wrong rule, a broken query | **No.** That needs a deploy. A panel that patches production logic on click is an outage waiting for a mistake. The console can *find and explain* it (incidents, the map, the witness); the fix ships through review and CI. |
+| **Config / a misbehaving feature** | A *switch* — a per-tenant feature flag — is the honest tool: turn the feature off now, fix it properly after. (Not built yet.) |
+
+**The pattern (worth being able to say in one breath):** *detect → diagnose → propose → approve → repair → **verify** → audit.*
+It is a **runbook automation**: what an on-call engineer does by hand, turned into rules and whitelisted actions.
+
+**Diagnose — a rule engine, not a model.** `diagnose(facts)` runs a list of small pure rules over a plain bundle of facts about
+one student and returns findings, each with its *evidence* so a person can check the reasoning. Rules exist only for causes that
+have **already happened** in this codebase (a missed webhook, a code-less student, a tenant-less row). Two consequences:
+it is unit-testable (facts in, findings out), and it is honest — an empty result says *"these 5 checks came back clean; that is
+not the same as nothing being wrong"*. A rule I could not verify against real code (a "no tutor assigned" check — your tutor
+logic has named-only tutors, co-tutors and hybrid cases) was **deliberately not written**: a detector that is confidently wrong
+is worse than none.
+
+**The headline algorithm — reconcile Paystack against our ledger.** The checkout route never creates a pending payment row, so a
+student whose webhook or callback failed leaves *no trace* in the database. So the tool **asks Paystack** (customer by email →
+their successful transactions) and diffs by reference against `Payment.stripeSessionId`. Ownership is decided by the metadata *we*
+attached at checkout, not by email — a parent paying for two children from one address must not have one child's payment offered
+to the other (`belongsToStudent`). A receipt reference the student sends can be checked too. Repair = `verifyPaystackTransaction(reference)`,
+which re-asks Paystack and records only money Paystack confirms, and is **idempotent by reference**.
+
+**Repair — five rules, all enforced in `runRepair` and tested:**
+1. **Re-derive before acting.** The browser's request is treated as a *request*, not an instruction. The server rebuilds the facts
+   and only proceeds if the diagnosis *still* offers exactly that repair. A stale click, a second admin, or a forged request all end at
+   "nothing to do".
+2. **Idempotent** — keyed on the Paystack reference; issuing a student ID never overwrites one.
+3. **Verify after** — re-run the same rules; report honestly *"done, but it is still there"* rather than a green tick.
+4. **Audited** — who, what, before/after, into the immutable `AuditLog` (best-effort by design, so a logging fault cannot undo a payment record).
+5. **Never retried** — a failed step stops and says so. A tool that quietly retries is how one payment is recorded twice.
+
+Plus: a **short whitelist** checked with `hasOwnProperty` (a plain `in` check is true for `"toString"` — a real hole found while
+writing the tests), a **per-repair capability** on top of console access (recording a payment needs `payments`), and **no repair
+at all** for some findings on purpose — a tenant mismatch needs a person's judgement about *who may see what*, and guessing wrong
+is how data leaks between schools.
+
+**Complaint → fix in one click.** A complaint incident carries the reporter's user id; a drift incident's samples carry the student
+id. "Diagnose the student this is about" opens the tool already pointed at them.
+
+**Honest limits.** Repairs are on-demand, not automatic — a person clicks. Only two repairs exist. The Paystack check needs the
+student to have paid with the email on their account or a reference someone can supply. The rules cover what has already gone wrong;
+a *new* kind of fault is invisible until a rule is written for it — which is the loop: every real incident should end with either a
+fix or a new rule.
+
 ---
 
 ## 6. Failure walk-throughs (rehearse these)
@@ -432,7 +483,7 @@ would never know. With the 50 s deadline it becomes a counted failure; after 5, 
 fast (returning `null`, which callers already handle) and the app falls back or degrades, while
 payments and every other provider are unaffected (separate breakers).
 
-**"I paid and it's still locked."** Open the student's Remote View → the composed verdict lists every
+**"I paid and it's still locked."** Open Mission Control → Diagnose & fix → search the student → **Deep check**: if Paystack holds a payment we never recorded, one confirmed click records it and re-checks. Otherwise, open the student's Remote View → the composed verdict lists every
 reason and what lifts it (perhaps *photo missing*, not payment) → `AccessSnapshot` shows *since when*
 and what their screen last reported. If their browser is acting on stale data, the witness has
 already raised a `stale` drift incident.
