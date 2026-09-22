@@ -15,6 +15,7 @@
  */
 
 import { RoomServiceClient, TrackSource } from "livekit-server-sdk";
+import { isAnnounceIdentity } from "@/lib/live-classroom";
 
 export function roomServiceClient(): RoomServiceClient | null {
   const url = process.env.LIVEKIT_URL;
@@ -64,6 +65,9 @@ export async function muteAllStudents(client: RoomServiceClient, room: string, c
   for (const participant of participants) {
     if (participant.identity === callerIdentity) continue;
     if (isTutorMetadata(participant.metadata)) continue;
+    // An office announcement mid-sentence is not "noise" — "mute everyone" for
+    // a loud room must not double as a way to cut off the school's own message.
+    if (isAnnounceIdentity(participant.identity)) continue;
     const micTrack = participant.tracks.find((track) => track.source === TrackSource.MICROPHONE);
     if (!micTrack || micTrack.muted) continue;
     await client.mutePublishedTrack(room, participant.identity, micTrack.sid, true);

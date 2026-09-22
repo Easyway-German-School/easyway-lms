@@ -230,7 +230,7 @@ export function initialQualityFor(role: RoomRole, preferred: QualityMode): Quali
  * mic but cannot mute the room or end the class. Enforced when the token is
  * minted, not in the UI — a hidden button is not a permission.
  */
-export type RoomRole = "tutor" | "student";
+export type RoomRole = "tutor" | "student" | "admin";
 
 /**
  * SILENT SUPERVISION.
@@ -255,4 +255,37 @@ export function observerIdentity(userId: string): string {
 
 export function isObserverIdentity(identity: string | null | undefined): boolean {
   return typeof identity === "string" && identity.startsWith(OBSERVER_IDENTITY_PREFIX);
+}
+
+/**
+ * ANONYMOUS ANNOUNCEMENT.
+ *
+ * The step up from silent supervision: an office admin who needs to actually
+ * say something to a live class — a message that cannot wait for the lesson to
+ * end — without the class learning which member of staff is speaking. The
+ * token for this is minted `hidden: false` (unlike the observer's), because a
+ * voice with nobody attached to it is worse than an anonymous one: the class
+ * DOES see this participant connect, publish a camera and a microphone, and
+ * disconnect again, on purpose. What they never learn is which person that
+ * was — the token's `name` is a fixed institutional label, never the admin's
+ * own name, and the identity below carries their user id only for the audit
+ * trail and the moderation exemption, never rendered anywhere a student can
+ * see it.
+ *
+ * Namespaced the same way `observerIdentity` is, so the two places that must
+ * agree can both spot one: the route that mints the token, and the
+ * moderation endpoint, which must refuse to let a tutor mute or remove an
+ * announcement mid-sentence.
+ */
+export const ANNOUNCE_IDENTITY_PREFIX = "announce:";
+
+/** The name every anonymous announcement connects under. Never the admin's own. */
+export const ANNOUNCE_DISPLAY_NAME = "The Office";
+
+export function announceIdentity(userId: string): string {
+  return `${ANNOUNCE_IDENTITY_PREFIX}${userId}`;
+}
+
+export function isAnnounceIdentity(identity: string | null | undefined): boolean {
+  return typeof identity === "string" && identity.startsWith(ANNOUNCE_IDENTITY_PREFIX);
 }

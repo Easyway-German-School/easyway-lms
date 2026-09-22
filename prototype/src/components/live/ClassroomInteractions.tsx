@@ -17,6 +17,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import {
   AlertIcon,
+  BroadcastMessageIcon,
   CheckIcon,
   ClockIcon,
   CrossIcon,
@@ -166,6 +167,28 @@ export function FloorBanner({ name, isMe }: { name: string; isMe: boolean }) {
         <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-current" />
       </span>
       {isMe ? "You have the floor — go ahead" : `${name} has the floor`}
+    </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * "The Office is about to speak." Sent the instant an anonymous announcement
+ * connects, before it turns on a camera or microphone — this banner is the
+ * beat that makes it an announcement rather than someone talking over the
+ * lesson. It clears itself; see `OFFICE_NOTICE_TTL_MS` in `useRoomInteractions`.
+ */
+export function OfficeNoticeBanner() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="flex items-center gap-3 rounded-2xl bg-amber-500 px-5 py-3 text-sm font-semibold text-white"
+    >
+      <BroadcastMessageIcon className="h-5 w-5 shrink-0" />
+      The office has something important to say — one moment.
     </motion.div>
   );
 }
