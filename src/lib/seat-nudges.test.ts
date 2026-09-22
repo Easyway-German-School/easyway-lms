@@ -24,6 +24,7 @@ const row = (over: Partial<SeatRow> = {}): SeatRow => ({
   createdAt: "2026-09-05T00:00:00.000Z",
   batch: "October",
   batchLabel: "October 2026",
+  monthKey: "2026-10",
   startsOn: "2026-09-30T23:00:00.000Z",
   daysUntilStart: 12,
   seat: "unpaid",

@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/admin-roles";
 import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 import { BEHIND_TUITION_MIN_DAYS } from "@/lib/finance/receivables";
 import { accessFromStudent } from "@/lib/student-access";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { computeChurnRisk } from "@/lib/student-risk";
 import { deriveSegments } from "@/lib/student-segments";
@@ -304,7 +305,12 @@ export async function GET(
     (payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description),
   );
   const accessInput = { ...student, payments: receivedTuitionPayments };
-  const access = accessFromStudent(accessInput, planSuppressesLock(planStatus?.adherence ?? null));
+  const startDayOverrides = await readIntakeStartDayOverrides(auth.session.user.tenantId ?? null);
+  const access = accessFromStudent(
+    accessInput,
+    planSuppressesLock(planStatus?.adherence ?? null),
+    startDayOverrides,
+  );
 
   const fee = access.tuitionFee;
   const deposit = access.requiredDeposit;

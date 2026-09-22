@@ -1,6 +1,7 @@
 import { DEPOSIT_RATE } from "@/lib/payment";
 import { buildLedger, type LedgerChargeInput } from "@/lib/finance/ledger";
 import { batchLockFloor, resolveUpcomingBatch, withBatchFloor } from "@/lib/batch-reservation";
+import type { IntakeStartDayOverrides } from "@/lib/intake";
 
 /**
  * Who can see what before tuition is paid.
@@ -235,6 +236,7 @@ export function deriveStudentAccess({
   paymentPlanOnTrack,
   batch,
   now = new Date(),
+  startDayOverrides,
 }: {
   totalPaid: number;
   tuitionFee: number;
@@ -273,6 +275,8 @@ export function deriveStudentAccess({
    */
   batch?: string | null;
   now?: Date;
+  /** Months that open off the 1st — see lib/intake.ts. Omitted → every batch opens the 1st, exactly as before. */
+  startDayOverrides?: IntakeStartDayOverrides;
 }): StudentAccess {
   const paid = Math.max(0, Math.round(Number(totalPaid) || 0));
   const fee = Math.max(0, Math.round(Number(tuitionFee) || 0));
@@ -316,12 +320,14 @@ export function deriveStudentAccess({
     registeredAt: toDate(enrolledAt),
     classesStartedAt,
     now,
+    startDayOverrides,
   });
   const batchLocked = upcomingBatch !== null;
   const batchFloor = batchLockFloor(batch, {
     registeredAt: toDate(enrolledAt),
     classesStartedAt,
     now,
+    startDayOverrides,
   });
 
   // The balance lock only exists for a student who is past the deposit gate

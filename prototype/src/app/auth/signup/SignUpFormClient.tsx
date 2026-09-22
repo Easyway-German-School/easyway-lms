@@ -22,6 +22,7 @@ import { TIME_SLOTS, slotLabel } from "@/lib/class-times";
 import { HYBRID_COMBOS, type HybridComboId } from "@/lib/hybrid-combo";
 import { defaultSessionTimes, timeFor, type SessionTimes } from "@/lib/session-times";
 import { OFFERED_LEVELS } from "@/lib/levels";
+import { availableBatchOptions } from "@/lib/intake";
 import {
   defaultSessionSettings,
   isCellEnabled,
@@ -785,23 +786,14 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="batch" className="block text-sm font-semibold text-[var(--muted)]">Batch</label>
+                  <label htmlFor="batch" className="block text-sm font-semibold text-[var(--muted)]">Batch (which month you start)</label>
                   <select id="batch" name="batch" value={batch} onChange={(e) => setBatch(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 bg-[var(--surface-alt)]">
                     <option value="">Select batch</option>
-                    <option>January</option>
-                    <option>February</option>
-                    <option>March</option>
-                    <option>April</option>
-                    <option>May</option>
-                    <option>June</option>
-                    <option>July</option>
-                    <option>August</option>
-                    <option>September</option>
-                    <option>October</option>
-                    <option>November</option>
-                    <option>December</option>
+                    {availableBatchOptions().map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
                   </select>
-                  <p className="mt-2 text-xs text-[var(--muted)]">You can select a future batch — payments for future batches are recorded and your access will be activated when the batch begins.</p>
+                  <p className="mt-2 text-xs text-[var(--muted)]">Only the batches open for new sign-ups are listed, with the year shown so there is no mix-up. You can pick one further out — payments for a future batch are recorded and your access activates the moment it begins.</p>
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-1">

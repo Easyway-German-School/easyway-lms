@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { batchFromAdmission } from "@/lib/batch";
 import { resolveUpcomingBatch, seatStatusFor, type SeatStatus } from "@/lib/batch-reservation";
+import type { IntakeStartDayOverrides } from "@/lib/intake";
 import { accessFromStudent, STUDENT_ACCESS_SELECT } from "@/lib/student-access";
 import { isReceivedPayment, isRegistrationFeePayment } from "@/lib/payment";
 
@@ -37,6 +38,8 @@ export type SeatRow = {
   batch: string;
   /** "October 2026" — the grouping key. */
   batchLabel: string;
+  /** "2026-10" — matches an IntakeStartDayOverrides key. */
+  monthKey: string;
   startsOn: string;
   daysUntilStart: number;
   seat: SeatStatus;
@@ -69,6 +72,8 @@ export async function loadUpcomingBatchRows(
     studentIds?: string[];
     /** Extra fence for the light query — the admin routes' tenant / branch scope. */
     where?: Record<string, unknown>;
+    /** Months that open off the 1st — see lib/intake.ts. Defaults to none (every batch opens the 1st). */
+    startDayOverrides?: IntakeStartDayOverrides;
   } = {},
 ): Promise<SeatRow[]> {
   const now = options.now ?? new Date();
@@ -91,6 +96,7 @@ export async function loadUpcomingBatchRows(
       registeredAt: student.createdAt,
       classesStartedAt: student.classesStartedAt,
       now,
+      startDayOverrides: options.startDayOverrides,
     });
     if (upcoming) waiting.set(student.id, upcoming);
   }
@@ -152,6 +158,7 @@ export async function loadUpcomingBatchRows(
       createdAt: student.createdAt instanceof Date ? student.createdAt.toISOString() : String(student.createdAt),
       batch: upcoming.batch,
       batchLabel: upcoming.monthLabel,
+      monthKey: upcoming.monthKey,
       startsOn: upcoming.startsOn.toISOString(),
       daysUntilStart: upcoming.daysUntilStart,
       seat,
@@ -188,6 +195,7 @@ export async function loadUpcomingBatchRows(
 
 export type IntakeSummary = {
   batchLabel: string;
+  monthKey: string;
   startsOn: string;
   daysUntilStart: number;
   total: number;
@@ -205,6 +213,7 @@ export function summariseIntakes(rows: SeatRow[]): IntakeSummary[] {
       map.get(row.batchLabel) ??
       ({
         batchLabel: row.batchLabel,
+        monthKey: row.monthKey,
         startsOn: row.startsOn,
         daysUntilStart: row.daysUntilStart,
         total: 0,

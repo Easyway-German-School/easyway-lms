@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { batchFromAdmission, monthNameToIndex, MONTH_NAMES } from "@/lib/batch";
 import { resolveUpcomingBatch } from "@/lib/batch-reservation";
 import { loadUpcomingBatchRows, summariseIntakes } from "@/lib/batch-reservation-server";
+import { readIntakeStartDayOverrides, writeIntakeStartDayOverride } from "@/lib/intake-server";
 import { sendManualSeatNudges } from "@/lib/seat-nudges";
 import { rankNameMatches } from "@/lib/student-name-match";
 
@@ -17,6 +18,9 @@ import { rankNameMatches } from "@/lib/student-name-match";
  *   POST {action:"assign"}    move learners into an intake month (their portal
  *                             then waits behind the countdown on its own)
  *   POST {action:"nudge"}     Becca messages the chosen learners now
+ *   POST {action:"setStartDay", monthKey:"2026-10", day:5|null}
+ *                             move that month's opening off the 1st (or, with
+ *                             day:null, back onto it) — see lib/intake.ts
  *
  * Assigning only rewrites `admission.batch`, the same single JSON key the
  * cohort console rewrites, so it is reversible from /admin/cohorts and lands in
@@ -53,7 +57,8 @@ export async function GET() {
   if (!gate.ok) return gate.response;
 
   try {
-    const rows = await loadUpcomingBatchRows({ where: fence(gate) });
+    const startDayOverrides = await readIntakeStartDayOverrides(gate.session.user.tenantId ?? null);
+    const rows = await loadUpcomingBatchRows({ where: fence(gate), startDayOverrides });
 
     // When Becca last messaged each learner about their seat.
     const nudges = rows.length
@@ -135,12 +140,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ results });
     }
 
+    if (action === "setStartDay") {
+      const tenantId = gate.session.user.tenantId;
+      if (!tenantId) return NextResponse.json({ error: "No school in context" }, { status: 400 });
+
+      const monthKey = typeof body.monthKey === "string" ? body.monthKey : "";
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
+        return NextResponse.json({ error: "monthKey must look like 2026-10" }, { status: 400 });
+      }
+      const rawDay = body.day;
+      const day = rawDay === null ? null : Number(rawDay);
+      if (day !== null && (!Number.isInteger(day) || day < 1 || day > 28)) {
+        return NextResponse.json({ error: "Give a day between 1 and 28, or null to reset to the 1st" }, { status: 400 });
+      }
+
+      const overrides = await writeIntakeStartDayOverride(tenantId, monthKey, day);
+      return NextResponse.json({ ok: true, startDayOverrides: overrides });
+    }
+
     if (action === "assign") {
       const ids = idList(body.studentIds, MAX_ASSIGN);
       const monthIndex = monthNameToIndex(typeof body.month === "string" ? body.month : "");
       if (ids.length === 0) return NextResponse.json({ error: "Choose at least one learner" }, { status: 400 });
       if (monthIndex === null) return NextResponse.json({ error: "Give a real month name" }, { status: 400 });
       const month = MONTH_NAMES[monthIndex];
+      const startDayOverrides = await readIntakeStartDayOverrides(gate.session.user.tenantId ?? null);
 
       const targets = await prisma.student.findMany({
         where: { id: { in: ids }, ...fence(gate) },
@@ -165,6 +189,7 @@ export async function POST(request: Request) {
         const upcoming = resolveUpcomingBatch(month, {
           registeredAt: student.createdAt,
           classesStartedAt: student.classesStartedAt,
+          startDayOverrides,
         });
         if (upcoming) locked += 1;
         else notLocked.push(student.user?.name ?? student.id);

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { loadUpcomingBatchRows } from "@/lib/batch-reservation-server";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 
 /**
  * The waiting-room screen's own numbers: which seat is mine, how many seats in
@@ -21,11 +22,12 @@ export async function GET() {
 
   const student = await prisma.student.findUnique({
     where: { userId: session.user.id as string },
-    select: { id: true, user: { select: { name: true } } },
+    select: { id: true, tenantId: true, user: { select: { name: true } } },
   });
   if (!student) return NextResponse.json({ error: "Student not found" }, { status: 404 });
 
-  const rows = await loadUpcomingBatchRows();
+  const startDayOverrides = await readIntakeStartDayOverrides(student.tenantId);
+  const rows = await loadUpcomingBatchRows({ startDayOverrides });
   const mine = rows.find((row) => row.studentId === student.id);
   if (!mine) return NextResponse.json({ waiting: false });
 

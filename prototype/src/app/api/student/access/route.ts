@@ -7,6 +7,7 @@ import { hasProfilePhoto } from "@/lib/access";
 import { privateClassPriceForLevel } from "@/lib/payment";
 import { portalVerdict } from "@/lib/portal-verdict";
 import { accessFromStudent, STUDENT_ACCESS_SELECT } from "@/lib/student-access";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { notify, KIND } from "@/lib/notify";
 
@@ -41,8 +42,11 @@ export async function GET() {
   }
 
   // An on-track tuition payment plan holds the balance lock back, like grace.
-  const planStatus = await planStatusForStudent(student.id);
-  const access = accessFromStudent(student, planSuppressesLock(planStatus?.adherence ?? null));
+  const [planStatus, startDayOverrides] = await Promise.all([
+    planStatusForStudent(student.id),
+    readIntakeStartDayOverrides(student.tenantId),
+  ]);
+  const access = accessFromStudent(student, planSuppressesLock(planStatus?.adherence ?? null), startDayOverrides);
   const hasPhoto = hasProfilePhoto(student.admission);
 
   /**

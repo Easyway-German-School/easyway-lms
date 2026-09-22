@@ -34,6 +34,7 @@
 
 import { MONTH_NAMES, resolveBatchAbsolute } from "@/lib/batch";
 import { instantToZonedParts, zonedTimeToInstant } from "@/lib/school-time";
+import { intakeMonthKey, type IntakeStartDayOverrides } from "@/lib/intake";
 
 /**
  * How far ahead of today a bare month name may sit and still count as a
@@ -92,19 +93,29 @@ export type BatchStart = {
   monthLabel: string;
   monthIndex: number;
   year: number;
+  /** "2026-10" — matches an IntakeStartDayOverrides key. */
+  monthKey: string;
   /** The first instant of the first teaching day, in the school's own timezone. */
   startsOn: Date;
-  /** "2026-10-01" */
+  /** "2026-10-05" once an override moves it off the 1st. */
   startsOnKey: string;
 };
 
 /**
  * When a student's batch starts — whether or not that is still ahead of today.
  * Null when the label is unusable or is a stale bare month (guard 1 above).
+ *
+ * Defaults every batch to the 1st of the month. Pass `startDayOverrides` (see
+ * lib/intake.ts) to move specific months — a school-wide decision, not a
+ * per-student one, so it is the caller's job to fetch it once and hand it in.
  */
 export function resolveBatchStart(
   batch: unknown,
-  { registeredAt, now = new Date() }: { registeredAt?: unknown; now?: Date } = {},
+  {
+    registeredAt,
+    now = new Date(),
+    startDayOverrides,
+  }: { registeredAt?: unknown; now?: Date; startDayOverrides?: IntakeStartDayOverrides } = {},
 ): BatchStart | null {
   const parsed = parseBatchLabel(batch);
   if (!parsed) return null;
@@ -125,12 +136,16 @@ export function resolveBatchStart(
 
   const year = Math.floor(absolute / 12);
   const monthIndex = absolute % 12;
-  const startsOnKey = `${year}-${String(monthIndex + 1).padStart(2, "0")}-01`;
+  const monthKey = intakeMonthKey(year, monthIndex);
+  const overrideDay = startDayOverrides?.[monthKey];
+  const startDay = overrideDay && overrideDay >= 1 && overrideDay <= 28 ? overrideDay : 1;
+  const startsOnKey = `${monthKey}-${String(startDay).padStart(2, "0")}`;
   return {
     batch: MONTH_NAMES[monthIndex],
     monthLabel: `${MONTH_NAMES[monthIndex]} ${year}`,
     monthIndex,
     year,
+    monthKey,
     startsOn: zonedTimeToInstant(startsOnKey, "00:00"),
     startsOnKey,
   };
@@ -151,13 +166,19 @@ export function resolveUpcomingBatch(
     registeredAt,
     classesStartedAt,
     now = new Date(),
-  }: { registeredAt?: unknown; classesStartedAt?: unknown; now?: Date } = {},
+    startDayOverrides,
+  }: {
+    registeredAt?: unknown;
+    classesStartedAt?: unknown;
+    now?: Date;
+    startDayOverrides?: IntakeStartDayOverrides;
+  } = {},
 ): UpcomingBatch | null {
   // Guard 2: a confirmed first day that has already passed beats the label.
   const confirmed = validDate(classesStartedAt);
   if (confirmed && confirmed.getTime() <= now.getTime()) return null;
 
-  const start = resolveBatchStart(batch, { registeredAt, now });
+  const start = resolveBatchStart(batch, { registeredAt, now, startDayOverrides });
   if (!start || start.startsOn.getTime() <= now.getTime()) return null;
 
   return {
@@ -181,10 +202,20 @@ export function resolveUpcomingBatch(
  */
 export function batchLockFloor(
   batch: unknown,
-  { registeredAt, classesStartedAt, now = new Date() }: { registeredAt?: unknown; classesStartedAt?: unknown; now?: Date } = {},
+  {
+    registeredAt,
+    classesStartedAt,
+    now = new Date(),
+    startDayOverrides,
+  }: {
+    registeredAt?: unknown;
+    classesStartedAt?: unknown;
+    now?: Date;
+    startDayOverrides?: IntakeStartDayOverrides;
+  } = {},
 ): Date | null {
   if (validDate(classesStartedAt)) return null;
-  return resolveBatchStart(batch, { registeredAt, now })?.startsOn ?? null;
+  return resolveBatchStart(batch, { registeredAt, now, startDayOverrides })?.startsOn ?? null;
 }
 
 /** The later of an anchor date and the batch floor. */

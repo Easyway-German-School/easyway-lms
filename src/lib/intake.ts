@@ -80,3 +80,62 @@ export function parseCurrentIntake(
 export function currentIntakeLabel(intake: CurrentIntake): string {
   return `${intake.month} ${intake.year}`;
 }
+
+export type BatchOption = { value: string; label: string };
+
+/**
+ * The batch months a NEW signup may choose today: this calendar month plus the
+ * next `count` — never a past one. `value` stays a bare month name (what
+ * `admission.batch` has always stored, and what `resolveBatchAbsolute`
+ * resolves forward from the registration date), while `label` spells out the
+ * year so the student is never guessing which "July" they are picking.
+ *
+ * Twelve options (this month + 11) is deliberate: one full year, so no month
+ * name repeats and `value` alone is never ambiguous.
+ */
+export function availableBatchOptions(now: Date = new Date(), count = 11): BatchOption[] {
+  const options: BatchOption[] = [];
+  for (let i = 0; i <= count; i++) {
+    const monthIndex = (now.getMonth() + i) % 12;
+    const year = now.getFullYear() + Math.floor((now.getMonth() + i) / 12);
+    options.push({ value: MONTH_NAMES[monthIndex], label: `${MONTH_NAMES[monthIndex]} ${year}` });
+  }
+  return options;
+}
+
+/**
+ * A specific batch does not always open on the 1st — a public holiday, a venue
+ * clash, an office decision can push the first teaching day a few days out.
+ * `resolveBatchStart` (lib/batch-reservation.ts) defaults every batch to the
+ * 1st; this is the override list on top of that, one entry per calendar month
+ * that opens on a different day. Keyed "YYYY-MM" so October 2026 and a future
+ * October 2027 never collide.
+ */
+export const INTAKE_START_DAYS_KEY = "intake.startDays";
+
+/** "YYYY-MM" -> the day of that month (1-28) the batch actually opens. */
+export type IntakeStartDayOverrides = Record<string, number>;
+
+const MONTH_KEY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function isValidStartDay(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 28;
+}
+
+/** "2026-10" for October 2026 — the same key `resolveBatchStart` looks up. */
+export function intakeMonthKey(year: number, monthIndex: number): string {
+  return `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Reading from storage must never throw — a hand-edited row degrades to "every
+ * batch opens on the 1st", not a broken countdown or a 500 on the sign-up form.
+ */
+export function parseIntakeStartDayOverrides(value: unknown): IntakeStartDayOverrides {
+  if (!value || typeof value !== "object") return {};
+  const out: IntakeStartDayOverrides = {};
+  for (const [key, day] of Object.entries(value as Record<string, unknown>)) {
+    if (MONTH_KEY_PATTERN.test(key) && isValidStartDay(day)) out[key] = day;
+  }
+  return out;
+}

@@ -85,6 +85,39 @@ describe("resolveUpcomingBatch", () => {
     expect(resolveUpcomingBatch(null, { now: NOW })).toBeNull();
     expect(resolveUpcomingBatch("", { now: NOW })).toBeNull();
   });
+
+  it("moves the opening day when a start-day override is given for that month", () => {
+    const upcoming = resolveUpcomingBatch("October", {
+      registeredAt: new Date("2026-08-04T10:00:00Z"),
+      now: NOW,
+      startDayOverrides: { "2026-10": 5 },
+    });
+    // 00:00 WAT on 5 Oct is 23:00 UTC on 4 Oct.
+    expect(upcoming?.startsOn.toISOString()).toBe("2026-10-04T23:00:00.000Z");
+    expect(upcoming?.monthKey).toBe("2026-10");
+    expect(upcoming?.daysUntilStart).toBe(16);
+  });
+
+  it("ignores an override for a different month", () => {
+    const upcoming = resolveUpcomingBatch("October", {
+      registeredAt: new Date("2026-08-04T10:00:00Z"),
+      now: NOW,
+      startDayOverrides: { "2026-11": 5 },
+    });
+    expect(upcoming?.startsOn.toISOString()).toBe("2026-09-30T23:00:00.000Z");
+  });
+
+  it("still opens the portal once the overridden day has come, not the 1st", () => {
+    const overrides = { "2026-10": 5 };
+    const stillWaiting = new Date("2026-10-04T23:59:00+01:00");
+    expect(
+      resolveUpcomingBatch("October", { registeredAt: new Date("2026-09-05T00:00:00Z"), now: stillWaiting, startDayOverrides: overrides }),
+    ).not.toBeNull();
+    const opened = new Date("2026-10-05T00:00:01+01:00");
+    expect(
+      resolveUpcomingBatch("October", { registeredAt: new Date("2026-09-05T00:00:00Z"), now: opened, startDayOverrides: overrides }),
+    ).toBeNull();
+  });
 });
 
 describe("batchLockFloor / withBatchFloor", () => {

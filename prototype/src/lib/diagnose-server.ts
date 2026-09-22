@@ -152,7 +152,9 @@ export async function loadFacts(studentId: string, options: LoadOptions = {}): P
     select: {
       id: true,
       studentCode: true,
-      tenantId: true,
+      // tenantId comes off STUDENT_ACCESS_SELECT now (it needs it too, for
+      // the intake-start-day override) — declaring it again here duplicates
+      // the key.
       user: { select: { id: true, email: true, name: true, tenantId: true } },
       ...STUDENT_ACCESS_SELECT,
     },
