@@ -61,11 +61,21 @@ export async function GET() {
   let partialDone = 0;
   let partialTotal = 0;
   const failures: Array<{
+    id: string;
     title: string;
     level: string | null;
     isPrivate: boolean;
     status: string;
     error: string | null;
+    when: string;
+  }> = [];
+  /** The most recently finished recaps, so the office can open one and see what it actually says. */
+  const recentReady: Array<{
+    id: string;
+    title: string;
+    level: string | null;
+    isPrivate: boolean;
+    outline: boolean;
     when: string;
   }> = [];
 
@@ -76,7 +86,20 @@ export async function GET() {
       continue;
     }
     byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
-    if (t.status === "ready" && t.provider === EXTRACTIVE_PROVIDER) outlines += 1;
+    if (t.status === "ready") {
+      const isOutline = t.provider === EXTRACTIVE_PROVIDER;
+      if (isOutline) outlines += 1;
+      if (recentReady.length < 8) {
+        recentReady.push({
+          id: rec.id,
+          title: rec.material?.title ?? "Untitled class",
+          level: rec.material?.level ?? null,
+          isPrivate: Boolean(rec.privateClassId),
+          outline: isOutline,
+          when: (t.updatedAt ?? rec.startedAt).toISOString(),
+        });
+      }
+    }
     if (t.status === "partial") {
       partialCount += 1;
       const total = rec.durationSeconds ?? 0;
@@ -90,6 +113,7 @@ export async function GET() {
       failures.length < 8
     ) {
       failures.push({
+        id: rec.id,
         title: rec.material?.title ?? "Untitled class",
         level: rec.material?.level ?? null,
         isPrivate: Boolean(rec.privateClassId),
@@ -152,6 +176,7 @@ export async function GET() {
     noSpeech: byStatus.none ?? 0,
     byStatus,
     failures,
+    recentReady,
     // Everything still waiting for the queue — what the background run is working down.
     backlog: await (await import("@/lib/class-notes-runner")).countBacklog(),
     // Groq's free-tier quotas known to be out right now, and roughly when they

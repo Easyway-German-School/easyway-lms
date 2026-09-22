@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import ClassRecap, { type ClassRecapData } from "@/components/notes/ClassRecap";
 
 /**
  * A compact read-out of the class-notes / transcript pipeline, so "there is
@@ -34,11 +36,21 @@ type Health = {
   skippedTooLarge: number;
   noSpeech: number;
   failures: Array<{
+    id: string;
     title: string;
     level: string | null;
     isPrivate: boolean;
     status: string;
     error: string | null;
+    when: string;
+  }>;
+  /** The most recently finished recaps — click one to see what it actually says. */
+  recentReady?: Array<{
+    id: string;
+    title: string;
+    level: string | null;
+    isPrivate: boolean;
+    outline: boolean;
     when: string;
   }>;
   documents?: {
@@ -61,7 +73,129 @@ const STATUS_LABEL: Record<string, string> = {
   skipped_too_large: "Too large",
   none: "No speech",
   partial: "Slow — resuming",
+  ready: "Ready",
 };
+
+type NoteDetail = {
+  id: string;
+  title: string;
+  level: string | null;
+  startedAt: string;
+  durationSeconds: number | null;
+  isPrivate: boolean;
+  status: string;
+  error: string | null;
+  provider: string | null;
+  generatedAt: string | null;
+  transcribedUntil: number | null;
+  recap: ClassRecapData;
+  transcriptText: string | null;
+  segmentCount: number;
+};
+
+/**
+ * Opens one class's note as it would actually render for a student (reusing
+ * `ClassRecap`, the exact same component `/notes/class/[id]` uses) plus the raw
+ * transcript underneath — so "why does this note look thin" or "is this even
+ * working" has a real answer instead of a status word.
+ */
+function NotePreview({ id, onClose }: { id: string; onClose: () => void }) {
+  const [detail, setDetail] = useState<NoteDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showTranscript, setShowTranscript] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDetail(null);
+    setError(null);
+    fetch(`/api/admin/class-notes/${id}`, { cache: "no-store" })
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+        if (!cancelled) setDetail(body as NoteDetail);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Could not load this note.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[70] grid place-items-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.5)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--accent)]">Class note preview</p>
+            {detail ? <h2 className="mt-1 text-lg font-bold text-[var(--foreground)]">{detail.title}</h2> : null}
+            {detail ? (
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                {[
+                  detail.level,
+                  detail.isPrivate ? "private lesson" : null,
+                  new Date(detail.startedAt).toLocaleDateString(),
+                  STATUS_LABEL[detail.status] ?? detail.status,
+                  detail.provider ? `via ${detail.provider}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-[var(--border)] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="mt-5">
+          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+          {!error && !detail ? <p className="text-sm text-[var(--muted)]">Loading…</p> : null}
+          {detail && !detail.recap.summary && detail.status !== "ready" ? (
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4 text-sm text-[var(--muted)]">
+              {detail.status === "partial"
+                ? `Part-way through — ${detail.durationSeconds && detail.transcribedUntil ? Math.round((Math.min(detail.transcribedUntil, detail.durationSeconds) / detail.durationSeconds) * 100) : 0}% of the audio transcribed so far. Whatever it has picked up is below.`
+                : "No summary yet for this class."}
+              {detail.error ? <p className="mt-2 break-words font-mono text-[11px]">{detail.error}</p> : null}
+            </div>
+          ) : null}
+          {detail?.recap.summary || (detail?.recap.keyPoints?.length ?? 0) > 0 ? <ClassRecap data={detail!.recap} /> : null}
+
+          {detail && (detail.transcriptText || detail.segmentCount > 0) ? (
+            <div className="mt-5 border-t border-[var(--border)] pt-4">
+              <button
+                type="button"
+                onClick={() => setShowTranscript((v) => !v)}
+                className="text-xs font-semibold text-[var(--accent)]"
+              >
+                {showTranscript ? "Hide full transcript" : "Show full transcript"}
+              </button>
+              {showTranscript ? (
+                <p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-line rounded-2xl bg-[var(--surface-alt)] p-4 text-xs leading-6 text-[var(--muted)]">
+                  {detail.transcriptText || "Nothing transcribed yet."}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 export default function ClassNotesHealth() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -70,6 +204,7 @@ export default function ClassNotesHealth() {
 
   const [starting, setStarting] = useState(false);
   const [startNote, setStartNote] = useState<string | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -248,22 +383,59 @@ export default function ClassNotesHealth() {
 
       {open && health.failures.length > 0 ? (
         <ul className="mt-3 space-y-1.5">
-          {health.failures.map((f, i) => (
-            <li key={i} className="rounded-xl border border-rose-200 bg-rose-50/50 px-3 py-2 text-xs">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold text-[var(--foreground)]">{f.title}</span>
-                {f.level ? <span className="text-[var(--muted)]">{f.level}</span> : null}
-                {f.isPrivate ? <span className="text-[var(--muted)]">· private</span> : null}
-                <span className="rounded-full bg-rose-100 px-2 py-0.5 font-semibold text-rose-700">
-                  {STATUS_LABEL[f.status] ?? f.status}
-                </span>
-                <span className="ml-auto text-[var(--muted)]">{new Date(f.when).toLocaleDateString()}</span>
-              </div>
-              {f.error ? <p className="mt-1 break-words text-[var(--muted)]">{f.error}</p> : null}
+          {health.failures.map((f) => (
+            <li key={f.id}>
+              <button
+                type="button"
+                onClick={() => setPreviewId(f.id)}
+                className="w-full rounded-xl border border-rose-200 bg-rose-50/50 px-3 py-2 text-left text-xs transition hover:border-rose-300"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-[var(--foreground)]">{f.title}</span>
+                  {f.level ? <span className="text-[var(--muted)]">{f.level}</span> : null}
+                  {f.isPrivate ? <span className="text-[var(--muted)]">· private</span> : null}
+                  <span className="rounded-full bg-rose-100 px-2 py-0.5 font-semibold text-rose-700">
+                    {STATUS_LABEL[f.status] ?? f.status}
+                  </span>
+                  <span className="ml-auto text-[var(--muted)]">{new Date(f.when).toLocaleDateString()}</span>
+                </div>
+                {f.error ? <p className="mt-1 break-words text-[var(--muted)]">{f.error}</p> : null}
+              </button>
             </li>
           ))}
         </ul>
       ) : null}
+
+      {(health.recentReady?.length ?? 0) > 0 ? (
+        <div className="mt-3">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+            Recent notes — tap one to see it
+          </p>
+          <ul className="space-y-1.5">
+            {health.recentReady!.map((r) => (
+              <li key={r.id}>
+                <button
+                  type="button"
+                  onClick={() => setPreviewId(r.id)}
+                  className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-left text-xs transition hover:border-[var(--accent)]"
+                >
+                  <span className="font-semibold text-[var(--foreground)]">{r.title}</span>
+                  {r.level ? <span className="text-[var(--muted)]">{r.level}</span> : null}
+                  {r.isPrivate ? <span className="text-[var(--muted)]">· private</span> : null}
+                  {r.outline ? (
+                    <span className="rounded-full bg-[var(--surface)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted)]">
+                      auto-outline
+                    </span>
+                  ) : null}
+                  <span className="ml-auto text-[var(--muted)]">{new Date(r.when).toLocaleDateString()}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {previewId ? <NotePreview id={previewId} onClose={() => setPreviewId(null)} /> : null}
     </div>
   );
 }
