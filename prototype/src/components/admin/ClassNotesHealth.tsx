@@ -182,11 +182,18 @@ function NotePreview({ id, onClose }: { id: string; onClose: () => void }) {
                 className="text-xs font-semibold text-[var(--accent)]"
               >
                 {showTranscript ? "Hide full transcript" : "Show full transcript"}
+                {detail.transcriptText ? ` (${detail.transcriptText.split(/\s+/).filter(Boolean).length} words)` : ""}
               </button>
               {showTranscript ? (
-                <p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-line rounded-2xl bg-[var(--surface-alt)] p-4 text-xs leading-6 text-[var(--muted)]">
-                  {detail.transcriptText || "Nothing transcribed yet."}
-                </p>
+                <div className="relative mt-2">
+                  <p className="max-h-96 overflow-y-auto whitespace-pre-line rounded-2xl bg-[var(--surface-alt)] p-4 text-xs leading-6 text-[var(--muted)]">
+                    {detail.transcriptText || "Nothing transcribed yet."}
+                  </p>
+                  {/* A scroll box this dark can look like the text just stops — this makes clear it doesn't. */}
+                  <p className="pointer-events-none absolute inset-x-0 bottom-0 rounded-b-2xl bg-gradient-to-t from-[var(--surface-alt)] to-transparent pb-1 pt-4 text-center text-[10px] font-medium text-[var(--muted)]">
+                    scroll for more ↓
+                  </p>
+                </div>
               ) : null}
             </div>
           ) : null}

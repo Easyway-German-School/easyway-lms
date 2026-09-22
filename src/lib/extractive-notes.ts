@@ -103,6 +103,40 @@ function scoreSentence(sentence: string): number {
   return score;
 }
 
+/** Lowercase, punctuation and whitespace stripped — for spotting the SAME thing said twice, not just typed twice. */
+function normalize(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Drop every later occurrence of a sentence (or a near-identical one — two
+ * sentences that share almost every word, allowing for "um", a restart, a
+ * mis-heard word) that already appears earlier in `rows`, keeping the FIRST.
+ *
+ * A tutor repeating a question while waiting for an answer, or Whisper
+ * stuttering the same clause twice, used to score identically each time and
+ * could fill half the key points with one line said four different ways —
+ * five real teaching points crowded out by one line, which reads as
+ * carelessness rather than a floor doing its honest best.
+ */
+function dedupeByWording<T extends { sentence: string }>(rows: T[]): T[] {
+  const seen: string[][] = []; // each entry is a normalized sentence's word list, kept for the overlap check
+  const kept: T[] = [];
+  for (const row of rows) {
+    const here = normalize(row.sentence).split(" ").filter(Boolean);
+    if (here.length === 0) continue;
+    const hereSet = new Set(here);
+    const isDuplicate = seen.some((words) => {
+      const shared = words.filter((word) => hereSet.has(word)).length;
+      return shared / Math.max(words.length, here.length) >= 0.75;
+    });
+    if (isDuplicate) continue;
+    seen.push(here);
+    kept.push(row);
+  }
+  return kept;
+}
+
 function tidy(sentence: string): string {
   const clean = sentence.replace(/\s+/g, " ").trim();
   if (clean.length <= MAX_SENTENCE_CHARS) return clean;
@@ -187,7 +221,11 @@ export function buildExtractiveNotes(transcriptText: string): ExtractiveNotes | 
   const scored = sentences.map((sentence, index) => ({ sentence, index, score: scoreSentence(sentence) }));
 
   // Best first; ties go to whichever was said earlier so the result is stable.
-  const ranked = scored.filter((row) => row.score > 0).sort((a, b) => b.score - a.score || a.index - b.index);
+  // Deduped by wording (not just exact index): the same line said, or mis-heard, twice
+  // must not fill two of the five key points on its own — see dedupeByWording.
+  const ranked = dedupeByWording(
+    scored.filter((row) => row.score > 0).sort((a, b) => b.score - a.score || a.index - b.index),
+  );
   if (ranked.length === 0) return null;
 
   const chronological = (rows: typeof ranked) => [...rows].sort((a, b) => a.index - b.index);
@@ -196,8 +234,7 @@ export function buildExtractiveNotes(transcriptText: string): ExtractiveNotes | 
   const summaryIndexes = new Set(summaryRows.map((row) => row.index));
   const keyRows = ranked.filter((row) => !summaryIndexes.has(row.index)).slice(0, KEY_POINTS);
 
-  const actionItems = scored
-    .filter((row) => row.score > -10 && ACTION_CUE.test(row.sentence))
+  const actionItems = dedupeByWording(scored.filter((row) => row.score > -10 && ACTION_CUE.test(row.sentence)))
     .slice(0, MAX_ACTION_ITEMS)
     .map((row) => tidy(row.sentence));
 
