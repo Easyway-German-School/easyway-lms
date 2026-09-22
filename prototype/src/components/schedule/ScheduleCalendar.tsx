@@ -335,10 +335,16 @@ function HoverDot({ tooltip, children }: { tooltip?: React.ReactNode; children: 
       {children}
       {pos &&
         createPortal(
+          // Fixed dark-on-light chip, NOT theme tokens: `--background` is a
+          // multi-layer gradient (invalid as a `color` value — silently
+          // dropped, leaving default/inherited text), and `--foreground`
+          // flips between dark and light depending which of the 3 themes is
+          // active, so neither pairs safely as a guaranteed-legible surface
+          // here. A portal target is also outside any local theme scoping.
           <div
             role="tooltip"
             style={{ position: "fixed", top: pos.top - 8, left: pos.left, transform: "translate(-50%, -100%)" }}
-            className="pointer-events-none z-50 w-max max-w-[220px] rounded-lg bg-[var(--foreground)] px-2.5 py-1.5 text-xs font-medium leading-snug text-[var(--background)] shadow-lg"
+            className="pointer-events-none z-50 w-max max-w-[220px] rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-medium leading-snug text-white shadow-lg"
           >
             {tooltip}
           </div>,
