@@ -235,6 +235,18 @@ async function callGroq(prompt: string, maxTokens: number): Promise<string | nul
   if (!apiKey) return null;
 
   /**
+   * The DAILY quota (tokens per day, per model) is a different animal from the
+   * per-minute one this function already paces around: it is account-wide, it
+   * can only be learned by actually being refused, and once it is gone it stays
+   * gone for a real stretch (Groq: "please try again in 18m25s", not 8s). A
+   * durable, cross-instance flag (see lib/ai-cooldown.ts) is what stops every
+   * fresh function — the self-kicking notes runner chief among them — from
+   * re-discovering that refusal one wasted request at a time.
+   */
+  const { groqCoolingDown, markGroqCooldown, parseGroqRetrySeconds } = await import("@/lib/ai-cooldown");
+  if (await groqCoolingDown("groq-chat")) return null;
+
+  /**
    * The free tier's real ceiling is tokens PER MINUTE, per model — 8,000 for
    * both models below, input and requested output together (confirmed against
    * the account's own `x-ratelimit-limit-tokens` header). Two consecutive
@@ -268,6 +280,11 @@ async function callGroq(prompt: string, maxTokens: number): Promise<string | nul
         const detail = await response.text().catch(() => "");
         console.error("Groq API error:", model, response.status, detail.slice(0, 300));
         if (response.status === 429) {
+          // Groq's own message names the real wait ("please try again in 13m27s") for
+          // an hourly/daily cap; the header is the short, genuine per-minute case. Both
+          // routes exist because neither alone is honest about both kinds of limit.
+          const fromMessage = parseGroqRetrySeconds(detail);
+          if (fromMessage) void markGroqCooldown("groq-chat", fromMessage);
           const seconds = Number(response.headers.get("retry-after"));
           return { text: null, retryAfterMs: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 8000 };
         }

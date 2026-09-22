@@ -8,6 +8,7 @@ const prisma = {
 };
 const processTranscriptionQueue = vi.fn();
 const processMaterialQueue = vi.fn();
+const groqCooldownUntil = vi.fn(async (_kind: string) => 0); // 0 = not cooling down, the default in every test unless overridden
 
 vi.mock("@/lib/prisma", () => ({ prisma }));
 vi.mock("@/lib/tenant/context", () => ({ runUnscoped: (_reason: string, fn: () => Promise<unknown>) => fn() }));
@@ -17,6 +18,7 @@ vi.mock("@/lib/class-transcription", () => ({
   transcriptionBacklogWhere: () => ({}),
 }));
 vi.mock("@/lib/material-ai", () => ({ processMaterialQueue }));
+vi.mock("@/lib/ai-cooldown", () => ({ groqCooldownUntil }));
 
 // The first import pulls in Prisma's real error class; give a cold, busy machine room.
 vi.setConfig({ testTimeout: 30_000 });
@@ -30,6 +32,8 @@ describe("runClassNotes", () => {
     aiCache.create.mockResolvedValue({});
     aiCache.updateMany.mockResolvedValue({ count: 1 });
     processMaterialQueue.mockResolvedValue({ attempted: 0, ready: 0, skipped: 0 });
+    groqCooldownUntil.mockReset();
+    groqCooldownUntil.mockResolvedValue(0);
   });
 
   it("works recordings one at a time until the queue is empty, then releases the lease", async () => {
@@ -111,6 +115,52 @@ describe("runClassNotes", () => {
     // The steal is conditional on the lease being older than the run could last.
     const steal = aiCache.updateMany.mock.calls[0][0];
     expect(steal.where.updatedAt.lt).toBeInstanceOf(Date);
+  });
+
+  it("skips recordings entirely while Whisper's free-tier quota is out — there is no sibling model to fall back to", async () => {
+    const until = Date.now() + 5 * 60_000;
+    groqCooldownUntil.mockImplementation(async (kind: string) => (kind === "groq-asr" ? until : 0));
+    processMaterialQueue.mockResolvedValueOnce({ attempted: 1, ready: 1, skipped: 0 }).mockResolvedValue({ attempted: 0, ready: 0, skipped: 0 });
+
+    const { runClassNotes } = await import("./class-notes-runner");
+    const summary = await runClassNotes({ budgetMs: 240_000 });
+
+    expect(processTranscriptionQueue).not.toHaveBeenCalled();
+    expect(summary.coolingDown.asrUntil).toBe(until);
+    // Handouts still get worked — the chat models have a fallback ASR does not.
+    expect(processMaterialQueue).toHaveBeenCalled();
+    expect(summary.documents.ready).toBe(1);
+  });
+
+  it("skips handouts while the chat models' quota is out, but still works recordings", async () => {
+    const until = Date.now() + 5 * 60_000;
+    groqCooldownUntil.mockImplementation(async (kind: string) => (kind === "groq-chat" ? until : 0));
+    processTranscriptionQueue
+      .mockResolvedValueOnce({ attempted: 1, created: 1, failed: 0, partial: 0 })
+      .mockResolvedValue({ attempted: 0, created: 0, failed: 0, partial: 0 });
+
+    const { runClassNotes } = await import("./class-notes-runner");
+    const summary = await runClassNotes({ budgetMs: 240_000 });
+
+    expect(processMaterialQueue).not.toHaveBeenCalled();
+    expect(summary.coolingDown.chatUntil).toBe(until);
+    expect(summary.recordings.created).toBe(1);
+  });
+
+  it("notices a quota going out mid-run and stops trying more recordings against the same wall", async () => {
+    let cooling = false;
+    groqCooldownUntil.mockImplementation(async (kind: string) => (kind === "groq-asr" && cooling ? Date.now() + 60_000 : 0));
+    processTranscriptionQueue.mockImplementation(async () => {
+      cooling = true; // the first attempt is what discovers the 429 and marks the flag
+      return { attempted: 1, created: 0, failed: 1, partial: 0 };
+    });
+
+    const { runClassNotes } = await import("./class-notes-runner");
+    await runClassNotes({ budgetMs: 240_000 });
+
+    // One attempt — not the usual three failed rounds — because the second
+    // check saw the quota was now known to be out and stopped immediately.
+    expect(processTranscriptionQueue).toHaveBeenCalledTimes(1);
   });
 });
 

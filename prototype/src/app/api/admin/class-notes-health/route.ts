@@ -154,6 +154,9 @@ export async function GET() {
     failures,
     // Everything still waiting for the queue — what the background run is working down.
     backlog: await (await import("@/lib/class-notes-runner")).countBacklog(),
+    // Groq's free-tier quotas known to be out right now, and roughly when they
+    // free up — the honest answer to "why has nothing moved in the last hour".
+    coolingDown: await (await import("@/lib/class-notes-runner")).groqCooldownStatus(),
     documents: {
       byState: docsByState,
       ready: docsByState.ready ?? 0,

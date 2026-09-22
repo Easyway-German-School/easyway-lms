@@ -94,9 +94,11 @@ export default function ClassNotesPanel({ materialId, onSeekTo }: { materialId: 
   if (loading) return null; // The video itself is the thing worth showing first; notes fade in quietly.
 
   if (!data || data.status !== "ready" || !data.notes) {
-    // "pending"/"transcribing"/"summarizing" all read as "still coming" to a
-    // student — the distinction only matters to whoever is debugging the queue.
-    const stillGenerating = ["pending", "transcribing", "summarizing"].includes(data?.status ?? "");
+    // "pending"/"transcribing"/"summarizing"/"partial" all read as "still coming"
+    // to a student — the distinction only matters to whoever is debugging the
+    // queue. `partial` is a long class picked back up between runs (see
+    // lib/class-transcription.ts) — still very much on its way, not stalled.
+    const stillGenerating = ["pending", "transcribing", "summarizing", "partial"].includes(data?.status ?? "");
     if (!stillGenerating) return null;
     return (
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-[var(--muted)]">

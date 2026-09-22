@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getFile, signedGetUrl } from "@/lib/storage";
-import { transcribeAudio, type TranscriptSegment } from "@/lib/transcription";
+import { transcribeAudio, type TranscriptSegment, type TranscriptionResult } from "@/lib/transcription";
 import { extractAudioForAsr, extractAudioForAsrFromUrl } from "@/lib/audio-extract";
 import { callModel, activeModelName, aiTextAvailable, promptCharBudget } from "@/lib/ai";
 import { buildExtractiveNotes, condenseSegments } from "@/lib/extractive-notes";
@@ -405,7 +405,17 @@ export async function transcribeInSlices(input: {
     }
 
     if (audio.buffer.length >= MIN_AUDIO_BYTES) {
-      const heard = await transcribeAudio(audio.buffer, audio.filename); // null = a silent stretch
+      // Never let a speech-to-text failure (most often Groq's free-tier quota,
+      // which has no sibling model to fall back to) blow past this function and
+      // mislabel the row `failed` — everything transcribed so far is real and
+      // must be kept, parked as `partial`, exactly like a slow read is.
+      let heard: TranscriptionResult | null;
+      try {
+        heard = await transcribeAudio(audio.buffer, audio.filename); // null = a silent stretch
+      } catch (error) {
+        reason = error instanceof Error ? error.message : String(error);
+        break;
+      }
       if (heard) {
         segments.push(...offsetSegments(heard.segments, until));
         text = text ? `${text} ${heard.text}` : heard.text;

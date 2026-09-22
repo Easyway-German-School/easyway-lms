@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { runUnscoped } from "@/lib/tenant/context";
 import { MIN_RECORDING_START_MS, processTranscriptionQueue, transcriptionBacklogWhere } from "@/lib/class-transcription";
 import { processMaterialQueue } from "@/lib/material-ai";
+import { groqCooldownUntil } from "@/lib/ai-cooldown";
 
 /**
  * THE CLASS-NOTES QUEUE, RUNNING ITSELF.
@@ -47,8 +48,17 @@ export type RunSummary = {
   remaining: number;
   /** Did this run finish anything — i.e. is kicking another one worth it. */
   progressed: boolean;
+  /** Groq quotas known to be out right now, and roughly when they free up — see lib/ai-cooldown.ts. */
+  coolingDown: { asrUntil: number | null; chatUntil: number | null };
   ms: number;
 };
+
+/** What the runner (and the admin panel) currently know about Groq's free-tier quotas. */
+export async function groqCooldownStatus(): Promise<{ asrUntil: number | null; chatUntil: number | null }> {
+  const now = Date.now();
+  const [asr, chat] = await Promise.all([groqCooldownUntil("groq-asr"), groqCooldownUntil("groq-chat")]);
+  return { asrUntil: asr > now ? asr : null, chatUntil: chat > now ? chat : null };
+}
 
 /**
  * A lease in the shared AiCache table: one row, taken by creating it or by
@@ -99,6 +109,7 @@ export async function runClassNotes(options: { budgetMs: number }): Promise<RunS
     documents: { attempted: 0, ready: 0, skipped: 0 },
     remaining: 0,
     progressed: false,
+    coolingDown: { asrUntil: null, chatUntil: null },
     ms: 0,
   };
 
@@ -110,10 +121,16 @@ export async function runClassNotes(options: { budgetMs: number }): Promise<RunS
 
     const summary: RunSummary = { ...empty, ran: true };
     try {
+      summary.coolingDown = await groqCooldownStatus();
+
       // RECORDINGS FIRST — a class recap is what students are waiting for, and it
-      // is the heavy, slow job. One at a time, so the deadline is checked between each.
+      // is the heavy, slow job. One at a time, so the deadline is checked between
+      // each. Skipped entirely while Whisper's free-tier quota is known to be
+      // out — there is no sibling model for speech-to-text, so a recording
+      // cannot make ANY progress until that clears; trying anyway would just
+      // spend the whole run re-learning what is already known.
       let stalls = 0;
-      while (deadlineAt - Date.now() >= MIN_RECORDING_START_MS) {
+      while (!summary.coolingDown.asrUntil && deadlineAt - Date.now() >= MIN_RECORDING_START_MS) {
         const round = await processTranscriptionQueue(1, { deadlineAt });
         summary.recordings.attempted += round.attempted;
         summary.recordings.created += round.created;
@@ -121,14 +138,22 @@ export async function runClassNotes(options: { budgetMs: number }): Promise<RunS
         summary.recordings.partial += round.partial;
         if (round.attempted === 0) break;
         // Getting further into a recording counts as progress even before it is finished.
-        stalls = round.created > 0 || round.partial > 0 ? 0 : stalls + 1;
+        const madeProgress = round.created > 0 || round.partial > 0;
+        stalls = madeProgress ? 0 : stalls + 1;
         if (stalls >= STALL_LIMIT) break;
+        // Only worth re-checking when something just went wrong — a recording
+        // that failed may have set the flag itself; catching that now (instead
+        // of on the next round) stops this run chewing through more recordings
+        // against the same freshly-discovered wall.
+        if (!madeProgress) summary.coolingDown = await groqCooldownStatus();
       }
 
-      // HANDOUTS with whatever time is left. (They still wait for a tutor's sign-off
-      // before a student sees anything.)
+      // HANDOUTS with whatever time is left. Same reasoning, but the chat models
+      // DO have a sibling to fall back to (see callGroq) and, failing that, the
+      // extractive floor — so a chat cooldown slows this down, it does not stop
+      // it outright the way an ASR cooldown stops recordings.
       stalls = 0;
-      while (deadlineAt - Date.now() >= 45_000) {
+      while (!summary.coolingDown.chatUntil && deadlineAt - Date.now() >= 45_000) {
         const round = await processMaterialQueue(1, undefined, { deadlineAt });
         summary.documents.attempted += round.attempted;
         summary.documents.ready += round.ready;
