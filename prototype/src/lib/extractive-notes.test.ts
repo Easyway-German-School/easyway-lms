@@ -52,6 +52,30 @@ describe("buildExtractiveNotes", () => {
     expect(buildExtractiveNotes("Can you hear me? Yes. Okay. Hello everyone. Can you see my screen? Great.")).toBeNull();
     expect(buildExtractiveNotes("")).toBeNull();
   });
+
+  it("never files the same line said twice as two separate notes", () => {
+    // A tutor repeating a rhetorical question while nobody answers, or Whisper
+    // stuttering a clause — real transcripts do this. One real class produced
+    // the same sentence as three separate "key points".
+    const REPEATED = `
+      Good morning everyone, today we're going to look at separable verbs in German.
+      Aber so ganz legal ist das ja nicht, oder? Wollen Sie denn damit, wenn ich fragen darf?
+      Was machen Sie denn damit, wenn ich fragen darf? Aber so ganz legal ist das ja nicht, oder?
+      The separable prefix moves to the end of the sentence in the present tense, for example ich stehe auf.
+      Aber so ganz legal ist das ja nicht, oder? For homework please write five sentences with separable verbs.
+      Remember that trennbare Verben split apart when you conjugate them in a main clause.
+      Please revise the vocabulary list before Friday's test and bring your workbook.
+    `;
+    const notes = buildExtractiveNotes(REPEATED);
+    expect(notes).not.toBeNull();
+    const all = [notes!.summary, ...notes!.keyPoints, ...notes!.actionItems].join(" | ").toLowerCase();
+    // The line appears 3 times verbatim in the transcript — it may be picked ONCE.
+    expect((all.match(/ganz legal ist das ja nicht/g) ?? []).length).toBeLessThanOrEqual(1);
+    // A near-identical restart of the same question must not sneak in as a second point either.
+    expect((all.match(/wenn ich fragen darf/g) ?? []).length).toBeLessThanOrEqual(1);
+    // The dedupe must not have swallowed the actually distinct teaching content.
+    expect(all).toMatch(/separable/);
+  });
 });
 
 describe("condenseSegments", () => {

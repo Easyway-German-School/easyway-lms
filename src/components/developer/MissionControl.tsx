@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { verdictKeyLabel } from "@/lib/portal-verdict";
 import BackendMap from "./BackendMap";
+import DiagnosePanel, { type DiagnoseTarget } from "./DiagnosePanel";
 import PatternsPanel from "./PatternsPanel";
 import Sparkline from "./Sparkline";
 
@@ -54,9 +55,19 @@ type Incident = {
   resolvedAt: string | null;
   resolutionNote: string | null;
 };
-type IncidentDetail = Incident & { message: string | null; stack: string | null; context: unknown };
+type IncidentDetail = Incident & { message: string | null; stack: string | null; context: unknown; userId: string | null };
 
-type Tab = "overview" | "incidents" | "access" | "map" | "patterns";
+/**
+ * Who a complaint or drift incident is about, if it says. A complaint carries the reporter's
+ * user id; a drift incident's recent samples carry the student id in their context.
+ */
+function whoIsAffected(info: IncidentDetail): DiagnoseTarget {
+  const fromSample = info.samples?.map((s) => s.context?.studentId).find((v): v is string => typeof v === "string");
+  if (fromSample) return { studentId: fromSample };
+  return info.userId ? { userId: info.userId } : null;
+}
+
+type Tab = "overview" | "incidents" | "diagnose" | "access" | "map" | "patterns";
 
 const SEVERITY = {
   critical: { dot: "bg-red-500", text: "text-red-500", label: "Critical" },
@@ -103,12 +114,14 @@ function IncidentList({
   kind,
   limit,
   expandId,
+  onDiagnose,
   compact,
 }: {
   kind?: string;
   limit?: number;
   expandId?: string | null;
   compact?: boolean;
+  onDiagnose?: (target: NonNullable<DiagnoseTarget>) => void;
 }) {
   const [status, setStatus] = useState<"active" | "resolved" | "ignored" | "all">("active");
   const [kindFilter, setKindFilter] = useState(kind ?? "");
@@ -255,6 +268,15 @@ function IncidentList({
                           </details>
                         )}
                         {info.resolutionNote && <p className="text-[var(--muted)]">Note: {info.resolutionNote}</p>}
+                        {onDiagnose && whoIsAffected(info) && (
+                          <button
+                            type="button"
+                            onClick={() => onDiagnose(whoIsAffected(info)!)}
+                            className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-semibold text-white"
+                          >
+                            Diagnose the student this is about →
+                          </button>
+                        )}
                       </>
                     )}
                     <div className="flex flex-wrap items-center gap-2">
@@ -446,7 +468,7 @@ function ActiveFeed({ onOpen }: { onOpen: (id: string) => void }) {
 /* Access drift                                                              */
 /* ------------------------------------------------------------------------ */
 
-function AccessPanel() {
+function AccessPanel({ onDiagnose }: { onDiagnose: (target: NonNullable<DiagnoseTarget>) => void }) {
   const [data, setData] = useState<Overview["access"] | null>(null);
   usePoll(async () => {
     try {
@@ -485,7 +507,7 @@ function AccessPanel() {
       </section>
       <section>
         <h3 className="mb-2 text-sm font-bold">Drift found</h3>
-        <IncidentList kind="drift" />
+        <IncidentList kind="drift" onDiagnose={onDiagnose} />
       </section>
     </div>
   );
@@ -515,6 +537,7 @@ function PatternsTab() {
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "overview", label: "Live" },
   { id: "incidents", label: "Incidents" },
+  { id: "diagnose", label: "Diagnose & fix" },
   { id: "access", label: "Access drift" },
   { id: "map", label: "Backend map" },
   { id: "patterns", label: "Patterns" },
@@ -523,6 +546,17 @@ const TABS: Array<{ id: Tab; label: string }> = [
 export default function MissionControl() {
   const [tab, setTab] = useState<Tab>("overview");
   const [expand, setExpand] = useState<string | null>(null);
+  const [diagnoseTarget, setDiagnoseTarget] = useState<DiagnoseTarget>(null);
+
+  // A complaint or drift incident hands its student to the Diagnose tab in one click.
+  const diagnoseWho = useMemo(
+    () => (target: NonNullable<DiagnoseTarget>) => {
+      setDiagnoseTarget(target);
+      setTab("diagnose");
+    },
+    [],
+  );
+  const clearTarget = useMemo(() => () => setDiagnoseTarget(null), []);
 
   const openIncident = useMemo(
     () => (id: string) => {
@@ -565,8 +599,9 @@ export default function MissionControl() {
       </nav>
 
       {tab === "overview" && <OverviewPanel onOpenIncident={openIncident} />}
-      {tab === "incidents" && <IncidentList expandId={expand} />}
-      {tab === "access" && <AccessPanel />}
+      {tab === "incidents" && <IncidentList expandId={expand} onDiagnose={diagnoseWho} />}
+      {tab === "diagnose" && <DiagnosePanel target={diagnoseTarget} onTargetUsed={clearTarget} />}
+      {tab === "access" && <AccessPanel onDiagnose={diagnoseWho} />}
       {tab === "map" && <BackendMap />}
       {tab === "patterns" && <PatternsTab />}
     </div>
