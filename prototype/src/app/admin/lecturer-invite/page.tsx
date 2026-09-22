@@ -103,6 +103,28 @@ type LinkSummary = {
   no_fit: number;
 };
 
+/** One row of `/api/admin/lecturers/coverage-preview`'s named list — the draft-assignment twin of `RosterStudent`. */
+type DraftPreviewStudent = {
+  id: string;
+  name: string;
+  studentCode: string | null;
+  level: string;
+  sessionSlot: string;
+  branchName: string | null;
+  action: "linked" | "add_primary" | "add_co_tutor" | "shares_class" | "conflict" | "blocked";
+  role: "online" | null;
+  reason: string;
+};
+
+const DRAFT_PREVIEW_ACTION_LABEL: Record<DraftPreviewStudent["action"], string> = {
+  linked: "Already theirs",
+  add_primary: "No tutor yet — would become primary",
+  add_co_tutor: "Has a tutor — would be added beside them",
+  shares_class: "Already has a tutor — stays as is",
+  conflict: "One-to-one — already has a tutor",
+  blocked: "Fits, but multi-tutor mode is off",
+};
+
 const EMPTY_ASSIGNMENT: LecturerAssignment = {
   branchIds: [],
   levels: [],
@@ -766,6 +788,126 @@ function TutorRosterPanel({
           </div>
         </>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * What saving the form above would cover, read live off the fields in it —
+ * before the office commits to anything.
+ *
+ * `ClassRoster` below only ever shows the SAVED class, with an "unsaved
+ * changes" nag once the form drifts from it — right, but it left no way to
+ * actually see who a new teaching group would reach until after clicking
+ * Save. The broad-coverage confirm dialog (`checkCoverageThenSave`) covers
+ * the dangerous end of that gap — 2+ levels or 25+ students — but everything
+ * smaller, the ordinary "one branch, one level, one sitting" case this page
+ * exists for, saved with no eyes on it at all. This is that missing look:
+ * same rule (`planLink`), same names the roster panel will show, fetched
+ * fresh (debounced) every time a field changes, never written anywhere.
+ */
+function DraftClassPreview({
+  lecturerId,
+  assignment,
+  active,
+}: {
+  lecturerId: string;
+  assignment: LecturerAssignment;
+  active: boolean;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [count, setCount] = useState(0);
+  const [students, setStudents] = useState<DraftPreviewStudent[]>([]);
+  const signature = assignmentSignature(assignment);
+
+  useEffect(() => {
+    if (!active) {
+      setLoadedOnce(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/admin/lecturers/coverage-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...assignment, assignmentGroups: assignment.groups, lecturerId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        setCount(data.count ?? 0);
+        setStudents(data.students ?? []);
+      } catch {
+        // A failed preview just leaves the last good list on screen.
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadedOnce(true);
+        }
+      }
+      // Debounced so picking a level then a sitting then a batch does not
+      // fire three requests in a row.
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // signature is the real dependency — assignment is a new object every
+    // render, and re-fetching on that would defeat the debounce entirely.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, signature, lecturerId]);
+
+  if (!active) return null;
+
+  return (
+    <div className="rounded-2xl border border-dashed border-[var(--accent)]/50 bg-[var(--surface)] p-4">
+      <p className="text-sm font-semibold text-[var(--foreground)]">Preview — before you save</p>
+      <p className="mt-1 text-xs text-[var(--muted)]">
+        Who the class above covers right now, so a wrong branch, level or sitting shows up here instead of after
+        saving.
+      </p>
+
+      {!loadedOnce ? (
+        <p className="mt-3 text-xs text-[var(--muted)]">Checking…</p>
+      ) : (
+        <>
+          <p className="mt-3 text-xs font-semibold text-[var(--foreground)]">
+            {count} student{count === 1 ? "" : "s"} would fit{loading ? " · checking…" : ""}
+          </p>
+          {students.length ? (
+            <div className="mt-2 max-h-72 space-y-1.5 overflow-y-auto pr-1">
+              {students.map((student) => (
+                <div
+                  key={student.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs"
+                >
+                  <span className="min-w-0 truncate text-[var(--foreground)]">
+                    {student.name}
+                    <span className="text-[var(--muted)]">
+                      {" "}
+                      · {student.level} · {student.sessionSlot}
+                      {student.branchName ? ` · ${student.branchName}` : ""}
+                    </span>
+                  </span>
+                  <span
+                    className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[var(--accent)]"
+                    title={student.reason}
+                  >
+                    {DRAFT_PREVIEW_ACTION_LABEL[student.action]}
+                  </span>
+                </div>
+              ))}
+              {count > students.length ? (
+                <p className="pt-1 text-[11px] text-[var(--muted)]">…and {count - students.length} more.</p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-[var(--muted)]">Nobody active matches this yet — check the branch, level and sitting above.</p>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -1744,6 +1886,12 @@ export default function AdminTutorsPage() {
                           setEditAssignment(next);
                           setCoveragePreview(null);
                         }}
+                      />
+
+                      <DraftClassPreview
+                        lecturerId={tutor.id}
+                        assignment={editAssignment}
+                        active={assignmentSignature(editAssignment) !== assignmentSignature(tutor.assignment)}
                       />
 
                       <div className="mt-5">
