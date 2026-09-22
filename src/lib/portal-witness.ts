@@ -82,7 +82,9 @@ export async function recordPortalWitness(
 ): Promise<{ recorded: boolean; judgement?: WitnessJudgement; verdict?: PortalVerdict }> {
   const student = await prisma.student.findUnique({
     where: { userId },
-    select: { id: true, tenantId: true, ...STUDENT_ACCESS_SELECT },
+    // tenantId comes off STUDENT_ACCESS_SELECT now — declaring it again here
+    // duplicates the key.
+    select: { id: true, ...STUDENT_ACCESS_SELECT },
   });
   // An admin previewing, a tutor, a parent: nothing to witness.
   if (!student) return { recorded: false };
