@@ -13,7 +13,10 @@ import {
   CURRENT_INTAKE_KEY,
   defaultCurrentIntake,
   parseCurrentIntake,
+  INTAKE_START_DAYS_KEY,
+  parseIntakeStartDayOverrides,
   type CurrentIntake,
+  type IntakeStartDayOverrides,
 } from "@/lib/intake";
 
 /**
@@ -40,4 +43,45 @@ export async function readCurrentIntake(tenantId: string | null | undefined): Pr
  */
 export async function defaultBatchMonth(tenantId: string | null | undefined): Promise<string> {
   return (await readCurrentIntake(tenantId)).month;
+}
+
+/**
+ * Which specific months open off the 1st — see lib/intake.ts. Never throws;
+ * an unreadable row just means every batch opens on the 1st, same as before
+ * this existed.
+ */
+export async function readIntakeStartDayOverrides(
+  tenantId: string | null | undefined,
+): Promise<IntakeStartDayOverrides> {
+  if (!tenantId) return {};
+  try {
+    const row = await prisma.schoolSetting.findUnique({
+      where: { tenantId_key: { tenantId, key: INTAKE_START_DAYS_KEY } },
+    });
+    return parseIntakeStartDayOverrides(row?.value);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Set (or, with `day: null`, clear) one month's override. Returns the full
+ * map afterwards so the caller can respond with the up-to-date list.
+ */
+export async function writeIntakeStartDayOverride(
+  tenantId: string,
+  monthKey: string,
+  day: number | null,
+): Promise<IntakeStartDayOverrides> {
+  const current = await readIntakeStartDayOverrides(tenantId);
+  const next = { ...current };
+  if (day === null) delete next[monthKey];
+  else next[monthKey] = day;
+
+  await prisma.schoolSetting.upsert({
+    where: { tenantId_key: { tenantId, key: INTAKE_START_DAYS_KEY } },
+    update: { value: next },
+    create: { tenantId, key: INTAKE_START_DAYS_KEY, value: next },
+  });
+  return next;
 }

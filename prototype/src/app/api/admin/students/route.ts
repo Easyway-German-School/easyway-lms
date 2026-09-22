@@ -13,7 +13,7 @@ import { notifyInBackground, KIND } from "@/lib/notify";
 import { slotTitle } from "@/lib/school-settings";
 import { assignStudentCode } from "@/lib/student-code";
 import { generateTempPassword } from "@/lib/student-password";
-import { defaultBatchMonth } from "@/lib/intake-server";
+import { defaultBatchMonth, readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { ensureChargeForLevel } from "@/lib/tuition-charges";
 import { isTravelPackagePathway } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
@@ -94,6 +94,7 @@ export async function GET(request: Request) {
    * sees who is behind and for how long, which is what they chase on.
    */
   const canSeeMoney = gate.admin.can("payments");
+  const startDayOverrides = await readIntakeStartDayOverrides(gate.session.user.tenantId ?? null);
 
   const enriched = pageRows.map(({ student, finance, risk, segments }) => ({
     ...student,
@@ -109,6 +110,7 @@ export async function GET(request: Request) {
       const upcoming = resolveUpcomingBatch(batchFromAdmission(student.admission), {
         registeredAt: student.createdAt,
         classesStartedAt: student.classesStartedAt,
+        startDayOverrides,
       });
       return upcoming ? { label: upcoming.monthLabel, daysUntilStart: upcoming.daysUntilStart } : null;
     })(),

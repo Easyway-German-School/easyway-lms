@@ -50,6 +50,7 @@ type Row = {
 
 type Intake = {
   batchLabel: string;
+  monthKey: string;
   startsOn: string;
   daysUntilStart: number;
   total: number;
@@ -94,6 +95,19 @@ function when(iso: string) {
   return new Date(iso).toLocaleDateString("en-NG", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Lagos" });
 }
 
+function dayOfMonth(iso: string) {
+  return Number(
+    new Date(iso).toLocaleDateString("en-CA", { day: "numeric", timeZone: "Africa/Lagos" }),
+  );
+}
+
+function ordinal(day: number) {
+  if (day % 10 === 1 && day !== 11) return "st";
+  if (day % 10 === 2 && day !== 12) return "nd";
+  if (day % 10 === 3 && day !== 13) return "rd";
+  return "th";
+}
+
 function csvCell(value: string | number | null) {
   const text = String(value ?? "");
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -114,6 +128,10 @@ export default function UpcomingIntakePage() {
   const [month, setMonth] = useState("October");
   const [matches, setMatches] = useState<MatchResult[] | null>(null);
   const [picked, setPicked] = useState<Record<string, string>>({});
+
+  const [editingStartDay, setEditingStartDay] = useState(false);
+  const [startDayInput, setStartDayInput] = useState("1");
+  const [savingStartDay, setSavingStartDay] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -218,6 +236,31 @@ export default function UpcomingIntakePage() {
     }
   }
 
+  async function saveStartDay() {
+    if (!intake) return;
+    const day = Number(startDayInput);
+    if (!Number.isInteger(day) || day < 1 || day > 28) {
+      setMsg("Give a day between 1 and 28.");
+      return;
+    }
+    setSavingStartDay(true);
+    setMsg("");
+    try {
+      await post({ action: "setStartDay", monthKey: intake.monthKey, day: day === 1 ? null : day });
+      setMsg(
+        day === 1
+          ? `${intake.batchLabel} now opens on the 1st, same as every other intake.`
+          : `${intake.batchLabel} now opens on the ${day}${ordinal(day)} — live everywhere the countdown shows.`,
+      );
+      setEditingStartDay(false);
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not change the opening day");
+    } finally {
+      setSavingStartDay(false);
+    }
+  }
+
   function exportCsv() {
     const header = ["Name", "Email", "Phone", "Branch", "Level", "Session", "Intake", "Seat status", "Seat #", "Tuition paid", "Registration fee paid", "Deposit still due", "Balance still owed", "First payment", "Last nudged"];
     const lines = inIntake.map((r) =>
@@ -298,7 +341,45 @@ export default function UpcomingIntakePage() {
                 <p className="text-2xl font-bold text-[var(--foreground)]">
                   Opens in {intake.daysUntilStart} day{intake.daysUntilStart === 1 ? "" : "s"}
                 </p>
-                <p className="text-sm text-[var(--muted)]">{when(intake.startsOn)}</p>
+                {editingStartDay ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-[var(--muted)]">{intake.batchLabel.split(" ")[0]} opens on the</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={28}
+                      value={startDayInput}
+                      onChange={(e) => setStartDayInput(e.target.value)}
+                      className="w-16 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-sm text-[var(--foreground)]"
+                      autoFocus
+                    />
+                    <button
+                      disabled={savingStartDay}
+                      onClick={saveStartDay}
+                      className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                    <button
+                      disabled={savingStartDay}
+                      onClick={() => setEditingStartDay(false)}
+                      className="text-xs text-[var(--muted)] underline"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setStartDayInput(String(dayOfMonth(intake.startsOn)));
+                      setEditingStartDay(true);
+                    }}
+                    className="group flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--accent)]"
+                  >
+                    {when(intake.startsOn)}
+                    <span className="text-xs underline opacity-0 group-hover:opacity-100">Edit opening day</span>
+                  </button>
+                )}
               </div>
               <button onClick={exportCsv} className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] hover:bg-[var(--background)]">
                 Download CSV

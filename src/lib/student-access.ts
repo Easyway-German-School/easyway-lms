@@ -5,6 +5,8 @@ import { planStatusForStudent, planSuppressesLock } from "@/lib/payment-plans";
 import { isOnlineBranch } from "@/lib/online-branch";
 import type { LedgerChargeInput } from "@/lib/finance/ledger";
 import { batchFromAdmission } from "@/lib/batch";
+import type { IntakeStartDayOverrides } from "@/lib/intake";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 
 /**
  * The exact Prisma field set the payment gate needs off a Student, as a
@@ -21,6 +23,8 @@ export const STUDENT_ACCESS_SELECT = {
   classesStartedAt: true,
   createdAt: true,
   paymentGraceUntil: true,
+  // Which tenant's intake-start-day overrides apply — see readIntakeStartDayOverrides.
+  tenantId: true,
   // The batch month lives on the admission blob — the upcoming-batch lock
   // ("your October seat opens on 1 October") reads it.
   admission: true,
@@ -60,6 +64,7 @@ export type StudentAccessFields = {
   branch: { name: string | null; mode?: string | null } | null;
   payments: Array<{ amount: number }>;
   tuitionCharges: LedgerChargeInput[];
+  tenantId?: string | null;
 };
 
 /**
@@ -80,7 +85,11 @@ export type StudentAccessFields = {
  * false "open": the only thing `paymentPlanOnTrack` does is hold back a
  * balance lock that would otherwise apply.
  */
-export function accessFromStudent(student: StudentAccessFields, paymentPlanOnTrack = false): StudentAccess {
+export function accessFromStudent(
+  student: StudentAccessFields,
+  paymentPlanOnTrack = false,
+  startDayOverrides?: IntakeStartDayOverrides,
+): StudentAccess {
   const totalPaid = student.payments.reduce((sum, payment) => sum + payment.amount, 0);
   const feeLookup = {
     level: student.level,
@@ -108,6 +117,7 @@ export function accessFromStudent(student: StudentAccessFields, paymentPlanOnTra
     paymentGraceUntil: student.paymentGraceUntil,
     paymentPlanOnTrack,
     batch: batchFromAdmission(student.admission),
+    startDayOverrides,
   });
 }
 
@@ -133,8 +143,11 @@ export async function getStudentAccess(studentId: string): Promise<StudentAccess
   });
   if (!student) return null;
 
-  const planStatus = await planStatusForStudent(studentId);
-  return accessFromStudent(student, planSuppressesLock(planStatus?.adherence ?? null));
+  const [planStatus, startDayOverrides] = await Promise.all([
+    planStatusForStudent(studentId),
+    readIntakeStartDayOverrides(student.tenantId),
+  ]);
+  return accessFromStudent(student, planSuppressesLock(planStatus?.adherence ?? null), startDayOverrides);
 }
 
 /**
