@@ -4,7 +4,7 @@ import { requireCapability } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
 import { assignmentToData, isAssigned, readAssignment } from "@/lib/lecturer-assignment";
 import { featuresForCurrentTenant } from "@/lib/tenant/features-server";
-import { planLink, summarizePlans } from "@/lib/tutor-class-match";
+import { compareByAction, planLink, summarizePlans } from "@/lib/tutor-class-match";
 import { LINK_STUDENT_SELECT, toLinkStudent } from "@/lib/tutor-link";
 
 /**
@@ -25,6 +25,11 @@ import { LINK_STUDENT_SELECT, toLinkStudent } from "@/lib/tutor-link";
  * tutor's roster will show. Read-only; it never touches the tutor row.
  */
 
+// The full roster is easily a few hundred rows for a broad pattern; the
+// office is here to eyeball names before saving, not to scroll a duplicate
+// of the roster panel. `count` (and `byLevel`) still reflect everybody.
+const PREVIEW_ROW_LIMIT = 200;
+
 export async function POST(request: NextRequest) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
@@ -34,7 +39,13 @@ export async function POST(request: NextRequest) {
   const lecturerId = typeof body?.lecturerId === "string" ? body.lecturerId : "preview";
 
   if (!isAssigned(assignment)) {
-    return NextResponse.json({ count: 0, levels: [], byLevel: {}, toLink: { primary: 0, coTutor: 0, other: 0 } });
+    return NextResponse.json({
+      count: 0,
+      levels: [],
+      byLevel: {},
+      toLink: { primary: 0, coTutor: 0, other: 0 },
+      students: [],
+    });
   }
 
   const [onlineBranch, features, students] = await Promise.all([
@@ -42,7 +53,12 @@ export async function POST(request: NextRequest) {
     featuresForCurrentTenant(),
     prisma.student.findMany({
       where: { status: "active", level: { in: assignment.levels } } as never,
-      select: LINK_STUDENT_SELECT,
+      select: {
+        ...LINK_STUDENT_SELECT,
+        user: { select: { name: true, email: true } },
+        studentCode: true,
+        branch: { select: { name: true } },
+      },
       take: 3000,
     }),
   ]);
@@ -75,5 +91,22 @@ export async function POST(request: NextRequest) {
       coTutor: summary.add_co_tutor,
       other: summary.shares_class + summary.conflict + summary.blocked,
     },
+    // Named rows so the office can actually read who this pattern reaches
+    // before saving, not just a count — capped, sorted so the ones needing a
+    // decision surface first.
+    students: fitting
+      .sort((a, b) => compareByAction(a.plan.action, b.plan.action) || a.student.level.localeCompare(b.student.level))
+      .slice(0, PREVIEW_ROW_LIMIT)
+      .map(({ student, plan }) => ({
+        id: student.id,
+        name: student.user.name || student.user.email,
+        studentCode: student.studentCode,
+        level: student.level,
+        sessionSlot: student.sessionSlot,
+        branchName: student.branch?.name ?? null,
+        action: plan.action,
+        role: plan.role ?? null,
+        reason: plan.reason,
+      })),
   });
 }
