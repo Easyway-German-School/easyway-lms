@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import ScheduleCalendar, { type DayCell, type Tone } from "@/components/schedule/ScheduleCalendar";
 import UndoToast, { type PendingUndo } from "@/components/schedule/UndoToast";
@@ -89,8 +89,11 @@ const MODES = [
   { value: "hybrid", label: "Hybrid" },
 ];
 
-type GroupDraft = { topic: string | null; status: string; startTime: string; endTime: string; day: string };
+type GroupDraft = { topic: string | null; status: string; startTime: string; endTime: string; day: string; tutorId: string };
 type PrivateDraft = { day: string; start: string; durationMinutes: number; status: string; topic: string | null };
+
+/** Just what the tutor-assignment dropdown needs, off GET /api/admin/lecturers. */
+type LecturerOption = { id: string; name: string; levels: string[] };
 
 export default function AdminScheduleCalendar({
   groups,
@@ -124,6 +127,25 @@ export default function AdminScheduleCalendar({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [undo, setUndo] = useState<PendingUndo | null>(null);
+
+  const [lecturers, setLecturers] = useState<LecturerOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/lecturers")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.lecturers) return;
+        setLecturers(
+          (data.lecturers as Array<{ id: string; user: { name: string | null }; assignment?: { levels?: string[] } }>).map(
+            (l) => ({ id: l.id, name: l.user.name ?? "Unnamed tutor", levels: l.assignment?.levels ?? [] }),
+          ),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const branchNames = useMemo(() => {
     const set = new Set<string>();
@@ -234,7 +256,14 @@ export default function AdminScheduleCalendar({
 
   async function putGroup(
     g: GroupSession,
-    fields: { status: string; postponedTo: string | null; startTime?: string; endTime?: string; topic?: string | null },
+    fields: {
+      status: string;
+      postponedTo: string | null;
+      startTime?: string;
+      endTime?: string;
+      topic?: string | null;
+      tutorId?: string;
+    },
   ) {
     if (!g.branchId) throw new Error("This cohort has no branch on file — fix it from the tutor timetable.");
     const res = await fetch("/api/lecturer/sessions", {
@@ -250,6 +279,10 @@ export default function AdminScheduleCalendar({
         startTime: fields.startTime ?? g.startTime,
         endTime: fields.endTime ?? g.endTime,
         postponedTo: fields.status === "postponed" ? fields.postponedTo : null,
+        // Only sent when the caller actually means to touch the assignment —
+        // rescheduleDot/moveBack never pass this, so a drag-to-move never
+        // silently clears who is teaching the class.
+        ...(fields.tutorId !== undefined ? { assignedLecturerId: fields.tutorId || null } : {}),
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -273,9 +306,21 @@ export default function AdminScheduleCalendar({
     setError("");
     setSaved("");
     try {
-      const before = { status: g.status, postponedTo: g.postponedTo, startTime: g.startTime, endTime: g.endTime };
+      const before = {
+        status: g.status,
+        postponedTo: g.postponedTo,
+        startTime: g.startTime,
+        endTime: g.endTime,
+        tutorId: g.tutorId ?? "",
+      };
       const move = resolveGroupMove(g, groupDraft.day, groupDraft.status);
-      await putGroup(g, { ...move, startTime: groupDraft.startTime, endTime: groupDraft.endTime, topic: groupDraft.topic });
+      await putGroup(g, {
+        ...move,
+        startTime: groupDraft.startTime,
+        endTime: groupDraft.endTime,
+        topic: groupDraft.topic,
+        tutorId: groupDraft.tutorId,
+      });
       setSaved("Saved. Students' calendars are updated.");
       if (move.status !== before.status || move.postponedTo !== before.postponedTo) {
         setUndo({
@@ -473,6 +518,7 @@ export default function AdminScheduleCalendar({
                               startTime: g.startTime,
                               endTime: g.endTime,
                               day: effectiveDayKey(g),
+                              tutorId: g.tutorId ?? "",
                             });
                             setError("");
                             setSaved("");
@@ -524,6 +570,45 @@ export default function AdminScheduleCalendar({
                               onChange={(e) => setGroupDraft({ ...groupDraft, topic: e.target.value })}
                               className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
                             />
+                          </label>
+                          <label>
+                            <span className="text-xs font-medium text-[var(--muted)]">Tutor</span>
+                            {(() => {
+                              const qualified = lecturers.filter((l) => l.levels.includes(g.level));
+                              const others = lecturers.filter((l) => !l.levels.includes(g.level));
+                              const knownIds = new Set(lecturers.map((l) => l.id));
+                              const currentMissing = Boolean(g.tutorId) && !knownIds.has(g.tutorId as string);
+                              return (
+                                <select
+                                  value={groupDraft.tutorId}
+                                  onChange={(e) => setGroupDraft({ ...groupDraft, tutorId: e.target.value })}
+                                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
+                                >
+                                  <option value="">Unassigned</option>
+                                  {currentMissing && (
+                                    <option value={g.tutorId as string}>{g.tutorName ?? "Currently assigned"}</option>
+                                  )}
+                                  {qualified.length > 0 && (
+                                    <optgroup label={`Teaches ${g.level}`}>
+                                      {qualified.map((l) => (
+                                        <option key={l.id} value={l.id}>
+                                          {l.name}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                  {others.length > 0 && (
+                                    <optgroup label="Other tutors">
+                                      {others.map((l) => (
+                                        <option key={l.id} value={l.id}>
+                                          {l.name}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                </select>
+                              );
+                            })()}
                           </label>
                           <div className="grid grid-cols-2 gap-3">
                             <label>
@@ -806,6 +891,28 @@ export default function AdminScheduleCalendar({
           const e = dotIndex.get(dotId);
           if (!e) return "Move";
           return e.kind === "group" ? `${e.g.level} · ${e.g.startTime}` : e.p.studentName;
+        }}
+        dotTooltip={(dotId) => {
+          const e = dotIndex.get(dotId);
+          if (!e) return undefined;
+          if (e.kind === "group") {
+            const g = e.g;
+            return (
+              <div className="space-y-0.5">
+                <p className="font-semibold">{g.level} · {g.branchName ?? "No branch"}</p>
+                <p>{g.startTime}–{g.endTime} · {g.tutorName ?? "Unassigned"}</p>
+                <p className="capitalize opacity-80">{g.status}</p>
+              </div>
+            );
+          }
+          const p = e.p;
+          return (
+            <div className="space-y-0.5">
+              <p className="font-semibold">{p.studentName}</p>
+              <p>{clockOf(p.scheduledAt)} · {p.tutorName}</p>
+              <p className="capitalize opacity-80">{p.status.replace("_", " ")}</p>
+            </div>
+          );
         }}
       />
       <UndoToast undo={undo} onClose={() => setUndo(null)} />

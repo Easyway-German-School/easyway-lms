@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   DndContext,
   DragOverlay,
@@ -74,6 +75,12 @@ type Props = {
   onMoveDot?: (dotId: string, fromDay: string, toDay: string) => void;
   /** Short label shown in the drag pill, e.g. "A1 · 10:00". */
   dotLabel?: (dotId: string) => string;
+  /**
+   * Rich content shown in a hover popup over a dot — level, time, tutor and
+   * the like. Each dot gets its own hover target even when several share a
+   * cell. Return undefined for a dot with nothing worth showing.
+   */
+  dotTooltip?: (dotId: string) => React.ReactNode;
 };
 
 export default function ScheduleCalendar({
@@ -87,6 +94,7 @@ export default function ScheduleCalendar({
   toolbar,
   onMoveDot,
   dotLabel,
+  dotTooltip,
 }: Props) {
   const weeks = useMemo(() => monthGrid(cursor), [cursor]);
   const todayKey = ymd(new Date());
@@ -136,6 +144,7 @@ export default function ScheduleCalendar({
                 isSelected={key === selected}
                 cell={cell}
                 draggable={Boolean(onMoveDot)}
+                dotTooltip={dotTooltip}
                 onSelect={() => onSelect(key === selected ? null : key)}
               />
             );
@@ -232,6 +241,7 @@ function DayGridCell({
   isSelected,
   cell,
   draggable,
+  dotTooltip,
   onSelect,
 }: {
   dayKey: string;
@@ -241,6 +251,7 @@ function DayGridCell({
   isSelected: boolean;
   cell: DayCell | undefined;
   draggable: boolean;
+  dotTooltip?: (dotId: string) => React.ReactNode;
   onSelect: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day:${dayKey}`, disabled: !draggable });
@@ -273,13 +284,15 @@ function DayGridCell({
       ) : (
         dots.length > 0 && (
           <div className="mt-1.5 flex flex-wrap items-center gap-1">
-            {dots.slice(0, 4).map((dot) =>
-              draggable ? (
-                <DraggableDot key={dot.key} id={dot.key} fromDay={dayKey} className={DOT[dot.tone]} />
-              ) : (
-                <span key={dot.key} className={`h-2 w-2 rounded-full ${DOT[dot.tone]}`} />
-              ),
-            )}
+            {dots.slice(0, 4).map((dot) => (
+              <HoverDot key={dot.key} tooltip={dotTooltip?.(dot.key)}>
+                {draggable ? (
+                  <DraggableDot id={dot.key} fromDay={dayKey} className={DOT[dot.tone]} />
+                ) : (
+                  <span className={`h-2 w-2 rounded-full ${DOT[dot.tone]}`} />
+                )}
+              </HoverDot>
+            ))}
             {dots.length > 4 && (
               <span className="text-[10px] font-semibold text-[var(--muted)]">+{dots.length - 4}</span>
             )}
@@ -287,6 +300,51 @@ function DayGridCell({
         )
       )}
     </button>
+  );
+}
+
+/**
+ * Renders `tooltip` in a portal to `document.body` on hover/focus, positioned
+ * off the dot's own bounding box. A portal, not CSS `absolute`, because the
+ * month grid sits inside an `overflow-hidden` rounded card — anything
+ * positioned relative to a dot near the card's edge would get clipped.
+ */
+function HoverDot({ tooltip, children }: { tooltip?: React.ReactNode; children: React.ReactNode }) {
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  if (!tooltip) return <>{children}</>;
+
+  function show() {
+    const box = anchorRef.current?.getBoundingClientRect();
+    if (box) setPos({ top: box.top, left: box.left + box.width / 2 });
+  }
+  function hide() {
+    setPos(null);
+  }
+
+  return (
+    <span
+      ref={anchorRef}
+      className="inline-flex"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+    >
+      {children}
+      {pos &&
+        createPortal(
+          <div
+            role="tooltip"
+            style={{ position: "fixed", top: pos.top - 8, left: pos.left, transform: "translate(-50%, -100%)" }}
+            className="pointer-events-none z-50 w-max max-w-[220px] rounded-lg bg-[var(--foreground)] px-2.5 py-1.5 text-xs font-medium leading-snug text-[var(--background)] shadow-lg"
+          >
+            {tooltip}
+          </div>,
+          document.body,
+        )}
+    </span>
   );
 }
 

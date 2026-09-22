@@ -26,6 +26,7 @@ export type GroupSession = {
   branchName: string | null;
   deliveryMode: string | null;
   tutorName: string | null;
+  tutorId: string | null;
 };
 
 export type PrivateClass = {

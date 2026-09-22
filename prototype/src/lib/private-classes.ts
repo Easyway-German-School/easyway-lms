@@ -212,6 +212,7 @@ export async function getPrivateSchedule(args: {
         movedFrom: null,
         edited: true,
         lecturerName: c.lecturer?.user?.name ?? null,
+        lecturerId: c.lecturerId ?? null,
         // Shaped the same as a group session's material, so the calendar has
         // one thing to render rather than two nearly-identical ones.
         material: c.material

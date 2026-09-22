@@ -115,6 +115,8 @@ export type MergedSession = {
   /** True when a tutor has actually touched this day. */
   edited: boolean;
   lecturerName: string | null;
+  /** Which Lecturer this class is assigned to, when one is — the admin rail's tutor picker preselects on this. */
+  lecturerId: string | null;
   material: {
     id: string;
     title: string;
@@ -246,6 +248,7 @@ export async function getMergedSchedule(args: {
       movedFrom: null,
       edited: true,
       lecturerName: o.lecturer?.user?.name ?? null,
+      lecturerId: o.lecturerId ?? null,
       material: o.material
         ? {
             id: o.material.id,
@@ -292,6 +295,7 @@ export async function getMergedSchedule(args: {
         movedFrom: null,
         edited: Boolean(override) || Boolean(closedByHoliday),
         lecturerName: override?.lecturer?.user?.name ?? null,
+        lecturerId: override?.lecturerId ?? null,
         material: override?.material
           ? {
               id: override.material.id,
@@ -348,6 +352,7 @@ function withDefaults(month: ScheduleMonth, slot: TimeSlot): MergedMonth {
       movedFrom: null,
       edited: false,
       lecturerName: null,
+      lecturerId: null,
       material: null,
     })),
   };

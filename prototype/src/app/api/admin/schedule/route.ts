@@ -162,6 +162,7 @@ export async function GET() {
       branchName: student.branch!.name,
       deliveryMode: student.deliveryMode,
       tutorName: session.lecturerName,
+      tutorId: session.lecturerId,
       cohort: `${student.level} · ${student.branch!.name} · ${session.timeSlot}`,
     })));
   }));

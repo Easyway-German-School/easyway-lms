@@ -203,7 +203,24 @@ export async function PUT(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { branchId, level, date, timeSlot, topic, notes, status, startTime, endTime, materialId, postponedTo } = body;
+    const {
+      branchId,
+      level,
+      date,
+      timeSlot,
+      topic,
+      notes,
+      status,
+      startTime,
+      endTime,
+      materialId,
+      postponedTo,
+      // Admin-only: assign (or clear, with null) which tutor teaches this class.
+      // Distinct from the `lecturerId` a tutor's own save stamps below — never
+      // conflate the two, or a tutor moving their own class could silently
+      // overwrite an admin's assignment on someone else's cohort.
+      assignedLecturerId,
+    } = body;
 
     if (!branchId || !level || !date) {
       return NextResponse.json({ error: "branchId, level and date are required" }, { status: 400 });
@@ -286,8 +303,13 @@ export async function PUT(req: NextRequest) {
             : postponedTo === null
               ? null
               : undefined,
-      // Record who last touched the day, when we know which lecturer they are.
-      lecturerId: staff.lecturerId ?? undefined,
+      // An admin explicitly assigning/clearing a tutor wins; otherwise, record
+      // who last touched the day when we know which lecturer they are (a no-op
+      // for an admin, who has no `lecturerId` of their own).
+      lecturerId:
+        staff.role === "admin" && assignedLecturerId !== undefined
+          ? (typeof assignedLecturerId === "string" && assignedLecturerId ? assignedLecturerId : null)
+          : staff.lecturerId ?? undefined,
     };
 
     const saved = await prisma.classSession.upsert({
