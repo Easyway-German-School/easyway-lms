@@ -277,7 +277,7 @@ export default function LecturerStudentRoster({ compact = false }: { compact?: b
 
   function messageGroup(label: string, ids: string[]) {
     const params = new URLSearchParams({ students: ids.join(","), label });
-    router.push(`/lecturer/announcements?${params.toString()}`);
+    router.push(`/lecturer/messages?${params.toString()}`);
   }
 
   if (loading) return <p className="text-sm text-[var(--muted)]">Loading your students…</p>;

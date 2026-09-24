@@ -113,6 +113,16 @@ export default function LecturerAttendance() {
     );
   }
 
+  /**
+   * The common case for most classes: everyone showed up. Without this a
+   * tutor with 20 students clicked the status pill 20 times before Save —
+   * exceptions (a late arrival, an absence) are now the only per-student
+   * clicks needed, marked individually after this.
+   */
+  function markAllPresent() {
+    setStudents(students.map((s) => ({ ...s, present: true, status: 'present' })));
+  }
+
   async function handleSubmit() {
     setMarking(true);
     try {
@@ -369,7 +379,13 @@ export default function LecturerAttendance() {
               </div>
 
               {/* Submit Button */}
-              <div className="mt-6 flex justify-end gap-4">
+              <div className="mt-6 flex flex-wrap items-center justify-end gap-4">
+                <button
+                  onClick={markAllPresent}
+                  className="inline-flex items-center gap-1.5 px-6 py-2 border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:bg-[var(--surface-alt)] transition-colors"
+                >
+                  <CheckIcon className="h-4 w-4" /> Mark all present
+                </button>
                 <button
                   onClick={() => fetchStudents(selectedCourse, selectedDate)}
                   className="px-6 py-2 border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:bg-[var(--surface-alt)] transition-colors"

@@ -36,6 +36,7 @@ export default function LecturerMaterials() {
   const [showForm, setShowForm] = useState(false);
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [sendResults, setSendResults] = useState<Record<string, string>>({});
+  const [assignedLevel, setAssignedLevel] = useState<string | null>(null);
 
   /**
    * Upload a file, or point at one somebody else is already hosting.
@@ -116,9 +117,16 @@ export default function LecturerMaterials() {
       }
 
       if (!res.ok) throw new Error('Failed to fetch materials');
-      
+
       const data = await res.json();
-      setMaterials(data);
+      setMaterials(data.materials ?? []);
+      // Pre-fill the level with this tutor's own assigned level — the
+      // dropdown then only needs touching for an upload aimed at a different
+      // level. Only when the tutor hasn't already picked one themselves.
+      if (data.assignedLevel) {
+        setAssignedLevel(data.assignedLevel);
+        setFormData((current) => (current.level ? current : { ...current, level: data.assignedLevel }));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -194,7 +202,7 @@ export default function LecturerMaterials() {
         file: null,
         sourceUrl: '',
         isRecording: false,
-        level: '',
+        level: assignedLevel ?? '',
         series: '',
         episodeNumber: '',
         recordedAt: '',

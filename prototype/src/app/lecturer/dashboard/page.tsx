@@ -191,7 +191,7 @@ export default function LecturerDashboard() {
             class, the code to read out, and who has actually turned up. Renders
             nothing when no class is running. */}
         <div className="max-w-7xl mx-auto px-6 pt-6">
-          <TutorLivePanel />
+          <TutorLivePanel showGoLive />
         </div>
 
         {/* Stats Grid */}
