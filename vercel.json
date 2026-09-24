@@ -3,6 +3,12 @@
   "framework": "nextjs",
   "installCommand": "npm install --include=dev --no-audit --no-fund",
   "buildCommand": "npm run build",
+  "git": {
+    "deploymentEnabled": {
+      "**": false,
+      "main": true
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/tick",
