@@ -1,5 +1,7 @@
 /**
- * The fixed set of hybrid combos a student can pick at signup.
+ * Every hybrid combo a student can pick at signup: which physical sitting
+ * they attend on campus, paired with which online sitting they drop into
+ * over video.
  *
  * "Hybrid" used to be a single vague mode — registered at a campus, and
  * somehow also allowed to drop into any online sitting of their level. That
@@ -8,23 +10,28 @@
  * student to one concrete online sitting, so nothing could match them to one
  * concrete online tutor either.
  *
- * A hybrid student now picks ONE of these named combos: which physical
- * sitting they attend on campus, and which online sitting they drop into
- * over video. `Student.sessionSlot` stores the physical half (same column
- * every physical/online-only student already uses), `hybridOnlineSlot`
- * stores the online half.
+ * A hybrid student now picks ONE of these named combos, which is what fixes
+ * that — `Student.sessionSlot` stores the physical half (same column every
+ * physical/online-only student already uses), `hybridOnlineSlot` stores the
+ * online half. What was fixed was picking a CONCRETE pair, not which pairs
+ * are offered: this is every physical sitting paired with every online
+ * sitting the school runs (physical has four; online only ever runs morning
+ * and evening — see session-times.ts), so "physical morning + online
+ * evening" and the rest are all real options here, not just the three the
+ * office happened to name first. The signup form and the retroactive
+ * "pick your sittings" popup both then filter this down further to whatever
+ * is actually open for the student's level (see isCellEnabled in
+ * school-settings.ts) — this list is every pairing that could exist, not
+ * every pairing that does right now.
  *
- * Deliberately a short, curated list rather than every physical × online
- * cross product — three real timetable slots the office actually runs,
- * plus an escape hatch for anything else. No prisma import: the signup form
- * and the Becca popup both need this in the browser.
+ * No prisma import: the signup form and the Becca popup both need this in
+ * the browser.
  */
 
-export type HybridComboId =
-  | "physical-morning_online-morning"
-  | "physical-evening_online-evening"
-  | "physical-afternoon_online-evening"
-  | "other";
+const PHYSICAL_SLOTS = ["morning", "afternoon", "evening", "weekend"] as const;
+const ONLINE_SLOTS = ["morning", "evening"] as const;
+
+export type HybridComboId = string;
 
 export type HybridCombo = {
   id: HybridComboId;
@@ -33,32 +40,28 @@ export type HybridCombo = {
   label: string;
 };
 
+function titleCase(slot: string): string {
+  return slot.charAt(0).toUpperCase() + slot.slice(1);
+}
+
+const PAIRED_COMBOS: readonly HybridCombo[] = PHYSICAL_SLOTS.flatMap((physicalSlot) =>
+  ONLINE_SLOTS.map((onlineSlot) => ({
+    id: `physical-${physicalSlot}_online-${onlineSlot}`,
+    physicalSlot,
+    onlineSlot,
+    label: `Physical ${titleCase(physicalSlot)} + Online ${titleCase(onlineSlot)}`,
+  })),
+);
+
 export const HYBRID_COMBOS: readonly HybridCombo[] = [
-  {
-    id: "physical-morning_online-morning",
-    physicalSlot: "morning",
-    onlineSlot: "morning",
-    label: "Physical morning + Online morning",
-  },
-  {
-    id: "physical-evening_online-evening",
-    physicalSlot: "evening",
-    onlineSlot: "evening",
-    label: "Physical evening + Online evening",
-  },
-  {
-    id: "physical-afternoon_online-evening",
-    physicalSlot: "afternoon",
-    onlineSlot: "evening",
-    label: "Physical afternoon + Online evening",
-  },
+  ...PAIRED_COMBOS,
   {
     id: "other",
     physicalSlot: null,
     onlineSlot: null,
     label: "Not sure yet — start me on a sitting",
   },
-] as const;
+];
 
 export const HYBRID_COMBO_IDS = HYBRID_COMBOS.map((combo) => combo.id) as HybridComboId[];
 

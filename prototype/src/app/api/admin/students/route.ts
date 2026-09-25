@@ -618,6 +618,9 @@ export async function PATCH(request: Request) {
       deliveryMode?: string;
       pathway?: string;
       tags?: string[];
+      classesStartedAt?: Date | null;
+      startConfirmedAt?: Date | null;
+      startConfirmedVia?: string | null;
       // JSON blob field — typed loosely on purpose, same as whereClause above.
       admission?: any;
     };
@@ -655,6 +658,34 @@ export async function PATCH(request: Request) {
       if (photoUrl !== undefined) nextAdmission.photoUrl = photoUrl || undefined;
       updateStudent.admission = nextAdmission;
     }
+
+    /**
+     * Moving a student to a new batch from this form must reopen the
+     * countdown lock if the new batch hasn't started yet — otherwise a
+     * student moved from a started September batch to an unstarted October
+     * one keeps their OLD classesStartedAt/startConfirmedAt on file, and
+     * resolveUpcomingBatch's guard against stale locks ("a confirmed first
+     * day that already passed beats the label" — see batch-reservation.ts)
+     * reads that as "this student already started class", leaving their
+     * portal open through a batch they haven't actually begun. Only clears
+     * when the label itself is genuinely readable as upcoming (deliberately
+     * omitting the student's existing classesStartedAt from this check,
+     * since that stale value is exactly what we're deciding whether to
+     * reset) — a same-batch edit or a move to an already-started batch
+     * leaves these fields untouched.
+     */
+    if (batch !== undefined && batch !== batchFromAdmission(student.admission)) {
+      const nowMovedToUpcoming = resolveUpcomingBatch(batch, {
+        registeredAt: student.createdAt,
+        now: new Date(),
+      });
+      if (nowMovedToUpcoming) {
+        updateStudent.classesStartedAt = null;
+        updateStudent.startConfirmedAt = null;
+        updateStudent.startConfirmedVia = null;
+      }
+    }
+
     if (body.branchId !== undefined) updateStudent.branchId = branchId;
     /**
      * deliveryMode follows the branch — an admin moving a student INTO the
