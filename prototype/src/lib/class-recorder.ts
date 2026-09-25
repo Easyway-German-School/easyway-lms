@@ -26,11 +26,12 @@ import { EgressStatus } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { createRecordingThumbnail } from "@/lib/recording-thumbnail";
-import { studentExpiryFrom } from "@/lib/retention";
+import { isTooShortToKeep, studentExpiryFrom } from "@/lib/retention";
 import {
   AUDIO_ENCODING,
   CLASS_ENCODING,
   buildFileOutput,
+  deleteRecordingObject,
   egressClient,
   egressTemplateBaseUrl,
   recordingConfigured,
@@ -376,6 +377,40 @@ export async function finaliseRecording(egress: {
     const fileUrl = recordingPublicUrl(objectKey);
     const recordedAt = row.startedAt;
     const isPrivate = Boolean(row.privateClassId);
+
+    /**
+     * A too-short GROUP recording is discarded here, before it ever becomes
+     * a Material row — nobody sees it, nobody is notified, and no thumbnail
+     * is wasted generating one. See RETENTION.minWorthKeepingSeconds.
+     *
+     * If the bucket delete itself fails, this recording is NOT purged: it
+     * falls through to the normal path below and becomes an ordinary
+     * Material, so a storage hiccup never leaves an orphaned file nobody can
+     * find or remove. The next admin retention pass, or a manual review,
+     * can deal with it from there.
+     */
+    if (isTooShortToKeep(durationSeconds, isPrivate)) {
+      const removed = await deleteRecordingObject(objectKey);
+      if (removed) {
+        await prisma.classRecording.update({
+          where: { id: row.id },
+          data: {
+            status: "purged",
+            endedAt: new Date(),
+            objectKey,
+            fileUrl: null,
+            durationSeconds,
+            sizeBytes,
+            purgedAt: new Date(),
+          },
+        });
+        return "created";
+      }
+      console.error(
+        `Could not auto-delete short recording ${row.egressId} (${durationSeconds}s, bucket delete failed) — keeping it instead.`,
+      );
+    }
+
     let thumbnailPath: string | null = null;
     try {
       thumbnailPath = await createRecordingThumbnail({

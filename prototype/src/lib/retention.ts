@@ -36,7 +36,25 @@ export const RETENTION = {
    * the class date. Enforced as a query filter, never by deletion.
    */
   studentWindowDays: 14,
+  /**
+   * A GROUP recording shorter than this is a false start, a connection test,
+   * or a class that ended almost as soon as it began — not a lesson anybody
+   * needs to rewatch. Unlike the age-based policy above, this one deletes:
+   * see `isTooShortToKeep` and its use in class-recorder.ts's
+   * `finaliseRecording`, which discards a recording this short the moment it
+   * finishes processing, before it ever becomes a Material row a portal
+   * could show. A PRIVATE one-to-one session is exempt regardless of length
+   * — a short private lesson is still a real, paid lesson a student may
+   * want proof of, not a false start.
+   */
+  minWorthKeepingSeconds: 40 * 60,
 } as const;
+
+/** True for a GROUP recording too short to be worth keeping. Never for a private one. */
+export function isTooShortToKeep(durationSeconds: number | null, isPrivate: boolean): boolean {
+  if (isPrivate) return false;
+  return durationSeconds != null && durationSeconds < RETENTION.minWorthKeepingSeconds;
+}
 
 /** Re-exported flat for callers that just want the number. */
 export const STUDENT_RECORDING_WINDOW_DAYS = RETENTION.studentWindowDays;
@@ -223,6 +241,123 @@ export async function applyRetention(
     // Material carries the tile in the library; deleting it is what makes the
     // recording disappear. `ClassRecording` survives as the audit trail —
     // "was Tuesday recorded?" must stay answerable afterwards.
+    if (recording.materialId) {
+      await prisma.material.delete({ where: { id: recording.materialId } }).catch(() => {});
+    }
+    await prisma.classRecording.update({
+      where: { id: target.recordingId },
+      data: { status: "purged", purgedAt: new Date(), fileUrl: null },
+    });
+
+    result.reclaimed += 1;
+    result.bytesReclaimed += target.sizeBytes;
+  }
+
+  return result;
+}
+
+export type ShortRecordingVerdict = {
+  recordingId: string;
+  materialId: string | null;
+  title: string;
+  recordedAt: Date;
+  durationSeconds: number;
+  sizeBytes: number;
+  variant: string;
+};
+
+export type ShortRecordingPlan = {
+  verdicts: ShortRecordingVerdict[];
+  reclaimable: number;
+  bytesReclaimable: number;
+};
+
+/**
+ * The EXISTING backlog of short GROUP recordings from before `finaliseRecording`
+ * started discarding these on the way in. Reads only — never deletes. A PRIVATE
+ * session is excluded regardless of length, same exemption as `isTooShortToKeep`.
+ */
+export async function planShortRecordingPurge(): Promise<ShortRecordingPlan> {
+  const recordings = await prisma.classRecording.findMany({
+    where: {
+      status: "completed",
+      materialId: { not: null },
+      privateClassId: null,
+      keepForever: false,
+      durationSeconds: { lt: RETENTION.minWorthKeepingSeconds },
+    },
+    select: {
+      id: true,
+      materialId: true,
+      durationSeconds: true,
+      sizeBytes: true,
+      variant: true,
+      startedAt: true,
+      material: { select: { title: true, recordedAt: true } },
+    },
+  });
+
+  const verdicts: ShortRecordingVerdict[] = recordings.map((recording) => ({
+    recordingId: recording.id,
+    materialId: recording.materialId,
+    title: recording.material?.title ?? "Class recording",
+    recordedAt: recording.material?.recordedAt ?? recording.startedAt,
+    durationSeconds: recording.durationSeconds ?? 0,
+    sizeBytes: recording.sizeBytes ?? 0,
+    variant: recording.variant,
+  }));
+
+  return {
+    verdicts,
+    reclaimable: verdicts.length,
+    bytesReclaimable: verdicts.reduce((sum, verdict) => sum + verdict.sizeBytes, 0),
+  };
+}
+
+export type ShortRecordingPurgeResult = {
+  dryRun: boolean;
+  considered: number;
+  reclaimed: number;
+  bytesReclaimed: number;
+  failed: number;
+  verdicts: ShortRecordingVerdict[];
+};
+
+/**
+ * Permanently delete the EXISTING backlog of short group recordings the plan
+ * lists. Same object-then-row order and same "stop on a failed object delete"
+ * rule as `applyRetention` — the library must never advertise a video that's
+ * no longer there.
+ */
+export async function applyShortRecordingPurge(
+  { dryRun = true }: { dryRun?: boolean } = {},
+): Promise<ShortRecordingPurgeResult> {
+  const plan = await planShortRecordingPurge();
+
+  const result: ShortRecordingPurgeResult = {
+    dryRun,
+    considered: plan.verdicts.length,
+    reclaimed: 0,
+    bytesReclaimed: 0,
+    failed: 0,
+    verdicts: plan.verdicts,
+  };
+
+  if (dryRun) return result;
+
+  for (const target of plan.verdicts) {
+    const recording = await prisma.classRecording.findUnique({
+      where: { id: target.recordingId },
+      select: { objectKey: true, materialId: true },
+    });
+    if (!recording?.objectKey) continue;
+
+    const removed = await deleteRecordingObject(recording.objectKey);
+    if (!removed) {
+      result.failed += 1;
+      continue;
+    }
+
     if (recording.materialId) {
       await prisma.material.delete({ where: { id: recording.materialId } }).catch(() => {});
     }

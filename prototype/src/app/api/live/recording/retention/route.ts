@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCapability } from "@/lib/admin-roles";
-import { applyRetention, planRetention, RETENTION } from "@/lib/retention";
+import { applyRetention, applyShortRecordingPurge, planRetention, planShortRecordingPurge, RETENTION } from "@/lib/retention";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +24,19 @@ export async function GET(request: Request) {
   if (denied) return denied;
 
   const url = new URL(request.url);
+
+  if (url.searchParams.get("mode") === "short") {
+    const plan = await planShortRecordingPurge();
+    return NextResponse.json({
+      ok: true,
+      mode: "short",
+      policy: RETENTION,
+      reclaimable: plan.reclaimable,
+      bytesReclaimable: plan.bytesReclaimable,
+      verdicts: plan.verdicts,
+    });
+  }
+
   const olderThanRaw = url.searchParams.get("olderThanDays");
   const olderThanDays = olderThanRaw != null && Number.isFinite(Number(olderThanRaw)) ? Number(olderThanRaw) : undefined;
 
@@ -53,7 +66,17 @@ export async function POST(request: Request) {
   const denied = await authorise(request);
   if (denied) return denied;
 
-  const body = (await request.json().catch(() => ({}))) as { confirm?: boolean; olderThanDays?: number };
+  const body = (await request.json().catch(() => ({}))) as {
+    confirm?: boolean;
+    olderThanDays?: number;
+    mode?: string;
+  };
+
+  if (body.mode === "short") {
+    const result = await applyShortRecordingPurge({ dryRun: body.confirm !== true });
+    return NextResponse.json({ ok: true, mode: "short", ...result });
+  }
+
   const olderThanDays =
     typeof body.olderThanDays === "number" && Number.isFinite(body.olderThanDays) && body.olderThanDays > 0
       ? body.olderThanDays
