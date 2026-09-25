@@ -45,6 +45,23 @@ export async function defaultBatchMonth(tenantId: string | null | undefined): Pr
   return (await readCurrentIntake(tenantId)).month;
 }
 
+const DEFAULT_TENANT_SLUG = process.env.DEFAULT_TENANT_SLUG || "easyway";
+let defaultTenantId: string | null = null;
+
+/**
+ * The tenant whose opening-day overrides apply. Some admin accounts and a
+ * couple of legacy students carry no `tenantId`; for them the override has to
+ * land on, and be read from, the default tenant — otherwise the office saves an
+ * opening day that no screen ever shows (and the save is refused outright).
+ */
+async function overrideTenantId(tenantId: string | null | undefined): Promise<string | null> {
+  if (tenantId) return tenantId;
+  if (defaultTenantId) return defaultTenantId;
+  const tenant = await prisma.tenant.findUnique({ where: { slug: DEFAULT_TENANT_SLUG }, select: { id: true } });
+  defaultTenantId = tenant?.id ?? null;
+  return defaultTenantId;
+}
+
 /**
  * Which specific months open off the 1st — see lib/intake.ts. Never throws;
  * an unreadable row just means every batch opens on the 1st, same as before
@@ -53,10 +70,11 @@ export async function defaultBatchMonth(tenantId: string | null | undefined): Pr
 export async function readIntakeStartDayOverrides(
   tenantId: string | null | undefined,
 ): Promise<IntakeStartDayOverrides> {
-  if (!tenantId) return {};
   try {
+    const resolved = await overrideTenantId(tenantId);
+    if (!resolved) return {};
     const row = await prisma.schoolSetting.findUnique({
-      where: { tenantId_key: { tenantId, key: INTAKE_START_DAYS_KEY } },
+      where: { tenantId_key: { tenantId: resolved, key: INTAKE_START_DAYS_KEY } },
     });
     return parseIntakeStartDayOverrides(row?.value);
   } catch {
@@ -69,19 +87,21 @@ export async function readIntakeStartDayOverrides(
  * map afterwards so the caller can respond with the up-to-date list.
  */
 export async function writeIntakeStartDayOverride(
-  tenantId: string,
+  tenantId: string | null | undefined,
   monthKey: string,
   day: number | null,
-): Promise<IntakeStartDayOverrides> {
-  const current = await readIntakeStartDayOverrides(tenantId);
+): Promise<IntakeStartDayOverrides | null> {
+  const resolved = await overrideTenantId(tenantId);
+  if (!resolved) return null;
+  const current = await readIntakeStartDayOverrides(resolved);
   const next = { ...current };
   if (day === null) delete next[monthKey];
   else next[monthKey] = day;
 
   await prisma.schoolSetting.upsert({
-    where: { tenantId_key: { tenantId, key: INTAKE_START_DAYS_KEY } },
+    where: { tenantId_key: { tenantId: resolved, key: INTAKE_START_DAYS_KEY } },
     update: { value: next },
-    create: { tenantId, key: INTAKE_START_DAYS_KEY, value: next },
+    create: { tenantId: resolved, key: INTAKE_START_DAYS_KEY, value: next },
   });
   return next;
 }

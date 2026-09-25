@@ -141,9 +141,6 @@ export async function POST(request: Request) {
     }
 
     if (action === "setStartDay") {
-      const tenantId = gate.session.user.tenantId;
-      if (!tenantId) return NextResponse.json({ error: "No school in context" }, { status: 400 });
-
       const monthKey = typeof body.monthKey === "string" ? body.monthKey : "";
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
         return NextResponse.json({ error: "monthKey must look like 2026-10" }, { status: 400 });
@@ -154,7 +151,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Give a day between 1 and 28, or null to reset to the 1st" }, { status: 400 });
       }
 
-      const overrides = await writeIntakeStartDayOverride(tenantId, monthKey, day);
+      const overrides = await writeIntakeStartDayOverride(gate.session.user.tenantId ?? null, monthKey, day);
+      if (!overrides) return NextResponse.json({ error: "No school in context" }, { status: 400 });
       return NextResponse.json({ ok: true, startDayOverrides: overrides });
     }
 
