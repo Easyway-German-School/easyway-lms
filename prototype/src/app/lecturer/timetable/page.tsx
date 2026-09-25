@@ -411,23 +411,23 @@ export default function LecturerTimetablePage() {
     }
   }
 
-  async function save(session: Session, patch: Partial<Session> & { materialId?: string | null }) {
+  async function save(session: Session, patch: Partial<Session> & { materialId?: string | null }, dayKey: string = editDate) {
     // One class per cohort per day — a move onto a busy day would stack two on
     // one calendar square.
     const chosenStatus = patch.status ?? session.status;
     if (
       chosenStatus !== "cancelled" &&
-      editDate &&
-      editDate !== effectiveDayKey(session) &&
-      (sessionsByDay.get(editDate) ?? []).some((other) => other !== session && other.status !== "cancelled")
+      dayKey &&
+      dayKey !== effectiveDayKey(session) &&
+      (sessionsByDay.get(dayKey) ?? []).some((other) => other !== session && other.status !== "cancelled")
     ) {
-      setError(`You already have a class on ${shortDay(editDate)} — pick a different day.`);
+      setError(`You already have a class on ${shortDay(dayKey)} — pick a different day.`);
       return;
     }
     setSavingKey(session.date);
     setSaved("");
     try {
-      const move = resolveMove(session, editDate, patch.status ?? session.status);
+      const move = resolveMove(session, dayKey, patch.status ?? session.status);
       const before = { status: session.status, postponedTo: session.postponedTo, startTime: session.startTime, endTime: session.endTime };
       await putSession(session, {
         ...move,
@@ -449,7 +449,7 @@ export default function LecturerTimetablePage() {
         setUndo({
           label:
             move.status === "postponed"
-              ? `Moved to ${shortDay(editDate)}`
+              ? `Moved to ${shortDay(dayKey)}`
               : move.status === "cancelled"
                 ? "Class cancelled"
                 : "Class updated",
@@ -460,7 +460,9 @@ export default function LecturerTimetablePage() {
         });
       }
       await load();
-      setEditing(null);
+      // The panel stays open after an inline field commits — a tutor editing
+      // the topic and then the notes should not have the panel snap shut
+      // between the two. It only closes on an explicit Close click.
       setError("");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save");
@@ -624,12 +626,21 @@ export default function LecturerTimetablePage() {
 
                   {isEditing && editing && (
                     <div className="mt-3 grid gap-3 border-t border-[var(--border)] pt-3">
+                      {/* Every field below commits on its own change or blur —
+                          there is no separate "Save class" step. A tutor edits
+                          the topic, tabs to notes, and both are already saved
+                          by the time they look up. */}
                       <label>
                         <span className="text-xs font-medium text-[var(--muted)]">Topic for this class</span>
                         <input
                           defaultValue={session.topic || session.defaultFocus}
                           placeholder={session.defaultFocus}
                           onChange={(event) => setEditing({ ...editing, topic: event.target.value })}
+                          onBlur={(event) => {
+                            const next = { ...editing, topic: event.target.value };
+                            setEditing(next);
+                            save(session, { ...next, materialId: next.material?.id ?? null });
+                          }}
                           className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
                         />
                       </label>
@@ -640,7 +651,13 @@ export default function LecturerTimetablePage() {
                           <input
                             type="date"
                             value={editDate}
-                            onChange={(event) => setEditDate(event.target.value)}
+                            onChange={(event) => {
+                              const newDay = event.target.value;
+                              setEditDate(newDay);
+                              if (newDay) {
+                                save(session, { ...editing, materialId: editing.material?.id ?? null }, newDay);
+                              }
+                            }}
                             className={`mt-1 w-full rounded-lg border bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] ${
                               editDate && editDate !== ymd(new Date(session.date))
                                 ? "border-[var(--accent)]"
@@ -657,7 +674,11 @@ export default function LecturerTimetablePage() {
                           <span className="text-xs font-medium text-[var(--muted)]">Status</span>
                           <select
                             value={editing.status === "postponed" ? "scheduled" : editing.status}
-                            onChange={(event) => setEditing({ ...editing, status: event.target.value })}
+                            onChange={(event) => {
+                              const next = { ...editing, status: event.target.value };
+                              setEditing(next);
+                              save(session, { ...next, materialId: next.material?.id ?? null });
+                            }}
                             className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
                           >
                             <option value="scheduled">Scheduled</option>
@@ -674,6 +695,11 @@ export default function LecturerTimetablePage() {
                             type="time"
                             defaultValue={session.startTime}
                             onChange={(event) => setEditing({ ...editing, startTime: event.target.value })}
+                            onBlur={(event) => {
+                              const next = { ...editing, startTime: event.target.value };
+                              setEditing(next);
+                              save(session, { ...next, materialId: next.material?.id ?? null });
+                            }}
                             className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
                           />
                         </label>
@@ -683,6 +709,11 @@ export default function LecturerTimetablePage() {
                             type="time"
                             defaultValue={session.endTime}
                             onChange={(event) => setEditing({ ...editing, endTime: event.target.value })}
+                            onBlur={(event) => {
+                              const next = { ...editing, endTime: event.target.value };
+                              setEditing(next);
+                              save(session, { ...next, materialId: next.material?.id ?? null });
+                            }}
                             className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
                           />
                         </label>
@@ -695,6 +726,11 @@ export default function LecturerTimetablePage() {
                           rows={2}
                           placeholder="Bring your workbook · we finish early today"
                           onChange={(event) => setEditing({ ...editing, notes: event.target.value })}
+                          onBlur={(event) => {
+                            const next = { ...editing, notes: event.target.value };
+                            setEditing(next);
+                            save(session, { ...next, materialId: next.material?.id ?? null });
+                          }}
                           className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
                         />
                       </label>
@@ -703,12 +739,12 @@ export default function LecturerTimetablePage() {
                         <span className="text-xs font-medium text-[var(--muted)]">Material for this class</span>
                         <select
                           defaultValue={session.material?.id ?? ""}
-                          onChange={(event) =>
-                            setEditing({
-                              ...editing,
-                              material: event.target.value ? { id: event.target.value, title: "" } : null,
-                            })
-                          }
+                          onChange={(event) => {
+                            const nextMaterial = event.target.value ? { id: event.target.value, title: "" } : null;
+                            const next = { ...editing, material: nextMaterial };
+                            setEditing(next);
+                            save(session, { ...next, materialId: nextMaterial?.id ?? null });
+                          }}
                           className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
                         >
                           <option value="">No material</option>
@@ -720,16 +756,9 @@ export default function LecturerTimetablePage() {
                         </select>
                       </label>
 
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => save(session, { ...editing, materialId: editing.material?.id ?? null })}
-                          disabled={savingKey === session.date || !editDate}
-                          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {savingKey === session.date ? "Saving…" : "Save class"}
-                        </button>
-                      </div>
+                      {savingKey === session.date && (
+                        <p className="text-xs font-medium text-[var(--muted)]">Saving…</p>
+                      )}
                     </div>
                   )}
                 </div>
