@@ -223,7 +223,8 @@ export default function UpcomingIntakePage() {
       const result = await post({ action: "assign", studentIds: ids, month });
       setMsg(
         `${result.locked} learner${result.locked === 1 ? " is" : "s are"} now waiting for ${result.month}.` +
-          (result.notLocked.length ? ` Not locked (already in class, or that month has begun): ${result.notLocked.join(", ")}.` : ""),
+          (result.restarted?.length ? ` Already attending, now paused until the intake opens: ${result.restarted.join(", ")}.` : "") +
+          (result.notLocked.length ? ` Not locked (that month has already begun): ${result.notLocked.join(", ")}.` : ""),
       );
       setMatches(null);
       setNames("");
@@ -578,7 +579,7 @@ export default function UpcomingIntakePage() {
                           />
                           <span className="text-[var(--foreground)]">
                             {c.name} <span className="text-[var(--muted)]">· {c.email} · {c.branch} · {c.level} · batch {c.currentBatch ?? "none"}</span>
-                            {c.alreadyInClass && <span className="ml-1 font-semibold text-amber-700">(already in class — will not lock)</span>}
+                            {c.alreadyInClass && <span className="ml-1 font-semibold text-amber-700">(already attending — placing pauses their portal until {month})</span>}
                           </span>
                         </label>
                       ))}

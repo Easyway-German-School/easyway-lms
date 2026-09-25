@@ -172,30 +172,53 @@ export async function POST(request: Request) {
       });
 
       const notLocked: string[] = [];
+      const restarted: string[] = [];
       let updated = 0;
       let locked = 0;
       for (const student of targets) {
         const admission =
           student.admission && typeof student.admission === "object" ? (student.admission as Record<string, unknown>) : {};
-        if (admission.batch !== month) {
+        const name = student.user?.name ?? student.id;
+
+        // The office chose this month on purpose. A past `classesStartedAt` (set
+        // when the learner joined a class, or stamped by the cohort check) would
+        // otherwise outrank the label and leave the portal open with no intake
+        // tag — so when the month really is still ahead, the old start date is
+        // retired and kept in `admission` so the move can be undone.
+        const startedAlready = Boolean(student.classesStartedAt && student.classesStartedAt.getTime() <= Date.now());
+        const monthIsAhead = Boolean(
+          resolveUpcomingBatch(month, { registeredAt: student.createdAt, startDayOverrides }),
+        );
+        const restart = startedAlready && monthIsAhead;
+
+        if (admission.batch !== month || restart) {
           await prisma.student.update({
             where: { id: student.id },
-            data: { admission: { ...admission, batch: month } },
+            data: {
+              admission: {
+                ...admission,
+                batch: month,
+                ...(restart ? { classesStartedAtBeforePlacement: student.classesStartedAt?.toISOString() } : {}),
+              },
+              ...(restart
+                ? { classesStartedAt: null, startConfirmedAt: null, startConfirmedVia: null, startPromptSnoozedUntil: null }
+                : {}),
+            },
           });
-          updated += 1;
+          if (admission.batch !== month) updated += 1;
+          if (restart) restarted.push(name);
         }
-        // A confirmed, past first day means classes already began for them — the
-        // batch label will not lock them. Say so instead of implying it did.
+
         const upcoming = resolveUpcomingBatch(month, {
           registeredAt: student.createdAt,
-          classesStartedAt: student.classesStartedAt,
+          classesStartedAt: restart ? null : student.classesStartedAt,
           startDayOverrides,
         });
         if (upcoming) locked += 1;
-        else notLocked.push(student.user?.name ?? student.id);
+        else notLocked.push(name);
       }
 
-      return NextResponse.json({ ok: true, month, updated, locked, notLocked });
+      return NextResponse.json({ ok: true, month, updated, locked, notLocked, restarted });
     }
 
     if (action === "nudge") {
