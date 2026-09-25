@@ -5,6 +5,10 @@ export const packageOptions = [
   "Opportunity card",
   "Study and work in Germany",
   "Study route",
+  // Its own per-level tuition ladder (see EXAM_PREPARATORY_PATHWAY in
+  // payment.ts), otherwise the same signup, registration-fee and
+  // classType/level flow as every other package above.
+  "Exam Preparatory",
 ];
 
 export const ausbildungSectorOptions = [

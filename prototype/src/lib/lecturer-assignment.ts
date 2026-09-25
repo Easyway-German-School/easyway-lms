@@ -32,6 +32,17 @@ export const SESSION_SLOTS = ["morning", "afternoon", "evening", "weekend"] as c
  */
 export const CLASS_TYPES = ["physical", "online", "private"] as const;
 
+/**
+ * Named packages a tutor's coverage can be scoped to, on top of the ordinary
+ * branch/level/session/classType/batch dimensions — so far just the one: an
+ * "exam preparatory tutor" is a tutor whose `pathways` names it, and whose
+ * roster (via `studentWhereForAssignment` below) then narrows to students on
+ * that pathway the same way a classType restriction narrows to a delivery
+ * mode. Matches `Student.pathway` (see EXAM_PREPARATORY_PATHWAY in
+ * payment.ts) case-insensitively, same as every other list here.
+ */
+export const ASSIGNABLE_PATHWAYS = ["Exam Preparatory"] as const;
+
 export const BATCHES = [
   "January",
   "February",
@@ -66,6 +77,8 @@ export type LecturerAssignment = {
   groups: Array<{ branchId: string; level: string; sessionSlot: string; batch?: string }>;
   classTypes: string[];
   batches: string[];
+  /** Named packages this tutor covers — see ASSIGNABLE_PATHWAYS. Empty = no restriction, like every list above. */
+  pathways: string[];
 };
 
 /** The shape this reads from — a Lecturer row, or a plain object in a form. */
@@ -79,6 +92,7 @@ export type AssignmentSource = {
   assignmentGroups?: unknown;
   classTypes?: unknown;
   batches?: unknown;
+  pathways?: unknown;
 };
 
 /**
@@ -123,7 +137,7 @@ function readList(raw: unknown, allowed?: readonly string[]): string[] {
  */
 export function readAssignment(source: AssignmentSource | null | undefined): LecturerAssignment {
   if (!source) {
-    return { branchIds: [], levels: [], sessionSlots: [], groups: [], classTypes: [], batches: [] };
+    return { branchIds: [], levels: [], sessionSlots: [], groups: [], classTypes: [], batches: [], pathways: [] };
   }
 
   const branchIds = readList(source.branchIds);
@@ -154,6 +168,7 @@ export function readAssignment(source: AssignmentSource | null | undefined): Lec
       groups,
     classTypes: readList(source.classTypes, CLASS_TYPES),
     batches: readList(source.batches, BATCHES),
+    pathways: readList(source.pathways, ASSIGNABLE_PATHWAYS),
   };
 }
 
@@ -196,13 +211,23 @@ export function studentWhereForAssignment(assignment: LecturerAssignment): Recor
   // "Online / hybrid" matched every online student at every level and branch —
   // the "it selected all 454 students" bug.
   const types = assignment.classTypes.map((type) => type.toLowerCase());
+  const andClauses: Array<Record<string, unknown>> = [];
   if (types.length && types.length < CLASS_TYPES.length) {
     const clauses: Array<Record<string, unknown>> = [];
     if (types.includes("physical")) clauses.push({ classType: "group", deliveryMode: { in: ["physical", "hybrid"] } });
     if (types.includes("online")) clauses.push({ classType: "group", deliveryMode: { in: ["online", "hybrid"] } });
     if (types.includes("private")) clauses.push({ classType: "private" });
-    if (clauses.length) where.AND = [{ OR: clauses }];
+    if (clauses.length) andClauses.push({ OR: clauses });
   }
+
+  // A tutor scoped to a named package (see ASSIGNABLE_PATHWAYS) only teaches
+  // students on it — combined with `AND`, same reasoning as classTypes above:
+  // assigning straight to `where.OR` would throw away the group clauses.
+  if (assignment.pathways.length) {
+    andClauses.push({ pathway: { in: assignment.pathways } });
+  }
+
+  if (andClauses.length) where.AND = andClauses;
 
   return where;
 }
@@ -546,6 +571,7 @@ export function assignmentToData(input: {
   assignmentGroups?: unknown;
   classTypes?: unknown;
   batches?: unknown;
+  pathways?: unknown;
 }) {
   const branchIds = readList(input.branchIds);
   const levels = readList(input.levels, COURSE_LEVELS);
@@ -565,6 +591,7 @@ export function assignmentToData(input: {
     : [];
   const classTypes = readList(input.classTypes, CLASS_TYPES);
   const batches = readList(input.batches, BATCHES);
+  const pathways = readList(input.pathways, ASSIGNABLE_PATHWAYS);
 
   return {
     branchIds,
@@ -573,6 +600,7 @@ export function assignmentToData(input: {
     assignmentGroups,
     classTypes,
     batches,
+    pathways,
     branchId: branchIds[0] ?? null,
     level: levels[0] ?? null,
     sessionSlot: sessionSlots[0] ?? null,
@@ -591,8 +619,9 @@ export function describeAssignment(
   const slots = assignment.sessionSlots.length
     ? assignment.sessionSlots.map((slot) => slot.charAt(0).toUpperCase() + slot.slice(1)).join(", ")
     : "All sittings";
+  const pathway = assignment.pathways.length ? ` · ${assignment.pathways.join(", ")}` : "";
 
-  return `${branches} · ${levels} · ${slots}`;
+  return `${branches} · ${levels} · ${slots}${pathway}`;
 }
 
 /**

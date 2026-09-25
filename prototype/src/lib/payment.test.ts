@@ -4,6 +4,8 @@ import {
   MIN_PART_PAYMENT,
   resolvePartialPaymentAmount,
   isTravelPackagePathway,
+  isExamPreparatoryPathway,
+  examPreparatoryPriceForLevel,
   tuitionFeeFor,
   requiredDepositFor,
   travelPackagePrice,
@@ -224,6 +226,65 @@ suite("requiredDepositFor — Travel Package", () => {
 
   it("leaves every non-Travel-Package student on the normal 60% deposit", () => {
     expect(requiredDepositFor({ level: "A1", branch: "Lagos" })).toBe(90000);
+  });
+});
+
+suite("isExamPreparatoryPathway", () => {
+  it("matches only the Exam Preparatory pathway, case-insensitively", () => {
+    expect(isExamPreparatoryPathway("Exam Preparatory")).toBe(true);
+    expect(isExamPreparatoryPathway("exam preparatory")).toBe(true);
+    expect(isExamPreparatoryPathway("  Exam Preparatory  ")).toBe(true);
+    expect(isExamPreparatoryPathway("Travel Package")).toBe(false);
+    expect(isExamPreparatoryPathway("Language training")).toBe(false);
+    expect(isExamPreparatoryPathway(null)).toBe(false);
+    expect(isExamPreparatoryPathway(undefined)).toBe(false);
+    expect(isExamPreparatoryPathway("")).toBe(false);
+  });
+});
+
+suite("examPreparatoryPriceForLevel", () => {
+  it("prices A1–B2 off its own ladder", () => {
+    expect(examPreparatoryPriceForLevel("A1")).toBe(100_000);
+    expect(examPreparatoryPriceForLevel("A2")).toBe(110_000);
+    expect(examPreparatoryPriceForLevel("B1")).toBe(120_000);
+    expect(examPreparatoryPriceForLevel("B2")).toBe(130_000);
+  });
+
+  it("falls back to the B2 price for a level this package does not run (e.g. C1)", () => {
+    expect(examPreparatoryPriceForLevel("C1")).toBe(130_000);
+    expect(examPreparatoryPriceForLevel(null)).toBe(130_000);
+    expect(examPreparatoryPriceForLevel("junk")).toBe(130_000);
+  });
+});
+
+suite("tuitionFeeFor — Exam Preparatory", () => {
+  it("prices off the exam-prep ladder whatever the branch, on top of the ordinary table", () => {
+    for (const branch of [null, "Lagos", "Abuja", "Online"]) {
+      expect(tuitionFeeFor({ level: "A1", branch, pathway: "Exam Preparatory" })).toBe(100_000);
+      expect(tuitionFeeFor({ level: "B2", branch, pathway: "Exam Preparatory" })).toBe(130_000);
+    }
+  });
+
+  it("wins over the private one-to-one flat price when both are somehow set", () => {
+    expect(tuitionFeeFor({ level: "B1", branch: "Abuja", classType: "private", pathway: "Exam Preparatory" })).toBe(
+      120_000,
+    );
+  });
+
+  it("loses to Travel Package when a student is somehow on both", () => {
+    expect(tuitionFeeFor({ level: "A1", branch: "Lagos", pathway: "Travel Package" })).toBe(TRAVEL_PACKAGE_PRICE);
+  });
+
+  it("leaves every non-Exam-Preparatory student on the normal table", () => {
+    expect(tuitionFeeFor({ level: "A1", branch: "Lagos", pathway: "Language training" })).toBe(150000);
+    expect(tuitionFeeFor({ level: "A1", branch: "Lagos" })).toBe(150000);
+  });
+});
+
+suite("requiredDepositFor — Exam Preparatory", () => {
+  it("is 60% of the exam-prep ladder price, the ordinary deposit rule", () => {
+    expect(requiredDepositFor({ level: "A1", branch: "Lagos", pathway: "Exam Preparatory" })).toBe(60_000);
+    expect(requiredDepositFor({ level: "B2", branch: "Lagos", pathway: "Exam Preparatory" })).toBe(78_000);
   });
 });
 

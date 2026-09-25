@@ -109,6 +109,12 @@ suite("editing the price book changes every lookup with no code change", () => {
     expect(requiredDepositFor({ level: "A1", pathway: "Travel Package" })).toBe(250_000);
   });
 
+  it("Exam Preparatory's per-level ladder comes from the book", () => {
+    setActivePriceBook(edited((b) => (b.examPrep.A1 = 105_000)));
+    expect(tuitionFeeFor({ level: "A1", branch: "Lagos", pathway: "Exam Preparatory" })).toBe(105_000);
+    expect(requiredDepositFor({ level: "A1", branch: "Lagos", pathway: "Exam Preparatory" })).toBe(63_000);
+  });
+
   it("reverts to the defaults when the active book is reset", () => {
     setActivePriceBook(edited((b) => (b.private.A1 = 1)));
     resetActivePriceBook();
@@ -148,6 +154,14 @@ suite("parsePriceBook — reading what is stored", () => {
     expect(DEFAULT_PRICE_BOOK.private.A1).toBe(300_000);
     expect(DEFAULT_PRICE_BOOK.private.A2).toBe(300_000);
   });
+
+  it("overlays Exam Preparatory cells, A1–B2 only, ignoring bad ones", () => {
+    const book = parsePriceBook({ examPrep: { A1: 101_000, A2: "abc", B1: -5, B2: 0 } });
+    expect(book.examPrep.A1).toBe(101_000);
+    expect(book.examPrep.A2).toBe(110_000);
+    expect(book.examPrep.B1).toBe(120_000);
+    expect(book.examPrep.B2).toBe(130_000);
+  });
 });
 
 suite("parsePriceBookStrict — validating a save", () => {
@@ -184,6 +198,14 @@ suite("parsePriceBookStrict — validating a save", () => {
     expect(parsePriceBookStrict(null).ok).toBe(false);
     expect(parsePriceBookStrict("x").ok).toBe(false);
   });
+
+  it("rejects a missing Exam Preparatory cell and names it", () => {
+    const partial = defaultPriceBook() as unknown as { examPrep: Record<string, unknown> };
+    delete partial.examPrep.B1;
+    const parsed = parsePriceBookStrict(partial);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("Exam Preparatory B1");
+  });
 });
 
 suite("diffPriceBooks", () => {
@@ -202,6 +224,13 @@ suite("diffPriceBooks", () => {
 
   it("is empty when nothing changed", () => {
     expect(diffPriceBooks(DEFAULT_PRICE_BOOK, defaultPriceBook())).toEqual([]);
+  });
+
+  it("lists a changed Exam Preparatory cell too", () => {
+    const after = edited((b) => (b.examPrep.B2 = 135_000));
+    expect(diffPriceBooks(DEFAULT_PRICE_BOOK, after)).toEqual([
+      { label: "Exam Preparatory B2", from: 130_000, to: 135_000 },
+    ]);
   });
 });
 

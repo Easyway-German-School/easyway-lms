@@ -201,6 +201,18 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
     }
     if (status !== 'authenticated') return;
     const role = (session?.user?.role ?? '').toLowerCase();
+    if (role === 'inactive_lecturer' || role === 'revoked_session') {
+      // A session downgraded to one of these sentinels (a deactivated tutor,
+      // a deleted/reset account — see INACTIVE_LECTURER_ROLE/REVOKED_SESSION_ROLE
+      // in src/lib/auth.ts) is not a role `homePathForRole` recognizes, so its
+      // fallback would send it to "/dashboard" — handing a deactivated or
+      // removed account the live student portal instead of signing them out.
+      // The async /api/lecturer/status poll below exists to catch exactly
+      // this, but the session already carries the sentinel by the time this
+      // effect runs, so end it here rather than race that fetch for it.
+      setRevoked(true);
+      return;
+    }
     if (role !== 'lecturer' && role !== 'tutor' && role !== 'admin') {
       router.replace(homePathForRole(role));
     }
