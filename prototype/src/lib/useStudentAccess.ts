@@ -32,9 +32,20 @@ export function useStudentAccess() {
      */
     refetchInterval: (q) => {
       const data = q.state.data;
-      // Not for an upcoming-intake wait: nothing changes for them until the start date.
-      const payLocked = data?.hasAccess === false && data.lockReason !== "upcoming_batch";
-      return data && (payLocked || data.hasPhoto === false) ? 30_000 : false;
+      if (!data) return false;
+      const payLocked = data.hasAccess === false && data.lockReason !== "upcoming_batch";
+      if (payLocked || data.hasPhoto === false) return 30_000;
+      /**
+       * A student waiting on an intake used to be excluded here, on the
+       * reasoning that nothing changes for them until the start date. That
+       * stopped being true the day the office could move the opening day:
+       * a portal left open on the lock screen would keep counting down to a
+       * date the school had already changed. Ask slowly — the date moves
+       * maybe once per intake, and a five-minute lag is invisible next to a
+       * countdown measured in days.
+       */
+      if (data.hasAccess === false && data.lockReason === "upcoming_batch") return 300_000;
+      return false;
     },
   });
 
