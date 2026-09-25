@@ -251,7 +251,7 @@ export async function POST(request: NextRequest) {
     const sessionSettingsForSignup =
       normalizedRole === "STUDENT" ? await readSessionSettings(currentTenantId()) : null;
     const isSlotOpen = (level: string | null | undefined, slot: string, mode: "hybrid" | "online") =>
-      isCellEnabled(sessionSettingsForSignup, level, slot, mode);
+      isCellEnabled(sessionSettingsForSignup, level, slot, mode, normalizedBranchId);
 
     /**
      * A hybrid student picks ONE of the curated combos in lib/hybrid-combo.ts
@@ -496,7 +496,7 @@ export async function POST(request: NextRequest) {
      */
     if (normalizedRole === "STUDENT") {
       const sessionSettings = sessionSettingsForSignup;
-      if (!isModeEnabled(sessionSettings, normalizedLevel, normalizedDeliveryMode)) {
+      if (!isModeEnabled(sessionSettings, normalizedLevel, normalizedDeliveryMode, normalizedBranchId)) {
         return NextResponse.json(
           { error: `${normalizedLevel} is not offered ${normalizedDeliveryMode === "physical" ? "on campus" : normalizedDeliveryMode} right now. Please choose another level or branch.` },
           { status: 400 }
@@ -504,7 +504,7 @@ export async function POST(request: NextRequest) {
       }
       if (
         normalizedClassType !== "private" &&
-        !isCellEnabled(sessionSettings, normalizedLevel, normalizedSessionSlot, normalizedDeliveryMode)
+        !isCellEnabled(sessionSettings, normalizedLevel, normalizedSessionSlot, normalizedDeliveryMode, normalizedBranchId)
       ) {
         return NextResponse.json(
           { error: `The ${normalizedSessionSlot} session is not running for ${normalizedLevel} ${normalizedDeliveryMode === "physical" ? "on campus" : normalizedDeliveryMode} right now. Please choose another.` },
@@ -513,7 +513,7 @@ export async function POST(request: NextRequest) {
       }
       if (
         normalizedHybridOnlineSlot &&
-        !isCellEnabled(sessionSettings, normalizedLevel, normalizedHybridOnlineSlot, "online")
+        !isCellEnabled(sessionSettings, normalizedLevel, normalizedHybridOnlineSlot, "online", normalizedBranchId)
       ) {
         return NextResponse.json(
           { error: `The ${normalizedHybridOnlineSlot} online session is not running for ${normalizedLevel} right now. Please choose another combo.` },

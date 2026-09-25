@@ -193,7 +193,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   // The sessions still running at the chosen level FOR THIS MODE (per
   // /admin/settings). Before a level is picked we show the full list.
   const offeredSlots = TIME_SLOTS.filter(
-    (slot) => !level || isCellEnabled(sessionCfg, level, slot, attendMode),
+    (slot) => !level || isCellEnabled(sessionCfg, level, slot, attendMode, branchId),
   );
   // Online-branch student at a level with no online session left at all: they
   // cannot be enrolled here, and are told to pick another level or a campus.
@@ -368,8 +368,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
     const combo = HYBRID_COMBOS.find((c) => c.id === hybridCombo);
     if (!combo) return;
     if (combo.id === "other") return;
-    const physicalOk = !level || isCellEnabled(sessionCfg, level, combo.physicalSlot!, "hybrid");
-    const onlineOk = !level || isCellEnabled(sessionCfg, level, combo.onlineSlot!, "online");
+    const physicalOk = !level || isCellEnabled(sessionCfg, level, combo.physicalSlot!, "hybrid", branchId);
+    const onlineOk = !level || isCellEnabled(sessionCfg, level, combo.onlineSlot!, "online", branchId);
     if (!physicalOk || !onlineOk) setHybridCombo("");
   }, [isOnline, deliveryMode, hybridCombo, level, sessionCfg]);
 
@@ -386,13 +386,13 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
   // the student re-chooses rather than submitting a closed one. Same for a
   // campus student whose picked attendance mode is no longer offered at all.
   useEffect(() => {
-    if (sessionSlot && level && !isCellEnabled(sessionCfg, level, sessionSlot, attendMode)) {
+    if (sessionSlot && level && !isCellEnabled(sessionCfg, level, sessionSlot, attendMode, branchId)) {
       setSessionSlot("");
     }
-    if (!isOnline && level && !isModeEnabled(sessionCfg, level, deliveryMode)) {
-      setDeliveryMode(isModeEnabled(sessionCfg, level, "physical") ? "physical" : "hybrid");
+    if (!isOnline && level && !isModeEnabled(sessionCfg, level, deliveryMode, branchId)) {
+      setDeliveryMode(isModeEnabled(sessionCfg, level, "physical", branchId) ? "physical" : "hybrid");
     }
-  }, [level, sessionCfg, sessionSlot, isOnline, deliveryMode, attendMode]);
+  }, [level, sessionCfg, sessionSlot, isOnline, deliveryMode, attendMode, branchId]);
 
   /**
    * Prefill from an enrolment invite link.
@@ -857,7 +857,7 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                       // A campus branch offers only the modes the office still
                       // runs for this level; the online branch's two are just
                       // an in-person-interest flag, so both always show there.
-                      .filter((option) => isOnline || !level || isModeEnabled(sessionCfg, level, option.value))
+                      .filter((option) => isOnline || !level || isModeEnabled(sessionCfg, level, option.value, branchId))
                       .map((option) => (
                       <button
                         key={option.value}
@@ -900,8 +900,8 @@ export default function SignUpFormClient({ pageTitle, initialBranchName, initial
                       if (combo.id === "other") return true;
                       if (!level) return true;
                       return (
-                        isCellEnabled(sessionCfg, level, combo.physicalSlot!, "hybrid") &&
-                        isCellEnabled(sessionCfg, level, combo.onlineSlot!, "online")
+                        isCellEnabled(sessionCfg, level, combo.physicalSlot!, "hybrid", branchId) &&
+                        isCellEnabled(sessionCfg, level, combo.onlineSlot!, "online", branchId)
                       );
                     }).map((combo) => (
                       <button

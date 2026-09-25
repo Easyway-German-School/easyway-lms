@@ -254,6 +254,18 @@ export function egressTemplateBaseUrl(): string | null {
 }
 
 /**
+ * Below this, a capture is a tutor starting and immediately ending a room
+ * (testing, a misclick, a connection drop) rather than a real lesson — a
+ * German class runs 60-90 minutes, so even a genuine short session has no
+ * teaching content worth a student's time. These never reach any shelf.
+ */
+export const MIN_RECORDING_DURATION_SECONDS = 40 * 60;
+
+export function isRecordingTooShort(durationSeconds: number | null | undefined): boolean {
+  return durationSeconds != null && durationSeconds < MIN_RECORDING_DURATION_SECONDS;
+}
+
+/**
  * Delete one object from the bucket.
  *
  * LiveKit writes objects but has no interest in removing them, so this is

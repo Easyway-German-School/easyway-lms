@@ -8,11 +8,13 @@ import { readAssignment } from "@/lib/lecturer-assignment";
 import {
   CLASS_SESSIONS_KEY,
   diffDisabledCells,
+  effectiveGrid,
   isSessionEnabled,
   levelsWithNoCell,
   nearestEnabledSlotForMode,
   parseSessionSettings,
   slotTitle,
+  withScopedEdit,
   MODE_LABELS,
   type ModeSlot,
   type SessionConfig,
@@ -35,19 +37,31 @@ import {
  * — and a plain POST with people in the firing line returns 409 needsConfirm
  * rather than moving anyone by surprise. A moved student keeps their mode and
  * only changes session (online-morning → online-afternoon).
+ *
+ * The stored document can hold a per-branch override on top of the
+ * tenant-wide default grid (see the v3 note in school-settings.ts). Both
+ * GET and POST take an optional `branchId` — omitted (or `null`), they read
+ * or write the shared default that every branch rides unless it has its own
+ * override; a real id scopes to that one branch's grid, leaving every other
+ * branch (default or override) untouched. The wire shape either way is the
+ * same flat `{ sessions: [{ level, grid }] }` the screen has always used —
+ * `effectiveGrid`/`withScopedEdit` do the folding into the full multi-branch
+ * document on this side.
  */
 
 export const dynamic = "force-dynamic";
 
 const MAX_GROUP = 800;
 
-export async function GET() {
+export async function GET(request: Request) {
   const gate = await requireCapability("staff");
   if (!gate.ok) return gate.response;
 
   try {
+    const branchId = new URL(request.url).searchParams.get("branchId") || null;
     const row = await prisma.schoolSetting.findFirst({ where: { key: CLASS_SESSIONS_KEY } });
-    return NextResponse.json(parseSessionSettings(row?.value));
+    const stored = parseSessionSettings(row?.value);
+    return NextResponse.json(effectiveGrid(stored, branchId));
   } catch (error) {
     console.error("Failed to load school settings:", error);
     return NextResponse.json({ error: "Unable to load settings" }, { status: 500 });
@@ -89,12 +103,20 @@ function rowOf(settings: SessionSettings, level: string): SessionConfig | undefi
 
 /**
  * What a save would do to the students already enrolled. Reads only.
+ *
+ * `targetBranchId` is the scope this save applies to (null = the shared
+ * default). Scoped to one branch, only that branch's students are in play.
+ * Scoped to the default, students in a branch that has ITS OWN override for
+ * the affected level are excluded — they were never riding the default in
+ * the first place, so this save does not touch them.
  */
 async function computeImpact(
   prev: SessionSettings,
   next: SessionSettings,
   tenantId: string | null,
   allowedBranchIds: string[] | null,
+  targetBranchId: string | null,
+  storedFull: SessionSettings,
 ): Promise<Impact> {
   const cells = diffDisabledCells(prev, next);
   const moves: MoveGroup[] = [];
@@ -107,13 +129,26 @@ async function computeImpact(
     const nextRow = rowOf(next, cell.level);
     if (!nextRow) continue;
 
+    const where: Record<string, unknown> = {
+      ...baseWhere,
+      level: cell.level,
+      sessionSlot: cell.slot,
+      deliveryMode: cell.mode,
+    };
+    if (targetBranchId) {
+      where.branchId = targetBranchId;
+    } else {
+      const overridden = storedFull.sessions
+        .filter((r) => r.branchId && r.level === cell.level)
+        .map((r) => r.branchId as string);
+      if (overridden.length) {
+        const existing = where.branchId as { in?: string[] } | undefined;
+        where.branchId = existing?.in ? { in: existing.in, notIn: overridden } : { notIn: overridden };
+      }
+    }
+
     const students = await prisma.student.findMany({
-      where: {
-        ...baseWhere,
-        level: cell.level,
-        sessionSlot: cell.slot,
-        deliveryMode: cell.mode,
-      },
+      where,
       select: { id: true },
       take: MAX_GROUP,
     });
@@ -141,17 +176,22 @@ async function computeImpact(
     }
   }
 
-  return { moves, stranded, tutorWarnings: await tutorWarningsFor(next, prev, tenantId) };
+  return { moves, stranded, tutorWarnings: await tutorWarningsFor(next, prev, tenantId, targetBranchId) };
 }
 
 /**
  * Best-effort heads-up: tutors every one of whose assigned sessions, for a
  * level they teach, now runs no mode at all. Informational — never blocks.
+ *
+ * `targetBranchId` narrows this to tutors actually assigned to that branch
+ * when the save is branch-scoped; a tutor with no branch restriction (teaches
+ * everywhere) is never excluded, since a branch-scoped change still reaches them.
  */
 async function tutorWarningsFor(
   next: SessionSettings,
   prev: SessionSettings,
   tenantId: string | null,
+  targetBranchId: string | null,
 ): Promise<Array<{ name: string; detail: string }>> {
   // Only bother if some session went fully dark (all modes off) that wasn't before.
   const wentDark = new Map<string, Set<string>>();
@@ -183,6 +223,7 @@ async function tutorWarningsFor(
     const out: Array<{ name: string; detail: string }> = [];
     for (const lecturer of lecturers) {
       const a = readAssignment(lecturer);
+      if (targetBranchId && a.branchIds.length && !a.branchIds.includes(targetBranchId)) continue;
       if (a.sessionSlots.length === 0) continue; // teaches every session — safe
       for (const [level, dark] of wentDark) {
         const teachesLevel = a.levels.length === 0 || a.levels.includes(level);
@@ -215,13 +256,22 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const preview = body?.preview === true;
     const confirm = body?.confirm === true;
+    const targetBranchId: string | null = typeof body?.branchId === "string" && body.branchId.trim() ? body.branchId.trim() : null;
 
-    const next: SessionSettings | null = parseSessionSettings(body, { strict: true });
-    if (!next) {
+    const allowedBranchIds = scopedBranchIds(gate.admin) ?? null;
+    if (targetBranchId && allowedBranchIds && !allowedBranchIds.includes(targetBranchId)) {
+      return NextResponse.json({ error: "You are not scoped to that branch" }, { status: 403 });
+    }
+
+    // What the screen posted — a flat, single-scope grid (one row per
+    // level), exactly the shape it has always posted. `branchId` says which
+    // scope it belongs to; it never travels inside `sessions` itself.
+    const edited: SessionSettings | null = parseSessionSettings(body, { strict: true });
+    if (!edited) {
       return NextResponse.json({ error: "Invalid settings format" }, { status: 400 });
     }
 
-    const empty = levelsWithNoCell(next);
+    const empty = levelsWithNoCell(edited);
     if (empty.length) {
       return NextResponse.json(
         { error: `Every level needs at least one session running. Re-enable one for: ${empty.join(", ")}.` },
@@ -230,10 +280,10 @@ export async function POST(request: Request) {
     }
 
     const prevRow = await prisma.schoolSetting.findFirst({ where: { key: CLASS_SESSIONS_KEY } });
-    const prev = parseSessionSettings(prevRow?.value);
+    const prevFull = parseSessionSettings(prevRow?.value);
+    const prevScoped = effectiveGrid(prevFull, targetBranchId);
 
-    const allowedBranchIds = scopedBranchIds(gate.admin);
-    const impact = await computeImpact(prev, next, tenantId, allowedBranchIds ?? null);
+    const impact = await computeImpact(prevScoped, edited, tenantId, allowedBranchIds, targetBranchId, prevFull);
     const affected =
       impact.moves.reduce((n, g) => n + g.count, 0) +
       impact.stranded.reduce((n, g) => n + g.count, 0);
@@ -252,11 +302,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, needsConfirm: true, affected, ...summary }, { status: 409 });
     }
 
-    // ---- write the setting ----------------------------------------------
+    // ---- write the setting ------------------------------------------------
+    // Fold the edited scope back into the FULL multi-branch document — every
+    // other branch's rows (default or override) must survive this save untouched.
+    const nextFull = withScopedEdit(prevFull, edited, targetBranchId);
     await prisma.schoolSetting.upsert({
       where: { tenantId_key: { tenantId, key: CLASS_SESSIONS_KEY } },
-      update: { value: next },
-      create: { tenantId, key: CLASS_SESSIONS_KEY, value: next },
+      update: { value: nextFull },
+      create: { tenantId, key: CLASS_SESSIONS_KEY, value: nextFull },
     });
 
     // ---- move the students out of a now-closed session -----------------

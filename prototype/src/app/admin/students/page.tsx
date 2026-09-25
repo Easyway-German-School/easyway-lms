@@ -419,9 +419,9 @@ function StudentsRoster() {
     : newDeliveryMode === "hybrid"
       ? "hybrid"
       : "physical";
-  const addSlots = TIME_SLOTS.filter((slot) => isCellEnabled(sessionCfg, newLevel, slot, addMode));
+  const addSlots = TIME_SLOTS.filter((slot) => isCellEnabled(sessionCfg, newLevel, slot, addMode, newBranchId));
   const addModes = (["physical", "hybrid"] as const).filter((mode) =>
-    isModeEnabled(sessionCfg, newLevel, mode),
+    isModeEnabled(sessionCfg, newLevel, mode, newBranchId),
   );
 
   async function handleSaveStudent(addAnother = false) {
