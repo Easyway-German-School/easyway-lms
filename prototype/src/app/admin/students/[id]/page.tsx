@@ -671,6 +671,7 @@ export default function StudentDossierPage() {
     sessionSlot: "morning",
     classType: "group",
     deliveryMode: "physical",
+    hybridOnlineSlot: "",
     branchId: "",
     status: "active",
     pathway: "",
@@ -718,6 +719,11 @@ export default function StudentDossierPage() {
       : "physical";
   const editSlots = TIME_SLOTS.filter((slot) => isCellEnabled(sessionCfg, editForm.level, slot, editMode));
   const editModes = (["physical", "hybrid"] as const).filter((mode) => isModeEnabled(sessionCfg, editForm.level, mode));
+  // The online half of a hybrid pairing — the school only ever runs online
+  // morning/evening (see lib/session-times.ts), never afternoon or weekend.
+  const editOnlineSlots = (["morning", "evening"] as const).filter((slot) =>
+    isCellEnabled(sessionCfg, editForm.level, slot, "online"),
+  );
 
   async function issueCode() {
     if (issuingCode) return;
@@ -764,6 +770,7 @@ export default function StudentDossierPage() {
       sessionSlot: data.identity.sessionSlot || "morning",
       classType: data.identity.classType || "group",
       deliveryMode: data.identity.deliveryMode === "hybrid" ? "hybrid" : "physical",
+      hybridOnlineSlot: data.identity.hybridOnlineSlot || "",
       branchId: data.identity.branch?.id || "",
       status: data.identity.status || "active",
       pathway: data.identity.pathway || "",
@@ -2424,6 +2431,26 @@ export default function StudentDossierPage() {
                   </select>
                 )}
               </label>
+              {editMode === "hybrid" && (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Online sitting</span>
+                  <select
+                    value={editForm.hybridOnlineSlot}
+                    onChange={(event) => setEditForm((form) => ({ ...form, hybridOnlineSlot: event.target.value }))}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    <option value="">Unchanged</option>
+                    {(editOnlineSlots.length ? editOnlineSlots : (["morning", "evening"] as const)).map((slot) => (
+                      <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
+                    ))}
+                  </select>
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Which online sitting this hybrid student drops into, alongside the physical Session above — any
+                    pairing works now, not just the few offered at signup. Leave on &quot;Unchanged&quot; unless
+                    you&apos;re correcting it.
+                  </span>
+                </label>
+              )}
               <SchedulePreview
                 branchId={editForm.branchId}
                 level={editForm.level}

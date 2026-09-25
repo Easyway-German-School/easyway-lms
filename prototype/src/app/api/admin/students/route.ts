@@ -523,6 +523,13 @@ export async function PATCH(request: Request) {
   const requestedDeliveryMode = body.deliveryMode === "hybrid" || body.deliveryMode === "physical"
     ? body.deliveryMode
     : undefined;
+  // The pairing a hybrid student attends — see lib/hybrid-combo.ts. Only
+  // "morning"/"evening" are real online sittings (the school never runs an
+  // online afternoon or weekend), so anything else is ignored rather than
+  // silently written.
+  const hybridOnlineSlot = ["morning", "evening"].includes(String(body.hybridOnlineSlot))
+    ? String(body.hybridOnlineSlot)
+    : undefined;
   const newPassword = typeof body.password === "string" ? body.password : "";
   const pathway = typeof body.pathway === "string" && body.pathway.trim() ? body.pathway.trim() : undefined;
   // Only touched when the key is present at all, so an edit that isn't about
@@ -616,6 +623,7 @@ export async function PATCH(request: Request) {
       classType?: string;
       sessionSlot?: string;
       deliveryMode?: string;
+      hybridOnlineSlot?: string;
       pathway?: string;
       tags?: string[];
       classesStartedAt?: Date | null;
@@ -707,6 +715,12 @@ export async function PATCH(request: Request) {
     if (status) updateStudent.status = status;
     if (classType) updateStudent.classType = classType;
     if (sessionSlot) updateStudent.sessionSlot = sessionSlot;
+    // Only for a student who is (or is becoming) hybrid — the edit form only
+    // shows this field in that case, but a save that switches the same
+    // request's delivery mode away from hybrid must not leave a stale online
+    // sitting behind on a now-physical/online student.
+    const effectiveDeliveryMode = updateStudent.deliveryMode ?? student.deliveryMode;
+    if (hybridOnlineSlot && effectiveDeliveryMode === "hybrid") updateStudent.hybridOnlineSlot = hybridOnlineSlot;
 
     /**
      * "YOUR CLASS TIME HAS CHANGED" — the same stamp, audit row and notification
@@ -714,34 +728,50 @@ export async function PATCH(request: Request) {
      * that route), fired here too. Moving ONE student's session or attendance
      * mode from this form used to happen in total silence — no bell, no Becca
      * card on their next page, no audit trail — even though it is exactly the
-     * same fact about their week as the bulk case.
+     * same fact about their week as the bulk case. A hybrid student's online
+     * sitting is corrected the same way — e.g. re-pairing them to a combo (like
+     * "physical morning + online evening") that only became offerable once
+     * hybrid-combo.ts stopped curating a fixed 3.
      */
     const sessionSlotChanged = Boolean(sessionSlot && sessionSlot !== student.sessionSlot);
     const deliveryModeChanged = Boolean(
       updateStudent.deliveryMode && updateStudent.deliveryMode !== student.deliveryMode,
     );
+    const hybridOnlineSlotChanged = Boolean(
+      updateStudent.hybridOnlineSlot && updateStudent.hybridOnlineSlot !== student.hybridOnlineSlot,
+    );
     const stampLevel = level || student.level;
-    if (sessionSlotChanged || deliveryModeChanged) {
+    if (sessionSlotChanged || deliveryModeChanged || hybridOnlineSlotChanged) {
       const admissionForStamp = (updateStudent.admission ?? student.admission ?? {}) as Record<string, unknown>;
       updateStudent.admission = {
         ...admissionForStamp,
-        scheduleChange: sessionSlotChanged
-          ? { kind: "slot", level: stampLevel, from: student.sessionSlot, to: sessionSlot, at: new Date().toISOString(), by: "admin" }
-          : {
-              kind: "mode",
-              level: stampLevel,
-              from: student.deliveryMode,
-              to: updateStudent.deliveryMode,
-              at: new Date().toISOString(),
-              by: "admin",
-            },
+        scheduleChange:
+          sessionSlotChanged || hybridOnlineSlotChanged
+            ? {
+                kind: "slot",
+                level: stampLevel,
+                from: student.sessionSlot,
+                to: sessionSlot || student.sessionSlot,
+                onlineFrom: student.hybridOnlineSlot,
+                onlineTo: hybridOnlineSlot || student.hybridOnlineSlot,
+                at: new Date().toISOString(),
+                by: "admin",
+              }
+            : {
+                kind: "mode",
+                level: stampLevel,
+                from: student.deliveryMode,
+                to: updateStudent.deliveryMode,
+                at: new Date().toISOString(),
+                by: "admin",
+              },
       };
     }
 
     await prisma.user.update({ where: { id: student.userId }, data: updateUser });
     await prisma.student.update({ where: { id: studentId }, data: updateStudent });
 
-    if (sessionSlotChanged || deliveryModeChanged) {
+    if (sessionSlotChanged || deliveryModeChanged || hybridOnlineSlotChanged) {
       await writeAudit(unguardedPrisma, {
         action: "studentScheduleMoved",
         model: "Student",
@@ -749,13 +779,20 @@ export async function PATCH(request: Request) {
         severity: "notice",
         summary: `${student.user.name ?? "Student"}: ${
           sessionSlotChanged ? `session ${student.sessionSlot} to ${sessionSlot}` : ""
-        }${sessionSlotChanged && deliveryModeChanged ? ", " : ""}${
+        }${sessionSlotChanged && (deliveryModeChanged || hybridOnlineSlotChanged) ? ", " : ""}${
           deliveryModeChanged ? `delivery ${student.deliveryMode} to ${updateStudent.deliveryMode}` : ""
+        }${deliveryModeChanged && hybridOnlineSlotChanged ? ", " : ""}${
+          hybridOnlineSlotChanged ? `online sitting ${student.hybridOnlineSlot ?? "none"} to ${hybridOnlineSlot}` : ""
         } (manual edit)`,
-        before: { sessionSlot: student.sessionSlot, deliveryMode: student.deliveryMode },
+        before: {
+          sessionSlot: student.sessionSlot,
+          deliveryMode: student.deliveryMode,
+          hybridOnlineSlot: student.hybridOnlineSlot,
+        },
         after: {
           sessionSlot: sessionSlot || student.sessionSlot,
           deliveryMode: updateStudent.deliveryMode || student.deliveryMode,
+          hybridOnlineSlot: hybridOnlineSlot || student.hybridOnlineSlot,
         },
       });
 
@@ -765,8 +802,10 @@ export async function PATCH(request: Request) {
         kind: KIND.classSessionChanged,
         severity: "warning",
         title: "Your class time has changed",
-        message: sessionSlotChanged
-          ? `Your ${stampLevel} class has moved to the ${slotTitle(sessionSlot!)} session${
+        message: sessionSlotChanged || hybridOnlineSlotChanged
+          ? `Your ${stampLevel} class has moved to the ${slotTitle(sessionSlot || student.sessionSlot)}${
+              hybridOnlineSlotChanged ? ` / online ${slotTitle(hybridOnlineSlot!)}` : ""
+            } session${
               deliveryModeChanged ? ` and you are now attending ${attendingAs(updateStudent.deliveryMode)}` : ""
             }. Your timetable is already updated — open your dashboard for the details.`
           : `You are now attending your ${stampLevel} class ${attendingAs(updateStudent.deliveryMode)}. Your timetable is already updated — open your dashboard for the details.`,
