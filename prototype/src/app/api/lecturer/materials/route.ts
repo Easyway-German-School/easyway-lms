@@ -8,6 +8,7 @@ import { assignmentBatches, belongsToLecturer, isAssigned, readAssignment, stude
 import { deriveMaterialKind } from '@/lib/video-library';
 import { AUDIO_EMBED_FILE_TYPE, EMBED_FILE_TYPE, parseAudioLink, parseEmbed } from '@/lib/media-embed';
 import { generateForMaterial } from '@/lib/material-ai';
+import { driveDownloadUrl, DRIVE_LINK_FILE_TYPE } from '@/lib/drive-import';
 
 function serialise(
   material: {
@@ -17,6 +18,7 @@ function serialise(
     courseId: string | null;
     course: { title: string } | null;
     filePath: string;
+    fileType: string;
     fileName: string;
     fileSize: number;
     kind: string;
@@ -41,7 +43,11 @@ function serialise(
     // Nullable since class recordings, which belong to a level rather than a
     // course, became uploadable.
     courseName: material.course?.title ?? null,
-    filePath: material.filePath,
+    // See the same rewrite in /api/student/materials — a Drive "view" link
+    // can fail to open in a mobile webview; the direct-download link always
+    // works, and this fixes materials imported before that fix existed too.
+    filePath:
+      material.fileType === DRIVE_LINK_FILE_TYPE ? driveDownloadUrl(material.filePath) : material.filePath,
     fileName: material.fileName,
     fileSize: material.fileSize,
     kind: material.kind,

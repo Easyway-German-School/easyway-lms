@@ -238,6 +238,9 @@ function StudentsRoster() {
   const [newClassType, setNewClassType] = useState("group");
   const [newSessionSlot, setNewSessionSlot] = useState("morning");
   const [newDeliveryMode, setNewDeliveryMode] = useState("physical");
+  // The online half of a hybrid pairing — correction-only (see openEdit),
+  // never set on creation. Empty means "leave unchanged" on save.
+  const [newHybridOnlineSlot, setNewHybridOnlineSlot] = useState("");
   // Which sittings/modes the school still runs, per level — set on /admin/settings.
   const [sessionCfg, setSessionCfg] = useState<SessionSettings | null>(null);
   const [newBatch, setNewBatch] = useState("");
@@ -423,6 +426,11 @@ function StudentsRoster() {
   const addModes = (["physical", "hybrid"] as const).filter((mode) =>
     isModeEnabled(sessionCfg, newLevel, mode),
   );
+  // The online half of a hybrid pairing — the school only ever runs online
+  // morning/evening (see lib/session-times.ts), never afternoon or weekend.
+  const addOnlineSlots = (["morning", "evening"] as const).filter((slot) =>
+    isCellEnabled(sessionCfg, newLevel, slot, "online"),
+  );
 
   async function handleSaveStudent(addAnother = false) {
     setStudentError("");
@@ -449,6 +457,7 @@ function StudentsRoster() {
       deliveryMode: effectiveDelivery,
       pathway: newPathway,
       batch: newBatch,
+      hybridOnlineSlot: newHybridOnlineSlot,
       city: newCity.trim(),
       state: newStateRegion.trim(),
       country: newCountry.trim(),
@@ -535,6 +544,7 @@ function StudentsRoster() {
     setNewCoTutorIds([]);
     setNewStatus("active");
     setNewDeliveryMode("physical");
+    setNewHybridOnlineSlot("");
     setNewBatch("");
     setNewPathway(packageOptions[0]);
     resetExtraStudentFields();
@@ -678,6 +688,7 @@ function StudentsRoster() {
     setNewClassType(student.classType || "group");
     setNewSessionSlot(student.sessionSlot || "morning");
     setNewDeliveryMode(student.deliveryMode === "hybrid" ? "hybrid" : "physical");
+    setNewHybridOnlineSlot(student.hybridOnlineSlot || "");
     setNewBatch(
       typeof (student.admission as AdmissionData)?.batch === "string"
         ? String((student.admission as AdmissionData)?.batch)
@@ -713,6 +724,7 @@ function StudentsRoster() {
     setNewClassType("group");
     setNewSessionSlot("morning");
     setNewDeliveryMode("physical");
+    setNewHybridOnlineSlot("");
     setNewBatch("");
     setNewPathway(packageOptions[0]);
     setNewAmountPaid("");
@@ -1685,6 +1697,26 @@ function StudentsRoster() {
                   that switches this to Online on its own.
                 </span>
               </label>
+              {editingStudentId && newDeliveryMode === "hybrid" && (
+                <label className="space-y-2 text-sm">
+                  <span className="font-semibold text-[var(--muted)]">Online sitting</span>
+                  <select
+                    value={newHybridOnlineSlot}
+                    onChange={(event) => setNewHybridOnlineSlot(event.target.value)}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                  >
+                    <option value="">Unchanged</option>
+                    {(addOnlineSlots.length ? addOnlineSlots : (["morning", "evening"] as const)).map((slot) => (
+                      <option key={slot} value={slot}>{SLOT_DEFAULTS[slot].label}</option>
+                    ))}
+                  </select>
+                  <span className="block text-xs font-normal text-[var(--muted)]">
+                    Which online sitting this hybrid student drops into, alongside the physical Session above — any
+                    pairing works now, not just the few offered at signup. Leave on &quot;Unchanged&quot; unless
+                    you&apos;re correcting it.
+                  </span>
+                </label>
+              )}
               <SchedulePreview
                 branchId={newBranchId}
                 level={newLevel}
