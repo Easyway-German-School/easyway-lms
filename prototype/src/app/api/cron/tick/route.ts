@@ -189,6 +189,17 @@ async function handleGET(request: NextRequest) {
   });
 
   /**
+   * Actually deletes the short (under 40 min) group recordings that have sat
+   * past their grace window (RETENTION.shortRecordingGraceHours) — see
+   * src/lib/retention.ts. Never touches one still inside that window, and
+   * never a private one-to-one, whatever its length.
+   */
+  register("short-recording-purge", async () => {
+    const { applyShortRecordingPurge } = await import("@/lib/retention");
+    return applyShortRecordingPurge({ dryRun: false });
+  });
+
+  /**
    * Retention no longer deletes anything on a schedule. Staff keep every class
    * recording forever; the student-side 14-day window is a read filter in
    * `/api/student/videos`, not a deletion (see src/lib/retention.ts). What

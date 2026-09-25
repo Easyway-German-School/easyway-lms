@@ -48,6 +48,19 @@ export const RETENTION = {
    * want proof of, not a false start.
    */
   minWorthKeepingSeconds: 40 * 60,
+  /**
+   * How long a held short recording waits before `short-recording-purge`
+   * (the daily cron, see src/app/api/cron/tick/route.ts) actually deletes
+   * it. The recording is still never shown to anyone during this window —
+   * it just is not yet gone for good, so a class that genuinely ran close
+   * to 40 minutes, or one a dropped connection cut short, sits in the
+   * Materials > Activity preview list for a couple of days before it is
+   * destroyed rather than the instant it finishes recording. The window
+   * applies whether the delete is triggered by the cron or by an admin's own
+   * "Delete short recordings" button — nothing can jump ahead of it, which is
+   * the whole point of having it.
+   */
+  shortRecordingGraceHours: 48,
 } as const;
 
 /** True for a GROUP recording too short to be worth keeping. Never for a private one. */
@@ -258,59 +271,73 @@ export async function applyRetention(
 
 export type ShortRecordingVerdict = {
   recordingId: string;
-  materialId: string | null;
   title: string;
   recordedAt: Date;
   durationSeconds: number;
   sizeBytes: number;
   variant: string;
+  /** When the grace window ends and this one becomes eligible for the daily purge. */
+  eligibleAt: Date;
+  /** True once `shortRecordingGraceHours` has passed — this is what the cron and the "delete now" button both check. */
+  graceEligible: boolean;
 };
 
 export type ShortRecordingPlan = {
   verdicts: ShortRecordingVerdict[];
+  /** How many are past their grace window and would actually be deleted by the cron right now. */
   reclaimable: number;
   bytesReclaimable: number;
 };
 
 /**
- * The EXISTING backlog of short GROUP recordings from before `finaliseRecording`
- * started discarding these on the way in. Reads only — never deletes. A PRIVATE
- * session is excluded regardless of length, same exemption as `isTooShortToKeep`.
+ * Short GROUP recordings currently on hold — `finaliseRecording` never gives
+ * one a Material row, so `materialId: null` on an otherwise-completed,
+ * non-private recording IS what marks it as short-and-pending-purge. Reads
+ * only — never deletes. A PRIVATE session is excluded regardless of length,
+ * same exemption as `isTooShortToKeep`.
  */
-export async function planShortRecordingPurge(): Promise<ShortRecordingPlan> {
+export async function planShortRecordingPurge(now: Date = new Date()): Promise<ShortRecordingPlan> {
   const recordings = await prisma.classRecording.findMany({
     where: {
       status: "completed",
-      materialId: { not: null },
+      materialId: null,
       privateClassId: null,
       keepForever: false,
       durationSeconds: { lt: RETENTION.minWorthKeepingSeconds },
     },
     select: {
       id: true,
-      materialId: true,
       durationSeconds: true,
       sizeBytes: true,
       variant: true,
+      level: true,
+      sessionSlot: true,
       startedAt: true,
-      material: { select: { title: true, recordedAt: true } },
+      endedAt: true,
     },
   });
 
-  const verdicts: ShortRecordingVerdict[] = recordings.map((recording) => ({
-    recordingId: recording.id,
-    materialId: recording.materialId,
-    title: recording.material?.title ?? "Class recording",
-    recordedAt: recording.material?.recordedAt ?? recording.startedAt,
-    durationSeconds: recording.durationSeconds ?? 0,
-    sizeBytes: recording.sizeBytes ?? 0,
-    variant: recording.variant,
-  }));
+  const graceMs = RETENTION.shortRecordingGraceHours * 3_600_000;
+  const verdicts: ShortRecordingVerdict[] = recordings.map((recording) => {
+    const recordedAt = recording.endedAt ?? recording.startedAt;
+    const eligibleAt = new Date(recordedAt.getTime() + graceMs);
+    return {
+      recordingId: recording.id,
+      title: `${recording.level ?? "Class"} recording${recording.sessionSlot ? ` — ${recording.sessionSlot}` : ""}`,
+      recordedAt,
+      durationSeconds: recording.durationSeconds ?? 0,
+      sizeBytes: recording.sizeBytes ?? 0,
+      variant: recording.variant,
+      eligibleAt,
+      graceEligible: eligibleAt.getTime() <= now.getTime(),
+    };
+  });
 
+  const eligible = verdicts.filter((verdict) => verdict.graceEligible);
   return {
     verdicts,
-    reclaimable: verdicts.length,
-    bytesReclaimable: verdicts.reduce((sum, verdict) => sum + verdict.sizeBytes, 0),
+    reclaimable: eligible.length,
+    bytesReclaimable: eligible.reduce((sum, verdict) => sum + verdict.sizeBytes, 0),
   };
 }
 
@@ -320,19 +347,24 @@ export type ShortRecordingPurgeResult = {
   reclaimed: number;
   bytesReclaimed: number;
   failed: number;
+  /** Held but not yet past its grace window — not touched this pass. */
+  pending: number;
   verdicts: ShortRecordingVerdict[];
 };
 
 /**
- * Permanently delete the EXISTING backlog of short group recordings the plan
- * lists. Same object-then-row order and same "stop on a failed object delete"
- * rule as `applyRetention` — the library must never advertise a video that's
- * no longer there.
+ * Permanently delete whichever short recordings the plan says are past their
+ * grace window. One still within `shortRecordingGraceHours` of ending is left
+ * alone, whatever `dryRun` says — the whole point of the window is that
+ * nothing here can jump ahead of it. Same object-then-row order and same
+ * "stop on a failed object delete" rule as `applyRetention` — a row is never
+ * left pointing at a file that's no longer there.
  */
 export async function applyShortRecordingPurge(
   { dryRun = true }: { dryRun?: boolean } = {},
 ): Promise<ShortRecordingPurgeResult> {
   const plan = await planShortRecordingPurge();
+  const targets = plan.verdicts.filter((verdict) => verdict.graceEligible);
 
   const result: ShortRecordingPurgeResult = {
     dryRun,
@@ -340,15 +372,18 @@ export async function applyShortRecordingPurge(
     reclaimed: 0,
     bytesReclaimed: 0,
     failed: 0,
+    pending: plan.verdicts.length - targets.length,
     verdicts: plan.verdicts,
   };
 
   if (dryRun) return result;
 
-  for (const target of plan.verdicts) {
+  for (const target of targets) {
+    // No Material to delete: a held short recording never had one (that
+    // absence is what marked it as pending in the first place).
     const recording = await prisma.classRecording.findUnique({
       where: { id: target.recordingId },
-      select: { objectKey: true, materialId: true },
+      select: { objectKey: true },
     });
     if (!recording?.objectKey) continue;
 
@@ -358,9 +393,6 @@ export async function applyShortRecordingPurge(
       continue;
     }
 
-    if (recording.materialId) {
-      await prisma.material.delete({ where: { id: recording.materialId } }).catch(() => {});
-    }
     await prisma.classRecording.update({
       where: { id: target.recordingId },
       data: { status: "purged", purgedAt: new Date(), fileUrl: null },

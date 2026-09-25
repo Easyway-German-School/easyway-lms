@@ -125,10 +125,10 @@ export const CRON_PLAN: TickPlan = {
       name: "media",
       budgetMs: 200_000,
       jobBudgetMs: 190_000,
-      jobs: ["recording-reconcile", "class-transcription"],
+      jobs: ["recording-reconcile", "short-recording-purge", "class-transcription"],
       // Reconcile is a safety net that talks to LiveKit and storage; if they are sick
       // it must not eat the time transcription (the heavy job) needs.
-      caps: { "recording-reconcile": 45_000 },
+      caps: { "recording-reconcile": 45_000, "short-recording-purge": 30_000 },
     },
   ],
 };

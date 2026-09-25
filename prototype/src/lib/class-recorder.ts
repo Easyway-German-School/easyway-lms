@@ -31,7 +31,6 @@ import {
   AUDIO_ENCODING,
   CLASS_ENCODING,
   buildFileOutput,
-  deleteRecordingObject,
   egressClient,
   egressTemplateBaseUrl,
   recordingConfigured,
@@ -379,36 +378,33 @@ export async function finaliseRecording(egress: {
     const isPrivate = Boolean(row.privateClassId);
 
     /**
-     * A too-short GROUP recording is discarded here, before it ever becomes
-     * a Material row — nobody sees it, nobody is notified, and no thumbnail
-     * is wasted generating one. See RETENTION.minWorthKeepingSeconds.
+     * A too-short GROUP recording never becomes a Material row — nobody sees
+     * it, nobody is notified, and no thumbnail is wasted generating one. See
+     * RETENTION.minWorthKeepingSeconds.
      *
-     * If the bucket delete itself fails, this recording is NOT purged: it
-     * falls through to the normal path below and becomes an ordinary
-     * Material, so a storage hiccup never leaves an orphaned file nobody can
-     * find or remove. The next admin retention pass, or a manual review,
-     * can deal with it from there.
+     * It is HELD, not deleted here: the object stays in the bucket and the
+     * row stays "completed" with no materialId, which is what marks it as a
+     * short recording pending purge (see planShortRecordingPurge). Only
+     * `short-recording-purge` in the daily cron actually deletes it, and
+     * only once RETENTION.shortRecordingGraceHours has passed — a class that
+     * genuinely ran close to 40 minutes, or one a dropped connection cut
+     * short, gets a window to be noticed before its tape is gone for good —
+     * an admin can preview and delete it from Materials > Activity too, but
+     * not before that same window has passed.
      */
     if (isTooShortToKeep(durationSeconds, isPrivate)) {
-      const removed = await deleteRecordingObject(objectKey);
-      if (removed) {
-        await prisma.classRecording.update({
-          where: { id: row.id },
-          data: {
-            status: "purged",
-            endedAt: new Date(),
-            objectKey,
-            fileUrl: null,
-            durationSeconds,
-            sizeBytes,
-            purgedAt: new Date(),
-          },
-        });
-        return "created";
-      }
-      console.error(
-        `Could not auto-delete short recording ${row.egressId} (${durationSeconds}s, bucket delete failed) — keeping it instead.`,
-      );
+      await prisma.classRecording.update({
+        where: { id: row.id },
+        data: {
+          status: "completed",
+          endedAt: new Date(),
+          objectKey,
+          fileUrl,
+          durationSeconds,
+          sizeBytes,
+        },
+      });
+      return "created";
     }
 
     let thumbnailPath: string | null = null;
