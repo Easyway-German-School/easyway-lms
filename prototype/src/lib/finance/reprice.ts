@@ -96,7 +96,16 @@ async function loadCandidates(onlyIds?: string[]): Promise<Candidate[]> {
   for (const charge of charges) {
     if (isTravelPackagePathway(charge.student?.pathway)) continue;
     // Read AFTER the query above — that query is what refreshes the price book.
-    const newAmount = tuitionFeeFor({ level: charge.level, branch: charge.branchName, classType: charge.classType });
+    // `pathway` must be passed through: an Exam Preparatory charge is priced
+    // off its own ladder (see EXAM_PREPARATORY_PATHWAY in payment.ts), and
+    // without it here every such student would compare against the ordinary
+    // group/private price and get "corrected" onto the wrong figure.
+    const newAmount = tuitionFeeFor({
+      level: charge.level,
+      branch: charge.branchName,
+      classType: charge.classType,
+      pathway: charge.student?.pathway,
+    });
     if (newAmount === charge.amount) continue;
     out.push({
       chargeId: charge.id,

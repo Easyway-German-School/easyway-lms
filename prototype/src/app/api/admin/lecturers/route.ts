@@ -384,6 +384,7 @@ export async function PATCH(request: NextRequest) {
     "classTypes",
     "batches",
     "assignmentGroups",
+    "pathways",
   ].some((key) => body[key] !== undefined);
   let assignment: ReturnType<typeof assignmentToData> | null = null;
   if (touchesAssignment) {

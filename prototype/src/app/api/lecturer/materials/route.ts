@@ -118,7 +118,14 @@ export async function GET(req: NextRequest) {
       return allowedBatches.includes(material.batch.toLowerCase());
     });
 
-    return NextResponse.json(materials.map((material) => serialise(material, lecturerId)));
+    return NextResponse.json({
+      materials: materials.map((material) => serialise(material, lecturerId)),
+      // The level this tutor's own class is at, so the upload form can default
+      // to it instead of making every upload start with an empty dropdown. A
+      // tutor assigned to more than one level gets the first — still right
+      // more often than blank, and the dropdown stays editable.
+      assignedLevel: assignment.levels[0] ?? null,
+    });
   } catch (error) {
     console.error('Materials GET error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

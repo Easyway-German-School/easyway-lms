@@ -73,10 +73,15 @@ export async function GET() {
     const totalPaid = student.payments
       .filter((payment) => isReceivedPayment(payment.status) && !isRegistrationFeePayment(payment.description))
       .reduce((sum, payment) => sum + payment.amount, 0);
-    const currentFee = tuitionFeeFor({ level: currentLevel, branch: branchName });
+    // pathway is passed through so an Exam Preparatory (or Travel Package)
+    // student is quoted their own ladder here, not the ordinary group/private
+    // price — the same fee `ensureChargeForLevel` will actually bill them.
+    const currentFee = tuitionFeeFor({ level: currentLevel, branch: branchName, pathway: student.pathway });
     const currentLevelOutstanding = Math.max(0, currentFee - totalPaid);
 
-    const nextFee = nextLevel ? tuitionFeeFor({ level: nextLevel, branch: branchName }) : 0;
+    const nextFee = nextLevel
+      ? tuitionFeeFor({ level: nextLevel, branch: branchName, pathway: student.pathway })
+      : 0;
 
     const offer: LevelAdvanceOffer = {
       eligible,

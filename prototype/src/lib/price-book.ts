@@ -25,6 +25,8 @@ export type FeeTier = "premium" | "standard" | "online";
 
 /** The levels the school sells. C2 is retired and deliberately not priced. */
 export const PRICE_LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
+/** Exam Preparatory only runs A1–B2 — there is no C1 sitting in this package. */
+export const EXAM_PREP_LEVELS = ["A1", "A2", "B1", "B2"] as const;
 export const FEE_TIERS: readonly FeeTier[] = ["standard", "premium", "online"];
 
 /** Level → whole naira. Indexed by an upper-cased level string. */
@@ -35,6 +37,13 @@ export type PriceBook = {
   group: Record<FeeTier, LevelPrices>;
   /** Private (one-to-one) tuition — priced by level, whatever the branch. */
   private: LevelPrices;
+  /**
+   * Exam Preparatory: its own per-level ladder, A1–B2 only, on top of the
+   * standard group/private ladders rather than replacing them — a student on
+   * this pathway pays this table's figure regardless of branch or class type,
+   * the same way Travel Package overrides but level-keyed instead of flat.
+   */
+  examPrep: LevelPrices;
   /**
    * Travel Package: one flat price for the whole programme (replaces the
    * per-level ladder), and the smallest first payment that opens the portal.
@@ -52,6 +61,7 @@ export const DEFAULT_PRICE_BOOK: PriceBook = {
     online: { A1: 150000, A2: 150000, B1: 180000, B2: 180000, C1: 350000 },
   },
   private: { A1: 300000, A2: 300000, B1: 360000, B2: 360000, C1: 350000 },
+  examPrep: { A1: 100000, A2: 110000, B1: 120000, B2: 130000 },
   travelPackage: { price: 980000, minFirstPayment: 200000 },
 };
 
@@ -66,6 +76,7 @@ function clone(book: PriceBook): PriceBook {
       online: { ...book.group.online },
     },
     private: { ...book.private },
+    examPrep: { ...book.examPrep },
     travelPackage: { ...book.travelPackage },
   };
 }
@@ -110,6 +121,13 @@ export function parsePriceBook(raw: unknown): PriceBook {
     for (const level of PRICE_LEVELS) {
       const price = asPrice(raw.private[level]);
       if (price !== null) book.private[level] = price;
+    }
+  }
+
+  if (isRecord(raw.examPrep)) {
+    for (const level of EXAM_PREP_LEVELS) {
+      const price = asPrice(raw.examPrep[level]);
+      if (price !== null) book.examPrep[level] = price;
     }
   }
 
@@ -164,6 +182,14 @@ export function parsePriceBookStrict(raw: unknown): StrictParse {
     book.private[level] = price;
   }
 
+  for (const level of EXAM_PREP_LEVELS) {
+    const price = asPrice(isRecord(raw.examPrep) ? raw.examPrep[level] : null);
+    if (price === null) {
+      return { ok: false, error: `Exam Preparatory ${level}: enter a price in naira (more than ₦0).` };
+    }
+    book.examPrep[level] = price;
+  }
+
   const travel = isRecord(raw.travelPackage) ? raw.travelPackage : {};
   const price = asPrice(travel.price);
   const floor = asPrice(travel.minFirstPayment);
@@ -190,6 +216,11 @@ export function diffPriceBooks(before: PriceBook, after: PriceBook): Array<{ lab
   for (const level of PRICE_LEVELS) {
     if (before.private[level] !== after.private[level]) {
       out.push({ label: `Private ${level}`, from: before.private[level], to: after.private[level] });
+    }
+  }
+  for (const level of EXAM_PREP_LEVELS) {
+    if (before.examPrep[level] !== after.examPrep[level]) {
+      out.push({ label: `Exam Preparatory ${level}`, from: before.examPrep[level], to: after.examPrep[level] });
     }
   }
   if (before.travelPackage.price !== after.travelPackage.price) {

@@ -44,6 +44,7 @@ import { canAttendLive, isLiveOnlyRoute, isPhotoGatedRoute, isTuitionGatedRoute 
 import { LiveClassProvider, useLiveClass } from "@/lib/useLiveClass";
 import { LiveDot, LivePill, LIVE_ICON_TILE } from "@/components/LiveNavBadge";
 import { useStudentAccess } from "@/lib/useStudentAccess";
+import { homePathForRole } from "@/lib/portal";
 import {
   AssignmentIcon,
   AttendanceIcon,
@@ -181,9 +182,35 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
    * the client: turn that sentinel into an actual sign-out with an
    * explanation, the same way LecturerShell handles a deactivated tutor.
    */
-  const accountRevoked =
-    status === "authenticated" &&
-    (session?.user?.role ?? "").toLowerCase() === "revoked_session";
+  const rawRole = (session?.user?.role ?? "").toLowerCase();
+  const accountRevoked = status === "authenticated" && rawRole === "revoked_session";
+
+  /**
+   * A tutor whose account was deactivated mid-session has their role
+   * downgraded server-side to this sentinel (see INACTIVE_LECTURER_ROLE in
+   * src/lib/auth.ts). LecturerShell is supposed to catch it and sign them
+   * out with an explanation, but its own role-mismatch redirect races that
+   * check and wins — landing them here, on `homePathForRole`'s generic
+   * "/dashboard" fallback, with nothing to say they should not be. Rather
+   * than let that be a silent second life as a "student", this shell closes
+   * the loop: it is exactly the same account-no-longer-valid case as
+   * accountRevoked above, just a different sentinel.
+   */
+  const accountInactive = status === "authenticated" && rawRole === "inactive_lecturer";
+  const invalidSession = accountRevoked || accountInactive;
+
+  /**
+   * A real, still-valid staff session (admin/lecturer/parent) that ended up
+   * on a student route — a stray link, a bookmark, browser history, typing
+   * the URL. Every other portal shell refuses a role that is not its own;
+   * this one silently rendered the student portal for anybody, which is the
+   * exact "clicked something and landed in the wrong portal" failure the
+   * other shells were built to rule out. Sent home rather than signed out,
+   * because unlike the sentinels above the session itself is perfectly
+   * valid — it is just in the wrong place.
+   */
+  const wrongPortalRole =
+    status === "authenticated" && !invalidSession && rawRole !== "" && rawRole !== "student";
   useHideFloatingThemeToggle();
   const [collapsed, setCollapsed] = useState(false);
   // Below lg the sidebar is a drawer, not a column. It used to be a fixed 288px
@@ -274,6 +301,22 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
     }
   }, [accountRevoked]);
 
+  // A deactivated tutor's session, same idea — see accountInactive above.
+  useEffect(() => {
+    if (accountInactive) {
+      signOut({
+        callbackUrl:
+          "/auth/lecturer/signin?message=This+tutor+account+is+no+longer+active.+Contact+the+school+office.",
+      });
+    }
+  }, [accountInactive]);
+
+  // A valid admin/lecturer/parent session on a student route belongs on its
+  // own portal, not signed out — see wrongPortalRole above.
+  useEffect(() => {
+    if (wrongPortalRole) router.replace(homePathForRole(rawRole));
+  }, [wrongPortalRole, rawRole, router]);
+
   // The welcome tour spotlights real sidebar buttons, which on a phone live
   // inside the drawer. It asks; the shell decides — the drawer's state stays
   // owned here rather than being reached into from outside.
@@ -323,7 +366,7 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
   // it. The route is refused here too, and again on the server.
   const wrongDeliveryMode = access !== null && !showsLiveClass && isLiveOnlyRoute(pathname);
 
-  if (accountRevoked) {
+  if (invalidSession) {
     return (
       <div className="grid min-h-screen place-items-center bg-[var(--background)] px-6 text-center">
         <div>
@@ -331,6 +374,17 @@ function StudentShellBody({ children }: { children: React.ReactNode }) {
           <p className="mt-2 text-sm text-[var(--muted)]">
             Please sign in again, or contact the school office if you cannot get back in.
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (wrongPortalRole) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[var(--background)] px-6 text-center">
+        <div>
+          <p className="text-lg font-semibold text-[var(--foreground)]">Taking you to your portal…</p>
+          <p className="mt-2 text-sm text-[var(--muted)]">This page is part of the student portal.</p>
         </div>
       </div>
     );

@@ -7,6 +7,7 @@ import AdminShell from "@/components/AdminShell";
 import { WalletIcon } from "@/components/icons";
 import {
   DEFAULT_PRICE_BOOK,
+  EXAM_PREP_LEVELS,
   FEE_TIERS,
   PRICE_LEVELS,
   defaultPriceBook,
@@ -142,6 +143,9 @@ export default function PricingSettingsPage() {
   }
   function setPrivate(level: string, value: number) {
     setDraft((prev) => ({ ...prev, private: { ...prev.private, [level]: value } }));
+  }
+  function setExamPrep(level: string, value: number) {
+    setDraft((prev) => ({ ...prev, examPrep: { ...prev.examPrep, [level]: value } }));
   }
   function setTravel(field: "price" | "minFirstPayment", value: number) {
     setDraft((prev) => ({ ...prev, travelPackage: { ...prev.travelPackage, [field]: value } }));
@@ -336,6 +340,29 @@ export default function PricingSettingsPage() {
                   changed={draft.private[level] !== saved.private[level]}
                   label={`Private ${level} tuition in naira`}
                   onChange={(v) => setPrivate(level, v)}
+                />
+              </label>
+            ))}
+          </div>
+        </section>
+
+        {/* Exam Preparatory */}
+        <section className={cardClass}>
+          <h2 className="text-lg font-bold text-[var(--foreground)]">Exam Preparatory</h2>
+          <p className="mb-4 mt-1 text-sm text-[var(--muted)]">
+            Its own price per level, A1–B2 only, the same at every branch — this is what a student who signs up
+            for the Exam Preparatory package pays instead of the standard group or private fee for their level.
+            The ₦5,000 registration fee is unchanged.
+          </p>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {EXAM_PREP_LEVELS.map((level) => (
+              <label key={level} className="flex flex-col gap-1.5 text-sm font-bold text-[var(--foreground)]">
+                {level}
+                <PriceInput
+                  value={draft.examPrep[level]}
+                  changed={draft.examPrep[level] !== saved.examPrep[level]}
+                  label={`Exam Preparatory ${level} tuition in naira`}
+                  onChange={(v) => setExamPrep(level, v)}
                 />
               </label>
             ))}

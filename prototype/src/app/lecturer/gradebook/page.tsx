@@ -13,6 +13,7 @@ import {
   CheckIcon,
   DownloadIcon,
   EmptyIcon,
+  ExamIcon,
   ResultsIcon,
   SearchIcon,
 } from "@/components/icons";
@@ -771,6 +772,13 @@ export default function GradebookPage() {
         <p className="pb-2 text-center text-xs text-[var(--muted)]">
           A blank cell means &ldquo;not marked yet&rdquo;, not zero. Clear a cell to take a mark back.
         </p>
+
+        {/* Exam sittings used to be their own page (Exam/Test). Folded in here
+            so there is one grading link in the sidebar, not two — this is the
+            other kind of mark a tutor gives: a booked sitting, scored as a
+            whole and released to students as a batch, instead of a running
+            classwork mark. */}
+        <ExamSittingsSection />
       </div>
     </LecturerShell>
   );
@@ -802,5 +810,362 @@ function Stat({
       </p>
       {hint && <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{hint}</p>}
     </div>
+  );
+}
+
+/* ------------------------------------------------------- exam sittings */
+
+type ExamGradeSession = {
+  id: string;
+  examId: string;
+  examName: string;
+  courseId: string;
+  courseName: string;
+  totalStudents: number;
+  gradedStudents: number;
+  resultsReleased: boolean;
+};
+
+type ExamStudentGrade = {
+  id: string;
+  studentId: string;
+  studentName: string;
+  email: string;
+  examName: string;
+  score: number;
+  totalScore: number;
+  grade: string;
+  studentCode?: string | null;
+  feedback?: string;
+  submissionMode?: string;
+  graded?: boolean;
+};
+
+/**
+ * A booked exam sitting, scored and released as a batch — the other shape of
+ * grading, alongside the running classwork marks in the grid above. Ported
+ * from the old standalone Exam/Test page: same two endpoints
+ * (`/api/lecturer/grades`, `/api/lecturer/grades/students`), same release
+ * toggle, so nothing about how a sitting is recorded changed — only where a
+ * tutor finds it.
+ */
+function ExamSittingsSection() {
+  const [sessions, setSessions] = useState<ExamGradeSession[]>([]);
+  const [selectedExam, setSelectedExam] = useState("");
+  const [students, setStudents] = useState<ExamStudentGrade[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [releasing, setReleasing] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void fetchSessions();
+  }, []);
+
+  async function fetchSessions() {
+    try {
+      const res = await fetch("/api/lecturer/grades");
+      if (!res.ok) throw new Error("Failed to fetch exam sittings");
+      const data = await res.json();
+      setSessions(data.sessions);
+      if (data.sessions.length > 0) {
+        setSelectedExam(data.sessions[0].examId);
+        await fetchStudents(data.sessions[0].examId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchStudents(examId: string) {
+    try {
+      const res = await fetch(`/api/lecturer/grades/students?examId=${examId}`);
+      if (!res.ok) throw new Error("Failed to fetch students");
+      const data = await res.json();
+      setStudents(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch students");
+    }
+  }
+
+  async function updateGrade(studentId: string, newScore: number, newFeedback?: string, newSubmissionMode?: string) {
+    if (newScore < 0 || newScore > 100) {
+      setError("Score must be between 0 and 100");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/lecturer/grades", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId,
+          examId: selectedExam,
+          score: newScore,
+          feedback: newFeedback,
+          submissionMode: newSubmissionMode,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to update grade");
+      const updated = await res.json();
+      setStudents(
+        students.map((s) =>
+          s.studentId === studentId
+            ? {
+                ...s,
+                score: updated.score,
+                grade: updated.grade,
+                feedback: updated.feedback ?? "",
+                submissionMode: updated.submissionMode ?? "platform",
+                graded: true,
+              }
+            : s,
+        ),
+      );
+      setEditingId(null);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleRelease() {
+    if (!selectedExam) return;
+    setReleasing(true);
+    setError("");
+    try {
+      const res = await fetch("/api/lecturer/results/release", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ examId: selectedExam }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || "Could not update result release");
+      setSessions((current) =>
+        current.map((s) => (s.examId === selectedExam ? { ...s, resultsReleased: payload.resultsReleased } : s)),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update result release");
+    } finally {
+      setReleasing(false);
+    }
+  }
+
+  const selectedSession = sessions.find((s) => s.examId === selectedExam);
+
+  if (loading) {
+    return (
+      <section className="mt-8 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+        <div className="h-20 animate-pulse rounded-xl bg-[var(--surface-alt)]" />
+      </section>
+    );
+  }
+
+  return (
+    <section className="mt-8">
+      <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-[var(--foreground)]">
+        <ExamIcon className="h-5 w-5 text-[var(--accent)]" />
+        Exam sittings
+      </h2>
+      <p className="mb-4 -mt-2 text-sm text-[var(--muted)]">
+        Students who booked a sitting, scored as a whole exam rather than a running mark. Release
+        publishes every graded score on this sitting to students at once.
+      </p>
+
+      {error && (
+        <p className="mb-4 flex items-start gap-2 rounded-2xl bg-rose-500/10 px-4 py-3 text-sm font-medium text-rose-700">
+          <AlertIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          {error}
+        </p>
+      )}
+
+      {sessions.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
+          No students have booked an exam sitting yet.
+        </div>
+      ) : (
+        <>
+          <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
+            <div className="filter-grid">
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Choose Exam/Test</label>
+                <select
+                  value={selectedExam}
+                  onChange={(e) => {
+                    setSelectedExam(e.target.value);
+                    void fetchStudents(e.target.value);
+                  }}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-[var(--foreground)]"
+                >
+                  {sessions.map((s) => (
+                    <option key={s.examId} value={s.examId}>
+                      {s.examName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Course</label>
+                <div className="rounded-lg bg-[var(--surface-alt)] px-4 py-2 text-sm text-[var(--foreground)]">
+                  {selectedSession?.courseName || "N/A"}
+                </div>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Progress</label>
+                <div className="rounded-lg bg-[var(--surface-alt)] px-4 py-2 text-sm text-[var(--foreground)]">
+                  {selectedSession?.gradedStudents ?? 0} / {selectedSession?.totalStudents ?? 0}
+                </div>
+              </div>
+            </div>
+
+            {selectedSession && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+                <div className="text-sm">
+                  <p className="font-semibold text-[var(--foreground)]">
+                    {selectedSession.resultsReleased ? "Results are visible to students" : "Results are hidden from students"}
+                  </p>
+                  <p className="text-[var(--muted)]">
+                    {selectedSession.resultsReleased
+                      ? "Every graded student can see their score on their results page."
+                      : "Students cannot see any score for this sitting yet."}
+                  </p>
+                </div>
+                <button
+                  onClick={toggleRelease}
+                  disabled={releasing}
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${
+                    selectedSession.resultsReleased ? "bg-[var(--muted)] hover:opacity-90" : "bg-[var(--accent)] hover:opacity-90"
+                  }`}
+                >
+                  {releasing ? "Saving…" : selectedSession.resultsReleased ? "Hide results" : "Release results"}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {students.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
+              No students for this exam.
+            </div>
+          ) : (
+            <div className="overflow-hidden overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+              <table className="w-full min-w-[640px]">
+                <thead className="border-b border-[var(--border)] bg-[var(--surface-alt)]">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-[var(--foreground)]">Student</th>
+                    <th className="px-4 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Score</th>
+                    <th className="px-4 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Grade</th>
+                    <th className="px-4 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Sat</th>
+                    <th className="px-4 py-3 text-center text-sm font-semibold text-[var(--foreground)]">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {students.map((student) => (
+                    <tr key={student.studentId} className="border-b border-[var(--border)] transition-colors last:border-b-0 hover:bg-[var(--surface-alt)]">
+                      <td className="px-4 py-3 text-sm text-[var(--foreground)]">
+                        {student.studentName}
+                        {student.studentCode && <span className="ml-2 font-mono text-xs text-[var(--muted)]">{student.studentCode}</span>}
+                        {editingId === student.studentId ? (
+                          <input
+                            id={`gb-feedback-${student.studentId}`}
+                            defaultValue={student.feedback ?? ""}
+                            placeholder="Feedback for this student (optional)"
+                            className="mt-2 w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
+                          />
+                        ) : student.feedback ? (
+                          <p className="mt-1 text-xs italic text-[var(--muted)]">{student.feedback}</p>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {editingId === student.studentId ? (
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            defaultValue={student.score}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                const fb = (document.getElementById(`gb-feedback-${student.studentId}`) as HTMLInputElement | null)?.value;
+                                const mode = (document.getElementById(`gb-mode-${student.studentId}`) as HTMLSelectElement | null)?.value;
+                                void updateGrade(student.studentId, parseInt(e.currentTarget.value), fb, mode);
+                              }
+                            }}
+                            autoFocus
+                            className="w-16 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-center text-[var(--foreground)]"
+                          />
+                        ) : (
+                          <span className={`font-semibold ${student.graded === false ? "text-[var(--muted)]" : "text-[var(--foreground)]"}`}>
+                            {student.graded === false ? "—" : student.score}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`rounded-full px-3 py-1 text-sm font-semibold ${toneFor(student.grade)}`}>{student.grade}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {editingId === student.studentId ? (
+                          <select
+                            id={`gb-mode-${student.studentId}`}
+                            defaultValue={student.submissionMode ?? "platform"}
+                            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)]"
+                          >
+                            <option value="platform">On platform</option>
+                            <option value="physical">On paper</option>
+                          </select>
+                        ) : student.graded === false ? (
+                          <span className="text-[var(--muted)]">—</span>
+                        ) : (
+                          <span
+                            className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                              student.submissionMode === "physical" ? "bg-purple-100 text-purple-700" : "bg-[var(--surface-alt)] text-[var(--foreground-soft)]"
+                            }`}
+                          >
+                            {student.submissionMode === "physical" ? "Paper" : "Platform"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {editingId === student.studentId ? (
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => {
+                                const feedbackEl = document.getElementById(`gb-feedback-${student.studentId}`) as HTMLInputElement | null;
+                                const scoreEl = feedbackEl?.closest("tr")?.querySelector<HTMLInputElement>("input[type=number]");
+                                const modeEl = document.getElementById(`gb-mode-${student.studentId}`) as HTMLSelectElement | null;
+                                void updateGrade(student.studentId, parseInt(scoreEl?.value ?? String(student.score)), feedbackEl?.value, modeEl?.value);
+                              }}
+                              disabled={saving}
+                              className="rounded bg-[var(--accent)] px-3 py-1 text-sm text-white hover:opacity-90 disabled:opacity-50"
+                            >
+                              {saving ? "Saving…" : "Save"}
+                            </button>
+                            <button onClick={() => setEditingId(null)} className="rounded border border-[var(--border)] px-3 py-1 text-sm">
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setEditingId(student.studentId)}
+                            disabled={saving}
+                            className="rounded bg-[var(--accent)] px-3 py-1 text-sm text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }

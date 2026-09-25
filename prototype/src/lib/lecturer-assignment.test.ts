@@ -7,10 +7,64 @@ import {
   matchesBatch,
   parseGroupKey,
   readAssignment,
+  studentWhereForAssignment,
   studentWhereForLecturerScope,
   teachingGroups,
 } from "./lecturer-assignment";
 import { batchMonthSpan, batchRangeLabel } from "./levels";
+
+describe("pathways — the exam preparatory tutor dimension", () => {
+  it("readAssignment defaults to no restriction, same as every other tutor", () => {
+    const assignment = readAssignment({ branchIds: ["branch-a"], levels: ["A1"] });
+    expect(assignment.pathways).toEqual([]);
+  });
+
+  it("readAssignment keeps only recognised pathways, canonicalised case-insensitively", () => {
+    const assignment = readAssignment({
+      branchIds: ["branch-a"],
+      levels: ["A1"],
+      pathways: ["exam preparatory", "Not A Real Package"],
+    });
+    expect(assignment.pathways).toEqual(["Exam Preparatory"]);
+  });
+
+  it("an empty pathways list narrows nothing — studentWhereForAssignment matches every existing tutor's query", () => {
+    const assignment = readAssignment({ branchIds: ["branch-a"], levels: ["A1"] });
+    const where = studentWhereForAssignment(assignment);
+    expect(where).not.toHaveProperty("AND");
+  });
+
+  it("a pathway-scoped tutor's query is narrowed by an AND clause, not by overwriting the branch/level match", () => {
+    const assignment = readAssignment({
+      branchIds: ["branch-a"],
+      levels: ["A1"],
+      pathways: ["Exam Preparatory"],
+    });
+    const where = studentWhereForAssignment(assignment);
+    expect(where).toMatchObject({
+      branchId: { in: ["branch-a"] },
+      level: { in: ["A1"] },
+      AND: [{ pathway: { in: ["Exam Preparatory"] } }],
+    });
+  });
+
+  it("combines with a classType restriction without either clause overwriting the other", () => {
+    // Regression guard for the same class of bug the classTypes comment in
+    // lecturer-assignment.ts describes ("it selected all 454 students"): two
+    // independent AND-worthy restrictions must both survive, not stomp on
+    // where.AND in turn.
+    const assignment = readAssignment({
+      branchIds: ["branch-a"],
+      levels: ["A1"],
+      classTypes: ["private"],
+      pathways: ["Exam Preparatory"],
+    });
+    const where = studentWhereForAssignment(assignment) as { AND: unknown[] };
+    expect(where.AND).toHaveLength(2);
+    expect(where.AND).toContainEqual({ OR: [{ classType: "private" }] });
+    expect(where.AND).toContainEqual({ pathway: { in: ["Exam Preparatory"] } });
+  });
+});
 
 describe("studentWhereForLecturerScope", () => {
   it("narrows the tutor cohort to the selected session when the admin assignment is broader", () => {

@@ -221,6 +221,29 @@ export function isTravelPackagePathway(pathway?: string | null): boolean {
 }
 
 /**
+ * EXAM PREPARATORY — its own per-level ladder (A1–B2, see price-book.ts),
+ * layered on top of the ordinary group/private fee the same way Travel
+ * Package overrides it, just level-keyed instead of flat. A student on this
+ * pathway pays this table's figure for their level regardless of branch or
+ * class type; the ₦5,000 registration fee and the signup workflow are
+ * unchanged — this only changes which number `tuitionFeeFor` returns.
+ */
+export const EXAM_PREPARATORY_PATHWAY = "Exam Preparatory";
+
+export function isExamPreparatoryPathway(pathway?: string | null): boolean {
+  return String(pathway ?? "").trim().toLowerCase() === EXAM_PREPARATORY_PATHWAY.toLowerCase();
+}
+
+/**
+ * A level outside A1–B2 (junk input, or a level this package does not run)
+ * falls back to the B2 price, the top of this ladder — same rule
+ * `privateClassPriceForLevel` follows against C1.
+ */
+export function examPreparatoryPriceForLevel(level?: string | null, book: PriceBook = getActivePriceBook()): number {
+  return book.examPrep[normaliseLevel(level)] ?? book.examPrep.B2;
+}
+
+/**
  * Levels a student may buy through the portal. A1–C1 are all self-service now —
  * C1 runs as private / online tuition at the flat ₦350,000 in FEE_TABLE. C2 is
  * retired: not offered (see OFFERED_LEVELS in levels.ts) and not sold here.
@@ -266,7 +289,11 @@ export type FeeLookup = {
    * site written before private tuition existed keeps quoting what it did.
    */
   classType?: string | null;
-  /** `Student.pathway` — "Travel Package" overrides the entire fee below. */
+  /**
+   * `Student.pathway` — "Travel Package" overrides the entire fee below with
+   * a flat price; "Exam Preparatory" overrides it with its own per-level
+   * ladder.
+   */
   pathway?: string | null;
 };
 
@@ -281,6 +308,12 @@ export function tuitionFeeFor(
   // Travel Package is a flat whole-program price that replaces the per-level
   // ladder outright, so it is checked before even the private-class price.
   if (isTravelPackagePathway(pathway)) return travelPackagePrice(book);
+
+  // Exam Preparatory has its own per-level ladder that overrides the ordinary
+  // group/private fee for its level, the same way Travel Package overrides —
+  // checked next, and before the private-class branch, since a pathway is a
+  // stronger signal than delivery mode.
+  if (isExamPreparatoryPathway(pathway)) return examPreparatoryPriceForLevel(level, book);
 
   // One-to-one is priced by level at every branch — the same figure the upsell
   // quotes and the checkout charges (see the note at the top of this section).

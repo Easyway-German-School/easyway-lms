@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
-import { isTravelPackagePathway } from "@/lib/payment";
+import { isTravelPackagePathway, isExamPreparatoryPathway } from "@/lib/payment";
 import { keyFromUrl } from "@/lib/storage";
 
 function pathwayOutcome(pathway: string) {
@@ -126,17 +126,24 @@ export async function POST(request: NextRequest) {
   }
 
   /**
-   * Travel Package is admin-onboarded only — a flat ₦980,000 relocation track
-   * the office puts a walk-in on by hand. A student editing their own profile
-   * must not be able to put themselves ON it (they'd owe ₦980k), and — the bug
-   * that bit us — must not knock themselves OFF it by saving the form with the
-   * pathway select on its default, which would leave the ₦980k ledger charge
-   * with a per-level fee beside it and every screen reading "overpaid". Either
-   * way, a Travel Package student's pathway is frozen here.
+   * Travel Package and Exam Preparatory both override the ordinary tuition
+   * fee — flat for the former, its own per-level ladder for the latter — so
+   * the same freeze applies to both. Travel Package is admin-onboarded only;
+   * a student editing their own profile must not be able to put themselves ON
+   * it (they'd owe ₦980k). Exam Preparatory IS self-service at signup, but
+   * this "current course" field is a different, cosmetic select (career-goal
+   * labels, not packages) — it must not be how a student switches packages
+   * either way. And for both, saving this form with the select on its default
+   * must not silently knock a student OFF their package pathway — the bug
+   * that bit us for Travel Package, which would leave its ledger charge with
+   * a mismatched per-level fee beside it and every screen reading "overpaid".
+   * So a student already on either package keeps it, and this field can never
+   * newly set one.
    */
-  const effectivePathway = isTravelPackagePathway(student.pathway)
+  const onOverridePathway = (value: string) => isTravelPackagePathway(value) || isExamPreparatoryPathway(value);
+  const effectivePathway = onOverridePathway(student.pathway)
     ? student.pathway
-    : isTravelPackagePathway(selectedPathway)
+    : onOverridePathway(selectedPathway)
       ? student.pathway
       : selectedPathway;
 

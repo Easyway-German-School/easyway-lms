@@ -2515,6 +2515,10 @@ model Lecturer {
   assignmentGroups Json? // [{ branchId, level, sessionSlot }]
   classTypes       Json? // ["physical", "online", "private"]
   batches          Json? // ["January", … "December"]
+  /// Named packages this tutor covers, e.g. ["Exam Preparatory"] — see
+  /// ASSIGNABLE_PATHWAYS in src/lib/lecturer-assignment.ts. Null/empty means
+  /// no restriction, same as every list above.
+  pathways         Json?
 
   /**
    * Which optional areas of the portal this tutor may reach:

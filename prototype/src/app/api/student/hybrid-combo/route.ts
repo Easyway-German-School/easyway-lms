@@ -3,7 +3,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { readSessionSettings } from "@/lib/school-settings-server";
 import { isCellEnabled } from "@/lib/school-settings";
-import { HYBRID_COMBOS, fallbackHybridCombo, findHybridCombo } from "@/lib/hybrid-combo";
+import { HYBRID_COMBOS, fallbackHybridCombo, findHybridCombo, type HybridCombo } from "@/lib/hybrid-combo";
 import { autoAssignTutor } from "@/lib/tutor-auto-assign";
 
 /**
@@ -33,15 +33,25 @@ export async function GET() {
 
   const student = await prisma.student.findUnique({
     where: { userId: session.user.id },
-    select: { deliveryMode: true, hybridOnlineSlot: true, level: true },
+    select: { deliveryMode: true, hybridOnlineSlot: true, level: true, user: { select: { tenantId: true } } },
   });
   if (!student) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const due = student.deliveryMode === "hybrid" && !student.hybridOnlineSlot;
+
+  // Same filter the signup form applies: only offer a pairing whose BOTH
+  // halves still run for this student's level, so this retroactive popup
+  // never offers a sitting the office has since closed.
+  const sessionSettings = await readSessionSettings(student.user?.tenantId ?? null);
+  const isOpen = (combo: HybridCombo) =>
+    combo.id === "other" ||
+    (isCellEnabled(sessionSettings, student.level, combo.physicalSlot!, "hybrid") &&
+      isCellEnabled(sessionSettings, student.level, combo.onlineSlot!, "online"));
+
   return NextResponse.json({
     due,
     level: student.level,
-    combos: HYBRID_COMBOS.map((combo) => ({ id: combo.id, label: combo.label })),
+    combos: HYBRID_COMBOS.filter(isOpen).map((combo) => ({ id: combo.id, label: combo.label })),
   });
 }
 

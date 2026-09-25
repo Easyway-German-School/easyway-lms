@@ -20,7 +20,6 @@ import {
   AttendanceIcon,
   BookOpenIcon,
   BroadcastIcon,
-  BroadcastMessageIcon,
   ChainIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -28,7 +27,6 @@ import {
   CrossIcon,
   CustomiseIcon,
   DashboardIcon,
-  ExamIcon,
   GradebookIcon,
   LessonBuilderIcon,
   MailIcon,
@@ -100,7 +98,9 @@ const navGroups: NavGroup[] = [
     label: 'Tracking',
     items: [
       { label: 'Attendance', href: '/lecturer/attendance', icon: <AttendanceIcon /> },
-      { label: 'Exam/Test', href: '/lecturer/grades', icon: <ExamIcon /> },
+      // Exam/Test used to be its own page; grading a booked sitting now lives
+      // inside Gradebook as its own section, so there is one grading link
+      // here instead of two that both claimed to be "where you grade".
       { label: 'Gradebook', href: '/lecturer/gradebook', icon: <GradebookIcon /> },
     ],
   },
@@ -112,8 +112,12 @@ const navGroups: NavGroup[] = [
       // was not in this sidebar, so the answering-questions-between-classes
       // half of the community never happened.
       { label: 'Community', href: '/community', icon: <CommunityIcon /> },
+      // Messages and Announcements were two forms doing the same thing — a
+      // broadcast to the class, with a read count — reachable from two
+      // different sidebar rows. One entry now; the compose box on it covers
+      // both what Messages did and what Announcements added (urgent flag,
+      // the AI drafting aid).
       { label: 'Messages', href: '/lecturer/messages', icon: <MailIcon /> },
-      { label: 'Announcements', href: '/lecturer/announcements', icon: <BroadcastMessageIcon /> },
     ],
   },
   {
@@ -197,6 +201,18 @@ export default function LecturerShell({ children }: { children: React.ReactNode 
     }
     if (status !== 'authenticated') return;
     const role = (session?.user?.role ?? '').toLowerCase();
+    if (role === 'inactive_lecturer' || role === 'revoked_session') {
+      // A session downgraded to one of these sentinels (a deactivated tutor,
+      // a deleted/reset account — see INACTIVE_LECTURER_ROLE/REVOKED_SESSION_ROLE
+      // in src/lib/auth.ts) is not a role `homePathForRole` recognizes, so its
+      // fallback would send it to "/dashboard" — handing a deactivated or
+      // removed account the live student portal instead of signing them out.
+      // The async /api/lecturer/status poll below exists to catch exactly
+      // this, but the session already carries the sentinel by the time this
+      // effect runs, so end it here rather than race that fetch for it.
+      setRevoked(true);
+      return;
+    }
     if (role !== 'lecturer' && role !== 'tutor' && role !== 'admin') {
       router.replace(homePathForRole(role));
     }

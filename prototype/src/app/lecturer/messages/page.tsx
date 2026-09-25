@@ -3,11 +3,18 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import LecturerShell from "@/components/LecturerShell";
-import { ArrowLeftIcon, InboxIcon, MailIcon, SendIcon } from "@/components/icons";
-import BrandLoader from "@/components/BrandLoader";
+import { deliveryModeLabel, groupByClass } from "@/lib/lecturer-class-groups";
+import {
+  AlertIcon,
+  BroadcastMessageIcon,
+  CheckCircleIcon,
+  EyeIcon,
+  InboxIcon,
+  MailIcon,
+  UsersIcon,
+} from "@/components/icons";
 import { MessageAttachments } from "@/components/support/TicketAttachments";
 import {
   ChatBubbleRow,
@@ -24,6 +31,21 @@ import { useTicketLive, useTicketTypingMap } from "@/lib/client/use-ticket-live"
 import { useTypingSender } from "@/lib/client/use-typing-sender";
 import { describeTypers } from "@/lib/typing";
 import type { TicketAttachment } from "@/lib/support-copy";
+
+/**
+ * Messages.
+ *
+ * Used to be two pages — Messages and Announcements — both a form that sends
+ * a broadcast to the class with a read count underneath it, reachable from
+ * two different sidebar rows. This is the merge: one compose box (with the
+ * urgent flag and the AI drafting aid Announcements had), one history, one
+ * sidebar entry. Sending goes through the announcements endpoint, which
+ * already does everything the old Messages send did plus push delivery and
+ * severity.
+ *
+ * The inbox below it — a student's direct question to their own tutor — is a
+ * different, two-way conversation and stays exactly as it was.
+ */
 
 type InboxTicket = {
   id: string;
@@ -46,45 +68,154 @@ type ThreadMessage = {
   attachments?: TicketAttachment[];
 };
 
-type SentMessage = {
-  key: string;
-  title: string;
-  message: string;
-  sentAt: string;
-  recipients: number;
-  readCount: number;
+type Student = {
+  id: string;
+  name: string;
+  level: string;
+  sessionSlot: string;
+  classType: string;
+  deliveryMode: string | null;
+  batch: string | null;
 };
 
-type Recipient = { id: string; name: string; email: string };
+type HistoryEntry = {
+  batchId: string;
+  title: string;
+  message: string;
+  severity: string;
+  createdAt: string;
+  sentTo: number;
+  readBy: number;
+};
 
-/**
- * Messages.
- *
- * Another sidebar link that led to a 404. Deliberately scoped to
- * announcements rather than a full two-way chat: a tutor's real need is "tell
- * my class something and know they saw it", and messages land in the
- * notifications students already check rather than in a second inbox nobody
- * would open.
- */
 export default function LecturerMessagesPage() {
-  const router = useRouter();
-  const [sent, setSent] = useState<SentMessage[]>([]);
-  const [recipients, setRecipients] = useState<Recipient[]>([]);
-  const [cohortSize, setCohortSize] = useState(0);
-  const [assigned, setAssigned] = useState(true);
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  /* ---------------------------------------------------------- compose ---- */
+  const [students, setStudents] = useState<Student[]>([]);
+  const [cohortLabel, setCohortLabel] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [composeLoading, setComposeLoading] = useState(true);
 
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [audience, setAudience] = useState<"cohort" | "student">("cohort");
-  const [studentIds, setStudentIds] = useState<string[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
+  // Set when the tutor arrived here from a "Message this group" button on the
+  // roster — a note above the picker so they know why it opened pre-filled.
+  const [groupLabel, setGroupLabel] = useState<string | null>(null);
+  const [urgent, setUrgent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [feedback, setFeedback] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  // The drafting aid keeps its own scratch field rather than writing into
+  // `message` as you type — a tutor's own words are the input, and
+  // overwriting them with the model's output before they have seen it would
+  // make the feature destructive.
+  const [notes, setNotes] = useState("");
+  const [drafting, setDrafting] = useState(false);
 
-  // The "Ask my tutor" side — students writing IN, not the tutor broadcasting
-  // out. A separate inbox from `sent` because it is a different conversation
-  // shape: threaded and two-way, not fire-and-forget.
+  const loadCompose = useCallback(async () => {
+    try {
+      const response = await fetch("/api/lecturer/announcements", { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      setStudents(data.students ?? []);
+      setCohortLabel(data.cohortLabel ?? null);
+      setHistory(data.history ?? []);
+    } catch {
+      /* Leave the form usable; sending will report its own failure. */
+    } finally {
+      setComposeLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCompose();
+  }, [loadCompose]);
+
+  // "Message this group" on the roster deep-links here with the class's
+  // student ids and a label. Read straight off the URL rather than
+  // useSearchParams, which would need a Suspense boundary.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const ids = (params.get("students") || "").split(",").map((id) => id.trim()).filter(Boolean);
+    if (ids.length === 0) return;
+    setAudience("student");
+    setPicked(ids);
+    setGroupLabel(params.get("label"));
+  }, []);
+
+  const recipientCount = audience === "cohort" ? students.length : picked.length;
+
+  const canSend = useMemo(
+    () => title.trim().length > 0 && message.trim().length > 0 && recipientCount > 0 && !sending,
+    [title, message, recipientCount, sending],
+  );
+
+  async function draft() {
+    if (notes.trim().length < 5 || drafting) return;
+    setDrafting(true);
+    setFeedback(null);
+    try {
+      const response = await fetch("/api/lecturer/announcements/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: notes.trim(), urgent }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setFeedback({ tone: "error", text: data.error ?? "Could not draft that." });
+        return;
+      }
+      setTitle(data.draft.title);
+      setMessage(data.draft.message);
+      setFeedback({ tone: "ok", text: "Draft ready — read it over and edit anything before you send." });
+    } catch {
+      setFeedback({ tone: "error", text: "Network problem — your notes are still here." });
+    } finally {
+      setDrafting(false);
+    }
+  }
+
+  async function send() {
+    if (!canSend) return;
+    setSending(true);
+    setFeedback(null);
+    try {
+      const response = await fetch("/api/lecturer/announcements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          message: message.trim(),
+          audience,
+          urgent,
+          studentIds: picked,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setFeedback({ tone: "error", text: data.error ?? "Could not send that." });
+        return;
+      }
+      setFeedback({
+        tone: "ok",
+        text: `Sent to ${data.sentTo} student${data.sentTo === 1 ? "" : "s"}${
+          data.pushed > 0 ? ` · ${data.pushed} phone${data.pushed === 1 ? "" : "s"} buzzed` : ""
+        }.`,
+      });
+      setTitle("");
+      setMessage("");
+      setPicked([]);
+      setUrgent(false);
+      void loadCompose();
+    } catch {
+      setFeedback({ tone: "error", text: "Network problem — nothing was sent." });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  /* ------------------------------------------------------------ inbox ---- */
   const [inbox, setInbox] = useState<InboxTicket[]>([]);
   const [inboxUnread, setInboxUnread] = useState(0);
   const [activeTicket, setActiveTicket] = useState<string | null>(null);
@@ -93,6 +224,8 @@ export default function LecturerMessagesPage() {
   const [reply, setReply] = useState("");
   const [replyFiles, setReplyFiles] = useState<TicketAttachment[]>([]);
   const [threadBusy, setThreadBusy] = useState(false);
+  const [threadStatus, setThreadStatus] = useState("open");
+  const [threadLoaded, setThreadLoaded] = useState(false);
 
   const loadInbox = useCallback(async () => {
     try {
@@ -102,16 +235,11 @@ export default function LecturerMessagesPage() {
       setInbox(data.tickets ?? []);
       setInboxUnread(data.unread ?? 0);
     } catch {
-      // Same rule as the announcements list below: a failed poll leaves the
-      // last known inbox on screen rather than clearing it out from under
-      // someone mid-read.
+      // A failed poll leaves the last known inbox on screen rather than
+      // clearing it out from under someone mid-read.
     }
   }, []);
 
-  const [threadStatus, setThreadStatus] = useState("open");
-  const [threadLoaded, setThreadLoaded] = useState(false);
-
-  /** Pull the open thread without disturbing the reply box. */
   const refreshThread = useCallback(async (id: string) => {
     const res = await fetch(`/api/support/tickets/${id}`, { cache: "no-store" });
     if (!res.ok) return null;
@@ -140,8 +268,6 @@ export default function LecturerMessagesPage() {
     [refreshThread],
   );
 
-  // A student typing in one of my threads lights up its row, and inside an open
-  // thread shows the dots (lib/typing.ts). Both ends of the conversation.
   const typingByTicket = useTicketTypingMap(true);
   const live = useTicketLive({
     ticketId: activeTicket,
@@ -157,7 +283,6 @@ export default function LecturerMessagesPage() {
     }),
   );
 
-  // A full-screen thread on a phone must not let the page behind it scroll.
   useEffect(() => {
     if (!activeTicket || window.innerWidth >= 640) return;
     const previous = document.body.style.overflow;
@@ -188,231 +313,38 @@ export default function LecturerMessagesPage() {
     }
   }
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/lecturer/messages", { cache: "no-store" });
-      if (res.status === 401) {
-        router.push("/auth/lecturer/signin");
-        return;
-      }
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(payload.error || "Could not load your messages");
-        return;
-      }
-      setSent(payload.sent || []);
-      setRecipients(payload.recipients || []);
-      setCohortSize(payload.cohortSize || 0);
-      setAssigned(Boolean(payload.assigned));
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Could not load your messages");
-    } finally {
-      setLoading(false);
-    }
-  }, [router]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
   useEffect(() => {
     loadInbox();
     const timer = window.setInterval(loadInbox, 90_000);
     return () => window.clearInterval(timer);
   }, [loadInbox]);
 
-  /**
-   * `?ticket=<id>` — where the "a student messaged you" notification lands.
-   * Read off `window.location` rather than `useSearchParams`, same reasoning
-   * as HelpLauncher: a query param used once should not opt this whole page
-   * into client-side rendering behind a Suspense boundary.
-   */
+  // `?ticket=<id>` — where the "a student messaged you" notification lands.
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("ticket");
     if (id) void openThread(id, "");
   }, [openThread]);
 
-  async function send(event: React.FormEvent) {
-    event.preventDefault();
-    setSending(true);
-    setError("");
-    setNotice("");
-    try {
-      const res = await fetch("/api/lecturer/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, message, studentIds: audience === "student" ? studentIds : undefined }),
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(payload.error || "Could not send your message");
-
-      setNotice(`Sent to ${payload.recipients} student${payload.recipients === 1 ? "" : "s"}.`);
-      setTitle("");
-      setMessage("");
-      setAudience("cohort");
-      setStudentIds([]);
-      await load();
-    } catch (sendError) {
-      setError(sendError instanceof Error ? sendError.message : "Could not send your message");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  if (loading) {
-    return (
-      <LecturerShell>
-        <BrandLoader fill size="lg" title="Einen Moment…" message="Loading your messages." />
-      </LecturerShell>
-    );
-  }
-
   return (
     <LecturerShell>
-      <div className="h-screen overflow-y-auto">
-        <div className="border-b border-[var(--border)] bg-gradient-to-r from-[var(--accent)]/20 to-transparent p-6">
-          <div className="mx-auto max-w-5xl">
-            <h1 className="flex items-center gap-3 text-3xl font-bold text-[var(--foreground)]"><MailIcon className="h-7 w-7 text-[var(--accent)]" />Messages</h1>
-            <p className="mt-2 text-[var(--muted)]">
-              Send an announcement to your class. It lands in each student&apos;s notifications, and you can see who has read it.
-            </p>
-          </div>
-        </div>
-
-        <div className="mx-auto max-w-5xl space-y-6 p-6">
-          {error ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div> : null}
-          {notice ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{notice}</div>
-          ) : null}
-
-          {!assigned ? (
-            <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
-              <p className="font-semibold">You have no class to message yet</p>
-              <p className="mt-1">
-                Set your branch, level and session first — messages go to the students in the class you teach.
+      <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+        <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+          <header className="flex items-start gap-4">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[var(--accent)]/10 text-[var(--accent)]">
+              <MailIcon className="h-6 w-6" />
+            </span>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold sm:text-3xl">Messages</h1>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                {cohortLabel
+                  ? `Broadcast to ${cohortLabel} — in the portal and on their phone — and answer what students ask you directly.`
+                  : "Set your branch, level and session under Customise my classes first."}
               </p>
-              <Link href="/lecturer/classes" className="mt-3 inline-flex rounded-full bg-[var(--accent)] px-5 py-2 text-xs font-semibold text-white">
-                Customise my classes
-              </Link>
             </div>
-          ) : (
-            <form onSubmit={send} className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-bold text-[var(--foreground)]">New announcement</h2>
-                <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]">
-                  {cohortSize} student{cohortSize === 1 ? "" : "s"} in your class
-                </span>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Send to</label>
-                <div className="flex flex-wrap gap-2">
-                  {(
-                    [
-                      { value: "cohort", label: `Everyone in my class (${cohortSize})` },
-                      { value: "student", label: "Pick students" },
-                    ] as const
-                  ).map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setAudience(option.value)}
-                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                        audience === option.value
-                          ? "bg-[var(--accent)] text-white"
-                          : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/*
-                  A student picked to message here can also be a private-class
-                  student who happens to show up in this same cohort list — the
-                  problem this replaces was that "everyone" was the ONLY way to
-                  reach the group, so a private student always got swept in too.
-                  Checkboxes let a tutor leave them unchecked instead.
-                */}
-                {audience === "student" && (
-                  <div className="mt-3 max-h-56 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
-                    {recipients.length === 0 ? (
-                      <p className="p-3 text-sm text-[var(--muted)]">No students in your class yet.</p>
-                    ) : (
-                      recipients.map((recipient) => {
-                        const checked = studentIds.includes(recipient.id);
-                        return (
-                          <label
-                            key={recipient.id}
-                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition hover:bg-[var(--background)]"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() =>
-                                setStudentIds((current) =>
-                                  checked ? current.filter((id) => id !== recipient.id) : [...current, recipient.id],
-                                )
-                              }
-                              className="h-4 w-4 accent-[var(--accent)]"
-                            />
-                            <span className="flex-1 font-medium text-[var(--foreground)]">{recipient.name}</span>
-                          </label>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="subject" className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Subject</label>
-                <input
-                  id="subject"
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="e.g. No class this Friday"
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-[var(--foreground)] placeholder-[var(--muted)]"
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor="body" className="mb-2 block text-sm font-semibold text-[var(--foreground)]">Message</label>
-                <textarea
-                  id="body"
-                  value={message}
-                  onChange={(event) => setMessage(event.target.value)}
-                  placeholder="Write your announcement…"
-                  className="min-h-[140px] w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-[var(--foreground)] placeholder-[var(--muted)]"
-                  required
-                />
-                <p className="mt-1 text-xs text-[var(--muted)]">Your name is added automatically at the end.</p>
-              </div>
-
-              <button
-                type="submit"
-                disabled={sending || !title.trim() || !message.trim() || (audience === "student" && studentIds.length === 0)}
-                className="rounded-lg bg-[var(--accent)] px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {sending
-                  ? "Sending…"
-                  : audience === "student"
-                    ? `Send to ${studentIds.length} student${studentIds.length === 1 ? "" : "s"}`
-                    : `Send to all ${cohortSize}`}
-              </button>
-            </form>
-          )}
+          </header>
 
           {activeTicket ? (
-            /*
-              A student's question, as a chat. Full-screen on a phone, a card
-              from `sm` up — the same shape as the student's own help panel, so
-              both ends of a conversation look like the same thing. Typing goes
-              both ways (lib/typing.ts).
-            */
-            <div className="fixed inset-0 z-[65] flex h-[100dvh] flex-col overflow-hidden bg-[var(--surface)] sm:static sm:z-auto sm:h-[34rem] sm:rounded-2xl sm:border sm:border-[var(--border)]">
+            <div className="mt-8 fixed inset-0 z-[65] flex h-[100dvh] flex-col overflow-hidden bg-[var(--surface)] sm:static sm:z-auto sm:h-[34rem] sm:rounded-[28px] sm:border sm:border-[var(--border)]">
               <ChatHeader
                 fullScreen
                 onBack={() => setActiveTicket(null)}
@@ -423,7 +355,6 @@ export default function LecturerMessagesPage() {
                   </span>
                 }
               />
-
               <ChatScroller resetKey={activeTicket} watch={`${thread.length}:${live.typers.length}`}>
                 <div className="space-y-3">
                   {thread.map((entry, index) => {
@@ -451,7 +382,6 @@ export default function LecturerMessagesPage() {
                   <ChatTypingRow typers={live.typers} />
                 </div>
               </ChatScroller>
-
               <ChatComposer
                 value={reply}
                 onChange={(next) => {
@@ -466,8 +396,9 @@ export default function LecturerMessagesPage() {
               />
             </div>
           ) : (
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
-              <>
+            <>
+              {/* ---------------------------------------------- inbox ---- */}
+              <section className="mt-8 rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)] sm:p-7">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="flex items-center gap-2 text-lg font-bold text-[var(--foreground)]">
                     <InboxIcon className="h-5 w-5 text-[var(--accent)]" />
@@ -519,33 +450,254 @@ export default function LecturerMessagesPage() {
                     })}
                   </div>
                 )}
-              </>
-          </div>
-          )}
+              </section>
 
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
-            <h2 className="text-lg font-bold text-[var(--foreground)]">Sent</h2>
-            {sent.length === 0 ? (
-              <p className="mt-3 text-sm text-[var(--muted)]">You have not sent any announcements yet.</p>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {sent.map((item) => (
-                  <div key={item.key} className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <p className="font-semibold text-[var(--foreground)]">{item.title}</p>
-                      <span className="rounded-full bg-[var(--surface)] px-3 py-1 text-xs font-medium text-[var(--muted)]">
-                        {item.readCount}/{item.recipients} read
+              {/* -------------------------------------------- compose ---- */}
+              <section className="mt-8 rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)] sm:p-7">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="flex items-center gap-2 text-lg font-bold text-[var(--foreground)]">
+                    <BroadcastMessageIcon className="h-5 w-5 text-[var(--accent)]" />
+                    New message
+                  </h2>
+                  <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]">
+                    {composeLoading ? "…" : `${students.length} student${students.length === 1 ? "" : "s"} in your class`}
+                  </span>
+                </div>
+
+                {!composeLoading && students.length === 0 ? (
+                  <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
+                    <p className="font-semibold">You have no class to message yet</p>
+                    <p className="mt-1">Set your branch, level and session first — messages go to the students in the class you teach.</p>
+                    <Link href="/lecturer/classes" className="mt-3 inline-flex rounded-full bg-[var(--accent)] px-5 py-2 text-xs font-semibold text-white">
+                      Customise my classes
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                      {(
+                        [
+                          { value: "cohort", label: `My whole class (${students.length})` },
+                          { value: "student", label: "Pick students" },
+                        ] as const
+                      ).map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setAudience(option.value)}
+                          className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                            audience === option.value
+                              ? "bg-[var(--accent)] text-white shadow-lg shadow-[var(--accent)]/20"
+                              : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {audience === "student" && (
+                      <div className="space-y-3">
+                        {groupLabel ? (
+                          <p className="rounded-xl bg-[var(--accent-soft)] px-3 py-2 text-xs font-medium text-[var(--accent)]">
+                            Pre-selected the <strong>{groupLabel}</strong> group from your roster. Add or remove anyone below.
+                          </p>
+                        ) : null}
+                        <div className="max-h-72 overflow-y-auto rounded-2xl border border-[var(--border)] p-2">
+                          {students.length === 0 ? (
+                            <p className="p-3 text-sm text-[var(--muted)]">No students assigned to you yet.</p>
+                          ) : (
+                            groupByClass(students).map((group) => {
+                              const ids = group.members.map((member) => member.id);
+                              const allChecked = ids.every((id) => picked.includes(id));
+                              return (
+                                <div key={group.key} className="mb-2 last:mb-0">
+                                  <label className="flex cursor-pointer items-center gap-3 rounded-xl bg-[var(--surface-alt)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                                    <input
+                                      type="checkbox"
+                                      checked={allChecked}
+                                      onChange={() =>
+                                        setPicked((current) =>
+                                          allChecked
+                                            ? current.filter((id) => !ids.includes(id))
+                                            : [...new Set([...current, ...ids])],
+                                        )
+                                      }
+                                      className="h-4 w-4 accent-[var(--accent)]"
+                                    />
+                                    <span className="flex-1">{group.label}</span>
+                                    <span className="font-medium normal-case">
+                                      {deliveryModeLabel(group.mode)} · {group.members.length}
+                                    </span>
+                                  </label>
+                                  {group.members.map((student) => {
+                                    const checked = picked.includes(student.id);
+                                    return (
+                                      <label
+                                        key={student.id}
+                                        className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 pl-8 text-sm transition hover:bg-[var(--background)]"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() =>
+                                            setPicked((current) =>
+                                              checked ? current.filter((id) => id !== student.id) : [...current, student.id],
+                                            )
+                                          }
+                                          className="h-4 w-4 accent-[var(--accent)]"
+                                        />
+                                        <span className="flex-1 font-medium">{student.name}</span>
+                                        <span className="text-xs text-[var(--muted)]">
+                                          {student.classType === "private" ? "private" : student.batch || ""}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Optional AI drafting aid, folded in from Announcements.
+                        Sits above the real fields and stays out of the way of
+                        a tutor who already knows what to say. */}
+                    <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--background)] p-4">
+                      <label htmlFor="message-notes" className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                        Write it for me — optional
+                      </label>
+                      <textarea
+                        id="message-notes"
+                        value={notes}
+                        onChange={(event) => setNotes(event.target.value)}
+                        rows={2}
+                        placeholder="no class thursday, moved to friday same time, bring kapitel 4"
+                        className="mt-1.5 w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none transition focus:border-[var(--accent)]"
+                      />
+                      <div className="mt-2 flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => void draft()}
+                          disabled={notes.trim().length < 5 || drafting}
+                          className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {drafting ? "Writing…" : "Draft this for me"}
+                        </button>
+                        <p className="text-xs text-[var(--muted)]">
+                          Fills in the title and message below. Nothing is sent until you press send.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label htmlFor="message-title" className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                        Subject
+                      </label>
+                      <input
+                        id="message-title"
+                        value={title}
+                        onChange={(event) => setTitle(event.target.value)}
+                        maxLength={120}
+                        placeholder="No class on Thursday"
+                        className="mt-1.5 w-full rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="message-body" className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                        Message
+                      </label>
+                      <textarea
+                        id="message-body"
+                        value={message}
+                        onChange={(event) => setMessage(event.target.value)}
+                        rows={4}
+                        placeholder="We move to Friday at the same time. Bring your Kapitel 4 workbook."
+                        className="mt-1.5 w-full resize-y rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
+                      />
+                      <p className="mt-1 text-xs text-[var(--muted)]">Your name is added automatically at the end.</p>
+                    </div>
+
+                    <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[var(--border)] p-3.5">
+                      <input
+                        type="checkbox"
+                        checked={urgent}
+                        onChange={(event) => setUrgent(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
+                      />
+                      <span className="text-sm">
+                        <span className="font-semibold">Mark as urgent</span>
+                        <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                          Shows in amber and stands out in their list. Use it for a cancelled class, not a reading reminder.
+                        </span>
+                      </span>
+                    </label>
+
+                    {feedback && (
+                      <p
+                        className={`flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium ${
+                          feedback.tone === "ok" ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-600"
+                        }`}
+                      >
+                        {feedback.tone === "ok" ? <CheckCircleIcon className="h-4 w-4" /> : <AlertIcon className="h-4 w-4" />}
+                        {feedback.text}
+                      </p>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        onClick={() => void send()}
+                        disabled={!canSend}
+                        className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[var(--accent)]/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <BroadcastMessageIcon className="h-4 w-4" />
+                        {sending ? "Sending…" : `Send to ${recipientCount} student${recipientCount === 1 ? "" : "s"}`}
+                      </button>
+                      <span className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+                        <UsersIcon className="h-3.5 w-3.5" />
+                        {cohortLabel ?? "No class assigned"}
                       </span>
                     </div>
-                    <p className="mt-2 whitespace-pre-line text-sm text-[var(--muted)]">{item.message}</p>
-                    <p className="mt-2 text-xs text-[var(--muted)]">{new Date(item.sentAt).toLocaleString()}</p>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                )}
+              </section>
+
+              {/* --------------------------------------------- history ---- */}
+              <section className="mt-8">
+                <h2 className="text-lg font-semibold">What you have sent</h2>
+                {history.length === 0 ? (
+                  <p className="mt-3 rounded-3xl border border-dashed border-[var(--border)] px-6 py-10 text-center text-sm text-[var(--muted)]">
+                    Nothing yet. Anything you send shows here with how many students opened it.
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {history.map((entry) => (
+                      <div key={entry.batchId} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h3 className="font-semibold">{entry.title}</h3>
+                            <p className="mt-1 text-sm text-[var(--muted)]">{entry.message}</p>
+                          </div>
+                          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--background)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)]">
+                            <EyeIcon className="h-3.5 w-3.5" />
+                            {entry.readBy} of {entry.sentTo} read
+                          </span>
+                        </div>
+                        <p className="mt-3 text-xs text-[var(--muted)]">
+                          {new Date(entry.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
         </div>
-      </div>
+      </main>
     </LecturerShell>
   );
 }

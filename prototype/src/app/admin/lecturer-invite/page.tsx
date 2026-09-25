@@ -9,6 +9,7 @@ import AssignmentPicker from "@/components/admin/AssignmentPicker";
 import { uploadImage } from "@/lib/upload";
 import { ArrowLeftIcon, BroadcastMessageIcon, LecturerIcon, MailIcon, UsersIcon } from "@/components/icons";
 import {
+  ASSIGNABLE_PATHWAYS,
   BATCHES,
   CLASS_TYPES,
   COURSE_LEVELS,
@@ -132,6 +133,7 @@ const EMPTY_ASSIGNMENT: LecturerAssignment = {
   groups: [],
   classTypes: [],
   batches: [],
+  pathways: [],
 };
 
 const CLASS_TYPE_LABELS: Record<string, string> = {
@@ -191,6 +193,7 @@ function assignmentSignature(value: LecturerAssignment): string {
     sessionSlots: sorted(value.sessionSlots),
     classTypes: sorted(value.classTypes),
     batches: sorted(value.batches),
+    pathways: sorted(value.pathways),
     groups: value.groups
       .map((group) => `${group.branchId}|${group.level}|${group.sessionSlot}|${group.batch ?? ""}`.toLowerCase())
       .sort(),
@@ -281,6 +284,14 @@ function AssignmentFields({
         selected={value.batches}
         onChange={(next) => set("batches", next)}
         emptyMeans="Nothing selected — this tutor takes every batch."
+      />
+
+      <AssignmentPicker
+        label="Package"
+        options={ASSIGNABLE_PATHWAYS.map((pathway) => ({ value: pathway, label: pathway }))}
+        selected={value.pathways}
+        onChange={(next) => set("pathways", next)}
+        emptyMeans="Nothing selected — this tutor's roster is not narrowed by package. Pick Exam Preparatory to make this an exam preparatory tutor: their roster, gradebook and attendance then only show students on that package."
       />
     </div>
   );
@@ -1789,6 +1800,13 @@ export default function AdminTutorsPage() {
                         <p className="mt-1 text-xs italic text-[var(--muted)]">{tutor.statusNote}</p>
                       ) : null}
                       <p className="mt-2 text-sm text-[var(--foreground-soft)]">{tutor.assignmentLabel}</p>
+                      {tutor.assignment.pathways.length ? (
+                        <p className="mt-1">
+                          <span className="rounded-full border border-[var(--accent)]/40 bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[var(--accent)]">
+                            {tutor.assignment.pathways.join(", ")} tutor
+                          </span>
+                        </p>
+                      ) : null}
                       {tutor.assignment.classTypes.length ? (
                         <p className="mt-1 text-xs text-[var(--muted)]">
                           Class types: {tutor.assignment.classTypes.map((type) => CLASS_TYPE_LABELS[type] ?? type).join(", ")}
