@@ -231,23 +231,30 @@ function NotLiveScreen({ message, title }: { message: string; title: string | nu
 type ChooserGroup = { key: string; label: string; branchName: string; batchRange: string };
 
 /**
- * WHICH CLASS ARE YOU STARTING?
+ * READY TO START? — the explicit act that separates "landed on this page"
+ * from "opened the room and rang the roster".
  *
- * Shown to a tutor who runs more than one class and arrived at `/live` without
- * saying which. Picking one appends `?group=` and the page opens that cohort's
- * room — the whole point of the separation is that starting B1 evening never
- * rings the A1 morning students, and vice versa.
+ * Shown to every tutor who arrives at `/live` without already naming a group,
+ * a code or a booking — including one who runs only a single class, who used
+ * to skip this and go live the moment the page loaded. Picking a class
+ * appends `?group=` and THAT is what actually opens the room; for more than
+ * one class it also keeps starting B1 evening from ever ringing the A1
+ * morning students.
  */
 function GroupChooser({ groups, liveKey }: { groups: ChooserGroup[]; liveKey: string | null }) {
   const router = useRouter();
+  const single = groups.length === 1;
   return (
     <div className="space-y-6">
       <div className="rounded-3xl bg-gradient-to-br from-[#0D7C7E] via-[#0D7C7E] to-[#FF6600] p-6 text-white shadow-xl sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/70">Live classroom</p>
-        <h1 className="mt-3 text-2xl font-semibold sm:text-4xl">Which class are you starting?</h1>
+        <h1 className="mt-3 text-2xl font-semibold sm:text-4xl">
+          {single ? "Ready to start your class?" : "Which class are you starting?"}
+        </h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-white/85">
-          You run more than one class. Pick the one to open now — only its students are rung, and its room
-          stays separate from your other classes.
+          {single
+            ? "Take your time to set up — camera, mic, whatever you need. Nothing opens and no student is notified until you press start."
+            : "You run more than one class. Pick the one to open now — only its students are rung, and its room stays separate from your other classes."}
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -345,22 +352,27 @@ function LiveClassroomPageInner() {
 
       try {
         /**
-         * A tutor who runs more than one class picks which one to start before
-         * a room is opened — otherwise `/api/live/session` would fall back to
-         * their primary class and quietly start the wrong cohort. Skipped the
-         * moment the URL is specific: a group key, a join code, or a private
-         * booking all name the room already.
+         * A tutor lands here from the sidebar with no group, code or booking
+         * named — that is a navigation, not a decision to start teaching, so
+         * it must never be the thing that opens the room, mints a join code
+         * and rings a roster (see the GET handler's own comment on why
+         * opening IS starting). The chooser is what turns "arrived" into
+         * "started": picking a class pushes `?group=`, and THAT re-run of
+         * this effect is what actually opens it. A tutor with only one class
+         * used to skip straight past this and auto-start on page load alone
+         * — shown the chooser too now, unless that one class is already
+         * live, in which case there is nothing left to decide and no new
+         * announce to trigger by rejoining it.
          */
         if (!code && !privateClassId && !group) {
           const stateRes = await fetch("/api/live/state", { cache: "no-store" });
           const stateData = await stateRes.json().catch(() => ({}));
           if (cancelled) return;
-          if (
-            stateData.role === "tutor" &&
-            Array.isArray(stateData.groups) &&
-            stateData.groups.length > 1
-          ) {
-            setChooser({ groups: stateData.groups, liveKey: stateData.live?.groupKey ?? null });
+          const groups = Array.isArray(stateData.groups) ? stateData.groups : [];
+          const singleGroupAlreadyLive =
+            groups.length === 1 && stateData.live?.groupKey === groups[0].key;
+          if (stateData.role === "tutor" && groups.length > 0 && !singleGroupAlreadyLive) {
+            setChooser({ groups, liveKey: stateData.live?.groupKey ?? null });
             return;
           }
         }
