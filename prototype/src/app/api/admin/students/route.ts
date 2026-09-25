@@ -681,13 +681,28 @@ export async function PATCH(request: Request) {
      * since that stale value is exactly what we're deciding whether to
      * reset) — a same-batch edit or a move to an already-started batch
      * leaves these fields untouched.
+     *
+     * SELF-HEAL: a batch change made before this reset existed (or one that
+     * silently failed to apply) can leave a student with a `classesStartedAt`
+     * that predates the batch label's own start date — impossible on its
+     * face, since a batch cannot have "started" before it starts. Any save
+     * that touches this student while that inconsistency is on file clears
+     * it too, even when `batch` itself didn't change on this particular
+     * request, so the very next edit (any edit) repairs a stuck record
+     * instead of requiring the office to re-toggle the batch dropdown.
      */
-    if (batch !== undefined && batch !== batchFromAdmission(student.admission)) {
+    if (batch !== undefined) {
+      const batchChanged = batch !== batchFromAdmission(student.admission);
       const nowMovedToUpcoming = resolveUpcomingBatch(batch, {
         registeredAt: student.createdAt,
         now: new Date(),
       });
-      if (nowMovedToUpcoming) {
+      const staleLock =
+        !batchChanged &&
+        nowMovedToUpcoming !== null &&
+        student.classesStartedAt !== null &&
+        student.classesStartedAt.getTime() < nowMovedToUpcoming.startsOn.getTime();
+      if ((batchChanged || staleLock) && nowMovedToUpcoming) {
         updateStudent.classesStartedAt = null;
         updateStudent.startConfirmedAt = null;
         updateStudent.startConfirmedVia = null;
