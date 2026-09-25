@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { liveWhere } from "@/lib/live-presence";
 import { isObserverIdentity } from "@/lib/live-classroom";
 import { roomServiceClient } from "@/lib/live-moderation";
-import { TrackSource } from "livekit-server-sdk";
+import { TrackSource, ServerError } from "livekit-server-sdk";
 
 export const dynamic = "force-dynamic";
 
@@ -134,6 +134,12 @@ export async function GET(request: NextRequest) {
         }),
       });
     } catch (error) {
+      // Same LiveKit quirk headcount() already tolerates below: a room with
+      // nobody in it (or never actually opened) 404s instead of returning [].
+      // That is "0 participants", not an outage worth alarming an admin over.
+      if (error instanceof ServerError && error.status === 404) {
+        return NextResponse.json({ participants: [] });
+      }
       console.error("Admin live participants fetch failed", error);
       return NextResponse.json({ error: "Could not reach LiveKit for that room." }, { status: 502 });
     }
