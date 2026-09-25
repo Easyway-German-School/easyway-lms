@@ -167,6 +167,23 @@ export default function MaterialsPage() {
 
 /* ------------------------------------------------------------------ activity */
 
+type ShortRecordingVerdict = {
+  recordingId: string;
+  title: string;
+  recordedAt: string;
+  durationSeconds: number;
+  sizeBytes: number;
+  variant: string;
+  eligibleAt: string;
+  graceEligible: boolean;
+};
+
+function graceLabel(verdict: ShortRecordingVerdict): string {
+  if (verdict.graceEligible) return "Ready to delete";
+  const hours = Math.max(1, Math.ceil((new Date(verdict.eligibleAt).getTime() - Date.now()) / 3_600_000));
+  return `Waiting ${hours}h — holds until it's had a chance to be noticed`;
+}
+
 function ActivityTab() {
   const [days, setDays] = useState(30);
   const [data, setData] = useState<Activity | null>(null);
@@ -174,6 +191,15 @@ function ActivityTab() {
   const [error, setError] = useState("");
   const [reconcileLoading, setReconcileLoading] = useState(false);
   const [reconcileMessage, setReconcileMessage] = useState<string | null>(null);
+
+  const [shortPurgeVerdicts, setShortPurgeVerdicts] = useState<ShortRecordingVerdict[] | null>(null);
+  const [shortPurgeGraceHours, setShortPurgeGraceHours] = useState(48);
+  const [shortPurgeLoading, setShortPurgeLoading] = useState(false);
+  const [shortPurgeError, setShortPurgeError] = useState<string | null>(null);
+  const [showShortPurgeModal, setShowShortPurgeModal] = useState(false);
+  const [shortPurgePhrase, setShortPurgePhrase] = useState("");
+  const [shortPurgeDeleting, setShortPurgeDeleting] = useState(false);
+  const [shortPurgeResult, setShortPurgeResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -211,6 +237,52 @@ function ActivityTab() {
     const timer = window.setInterval(() => void load(), 10_000);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  const loadShortPurgePlan = useCallback(async () => {
+    setShortPurgeLoading(true);
+    setShortPurgeError(null);
+    setShortPurgeResult(null);
+    try {
+      const res = await fetch("/api/live/recording/retention?mode=short", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Could not load the list.");
+      setShortPurgeVerdicts(json.verdicts as ShortRecordingVerdict[]);
+      if (typeof json.policy?.shortRecordingGraceHours === "number") {
+        setShortPurgeGraceHours(json.policy.shortRecordingGraceHours);
+      }
+      setShowShortPurgeModal(true);
+      setShortPurgePhrase("");
+    } catch (err) {
+      setShortPurgeError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setShortPurgeLoading(false);
+    }
+  }, []);
+
+  const confirmShortPurge = useCallback(async () => {
+    if (shortPurgePhrase !== "DELETE RECORDINGS") return;
+    setShortPurgeDeleting(true);
+    try {
+      const res = await fetch("/api/live/recording/retention", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "short", confirm: true }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Delete failed");
+      setShortPurgeResult(
+        `Permanently deleted ${json.reclaimed} recording${json.reclaimed === 1 ? "" : "s"}${
+          json.failed ? ` (${json.failed} failed — object already gone or storage error)` : ""
+        }.`,
+      );
+      setShowShortPurgeModal(false);
+      setShortPurgeVerdicts(null);
+    } catch (err) {
+      setShortPurgeResult(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setShortPurgeDeleting(false);
+    }
+  }, [shortPurgePhrase]);
 
   if (loading && !data) return <BrandLoader fill size="lg" message="Counting what happened." />;
   if (error && !data) return <p className="rounded-2xl bg-rose-50 p-6 text-sm text-rose-700">{error}</p>;
@@ -284,6 +356,105 @@ function ActivityTab() {
         </button>
         {reconcileMessage ? <p className="text-sm text-[var(--muted)]">{reconcileMessage}</p> : null}
       </div>
+
+      {/* Existing backlog of short (under 40 min) group recordings from before
+          this got handled automatically on capture. Never for a private
+          one-to-one. Preview first — an admin has to see the exact titles and
+          give one typed yes before anything is permanently deleted. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={loadShortPurgePlan}
+          disabled={shortPurgeLoading}
+          className="inline-flex items-center gap-2 rounded-2xl border border-red-300 px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <TrashIcon className="h-4 w-4" />
+          {shortPurgeLoading ? "Checking…" : "Delete short recordings (under 40 min)"}
+        </button>
+        {shortPurgeError ? <p className="text-sm text-rose-700">{shortPurgeError}</p> : null}
+        {shortPurgeResult ? <p className="text-sm text-[var(--muted)]">{shortPurgeResult}</p> : null}
+      </div>
+
+      {showShortPurgeModal && shortPurgeVerdicts ? (
+        (() => {
+          const readyNow = shortPurgeVerdicts.filter((verdict) => verdict.graceEligible);
+          const stillWaiting = shortPurgeVerdicts.length - readyNow.length;
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+              <div className="w-full max-w-lg space-y-4 rounded-3xl border border-red-300 bg-[var(--surface)] p-6 shadow-xl">
+                <h2 className="text-xl font-bold text-red-600">Permanently delete these recordings?</h2>
+                <p className="text-sm text-[var(--foreground-soft)]">
+                  {shortPurgeVerdicts.length === 0 ? (
+                    "No group recordings under 40 minutes are on file right now."
+                  ) : (
+                    <>
+                      <strong>{readyNow.length}</strong> group recording{readyNow.length === 1 ? "" : "s"} under 40
+                      minutes {readyNow.length === 1 ? "is" : "are"} ready to go, gone from storage for good — this
+                      cannot be undone.
+                      {stillWaiting > 0 ? (
+                        <>
+                          {" "}
+                          <strong>{stillWaiting}</strong> more {stillWaiting === 1 ? "is" : "are"} still in its
+                          {" "}{shortPurgeGraceHours}-hour waiting window (a chance to notice a class that
+                          ended early rather than a false start) and won&apos;t be touched by this.
+                        </>
+                      ) : null}{" "}
+                      Private one-to-one recordings are never included, whatever their length.
+                    </>
+                  )}
+                </p>
+                {shortPurgeVerdicts.length > 0 ? (
+                  <div className="max-h-64 space-y-1 overflow-y-auto rounded-xl border border-[var(--border)] p-3">
+                    {shortPurgeVerdicts.map((verdict) => (
+                      <div key={verdict.recordingId} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="truncate font-medium text-[var(--foreground)]">{verdict.title}</span>
+                        <div className="shrink-0 text-right text-xs text-[var(--muted)]">
+                          <div>
+                            {new Date(verdict.recordedAt).toLocaleDateString()} · {Math.round(verdict.durationSeconds / 60)} min
+                          </div>
+                          <div className={verdict.graceEligible ? "text-red-600" : "text-amber-600"}>{graceLabel(verdict)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {readyNow.length > 0 ? (
+                  <>
+                    <p className="text-sm text-[var(--muted)]">
+                      Type <span className="font-mono font-bold">DELETE RECORDINGS</span> to confirm.
+                    </p>
+                    <input
+                      value={shortPurgePhrase}
+                      onChange={(event) => setShortPurgePhrase(event.target.value)}
+                      placeholder="DELETE RECORDINGS"
+                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    />
+                  </>
+                ) : null}
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { setShowShortPurgeModal(false); setShortPurgePhrase(""); }}
+                    className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  {readyNow.length > 0 ? (
+                    <button
+                      type="button"
+                      disabled={shortPurgePhrase !== "DELETE RECORDINGS" || shortPurgeDeleting}
+                      onClick={confirmShortPurge}
+                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      {shortPurgeDeleting ? "Deleting…" : `Permanently delete ${readyNow.length}`}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          );
+        })()
+      ) : null}
 
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">

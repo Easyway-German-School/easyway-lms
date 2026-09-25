@@ -26,7 +26,7 @@ import { EgressStatus } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { createRecordingThumbnail } from "@/lib/recording-thumbnail";
-import { studentExpiryFrom } from "@/lib/retention";
+import { isTooShortToKeep, studentExpiryFrom } from "@/lib/retention";
 import {
   AUDIO_ENCODING,
   CLASS_ENCODING,
@@ -376,6 +376,37 @@ export async function finaliseRecording(egress: {
     const fileUrl = recordingPublicUrl(objectKey);
     const recordedAt = row.startedAt;
     const isPrivate = Boolean(row.privateClassId);
+
+    /**
+     * A too-short GROUP recording never becomes a Material row — nobody sees
+     * it, nobody is notified, and no thumbnail is wasted generating one. See
+     * RETENTION.minWorthKeepingSeconds.
+     *
+     * It is HELD, not deleted here: the object stays in the bucket and the
+     * row stays "completed" with no materialId, which is what marks it as a
+     * short recording pending purge (see planShortRecordingPurge). Only
+     * `short-recording-purge` in the daily cron actually deletes it, and
+     * only once RETENTION.shortRecordingGraceHours has passed — a class that
+     * genuinely ran close to 40 minutes, or one a dropped connection cut
+     * short, gets a window to be noticed before its tape is gone for good —
+     * an admin can preview and delete it from Materials > Activity too, but
+     * not before that same window has passed.
+     */
+    if (isTooShortToKeep(durationSeconds, isPrivate)) {
+      await prisma.classRecording.update({
+        where: { id: row.id },
+        data: {
+          status: "completed",
+          endedAt: new Date(),
+          objectKey,
+          fileUrl,
+          durationSeconds,
+          sizeBytes,
+        },
+      });
+      return "created";
+    }
+
     let thumbnailPath: string | null = null;
     try {
       thumbnailPath = await createRecordingThumbnail({
