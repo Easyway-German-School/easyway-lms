@@ -200,6 +200,48 @@ function driveViewUrl(id: string, mimeType: string): string {
 }
 
 /**
+ * A Drive "view" link opens Google's own web viewer, which needs the file
+ * embeddable in a page and can fail silently inside a phone's in-app
+ * browser/PWA (blank preview, "Preview unavailable", or nothing at all) —
+ * exactly the shape of "the PDF won't open or download" reports. This is the
+ * direct-download counterpart: for an uploaded file it hands back the bytes
+ * straight from `uc?export=download`, and for a native Doc/Sheet/Slide it
+ * exports one (PDF/XLSX/PPTX) — either way something a browser can always
+ * save, instead of a page that has to render first.
+ *
+ * Takes the URL alone (not a stored mimeType) so it can also rewrite a
+ * `/view` link already sitting in the database from before this existed —
+ * no backfill needed, every read fixes itself.
+ */
+export function driveDownloadUrl(url: string): string {
+  const value = String(url ?? "").trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return value;
+  }
+
+  const host = parsed.hostname.replace(/^www\./, "");
+
+  if (host === "drive.google.com") {
+    const match = parsed.pathname.match(/\/file\/d\/([A-Za-z0-9_-]+)/);
+    const id = match?.[1] ?? parsed.searchParams.get("id");
+    return id ? `https://drive.google.com/uc?export=download&id=${id}` : value;
+  }
+
+  if (host === "docs.google.com") {
+    const match = parsed.pathname.match(/\/(document|spreadsheets|presentation)\/d\/([A-Za-z0-9_-]+)/);
+    if (!match) return value;
+    const [, kind, id] = match;
+    const format = kind === "spreadsheets" ? "xlsx" : kind === "presentation" ? "pptx" : "pdf";
+    return `https://docs.google.com/${kind}/d/${id}/export?format=${format}`;
+  }
+
+  return value;
+}
+
+/**
  * Turn one Drive file into the columns a Material row needs.
  *
  * Video and audio reuse the existing embed types so they slot into the video
@@ -231,7 +273,7 @@ export function driveFileToMaterialFields(file: DriveFile): DriveMaterialFields 
   }
 
   return {
-    filePath: driveViewUrl(file.id, mime),
+    filePath: driveDownloadUrl(driveViewUrl(file.id, mime)),
     fileName: file.name,
     fileType: DRIVE_LINK_FILE_TYPE,
     fileSize: file.size ?? 0,

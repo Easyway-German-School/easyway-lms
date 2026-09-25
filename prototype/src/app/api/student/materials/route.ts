@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { getStudentAccess } from "@/lib/student-access";
 import { toPlayableUrl } from "@/lib/video-library";
 import { notExpiredForStudents } from "@/lib/retention";
+import { driveDownloadUrl, DRIVE_LINK_FILE_TYPE } from "@/lib/drive-import";
 
 export async function GET() {
   try {
@@ -139,7 +140,18 @@ export async function GET() {
                 : null,
           }
         : null;
-      return { ...rest, fileUrl: toPlayableUrl(material.filePath), sentBy };
+      // A Drive "view" link (some already sitting in the database from before
+      // driveDownloadUrl existed) opens Google's own viewer, which can fail
+      // silently in a phone's in-app browser — rewriting it to a direct
+      // download at read time fixes every existing document, not just new
+      // imports. Video/audio embeds (`/preview` links) are a different
+      // fileType and are left alone — they need to stay embeddable, not
+      // become a download.
+      const fileUrl =
+        material.fileType === DRIVE_LINK_FILE_TYPE
+          ? driveDownloadUrl(toPlayableUrl(material.filePath))
+          : toPlayableUrl(material.filePath);
+      return { ...rest, fileUrl, sentBy };
     });
 
     return NextResponse.json({ materials, locked: false, totalPaid, tuitionFee });

@@ -154,6 +154,11 @@ const EMAILS_BY_DEFAULT = new Set<string>([
   KIND.levelAdvance,
   KIND.announcement,
   KIND.assignmentDue,
+  // A tutor's upload (handout, kursbuch PDF, recording) already push-notifies;
+  // this is the same "your tutor sent you something" moment a homework
+  // notice already emails for, and a student's only chance to hear about it
+  // is whichever channel they actually check.
+  KIND.materialPublished,
 ]);
 
 export function emailsByDefault(kind: string): boolean {
