@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+/**
+ * Deliberately NOT the LMS's playful, gamified look (Becca, journey maps,
+ * teal/orange). An exam-registration authority reads as serious: navy, gold,
+ * a serif for anything official-sounding — but warmed up with real travel
+ * photography (the D-A-CH region the certificate opens doors to), dusk
+ * gradients and boarding-pass details, in the spirit of the Goethe-Institut's
+ * own image-led pages. Think "airline meets embassy", not "app".
+ */
+:root {
+  --ink: #10203f;
+  --ink-soft: #3c4a68;
+  --paper: #fbfaf6;
+  --paper-raised: #ffffff;
+  --line: #dcdcd2;
+  --navy: #0b1f3a;
+  --navy-deep: #071328;
+  --gold: #b8912f;
+  --gold-soft: #f4ecd8;
+  --red: #9b2226;
+  --red-soft: #fbeceb;
+  --green: #1f6f4a;
+  --green-soft: #e9f5ee;
+  --sky: #1d4e89;
+  --amber: #f5b83d;
+  --gold-bright: #e3b94f;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-navy: var(--navy);
+  --color-gold: var(--gold);
+  --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.font-serif-display {
+  font-family: var(--font-serif);
+}
+
+.seal-border {
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(11, 31, 58, 0.04);
+}
+
+.step-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--line);
+}
+.step-dot[data-active="true"] {
+  background: var(--gold);
+}
+.step-dot[data-done="true"] {
+  background: var(--navy);
+}
+
+/* ------------------------------------------------------------------ */
+/* Travel-style visual system                                          */
+/* ------------------------------------------------------------------ */
+
+.gold-text {
+  background: linear-gradient(100deg, #f3d98a 0%, #e3b94f 45%, #c99a2e 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Cinematic film grain over hero photography — depth without weight. */
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.09;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+@keyframes kenburns {
+  from { transform: scale(1.04) translate3d(0, 0, 0); }
+  to { transform: scale(1.15) translate3d(-1.5%, -1.2%, 0); }
+}
+.kenburns {
+  animation: kenburns 34s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: none; }
+}
+.fade-up { animation: fade-up 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.delay-1 { animation-delay: 0.1s; }
+.delay-2 { animation-delay: 0.22s; }
+.delay-3 { animation-delay: 0.36s; }
+.delay-4 { animation-delay: 0.5s; }
+
+/* Scroll-reveal, progressive enhancement: browsers without scroll-driven
+   animations simply show everything immediately. */
+@supports (animation-timeline: view()) {
+  .reveal {
+    animation: fade-up linear both;
+    animation-timeline: view();
+    animation-range: entry 0% entry 40%;
+  }
+}
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee 46s linear infinite;
+}
+
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.06) 30%, rgba(255, 255, 255, 0.16) 50%, rgba(255, 255, 255, 0.06) 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* Boarding-pass perforation: two stacked halves, each with its inner corners
+   scooped out by a mask so the photo behind shows through the notches. */
+.ticket-top,
+.ticket-bottom {
+  --r: 13px;
+}
+.ticket-top {
+  -webkit-mask:
+    radial-gradient(circle var(--r) at 0 100%, #0000 97%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle var(--r) at 100% 100%, #0000 97%, #000) right / 51% 100% no-repeat;
+  mask:
+    radial-gradient(circle var(--r) at 0 100%, #0000 97%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle var(--r) at 100% 100%, #0000 97%, #000) right / 51% 100% no-repeat;
+}
+.ticket-bottom {
+  -webkit-mask:
+    radial-gradient(circle var(--r) at 0 0, #0000 97%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle var(--r) at 100% 0, #0000 97%, #000) right / 51% 100% no-repeat;
+  mask:
+    radial-gradient(circle var(--r) at 0 0, #0000 97%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle var(--r) at 100% 0, #0000 97%, #000) right / 51% 100% no-repeat;
+}
+
+/* Decorative barcode strip. */
+.barcode {
+  height: 34px;
+  background: repeating-linear-gradient(90deg,
+    currentColor 0 2px, transparent 2px 5px,
+    currentColor 5px 6px, transparent 6px 9px,
+    currentColor 9px 12px, transparent 12px 14px);
+  opacity: 0.55;
+}
+
+.card-lift {
+  transition: transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.35s ease;
+}
+.card-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 40px -18px rgba(11, 31, 58, 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kenburns, .fade-up, .marquee-track, .skeleton, .reveal { animation: none !important; }
+  .card-lift, .card-lift:hover { transition: none; transform: none; }
+}
+
+/* A printed admission slip should look like a document, not a webpage. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-ticket,
+  #printable-ticket * {
+    visibility: visible;
+  }
+  #printable-ticket {
+    position: absolute;
+    inset: 0;
+    box-shadow: none;
+  }
+}

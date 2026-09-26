@@ -105,6 +105,14 @@ export type MyExam = {
   seatNumber: string | null;
   branchName: string | null;
   isPast: boolean;
+  paymentMethod: string | null;
+  transferProofUrl: string | null;
+  transferReference: string | null;
+  transferRejectedReason: string | null;
+  passportPhotoUrl: string | null;
+  passportDataPageUrl: string | null;
+  documentStatus: string;
+  documentRejectedReason: string | null;
   result: {
     score: number;
     grade: string | null;
@@ -177,6 +185,14 @@ export async function myExams(userId: string, now = new Date()): Promise<MyExam[
       seatNumber: r.seatNumber,
       branchName: r.exam?.branch?.name ?? null,
       isPast: r.examDate < now,
+      paymentMethod: r.paymentMethod,
+      transferProofUrl: r.transferProofUrl,
+      transferReference: r.transferReference,
+      transferRejectedReason: r.transferRejectedReason,
+      passportPhotoUrl: r.passportPhotoUrl,
+      passportDataPageUrl: r.passportDataPageUrl,
+      documentStatus: r.documentStatus,
+      documentRejectedReason: r.documentRejectedReason,
       result: grade
         ? {
             score: grade.score,

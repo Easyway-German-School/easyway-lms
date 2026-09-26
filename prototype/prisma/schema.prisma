@@ -1263,13 +1263,52 @@ model ExamRegistration {
   notes    String?
 
   /**
-   * unpaid | paid | waived — a seat is only held once the fee is settled.
+   * unpaid | pending_verification | paid | waived — a seat is only held once
+   * the fee is settled. `pending_verification` is the manual bank-transfer
+   * path: the candidate has uploaded a slip but no admin has confirmed the
+   * money landed yet, so the seat stays provisional (not shown as PAID, no
+   * hall ticket) until someone reviews it.
    */
   paymentStatus    String  @default("unpaid")
+  /**
+   * paystack | bank_transfer — which rail this fee was (or is being) paid on.
+   * Null until the candidate picks one. Paystack settles itself via
+   * settleExamFee(); bank_transfer is settled by an admin via
+   * verifyBankTransfer() in src/lib/exam-payments.ts.
+   */
+  paymentMethod    String?
   paymentReference String?
   amountPaid       Int?
 
+  /**
+   * The manual-transfer trail: a candidate-uploaded proof of payment plus
+   * whichever admin reviewed it. Kept even after verification as the audit
+   * record — see [[project-security-architecture]].
+   */
+  transferProofUrl  String?
+  transferReference String?
+  transferVerifiedBy String?
+  transferVerifiedAt DateTime?
+  /** Why an admin sent a slip back — shown to the candidate to fix and resubmit. */
+  transferRejectedReason String?
+
   seatNumber String?
+
+  /**
+   * The two documents ÖSD registration needs beyond what MyExamsPanel
+   * collects: a passport-style photograph and the passport's data page. Kept
+   * on the registration (not the Student/User row) because a walk-in
+   * candidate has neither, and because a re-sit years later should not carry
+   * a stale photo forward silently.
+   */
+  passportPhotoUrl    String?
+  passportDataPageUrl String?
+  /**
+   * pending | approved | rejected. Only meaningful once both files above are
+   * uploaded — see documentsComplete() in src/lib/exam-documents.ts.
+   */
+  documentStatus         String  @default("pending")
+  documentRejectedReason String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
