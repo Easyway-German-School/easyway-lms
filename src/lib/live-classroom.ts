@@ -87,12 +87,23 @@ function slug(value: string): string {
 }
 
 /**
- * A cohort's permanent room.
+ * A cohort's room.
  *
- * Derived from branch + level + slot rather than stored, so a class is
- * joinable even when no ClassSession row was generated for today — a tutor
- * holding an unscheduled catch-up should not hit a dead end. Everyone in the
- * same cohort computes the same string, which is the whole trick.
+ * Derived from branch + level + slot (+ the tutor) rather than stored, so a
+ * class is joinable even when no ClassSession row was generated for today — a
+ * tutor holding an unscheduled catch-up should not hit a dead end.
+ *
+ * THE TUTOR IS PART OF THE ROOM. The cohort alone is not a class: two tutors
+ * can hold the same branch + level + sitting at the same time (a class moved
+ * to another day, two tutors on one cohort, a split roster). With a cohort-only
+ * name they derived the SAME room, and `openLiveSession` — which adopts
+ * whatever is already live in a room so a reload never starts a second class —
+ * put the second tutor inside the first tutor's lesson. So a tutor's room
+ * carries their id, and two tutors can never share one by construction.
+ *
+ * Omit `lecturerId` for the cohort-wide name (an admin-opened room, or code
+ * that only needs the cohort's shape). Students never derive this: they follow
+ * the live session row (`liveSessionForStudent`), which names the room.
  *
  * `ClassSession.roomName` overrides this when a tutor pins a specific room.
  */
@@ -100,15 +111,18 @@ export function cohortRoomName({
   branchName,
   level,
   sessionSlot,
+  lecturerId,
 }: {
   branchName?: string | null;
   level?: string | null;
   sessionSlot?: string | null;
+  lecturerId?: string | null;
 }): string {
   const branch = slug(branchName || "easyway");
   const lvl = slug(level || "a1");
   const slot = slug(sessionSlot || "morning");
-  return `ew-${branch}-${lvl}-${slot}`;
+  const tutor = lecturerId ? slug(lecturerId) : "";
+  return tutor ? `ew-${branch}-${lvl}-${slot}-t-${tutor}` : `ew-${branch}-${lvl}-${slot}`;
 }
 
 /** A one-to-one private class gets its own room, keyed on the booking. */

@@ -14,6 +14,7 @@ import {
   liveSessionForStudent,
   mayJoinPrivateRoom,
   openLiveSession,
+  ownOpenCohortRoom,
   recordAttendance,
   LIVE_HEARTBEAT_MS,
 } from "@/lib/live-presence";
@@ -250,6 +251,7 @@ export async function GET(request: Request) {
             readAssignment(lecturer),
             new Map([[groupBranch.id, groupBranch.name]]),
             requestedGroup,
+            lecturer.id,
           )
         : null;
       if (!chosenGroup) {
@@ -268,7 +270,25 @@ export async function GET(request: Request) {
       ? privateRoomName(privateClassId)
       : chosenGroup
         ? chosenGroup.roomName
-        : cohortRoomName({ branchName: branch?.name, level, sessionSlot });
+        : cohortRoomName({
+            branchName: branch?.name,
+            level,
+            sessionSlot,
+            // A tutor's room is theirs alone. Two tutors on one branch + level
+            // + sitting used to derive the same room and land in each other's
+            // class. A student never uses this name — they follow the live
+            // session row below — so only the tutor side carries the id.
+            lecturerId: lecturer?.id ?? null,
+          });
+    // A class this tutor already has open keeps ITS room — see ownOpenCohortRoom.
+    if (role === "tutor" && lecturer && !privateClassId) {
+      roomName =
+        (await ownOpenCohortRoom(lecturer.id, {
+          branchId: branch?.id ?? null,
+          level,
+          sessionSlot,
+        })) ?? roomName;
+    }
     let displayName = privateClassId
       ? codedSession?.title ?? "Private class"
       : roomDisplayName({ branchName: branch?.name, level, sessionSlot });

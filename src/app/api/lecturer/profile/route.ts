@@ -114,7 +114,7 @@ export async function GET() {
     const record = admission && typeof admission === "object" ? (admission as Record<string, unknown>) : {};
     return typeof record.batch === "string" ? record.batch.toLowerCase() : "";
   };
-  const groups = teachingGroups(assignment, branchNameMap).map((group) => {
+  const groups = teachingGroups(assignment, branchNameMap, lecturer.id).map((group) => {
     const members = roster.filter(
       (student) =>
         student.branchId === group.branchId &&
@@ -182,6 +182,7 @@ export async function GET() {
         branchName: lecturer.branch?.name,
         level: lecturer.level,
         sessionSlot: lecturer.sessionSlot,
+        lecturerId: lecturer.id,
       }),
       studentCount: roster.length,
     },
