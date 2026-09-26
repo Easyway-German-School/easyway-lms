@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { getToken, type JWT } from "next-auth/jwt";
 import { isPlatformHost } from "@/lib/platform/brand";
 
 /**
@@ -89,34 +89,59 @@ const normalizeRole = (value: unknown) => String(value || "student").toLowerCase
  */
 const IMPERSONATION_END_PATH = "/api/admin/impersonate/end";
 
-async function guardPortal(request: NextRequest, path: string): Promise<NextResponse | null> {
-  if (path === IMPERSONATION_END_PATH) return null;
+// getToken() has a `raw: true` overload that resolves to a bare string, so
+// its inferred return is `string | JWT | null`. This file never passes `raw`,
+// so the decoded object is all that comes back.
+type SessionToken = JWT | null;
 
-  const portal = PORTALS.find((p) => p.pagePattern.test(path) || p.apiPattern.test(path));
-  if (!portal) return null;
-
-  /**
-   * secureCookie must be forced, not inferred.
-   *
-   * getToken() defaults to checking whether NEXTAUTH_URL starts with
-   * "https://" to decide which cookie name to read — but NEXTAUTH_URL is
-   * marked Sensitive in Vercel, and Sensitive env vars are not exposed to
-   * the Edge Middleware runtime this file runs in. So that check silently
-   * saw `undefined` here and looked for the plain "next-auth.session-token"
-   * cookie, while every real sign-in (a Node.js serverless function, where
-   * the var IS visible) issues the browser "__Secure-next-auth.session-
-   * token". The result: a session that /api/auth/session reports as valid
-   * was rejected at this gate on every single request — every admin and
-   * lecturer sign-in bounced straight back to the sign-in page it just came
-   * from. Deriving it from the request's own protocol instead of an env var
-   * makes it correct regardless of what NEXTAUTH_URL is set to or which
-   * runtime can see it.
-   */
-  const token = await getToken({
+/**
+ * Decrypt the NextAuth session JWT. Called once per request in `proxy()`,
+ * then shared by the portal gate and the per-account rate limiter — both
+ * need it, and the decrypt is not free.
+ *
+ * secureCookie must be forced, not inferred.
+ *
+ * getToken() defaults to checking whether NEXTAUTH_URL starts with
+ * "https://" to decide which cookie name to read — but NEXTAUTH_URL is
+ * marked Sensitive in Vercel, and Sensitive env vars are not exposed to
+ * the Edge Middleware runtime this file runs in. So that check silently
+ * saw `undefined` here and looked for the plain "next-auth.session-token"
+ * cookie, while every real sign-in (a Node.js serverless function, where
+ * the var IS visible) issues the browser "__Secure-next-auth.session-
+ * token". The result: a session that /api/auth/session reports as valid
+ * was rejected at this gate on every single request — every admin and
+ * lecturer sign-in bounced straight back to the sign-in page it just came
+ * from. Deriving it from the request's own protocol instead of an env var
+ * makes it correct regardless of what NEXTAUTH_URL is set to or which
+ * runtime can see it.
+ */
+function readToken(request: NextRequest): Promise<SessionToken> {
+  return getToken({
     req: request,
     secret: process.env.NEXTAUTH_SECRET,
     secureCookie: request.nextUrl.protocol === "https:",
   });
+}
+
+/**
+ * The portal a path belongs to, or null for a path this gate does not own.
+ * `/api/admin/impersonate/end` is excluded on purpose: ending an act-as-
+ * student session restores the admin's own cookie and is called while that
+ * cookie still holds the STUDENT's token (see src/lib/impersonation.ts). It
+ * authenticates itself from the `impersonatorToken` claim, so it must not be
+ * held to the admin role check.
+ */
+function portalFor(path: string): PortalRule | null {
+  if (path === IMPERSONATION_END_PATH) return null;
+  return PORTALS.find((p) => p.pagePattern.test(path) || p.apiPattern.test(path)) ?? null;
+}
+
+function guardPortal(
+  request: NextRequest,
+  path: string,
+  portal: PortalRule,
+  token: SessionToken,
+): NextResponse | null {
   const role = normalizeRole(token?.role);
   // A revoked or admin-locked token carries whatever role it had at issue
   // time; treat it the same way the session callback does — unauthorised,
@@ -160,7 +185,22 @@ async function guardPortal(request: NextRequest, path: string): Promise<NextResp
 type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
 
-type Rule = { pattern: RegExp; limit: number; windowMs: number; label: string };
+type Rule = {
+  pattern: RegExp;
+  limit: number;
+  windowMs: number;
+  label: string;
+  /**
+   * Key the bucket on the signed-in account id instead of the client
+   * address. Only meaningful on paths `guardPortal()` has already forced a
+   * session onto — for those, the address is the wrong identifier: one
+   * office NAT puts every real admin behind a single IP (they would pool a
+   * shared limit), while one stolen session trivially rotates IPs (it would
+   * escape a per-IP one). Per-account gets both right, and means a tripped
+   * limit isolates the one account abusing it.
+   */
+  perAccount?: boolean;
+};
 
 const RULES: Rule[] = [
   /**
@@ -193,6 +233,62 @@ const RULES: Rule[] = [
    * fill with rubbish.
    */
   { pattern: /^\/api\/leads/, limit: 10, windowMs: 60 * 60_000, label: "leads" },
+
+  /**
+   * The authenticated admin surface. `guardPortal()` has already turned away
+   * anyone without a valid admin session before these match, so what is left
+   * to slow down is a *real* session — stolen, shared, or an insider on the
+   * way out — pulling the school's data through the read APIs faster than any
+   * person works. The school holds ~200 students' names, phones, locations,
+   * photos and payment histories; enumerated in a loop that is the exact file
+   * a competitor or a fraudster would buy.
+   *
+   * Ordered specific-to-general: `RULES.find()` takes the first match.
+   */
+
+  /**
+   * Sending credentials mails a login to a student, so a loop over the roster
+   * is a spam run from the school's own domain. Tight — and still ample for
+   * the real "reset this intake's logins" job, which goes out as one batched
+   * request.
+   */
+  {
+    pattern: /^\/api\/admin\/students\/send-credentials/,
+    limit: 12,
+    windowMs: 10 * 60_000,
+    label: "admin-credentials",
+    perAccount: true,
+  },
+
+  /**
+   * The endpoints that each return, or act on, a student's full record —
+   * the roster list, any student sub-route (the dossier included), the AI
+   * assistant (its tools read the same data), and the staff directory. A
+   * person reviewing students opens a handful a minute; 150 in five minutes
+   * is far above that and far below the ~400 calls it takes to scrape every
+   * student and dossier, so a scraper stalls for the rest of each window
+   * while a real reviewer never notices the ceiling.
+   */
+  {
+    pattern: /^\/api\/admin\/(students|assistant|staff)(\/|$)/,
+    limit: 150,
+    windowMs: 5 * 60_000,
+    label: "admin-bulk",
+    perAccount: true,
+  },
+
+  /**
+   * Everything else under the admin API. Generous — one dashboard
+   * navigation can fan out into twenty XHRs — but a ceiling all the same,
+   * so a script driving a live session cannot run entirely unbounded.
+   */
+  {
+    pattern: /^\/api\/admin(\/|$)/,
+    limit: 600,
+    windowMs: 5 * 60_000,
+    label: "admin",
+    perAccount: true,
+  },
 ];
 
 function clientKey(request: NextRequest): string {
@@ -371,12 +467,26 @@ export default async function proxy(request: NextRequest) {
   // host is protected exactly as `/platform` is.
   const path = rewriteTarget ?? requestedPath;
 
-  const portalRejection = await guardPortal(request, path);
-  if (portalRejection) return portalRejection;
+  // Decrypt the session once, and only for portal traffic — the gate needs
+  // it, the per-account rate limiter below needs it, an anonymous page load
+  // needs neither.
+  const portal = portalFor(path);
+  const token = portal ? await readToken(request) : null;
+
+  if (portal) {
+    const portalRejection = guardPortal(request, path, portal, token);
+    if (portalRejection) return portalRejection;
+  }
 
   const rule = RULES.find((candidate) => candidate.pattern.test(path));
   if (rule) {
-    const { allowed, retryAfter } = hit(clientKey(request), rule);
+    // A `perAccount` rule sits behind the portal gate, so a valid session is
+    // guaranteed and its id is the right key. The fallback to address only
+    // fires on the one carve-out path (`/api/admin/impersonate/end`), where
+    // the generous catch-all limit makes per-IP fine.
+    const accountId = rule.perAccount ? token?.id : undefined;
+    const key = accountId ? `account:${String(accountId)}` : clientKey(request);
+    const { allowed, retryAfter } = hit(key, rule);
     if (!allowed) {
       const response = NextResponse.json(
         {
