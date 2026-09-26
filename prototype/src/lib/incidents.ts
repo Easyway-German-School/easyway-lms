@@ -20,7 +20,6 @@
  * into two. Every path here swallows its own failures into a console line.
  */
 
-import { createHash } from "node:crypto";
 
 export type IncidentKind = "error" | "complaint" | "drift" | "health";
 export type IncidentSource = "request" | "cron" | "client" | "feedback" | "invariant";
@@ -82,12 +81,34 @@ export function normaliseMessage(message: string): string {
     .slice(0, 240);
 }
 
+/**
+ * A 53-bit string hash (cyrb53). Not cryptographic and not meant to be: it only
+ * has to keep distinct problems apart. It replaced `node:crypto` because this
+ * file is reachable from `instrumentation.ts`, which Next also compiles for the
+ * edge runtime — where a `node:` import is a build error in dev and a warning
+ * that disables the hook in production. Pure JS has no such constraint.
+ */
+function hash53(text: string, seed: number): number {
+  let h1 = 0xdeadbeef ^ seed;
+  let h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+
 export function fingerprintOf(input: Pick<IncidentInput, "kind" | "route" | "message">): string {
   // Complaints are worded a hundred ways; what makes them "the same" is the page
   // they are about. Only fall back to wording when there is no page to go on.
   const byPage = input.kind === "complaint" && Boolean(input.route);
   const parts = [input.kind, (input.route ?? "").toLowerCase(), byPage ? "" : normaliseMessage(input.message)];
-  return createHash("sha1").update(parts.join(" | ")).digest("hex").slice(0, 32);
+  const text = parts.join(" | ");
+  // Two seeds: ~106 bits, so a collision between two real problems is not a concern.
+  return hash53(text, 0).toString(16).padStart(14, "0") + hash53(text, 1).toString(16).padStart(14, "0");
 }
 
 /**
