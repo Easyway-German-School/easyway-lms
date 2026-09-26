@@ -375,10 +375,10 @@ export default function UpcomingIntakePage() {
                       setStartDayInput(String(dayOfMonth(intake.startsOn)));
                       setEditingStartDay(true);
                     }}
-                    className="group flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--accent)]"
+                    className="mt-1 inline-flex flex-wrap items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1 text-sm text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
                   >
                     {when(intake.startsOn)}
-                    <span className="text-xs underline opacity-0 group-hover:opacity-100">Edit opening day</span>
+                    <span className="text-xs font-semibold text-[var(--accent)] underline">Change opening day</span>
                   </button>
                 )}
               </div>
