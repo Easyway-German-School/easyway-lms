@@ -68,6 +68,7 @@ export async function GET() {
         branchName: lecturer.branch?.name,
         level: lecturer.level,
         sessionSlot: lecturer.sessionSlot,
+        lecturerId: lecturer.id,
       });
 
       // Every class this tutor runs, so a multi-class tutor's dashboard can
@@ -79,6 +80,7 @@ export async function GET() {
       const groups = teachingGroups(
         readAssignment(lecturer),
         new Map(activeBranches.map((branch) => [branch.id, branch.name])),
+        lecturer.id,
       ).map((group) => ({
         key: group.key,
         label: group.label,

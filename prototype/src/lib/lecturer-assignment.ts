@@ -646,7 +646,7 @@ export type TeachingGroup = {
   sessionSlot: string;
   /** Intake month pinned to this group, or null for "every intake". */
   batch: string | null;
-  /** The cohort's live room — identical to what its students compute. */
+  /** This tutor's live room for the cohort (the tutor is part of the name). */
   roomName: string;
   /** "B1 · Evening", or just "B1" for an all-sittings group. */
   label: string;
@@ -667,6 +667,13 @@ export type TeachingGroup = {
 export function teachingGroups(
   assignment: LecturerAssignment,
   branchNames: Map<string, string>,
+  /**
+   * The tutor these groups belong to. It goes into each group's live room so
+   * two tutors on the same branch + level + sitting never share one — see
+   * `cohortRoomName`. Every caller that hands a room to a tutor's page must
+   * pass it, or the room it shows will not be the room the session opens.
+   */
+  lecturerId?: string | null,
 ): TeachingGroup[] {
   if (!isAssigned(assignment)) return [];
 
@@ -712,6 +719,7 @@ export function teachingGroups(
         branchName,
         level: row.level,
         sessionSlot: row.sessionSlot || undefined,
+        lecturerId,
       }),
       label: slotLabel ? `${row.level} · ${slotLabel}` : row.level,
       batchRange: batchRangeLabel(row.batch, row.sessionSlot),
@@ -745,7 +753,8 @@ export function assignmentHasGroup(
   assignment: LecturerAssignment,
   branchNames: Map<string, string>,
   target: { branchId: string; level: string; sessionSlot: string },
+  lecturerId?: string | null,
 ): TeachingGroup | null {
   const want = `${target.branchId}:${target.level.toUpperCase()}:${target.sessionSlot.toLowerCase()}`;
-  return teachingGroups(assignment, branchNames).find((group) => group.key === want) ?? null;
+  return teachingGroups(assignment, branchNames, lecturerId).find((group) => group.key === want) ?? null;
 }

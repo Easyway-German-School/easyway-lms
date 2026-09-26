@@ -426,10 +426,19 @@ export async function liveSessionForStudent(student: {
     orderBy: { startedAt: "desc" },
   });
 
-  // Prefer the student's own sitting when more than one is live at once;
-  // otherwise the most recently started.
+  // When more than one is live at once — two tutors on the same cohort, or a
+  // hybrid student's several sittings — the student's OWN tutor comes first,
+  // then their own sitting, then the most recently started. Rooms are per-tutor
+  // now, so "same cohort" no longer means "same class"; without this a student
+  // would be sent to whichever tutor happened to start last.
+  const ownTutorIds = new Set(
+    [student.tutorId, ...(student.coTutorIds ?? [])].filter((id): id is string => Boolean(id)),
+  );
   const cohort =
-    liveCohorts.find((room) => room.sessionSlot === student.sessionSlot) ?? liveCohorts[0] ?? null;
+    liveCohorts.find((room) => room.lecturerId && ownTutorIds.has(room.lecturerId)) ??
+    liveCohorts.find((room) => room.sessionSlot === student.sessionSlot) ??
+    liveCohorts[0] ??
+    null;
 
   if (cohort) {
     return { ...toRow(cohort, cohort.lecturer?.user?.name ?? null), invited: false, inviteStatus: null };
@@ -652,6 +661,36 @@ export function ringStudents(session: LiveSessionRow, studentIds: string[], roun
 }
 
 /**
+ * The room this tutor already has open for this cohort, if any.
+ *
+ * A tutor reloading, or opening a second device, must land back in the class
+ * they are running — by the ROOM THEY OPENED, not by re-deriving a name. This
+ * matters most across a change to how rooms are named: a class that was started
+ * under the old cohort-only name keeps its room until it ends, instead of the
+ * tutor's reload spinning up a second room while their students sit in the
+ * first. Scoped to the tutor's own `lecturerId`, so it can never return
+ * somebody else's class.
+ */
+export async function ownOpenCohortRoom(
+  lecturerId: string,
+  cohort: { branchId?: string | null; level?: string | null; sessionSlot?: string | null },
+): Promise<string | null> {
+  const open = await prisma.liveClassSession.findFirst({
+    where: {
+      kind: "cohort",
+      lecturerId,
+      branchId: cohort.branchId ?? null,
+      level: cohort.level ?? null,
+      sessionSlot: cohort.sessionSlot ?? null,
+      ...liveWhere(),
+    },
+    orderBy: { startedAt: "desc" },
+    select: { roomName: true },
+  });
+  return open?.roomName ?? null;
+}
+
+/**
  * The cohort room for a tutor's primary class, and its label, in one place.
  * Callers were rebuilding both by hand and disagreeing about the fallbacks.
  */
@@ -659,6 +698,7 @@ export function cohortRoomFor(args: {
   branchName?: string | null;
   level?: string | null;
   sessionSlot?: string | null;
+  lecturerId?: string | null;
 }): { roomName: string; title: string } {
   return {
     roomName: cohortRoomName(args),

@@ -45,6 +45,7 @@ export async function GET() {
       branchName: lecturer.branch?.name,
       level: lecturer.level,
       sessionSlot: lecturer.sessionSlot,
+      lecturerId: lecturer.id,
     });
     const count = await prisma.liveClassSession.count({
       where: { OR: [{ roomName: room }, { lecturerId: lecturer.id }], ...liveWhere() },
