@@ -2,40 +2,62 @@
 
 import { useState } from "react";
 
+/** Whatever the booking holds — a Panthexa registration arrives without address, country of birth or ID. */
 type Details = {
   fullName: string;
   phone: string;
-  addressLine: string;
-  city: string;
+  addressLine: string | null;
+  city: string | null;
   country: string;
   dateOfBirth: string; // ISO
   placeOfBirth: string;
-  countryOfBirth: string;
+  countryOfBirth: string | null;
   nationality: string;
-  idType: string;
-  idNumber: string;
-  idExpiry: string; // ISO
+  idType: string | null;
+  idNumber: string | null;
+  idExpiry: string | null; // ISO
 };
 
+const ID_TYPES = ["International Passport", "National ID Card (NIN)", "Driver's License", "Other"];
+
 /**
- * A candidate correcting their own typo before paying — see
- * lib/booking.ts updateBookingDetails for why this only exists while
- * unpaid. Kept separate from the main booking page so that file doesn't
- * grow another dozen pieces of state for something most bookings never use.
+ * A candidate checking, correcting and COMPLETING their own details — see
+ * lib/booking.ts updateBookingDetails for the rule (open until the office
+ * admits them). Kept separate from the main booking page so that file doesn't
+ * grow another dozen pieces of state. `startOpen` is set when required details
+ * are still blank, so the thing they must do is the first thing they see.
  */
 export default function EditBookingDetails({
   referenceCode,
   email,
   initial,
   onSaved,
+  startOpen = false,
 }: {
   referenceCode: string;
   email: string;
   initial: Details;
   onSaved: () => void;
+  startOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ ...initial, dateOfBirth: initial.dateOfBirth.slice(0, 10), idExpiry: initial.idExpiry.slice(0, 10) });
+  const [open, setOpen] = useState(startOpen);
+  // Pick the editable fields by name. `initial` is often the WHOLE booking object,
+  // and spreading it would put every one of its fields (nulls included) into what
+  // this form submits.
+  const [form, setForm] = useState({
+    fullName: initial.fullName,
+    phone: initial.phone,
+    country: initial.country,
+    placeOfBirth: initial.placeOfBirth,
+    nationality: initial.nationality,
+    addressLine: initial.addressLine ?? "",
+    city: initial.city ?? "",
+    countryOfBirth: initial.countryOfBirth ?? "",
+    idType: initial.idType ?? "",
+    idNumber: initial.idNumber ?? "",
+    dateOfBirth: initial.dateOfBirth.slice(0, 10),
+    idExpiry: initial.idExpiry ? initial.idExpiry.slice(0, 10) : "",
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -46,7 +68,8 @@ export default function EditBookingDetails({
       const res = await fetch(`/api/bookings/${referenceCode}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, ...form }),
+        // Blank fields are left out rather than sent as "" — a blank is "not filled in yet", never an instruction to erase.
+        body: JSON.stringify({ email, ...Object.fromEntries(Object.entries(form).filter(([, v]) => v !== "")) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not save those changes");
@@ -62,14 +85,14 @@ export default function EditBookingDetails({
   if (!open) {
     return (
       <button onClick={() => setOpen(true)} className="mt-2 text-xs font-semibold text-[var(--navy)] underline underline-offset-4">
-        Spotted a typo in your details? Fix it before paying
+        Check or edit my details
       </button>
     );
   }
 
   return (
     <div className="mt-2 seal-border rounded-lg bg-[var(--paper-raised)] p-4">
-      <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Edit your details</p>
+      <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Your details</p>
       <p className="mt-1 text-[11px] text-[var(--red)]">
         Make sure your name matches your passport exactly — this prints on your certificate.
       </p>
@@ -84,7 +107,17 @@ export default function EditBookingDetails({
         <I label="Place of birth" value={form.placeOfBirth} onChange={(v) => setForm({ ...form, placeOfBirth: v })} />
         <I label="Country of birth" value={form.countryOfBirth} onChange={(v) => setForm({ ...form, countryOfBirth: v })} />
         <I label="Nationality" value={form.nationality} onChange={(v) => setForm({ ...form, nationality: v })} />
-        <I label="ID type" value={form.idType} onChange={(v) => setForm({ ...form, idType: v })} />
+        <label className="block">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">ID document type</span>
+          <select
+            value={form.idType}
+            onChange={(e) => setForm({ ...form, idType: e.target.value })}
+            className="mt-0.5 w-full rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs focus:border-[var(--navy)] focus:outline-none"
+          >
+            <option value="">Select…</option>
+            {ID_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
         <I label="ID number" value={form.idNumber} onChange={(v) => setForm({ ...form, idNumber: v })} />
         <I label="ID expiry date" type="date" value={form.idExpiry} onChange={(v) => setForm({ ...form, idExpiry: v })} full />
       </div>

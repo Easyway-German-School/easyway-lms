@@ -64,14 +64,39 @@ component library — deliberately small.
   50→1, then 100→51, then 150→101 — matching the physical room layout Jason
   described, assigned only once a payment is verified (never at raw booking
   time, so an unpaid booking never occupies a seat).
-- **Nurture drip** (`lib/nurture.ts`, `/api/cron/nurture`) — +2 days after
-  confirmation (educational, no pitch), 7 days and 3 days before the exam
-  (practise nudges with a link to prep classes). Point a scheduler (Vercel
-  Cron via `vercel.json`, or any cron) at it daily with
-  `Authorization: Bearer $CRON_SECRET`.
+- **The Panthexa lane + candidate journey** (`lib/panthexa-intake.ts`,
+  `lib/journey*.ts`, `lib/invoice*.ts`, `lib/lifecycle.ts`). Candidates
+  register on Panthexa (the official ÖSD platform; Easyway is a tenant) and pay
+  Easyway directly. The office keys each registration in ONCE (`/admin` →
+  "Register a Panthexa candidate"); the system then creates the reference and
+  invoice number, renders the examination invoice as a PDF that matches the
+  school's own template (`lib/invoice-pdf.ts`), and emails it as Document A.
+  Everything after that is one automated, ordered journey — see
+  `lib/journey-emails.ts` for the twelve emails (Documents A–M of the
+  Candidate Document Pack), `lib/journey-schedule.ts` for exactly when each one
+  is due, and `lib/candidate-status.ts` for the Operations Manual §8 status
+  (derived from timestamps, never stored). Sent emails are logged per candidate
+  in `JourneyEmail` (Manual §46) and that unique (booking, step) row is also
+  what stops a double send.
+  - Event steps fire immediately from the office action (verify payment →
+    Document B + receipt PDF; admit → Document D; release result; certificate).
+  - Timed steps come from `/api/cron/nurture` (name kept so the registered
+    cron entry still works), daily at 08:00 UTC = 09:00 Lagos: a payment
+    reminder the morning after an unpaid booking, the details check a day after
+    payment, ONE soft prep-class note ~3 days after payment (only if the exam is
+    10+ days away and they haven't already asked), the exam guide, the 7-day and
+    24-hour reminders, and "result still pending" after 10 days. At most one
+    email per candidate per run, so a missed day never becomes a pile-up.
+    Point a scheduler at it with `Authorization: Bearer $CRON_SECRET`.
+  - The office can't admit anyone until payment is verified, the details are
+    complete and confirmed, and the ID is approved (Manual §12) — enforced in
+    `lib/lifecycle.ts`, not just greyed out in the UI.
+  - Nothing in the journey talks to Panthexa: it has no public API we could
+    find. "Unpaid for a day" is detected from OUR records — the office keying
+    the registration in is what starts the clock.
 - **"Need help?"** (`lib/support.ts`, `/admin/support`) — a plain contact-the-
-  office form, deliberately separate from the nurture drip's prep-class
-  link. On the booking page (prefilled), the printed slip's "what to
+  office form, deliberately separate from the journey's prep-class
+  note. On the booking page (prefilled), the printed slip's "what to
   bring" section, and the site footer for anyone who hasn't booked yet.
   Saved to the database either way; emailed to `OFFICE_NOTIFICATION_EMAIL`
   when it's set — there's no in-app admin notification system in an app

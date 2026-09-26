@@ -41,7 +41,7 @@ export const GET = jsonRoute(async (req: NextRequest, { params }: { params: Prom
       gender: b.gender,
       idType: b.idType,
       idNumber: b.idNumber,
-      idExpiry: b.idExpiry.toISOString().slice(0, 10),
+      idExpiry: b.idExpiry ? b.idExpiry.toISOString().slice(0, 10) : "",
       addressLine: b.addressLine,
       city: b.city,
       country: b.country,

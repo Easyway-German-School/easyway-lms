@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { jsonRoute } from "@/lib/api-route";
-import { resolveOwnedBooking, updateBookingDetails } from "@/lib/booking";
+import { resolveOwnedBooking, sanitizeDetailsInput, updateBookingDetails } from "@/lib/booking";
+import { candidateJourney, deriveStatus, missingAdmissionFields } from "@/lib/candidate-status";
+import { arrivalClock, formatClock } from "@/lib/exam-time";
+import { invoiceNumberFor } from "@/lib/invoice";
 
 export const dynamic = "force-dynamic";
 
@@ -30,13 +33,13 @@ export const GET = jsonRoute(async (req: NextRequest, { params }: { params: Prom
 /** A candidate correcting their own typo, only while still unpaid — see lib/booking.ts updateBookingDetails. */
 export const PATCH = jsonRoute(async (req: NextRequest, { params }: { params: Promise<{ reference: string }> }) => {
   const { reference } = await params;
-  const { email, ...updates } = await req.json();
+  const { email, ...rawUpdates } = await req.json();
   if (!email) return NextResponse.json({ error: "email is required" }, { status: 400 });
 
   const booking = await resolveOwnedBooking(reference, email);
   if (!booking) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
 
-  const result = await updateBookingDetails(booking.id, updates);
+  const result = await updateBookingDetails(booking.id, sanitizeDetailsInput(rawUpdates));
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
   return NextResponse.json({ ok: true });
 });
@@ -73,6 +76,16 @@ export function shapeBooking(booking: NonNullable<Awaited<ReturnType<typeof pris
     documentRejectedReason: booking.documentRejectedReason,
     seatNumber: booking.seatNumber,
     status: booking.status,
+    invoiceNumber: booking.invoiceNumber ?? invoiceNumberFor(booking.referenceCode),
+    express: booking.express,
+    // Derived, never stored — see lib/candidate-status.ts.
+    derived: deriveStatus(booking),
+    journey: candidateJourney(booking),
+    missingFields: missingAdmissionFields(booking),
+    infoConfirmedAt: booking.infoConfirmedAt,
+    admittedAt: booking.admittedAt,
+    prepInterestAt: booking.prepInterestAt,
+    certificateCollection: booking.certificateCollection,
     session: {
       title: booking.session.title,
       level: booking.session.level,
@@ -81,6 +94,8 @@ export function shapeBooking(booking: NonNullable<Awaited<ReturnType<typeof pris
       startDate: booking.session.startDate,
       endDate: booking.session.endDate,
       examFormat: booking.session.examFormat,
+      startTime: formatClock(booking.session.startTime),
+      arrivalTime: arrivalClock(booking.session.startTime, booking.session.arrivalMinutesBefore),
     },
   };
 }

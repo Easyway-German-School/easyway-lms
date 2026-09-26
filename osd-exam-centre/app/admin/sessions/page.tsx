@@ -4,7 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const MODULES = ["reading", "listening", "writing", "speaking"] as const;
+// ÖSD is sold as a Written part and an Oral part (see the school's invoice). The four-skill split is
+// kept only so older sittings that were priced that way stay editable.
+const PARTS = ["written", "oral"] as const;
+const LEGACY_MODULES = ["reading", "listening", "writing", "speaking"] as const;
+const ALL_MODULES = [...PARTS, ...LEGACY_MODULES] as const;
 
 type Session = {
   id: string;
@@ -18,6 +22,9 @@ type Session = {
   capacity: number;
   examFormat: string;
   feeWholeExam: number;
+  expressFee: number;
+  startTime: string | null;
+  arrivalMinutesBefore: number;
   published: boolean;
   modulePrices: { module: string; price: number }[];
   _count: { bookings: number };
@@ -26,7 +33,8 @@ type Session = {
 const emptyForm = {
   level: "B2", title: "", venueName: "Easyway German Language School, Ikeja", venueAddress: "",
   startDate: "", endDate: "", registrationDeadline: "", capacity: "50", examFormat: "paper", feeWholeExam: "",
-  modulePrices: { reading: "", listening: "", writing: "", speaking: "" } as Record<string, string>,
+  startTime: "09:00", arrivalMinutesBefore: "60", expressFee: "",
+  modulePrices: { written: "", oral: "", reading: "", listening: "", writing: "", speaking: "" } as Record<string, string>,
 };
 
 export default function AdminSessionsPage() {
@@ -74,8 +82,11 @@ export default function AdminSessionsPage() {
       capacity: String(s.capacity),
       examFormat: s.examFormat,
       feeWholeExam: String(s.feeWholeExam),
+      startTime: s.startTime ?? "",
+      arrivalMinutesBefore: String(s.arrivalMinutesBefore),
+      expressFee: s.expressFee ? String(s.expressFee) : "",
       modulePrices: {
-        reading: "", listening: "", writing: "", speaking: "",
+        written: "", oral: "", reading: "", listening: "", writing: "", speaking: "",
         ...Object.fromEntries(s.modulePrices.map((m) => [m.module, String(m.price)])),
       },
     });
@@ -102,6 +113,23 @@ export default function AdminSessionsPage() {
       setError(e instanceof Error ? e.message : `Could not ${editingId ? "update" : "create"} that sitting`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function sittingAction(id: string, action: "complete" | "releaseResults", confirmText: string) {
+    if (!window.confirm(confirmText)) return;
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/sessions/${id}/lifecycle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "That didn't work");
+      window.alert(action === "complete" ? `${data.completed} candidate(s) marked as having completed the exam.` : `${data.released} result notice(s) sent${data.failed ? `, ${data.failed} failed — try again` : ""}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That didn't work");
     }
   }
 
@@ -147,6 +175,9 @@ export default function AdminSessionsPage() {
               <F label="Registration deadline" type="date" value={form.registrationDeadline} onChange={(v) => setForm({ ...form, registrationDeadline: v })} />
               <F label="Capacity (seats)" type="number" value={form.capacity} onChange={(v) => setForm({ ...form, capacity: v })} />
               <F label="Whole-exam fee (₦)" type="number" value={form.feeWholeExam} onChange={(v) => setForm({ ...form, feeWholeExam: v })} />
+              <F label="Express-result fee (₦, blank = not offered)" type="number" value={form.expressFee} onChange={(v) => setForm({ ...form, expressFee: v })} />
+              <F label="Exam start time" type="time" value={form.startTime} onChange={(v) => setForm({ ...form, startTime: v })} />
+              <F label="Arrive this many minutes before" type="number" value={form.arrivalMinutesBefore} onChange={(v) => setForm({ ...form, arrivalMinutesBefore: v })} />
               <label className="block">
                 <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Format</span>
                 <select
@@ -159,12 +190,36 @@ export default function AdminSessionsPage() {
                 </select>
               </label>
             </div>
-            <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Individual module prices (optional)</p>
-            <div className="mt-2 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              {MODULES.map((m) => (
+            <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-[var(--ink-soft)]">Written / Oral prices</p>
+            <div className="mt-2 grid grid-cols-2 gap-4">
+              {PARTS.map((m) => (
                 <F key={m} label={m} type="number" value={form.modulePrices[m]} onChange={(v) => setForm({ ...form, modulePrices: { ...form.modulePrices, [m]: v } })} />
               ))}
             </div>
+            {Number(form.feeWholeExam) > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const total = Number(form.feeWholeExam);
+                  const written = Math.round(total * 0.75);
+                  setForm({ ...form, modulePrices: { ...form.modulePrices, written: String(written), oral: String(total - written) } });
+                }}
+                className="mt-2 text-xs font-semibold text-[var(--navy)] underline underline-offset-4"
+              >
+                Split 75% / 25% (as on the B2 invoice: 157,500 / 52,500)
+              </button>
+            )}
+            <p className="mt-1 text-[11px] text-[var(--ink-soft)]">
+              The invoice itemises Written and Oral. If they don&apos;t add up to the whole-exam fee, the invoice shows one line instead.
+            </p>
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs font-semibold text-[var(--ink-soft)]">Older four-skill prices</summary>
+              <div className="mt-2 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                {LEGACY_MODULES.map((m) => (
+                  <F key={m} label={m} type="number" value={form.modulePrices[m]} onChange={(v) => setForm({ ...form, modulePrices: { ...form.modulePrices, [m]: v } })} />
+                ))}
+              </div>
+            </details>
             <button onClick={saveSession} disabled={busy} className="mt-5 rounded-sm bg-[var(--gold)] px-6 py-2.5 text-sm font-semibold text-[var(--navy-deep)] disabled:opacity-40">
               {busy ? "Saving…" : editingId ? "Save changes" : "Create sitting (unpublished)"}
             </button>
@@ -173,14 +228,26 @@ export default function AdminSessionsPage() {
 
         <div className="mt-6 space-y-3">
           {sessions.map((s) => (
-            <div key={s.id} className="seal-border flex items-center justify-between rounded-sm bg-white p-4">
+            <div key={s.id} className="seal-border flex flex-wrap items-center justify-between gap-3 rounded-sm bg-white p-4">
               <div>
                 <p className="font-semibold text-[var(--navy)]">{s.title}</p>
                 <p className="text-xs text-[var(--ink-soft)]">
                   {new Date(s.startDate).toLocaleDateString()} · {s.venueName} · {s.examFormat} · {s._count.bookings} booked / {s.capacity} seats · ₦{s.feeWholeExam.toLocaleString()}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => sittingAction(s.id, "complete", "Mark every ADMITTED candidate in this sitting as having completed the exam? Mark no-shows first — they are skipped.")}
+                  className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)] hover:border-[var(--navy)] hover:text-[var(--navy)]"
+                >
+                  Exam done
+                </button>
+                <button
+                  onClick={() => sittingAction(s.id, "releaseResults", "ÖSD's official results have arrived. Email every completed candidate that their result is available?")}
+                  className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)] hover:border-[var(--navy)] hover:text-[var(--navy)]"
+                >
+                  Release results
+                </button>
                 <a
                   href={`/api/admin/sessions/${s.id}/roster`}
                   className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink-soft)] hover:border-[var(--navy)] hover:text-[var(--navy)]"

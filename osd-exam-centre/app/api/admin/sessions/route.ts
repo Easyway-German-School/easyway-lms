@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isAdminRequest } from "@/lib/admin-auth";
 import { MODULES } from "@/lib/booking";
+
+// Written/Oral are how ÖSD is sold here (the school's invoice); the four skills stay for older sittings.
+const PRICEABLE_MODULES = ["written", "oral", ...MODULES] as const;
+
+function cleanTime(value: unknown): string | null {
+  return typeof value === "string" && /^\d{1,2}:\d{2}$/.test(value) ? value : null;
+}
 import { jsonRoute } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +30,7 @@ export const POST = jsonRoute(async (req: NextRequest) => {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  const modulePrices = MODULES
+  const modulePrices = PRICEABLE_MODULES
     .filter((m) => b.modulePrices?.[m])
     .map((m) => ({ module: m, price: Number(b.modulePrices[m]) }));
 
@@ -40,6 +47,9 @@ export const POST = jsonRoute(async (req: NextRequest) => {
       capacity: Number(b.capacity),
       examFormat: b.examFormat === "computer" ? "computer" : "paper",
       feeWholeExam: Number(b.feeWholeExam),
+      expressFee: Number(b.expressFee) > 0 ? Number(b.expressFee) : 0,
+      startTime: cleanTime(b.startTime),
+      arrivalMinutesBefore: Number(b.arrivalMinutesBefore) > 0 ? Number(b.arrivalMinutesBefore) : 60,
       published: Boolean(b.published),
       modulePrices: { create: modulePrices },
     },
@@ -72,6 +82,9 @@ export const PATCH = jsonRoute(async (req: NextRequest) => {
   if (b.endDate) data.endDate = new Date(b.endDate);
   if (b.registrationDeadline) data.registrationDeadline = new Date(b.registrationDeadline);
   if (b.feeWholeExam) data.feeWholeExam = Number(b.feeWholeExam);
+  if (b.expressFee !== undefined) data.expressFee = Number(b.expressFee) > 0 ? Number(b.expressFee) : 0;
+  if (b.startTime !== undefined) data.startTime = cleanTime(b.startTime);
+  if (b.arrivalMinutesBefore) data.arrivalMinutesBefore = Number(b.arrivalMinutesBefore);
   if (b.examFormat === "paper" || b.examFormat === "computer") data.examFormat = b.examFormat;
 
   // Capacity needs its own check, not just a blind assignment: dropping it
@@ -104,7 +117,7 @@ export const PATCH = jsonRoute(async (req: NextRequest) => {
       // Replace wholesale rather than diff — simpler, and this only ever
       // runs from the admin edit form submitting its whole current state.
       await tx.examModulePrice.deleteMany({ where: { sessionId } });
-      const modulePrices = MODULES.filter((m) => b.modulePrices[m]).map((m) => ({ sessionId, module: m, price: Number(b.modulePrices[m]) }));
+      const modulePrices = PRICEABLE_MODULES.filter((m) => b.modulePrices[m]).map((m) => ({ sessionId, module: m, price: Number(b.modulePrices[m]) }));
       if (modulePrices.length) await tx.examModulePrice.createMany({ data: modulePrices });
     }
 

@@ -1,4 +1,5 @@
 import { secureCompare } from "@/lib/secure-compare";
+import { paymentAccount } from "@/lib/config";
 
 /**
  * Manual Moniepoint bank-transfer details shown to every candidate. Same
@@ -10,11 +11,9 @@ import { secureCompare } from "@/lib/secure-compare";
  * change — everywhere else just asks "what account do I show/verify".
  */
 export function bankTransferDetails(): { bankName: string; accountName: string; accountNumber: string } {
-  return {
-    bankName: process.env.EXAM_BANK_NAME || "Moniepoint MFB",
-    accountName: process.env.EXAM_BANK_ACCOUNT_NAME || "Easyway German Language School",
-    accountNumber: process.env.EXAM_BANK_ACCOUNT_NUMBER || "",
-  };
+  // The account on the school's own invoice template lives in config.ts so the
+  // PDF, the emails and this payment page can never quote different accounts.
+  return paymentAccount();
 }
 
 /**

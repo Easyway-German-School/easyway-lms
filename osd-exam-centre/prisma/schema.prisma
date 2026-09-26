@@ -34,15 +34,25 @@ model ExamSession {
   registrationDeadline DateTime
   /// Seats. Seat NUMBERS are assigned in blocks of 50 counting down
   /// (50→1, then 100→51, …) — see lib/seat-numbering.ts.
-  capacity Int
+  capacity             Int
 
   /// paper | computer — a whole sitting is one format, not chosen per
   /// candidate (see the Easyway ÖSD Examination Operations Manual, §35).
   examFormat String @default("paper")
 
-  /// Naira, whole exam, all four skills.
-  feeWholeExam Int
-  published    Boolean @default(false)
+  /// Naira, whole exam (written + oral).
+  feeWholeExam         Int
+  /// Naira added when a candidate asks for the express result. 0 = this
+  /// sitting doesn't offer it (the Panthexa intake form hides the toggle).
+  expressFee           Int     @default(0)
+  /// "09:00" — Lagos wall-clock start, 24h. Null until the office sets it;
+  /// the admission letter says "to be confirmed" rather than inventing one.
+  startTime            String?
+  /// Operations Manual §21: candidates arrive 60 minutes before the exam
+  /// starts unless the specific instructions say otherwise. Drives the
+  /// arrival time printed on the admission letter and reminders.
+  arrivalMinutesBefore Int     @default(60)
+  published            Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -83,16 +93,19 @@ model ExamBooking {
   // confirmation's field shape; extended to match the Easyway ÖSD
   // Examination Operations Manual §7 ("Required Candidate Information")
   // once Jason sent it. -----
-  fullName      String
-  email         String
-  phone         String
-  addressLine   String
-  city          String
+  fullName       String
+  email          String
+  phone          String
+  /// Address, country of birth and the ID block below are optional because a
+  /// Panthexa registration doesn't hand them to us — the candidate completes
+  /// them from the Document C link, and admission is blocked until they do.
+  addressLine    String?
+  city           String?
   /// Residential/contact country — not country of birth (below).
-  country       String @default("Nigeria")
-  dateOfBirth   DateTime
-  placeOfBirth  String
-  countryOfBirth String
+  country        String   @default("Nigeria")
+  dateOfBirth    DateTime
+  placeOfBirth   String
+  countryOfBirth String?
   nationality    String
   /// "where required by the applicable system" (Manual §7) — optional on
   /// purpose, not every candidate needs to state it.
@@ -101,17 +114,39 @@ model ExamBooking {
   /// Passport/ID details — Manual §7 "passport/ID details; valid
   /// identification document". idType is almost always "passport" for an
   /// international examination but the manual doesn't hard-code that.
-  idType   String
-  idNumber String
-  idExpiry DateTime
+  idType   String?
+  idNumber String?
+  idExpiry DateTime?
 
   /// Manual §7 "first attempt/repeat attempt" and §16 "special needs".
   isRepeatAttempt Boolean @default(false)
   specialNeeds    String?
 
-  /// Either ["full"] or a subset of reading/listening/writing/speaking.
-  modules  String[]
-  feeTotal Int
+  /// Either ["full"] (written + oral) or a subset of written/oral — the
+  /// legacy reading/listening/writing/speaking split still validates for
+  /// bookings made through the public wizard.
+  modules    String[]
+  /// Snapshotted at booking time (session prices may change afterwards).
+  /// Includes the express surcharge when `express` is set.
+  feeTotal   Int
+  /// Express result requested — `expressFee` is the snapshotted surcharge
+  /// already included in feeTotal, kept apart so the invoice can itemise it.
+  express    Boolean  @default(false)
+  expressFee Int      @default(0)
+
+  // ----- the Panthexa lane -----
+  /// direct (booked on this site's own wizard) | panthexa (registered on the
+  /// official ÖSD platform; the office keyed it in here — see
+  /// lib/panthexa-intake.ts). Only the office lane sends the invoice pack.
+  source            String    @default("direct")
+  /// The candidate's own registration code on Panthexa, for cross-referencing.
+  panthexaReference String?
+  /// The date they registered on Panthexa (printed on the invoice). Falls
+  /// back to createdAt for a direct booking.
+  registeredAt      DateTime?
+  /// EW-OSD-INV-2026-XXXXX — the same suffix as referenceCode so a bank
+  /// narration ("LAMINA EW-OSD-INV-2026-OBB052") finds the booking at a glance.
+  invoiceNumber     String?   @unique
 
   // ----- payment -----
   /// bank_transfer | card — bank_transfer is manual (an admin verifies a
@@ -162,6 +197,29 @@ model ExamBooking {
   documentStatus         String  @default("pending")
   documentRejectedReason String?
 
+  // ----- payment confirmation block on the invoice/receipt -----
+  amountReceived Int?
+  /// The date the money reached the bank (not the date the office clicked verify).
+  paidOn         DateTime?
+
+  // ----- Operations Manual §8 lifecycle. Deliberately timestamps, not a
+  // stored "stage" column: the status shown anywhere is DERIVED from these
+  // (lib/candidate-status.ts), so it can never disagree with the facts. -----
+  /// The candidate (or the office for them) confirmed their details match their ID (Document C).
+  infoConfirmedAt        DateTime?
+  /// Formal admission — the only thing that unlocks the admission slip (Manual §11 step 10).
+  admittedAt             DateTime?
+  examCompletedAt        DateTime?
+  resultReleasedAt       DateTime?
+  /// The certificate has arrived and the candidate was told how to get it (Document M).
+  certificateReadyAt     DateTime?
+  /// ...and it has actually been collected or delivered.
+  certificateDeliveredAt DateTime?
+  /// Free text shown in the certificate-collection email ("from 12 Nov, 10am–4pm").
+  certificateCollection  String?
+  /// The candidate tapped "tell me about prep classes" — a warm lead, not a sale.
+  prepInterestAt         DateTime?
+
   /// Only set once payment is verified — see lib/seat-numbering.ts. Null
   /// means "not yet confirmed", not "seat 0".
   seatNumber Int?
@@ -186,6 +244,7 @@ model ExamBooking {
   updatedAt DateTime @updatedAt
 
   supportMessages SupportMessage[]
+  journeyEmails   JourneyEmail[]
 
   @@index([sessionId])
   @@index([email])
@@ -197,9 +256,9 @@ model ExamBooking {
 /// a booking when the candidate has one, but not required: someone with a
 /// question before they've registered can still reach the office.
 model SupportMessage {
-  id         String       @id @default(cuid())
-  bookingId  String?
-  booking    ExamBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  id        String       @id @default(cuid())
+  bookingId String?
+  booking   ExamBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
 
   name    String
   email   String
@@ -226,4 +285,25 @@ model LoginAttempt {
   createdAt DateTime @default(now())
 
   @@index([ip, createdAt])
+}
+
+/// Every journey email the system has sent for a booking (Operations Manual
+/// §46: "every important email should be saved in the candidate's record").
+/// The unique (bookingId, step) is also what makes the daily sweep and the
+/// event triggers idempotent — a step that already has a row never sends twice.
+model JourneyEmail {
+  id         String      @id @default(cuid())
+  bookingId  String
+  booking    ExamBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  /// A key from lib/journey.ts (booking_received, payment_confirmed, ...).
+  step       String
+  subject    String
+  /// The address it went to — the candidate's email can change later.
+  toEmail    String
+  /// Filename of the invoice/receipt PDF that rode along, if any.
+  attachment String?
+  sentAt     DateTime    @default(now())
+
+  @@unique([bookingId, step])
+  @@index([bookingId])
 }

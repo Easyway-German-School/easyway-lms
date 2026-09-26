@@ -13,16 +13,16 @@ type Booking = {
   fullName: string;
   email: string;
   phone: string;
-  addressLine: string;
-  city: string;
+  addressLine: string | null;
+  city: string | null;
   country: string;
   dateOfBirth: string;
   placeOfBirth: string;
-  countryOfBirth: string;
+  countryOfBirth: string | null;
   nationality: string;
-  idType: string;
-  idNumber: string;
-  idExpiry: string;
+  idType: string | null;
+  idNumber: string | null;
+  idExpiry: string | null;
   isRepeatAttempt: boolean;
   specialNeeds: string | null;
   modules: string[];
@@ -36,7 +36,15 @@ type Booking = {
   documentRejectedReason: string | null;
   seatNumber: number | null;
   status: string;
-  session: { title: string; level: string; venueName: string; venueAddress: string; startDate: string; endDate: string };
+  invoiceNumber: string;
+  derived: { key: string; label: string };
+  journey: { key: string; label: string; state: "done" | "current" | "todo"; hint: string | null }[];
+  missingFields: string[];
+  infoConfirmedAt: string | null;
+  admittedAt: string | null;
+  prepInterestAt: string | null;
+  certificateCollection: string | null;
+  session: { title: string; level: string; venueName: string; venueAddress: string; startDate: string; endDate: string; startTime: string | null; arrivalTime: string | null };
 };
 
 /**
@@ -98,12 +106,9 @@ function BookingPageInner() {
     return <Shell><p className="text-sm text-[var(--red)]">We couldn't find that booking. Check your reference code and email on the <a className="underline" href="/status">status page</a>.</p></Shell>;
   }
 
-  const confirmed = booking.seatNumber !== null;
-  const heading = confirmed
-    ? "Your seat is confirmed"
-    : booking.paymentStatus === "pending_verification"
-      ? "Payment under review"
-      : "Complete your booking";
+  const admitted = Boolean(booking.admittedAt);
+  const paid = booking.paymentStatus === "paid";
+  const heading = admitted ? "You're admitted" : booking.derived.label;
 
   return (
     <div className="min-h-screen">
@@ -116,17 +121,175 @@ function BookingPageInner() {
         position="object-[60%_45%]"
       />
       <main className="relative z-10 mx-auto -mt-16 max-w-2xl px-5 pb-20 sm:px-6">
-        {confirmed ? (
-          <ConfirmedTicket booking={booking} />
+        {admitted ? (
+          <ConfirmedTicket booking={booking} email={email} />
         ) : (
           <div className="rounded-2xl bg-white p-6 shadow-xl shadow-[var(--navy)]/15 ring-1 ring-black/5 sm:p-8">
-            <PendingBooking booking={booking} email={email} onChange={load} error={error} setError={setError} justBooked={justBooked} />
+            <JourneyTracker booking={booking} />
+            {paid ? (
+              <RegistrationProgress booking={booking} email={email} onChange={load} />
+            ) : (
+              <PendingBooking booking={booking} email={email} onChange={load} error={error} setError={setError} justBooked={justBooked} />
+            )}
           </div>
         )}
 
-        <DocumentsPanel booking={booking} email={email} onChange={load} />
+        {!admitted && <DocumentsPanel booking={booking} email={email} onChange={load} />}
       </main>
       <SiteFooter />
+    </div>
+  );
+}
+
+/** Where the candidate is on the road, and the one thing that is theirs to do next. */
+function JourneyTracker({ booking }: { booking: Booking }) {
+  if (booking.derived.key === "cancelled" || booking.derived.key === "no_show") return null;
+  return (
+    <ol className="mb-7 space-y-0">
+      {booking.journey.map((step, i) => (
+        <li key={step.key} className="flex gap-3">
+          <div className="flex flex-col items-center">
+            <span
+              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                step.state === "done"
+                  ? "bg-[var(--green)] text-white"
+                  : step.state === "current"
+                    ? "bg-[var(--gold-bright)] text-[var(--navy-deep)] ring-4 ring-[var(--gold-soft)]"
+                    : "border border-[var(--line)] bg-white text-[var(--ink-soft)]"
+              }`}
+            >
+              {step.state === "done" ? "✓" : i + 1}
+            </span>
+            {i < booking.journey.length - 1 && <span className={`w-px flex-1 ${step.state === "done" ? "bg-[var(--green)]/50" : "bg-[var(--line)]"}`} style={{ minHeight: "14px" }} />}
+          </div>
+          <div className="pb-3">
+            <p className={`text-sm ${step.state === "todo" ? "text-[var(--ink-soft)]" : "font-semibold text-[var(--navy)]"}`}>{step.label}</p>
+            {step.hint && <p className="mt-0.5 text-xs text-[var(--ink-soft)]">{step.hint}</p>}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function invoiceHref(booking: Booking, email: string) {
+  return `/api/bookings/${booking.referenceCode}/invoice?email=${encodeURIComponent(email)}`;
+}
+
+/** Paid, not yet admitted: complete the details, confirm them, and wait for the office. */
+function RegistrationProgress({ booking, email, onChange }: { booking: Booking; email: string; onChange: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState("");
+  const missing = booking.missingFields;
+  const confirmed = Boolean(booking.infoConfirmedAt);
+
+  async function confirm() {
+    setConfirming(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/bookings/${booking.referenceCode}/confirm-info`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not confirm your details");
+      onChange();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not confirm your details");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  return (
+    <div>
+      <p className="rounded-lg bg-[var(--green-soft)] px-4 py-3 text-sm font-semibold text-[var(--green)]">
+        Payment verified. Your registration is now moving to admission.
+      </p>
+
+      {!confirmed && (
+        <div className="mt-5">
+          <p className="text-sm font-semibold text-[var(--navy)]">Check your details</p>
+          <p className="mt-1 text-xs text-[var(--ink-soft)]">
+            Your name and details must match the identification document you will bring on the day.
+            {missing.length > 0 && <> We still need: <strong>{missing.join(", ")}</strong>.</>}
+          </p>
+          <EditBookingDetails
+            key={missing.join(",")}
+            startOpen={missing.length > 0}
+            referenceCode={booking.referenceCode}
+            email={email}
+            initial={booking}
+            onSaved={onChange}
+          />
+          {error && <p className="mt-3 text-xs text-[var(--red)]">{error}</p>}
+          <button
+            onClick={confirm}
+            disabled={confirming || missing.length > 0}
+            className="mt-4 rounded-lg bg-[var(--navy)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            {confirming ? "Confirming…" : "These details are correct"}
+          </button>
+          {missing.length > 0 && <p className="mt-2 text-[11px] text-[var(--ink-soft)]">Fill in the missing details above first.</p>}
+        </div>
+      )}
+      {confirmed && (
+        <div className="mt-5 text-xs text-[var(--ink-soft)]">
+          You confirmed your details. If you spot a mistake before you are admitted, edit them again — you&apos;ll be asked to re-confirm.
+          <EditBookingDetails referenceCode={booking.referenceCode} email={email} initial={booking} onSaved={onChange} />
+        </div>
+      )}
+
+      <p className="mt-5 text-xs text-[var(--ink-soft)]">
+        <a className="font-semibold text-[var(--navy)] underline" href={invoiceHref(booking, email)}>Download your receipt (PDF)</a>
+      </p>
+
+      {/* Not while they still have chores to do — the soft sell waits for a calm moment (same rule as the email). */}
+      {confirmed && (
+        <div className="mt-6">
+          <PrepInterest booking={booking} email={email} onChange={onChange} />
+        </div>
+      )}
+      <div className="mt-6">
+        <NeedHelp bookingReference={booking.referenceCode} defaultName={booking.fullName} defaultEmail={booking.email} />
+      </div>
+    </div>
+  );
+}
+
+/** The soft prep-class door: one tap, no price, no payment. */
+function PrepInterest({ booking, email, onChange }: { booking: Booking; email: string; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const asked = Boolean(booking.prepInterestAt);
+
+  async function ask() {
+    setBusy(true);
+    try {
+      await fetch(`/api/bookings/${booking.referenceCode}/prep-interest`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-[var(--gold-soft)]/30 p-5 print:hidden">
+      <p className="text-sm font-semibold text-[var(--navy)]">Want company on the way to exam day?</p>
+      <p className="mt-1 text-sm text-[var(--ink-soft)]">
+        Easyway runs exam-preparation classes built around this exact examination. Optional — it has no bearing on your registration, admission or result.
+      </p>
+      {asked ? (
+        <p className="mt-3 text-sm font-semibold text-[var(--green)]">Thanks — our classes team will be in touch with dates.</p>
+      ) : (
+        <button onClick={ask} disabled={busy} className="mt-3 rounded-lg border border-[var(--navy)] px-4 py-2 text-sm font-semibold text-[var(--navy)] disabled:opacity-40">
+          {busy ? "Sending…" : "Tell me about prep classes"}
+        </button>
+      )}
     </div>
   );
 }
@@ -149,7 +312,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ConfirmedTicket({ booking }: { booking: Booking }) {
+function ConfirmedTicket({ booking, email }: { booking: Booking; email: string }) {
   return (
     <div>
       <div id="printable-ticket" className="overflow-hidden rounded-2xl bg-white shadow-xl shadow-[var(--navy)]/15 ring-1 ring-black/5 print:rounded-none print:shadow-none print:ring-black/30">
@@ -160,7 +323,7 @@ function ConfirmedTicket({ booking }: { booking: Booking }) {
           </span>
         </div>
 
-        <div className="grid sm:grid-cols-[1fr_11rem] print:grid-cols-[1fr_11rem]">
+        <div className={`grid ${booking.seatNumber !== null ? "sm:grid-cols-[1fr_11rem] print:grid-cols-[1fr_11rem]" : ""}`}>
           <div className="p-6 sm:p-8">
             <h2 className="text-xl font-semibold text-[var(--navy)]">{booking.session.title}</h2>
             <p className="mt-1 text-sm text-[var(--ink-soft)]">
@@ -169,7 +332,11 @@ function ConfirmedTicket({ booking }: { booking: Booking }) {
             <p className="text-sm text-[var(--ink-soft)]">
               {new Date(booking.session.startDate).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
             </p>
-            <p className="mt-1 text-xs font-semibold text-[var(--red)]">Please arrive 30 minutes early.</p>
+            <p className="mt-1 text-xs font-semibold text-[var(--red)]">
+              {booking.session.arrivalTime
+                ? `Please arrive by ${booking.session.arrivalTime}${booking.session.startTime ? ` — the examination starts at ${booking.session.startTime}` : ""}.`
+                : "Please arrive 60 minutes before the examination starts."}
+            </p>
 
             <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-[var(--line)] pt-6 text-sm">
               <div>
@@ -188,12 +355,12 @@ function ConfirmedTicket({ booking }: { booking: Booking }) {
           </div>
 
           {/* The stub: the seat number is the whole point of the page. */}
-          <div className="flex flex-col items-center justify-center border-t border-dashed border-[var(--line)] bg-gradient-to-b from-[var(--gold-soft)] to-[#fbf6e6] p-6 text-center sm:border-l sm:border-t-0 print:border-l print:border-t-0 print:bg-none">
+          {booking.seatNumber !== null && <div className="flex flex-col items-center justify-center border-t border-dashed border-[var(--line)] bg-gradient-to-b from-[var(--gold-soft)] to-[#fbf6e6] p-6 text-center sm:border-l sm:border-t-0 print:border-l print:border-t-0 print:bg-none">
             <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[var(--ink-soft)]">Seat</p>
             <p className="font-serif-display text-7xl font-bold leading-none text-[var(--navy)]">{booking.seatNumber}</p>
             <div className="barcode mt-5 w-24 text-[var(--navy)]" aria-hidden="true" />
             <p className="mt-2 font-mono text-[10px] tracking-widest text-[var(--ink-soft)]">{booking.referenceCode}</p>
-          </div>
+          </div>}
         </div>
 
         <p className="border-t border-[var(--line)] px-6 py-4 text-xs leading-5 text-[var(--ink-soft)] sm:px-8">
@@ -218,7 +385,7 @@ function ConfirmedTicket({ booking }: { booking: Booking }) {
         <ul className="mt-2 space-y-1.5 text-sm text-[var(--ink-soft)]">
           <li>• This admission slip, printed, and your international passport's data page.</li>
           <li>• A normal ballpoint pen — no pencils, no correction fluid.</li>
-          <li>• Arrive 30 minutes early. Latecomers may not be admitted.</li>
+          <li>• Arrive on time — 60 minutes before the start. Latecomers may not be admitted.</li>
           <li>• Phones and smart watches off and out of reach for the whole exam.</li>
         </ul>
         <div className="mt-4">
@@ -226,14 +393,8 @@ function ConfirmedTicket({ booking }: { booking: Booking }) {
         </div>
       </div>
 
-      <div className="mt-8 rounded-lg border border-[var(--line)] bg-[var(--gold-soft)]/30 p-5 print:hidden">
-        <p className="text-sm font-semibold text-[var(--navy)]">Ready to prepare?</p>
-        <p className="mt-1 text-sm text-[var(--ink-soft)]">
-          ÖSD rewards candidates who know its format. Easyway's prep classes practise exactly the way the exam is marked.
-        </p>
-        <a href="https://easywayschoollms.com.ng/exams/osd" className="mt-3 inline-block text-sm font-semibold text-[var(--navy)] underline">
-          Explore prep classes →
-        </a>
+      <div className="mt-8">
+        <PrepInterest booking={booking} email={email} onChange={() => window.location.reload()} />
       </div>
     </div>
   );
@@ -316,30 +477,24 @@ function PendingBooking({ booking, email, onChange, error, setError, justBooked 
       <p className="mt-1 text-sm text-[var(--ink-soft)]">Reference: <span className="font-mono">{booking.referenceCode}</span></p>
 
       {booking.paymentStatus === "unpaid" && (
-        <EditBookingDetails
-          referenceCode={booking.referenceCode}
-          email={email}
-          initial={{
-            fullName: booking.fullName, phone: booking.phone, addressLine: booking.addressLine,
-            city: booking.city, country: booking.country, dateOfBirth: booking.dateOfBirth, placeOfBirth: booking.placeOfBirth,
-            countryOfBirth: booking.countryOfBirth, nationality: booking.nationality,
-            idType: booking.idType, idNumber: booking.idNumber, idExpiry: booking.idExpiry,
-          }}
-          onSaved={onChange}
-        />
+        <EditBookingDetails referenceCode={booking.referenceCode} email={email} initial={booking} onSaved={onChange} />
       )}
 
       {error && <p className="mt-4 rounded-lg bg-[var(--red-soft)] px-4 py-3 text-sm text-[var(--red)]">{error}</p>}
 
       {booking.paymentStatus === "pending_verification" && (
         <p className="mt-6 rounded-lg bg-[var(--gold-soft)] px-4 py-3 text-sm font-semibold text-[var(--navy)]">
-          Payment slip submitted — the office is confirming it landed. Your seat number will appear here once confirmed.
+          Receipt submitted — the office is confirming your payment landed. This page will update once it is verified.
         </p>
       )}
 
       {booking.paymentStatus === "unpaid" && (
         <div className="mt-6 seal-border rounded-lg bg-[var(--paper-raised)] p-6">
           <p className="text-sm font-semibold text-[var(--navy)]">Amount due: ₦{booking.feeTotal.toLocaleString()}</p>
+          <p className="mt-1 text-xs text-[var(--ink-soft)]">
+            Invoice {booking.invoiceNumber} ·{" "}
+            <a className="font-semibold text-[var(--navy)] underline" href={invoiceHref(booking, email)}>Download invoice (PDF)</a>
+          </p>
           {booking.transferRejectedReason && (
             <p className="mt-2 rounded-lg bg-[var(--red-soft)] p-3 text-xs text-[var(--red)]">
               Your last transfer couldn't be confirmed: {booking.transferRejectedReason}

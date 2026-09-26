@@ -62,7 +62,7 @@ export default function ManualBookingForm({ onCreated }: { onCreated: () => void
   if (!open) {
     return (
       <button onClick={() => setOpen(true)} className="rounded-sm border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--navy)]">
-        Add booking manually
+        Walk-in booking (already paid)
       </button>
     );
   }

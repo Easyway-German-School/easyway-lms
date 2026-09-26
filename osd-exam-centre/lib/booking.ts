@@ -3,6 +3,8 @@ import { generateReferenceCode } from "@/lib/reference-code";
 import { seatNumberForIndex } from "@/lib/seat-numbering";
 import { sendEmail } from "@/lib/email";
 import { bookingLink } from "@/lib/config";
+import { invoiceNumberFor } from "@/lib/invoice";
+import { sendJourneyStepSafely } from "@/lib/journey";
 import { refundCardPayment, verifyCardPayment } from "@/lib/payments";
 import { escapeHtml } from "@/lib/html";
 
@@ -58,22 +60,47 @@ export type UpdateBookingDetailsInput = Partial<{
   specialNeeds: string;
 }>;
 
+const DETAIL_TEXT_FIELDS = [
+  "fullName", "phone", "addressLine", "city", "country", "dateOfBirth", "placeOfBirth", "countryOfBirth",
+  "nationality", "gender", "idType", "idNumber", "idExpiry", "specialNeeds",
+] as const;
+
 /**
- * A candidate correcting their own typo before paying — a wrong date of
- * birth or a misspelled name is exactly the kind of thing worth fixing
- * before it ends up on a certificate. Deliberately closed off once payment
- * has started (`unpaid` only): a booking under review or already paid needs
- * the office involved in a change, not a silent self-edit. Email is not
- * editable here at all — it's the lookup key a candidate needs to find
- * their own booking again, so changing it needs more care than this.
+ * Turn an untrusted request body into a well-formed edit: only the known
+ * fields, only strings (or a boolean for isRepeatAttempt), nothing else. A
+ * client that sends `null` or a number for a text field is ignored for that
+ * field, not allowed to crash the update.
+ */
+export function sanitizeDetailsInput(raw: unknown): UpdateBookingDetailsInput {
+  const out: Record<string, string | boolean> = {};
+  if (typeof raw !== "object" || raw === null) return out;
+  const body = raw as Record<string, unknown>;
+  for (const key of DETAIL_TEXT_FIELDS) {
+    if (typeof body[key] === "string") out[key] = body[key] as string;
+  }
+  if (typeof body.isRepeatAttempt === "boolean") out.isRepeatAttempt = body.isRepeatAttempt;
+  return out as UpdateBookingDetailsInput;
+}
+
+/**
+ * A candidate correcting or completing their own details. Open until the office
+ * has formally admitted them (Manual §13: "Errors must be corrected before
+ * examination records are finalised"), then closed — an admitted candidate's
+ * record is what the invigilators check against their ID, so a change from
+ * that point needs the office involved, not a silent self-edit.
+ *
+ * Any change clears `infoConfirmedAt`: "I confirm my details are correct" was
+ * about the old details, and admission must not ride on a confirmation of
+ * something that no longer exists. Email is not editable here at all — it's
+ * the lookup key a candidate needs to find their own booking again.
  */
 export async function updateBookingDetails(
   bookingId: string,
   updates: UpdateBookingDetailsInput,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const booking = await prisma.examBooking.findUnique({ where: { id: bookingId }, select: { paymentStatus: true } });
+  const booking = await prisma.examBooking.findUnique({ where: { id: bookingId }, select: { admittedAt: true, status: true } });
   if (!booking) return { ok: false, error: "Booking not found" };
-  if (booking.paymentStatus !== "unpaid") {
+  if (booking.admittedAt || booking.status === "cancelled" || booking.status === "no_show") {
     return { ok: false, error: "This booking can no longer be edited — use \"Need help?\" instead." };
   }
   if (updates.dateOfBirth !== undefined && !isPlausibleDateOfBirth(updates.dateOfBirth)) {
@@ -101,6 +128,7 @@ export async function updateBookingDetails(
       ...(updates.idExpiry !== undefined ? { idExpiry: new Date(updates.idExpiry) } : {}),
       ...(updates.isRepeatAttempt !== undefined ? { isRepeatAttempt: updates.isRepeatAttempt } : {}),
       ...(updates.specialNeeds !== undefined ? { specialNeeds: updates.specialNeeds.trim() || null } : {}),
+      infoConfirmedAt: null,
     },
   });
 
@@ -133,6 +161,21 @@ export type CreateBookingInput = {
 export type CreateBookingResult =
   | { ok: true; referenceCode: string; feeTotal: number }
   | { ok: false; error: string; code: "not_found" | "closed" | "invalid" | "duplicate" | "rate_limited" };
+
+/**
+ * A fresh, unused booking reference. Collision odds are astronomically low
+ * (32^5 space) but the unique constraint means a retry is free insurance
+ * rather than a 500 for the one candidate unlucky enough to hit it.
+ */
+export async function uniqueReferenceCode(year: number): Promise<string> {
+  let referenceCode = generateReferenceCode(year);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const clash = await prisma.examBooking.findUnique({ where: { referenceCode } });
+    if (!clash) break;
+    referenceCode = generateReferenceCode(year);
+  }
+  return referenceCode;
+}
 
 /** More than this many bookings from one email in an hour is spam, not enthusiasm. */
 const BOOKING_RATE_LIMIT = 3;
@@ -193,19 +236,12 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
     return { ok: false, error: "Could not price that selection of modules.", code: "invalid" };
   }
 
-  let referenceCode = generateReferenceCode(session.startDate.getFullYear());
-  // Collision odds are astronomically low (32^5 space) but the unique
-  // constraint means a retry is free insurance rather than a 500 for the one
-  // candidate unlucky enough to hit it.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const clash = await prisma.examBooking.findUnique({ where: { referenceCode } });
-    if (!clash) break;
-    referenceCode = generateReferenceCode(session.startDate.getFullYear());
-  }
+  const referenceCode = await uniqueReferenceCode(session.startDate.getFullYear());
 
   const booking = await prisma.examBooking.create({
     data: {
       referenceCode,
+      invoiceNumber: invoiceNumberFor(referenceCode),
       sessionId: session.id,
       fullName: input.fullName.trim(),
       email,
@@ -229,18 +265,8 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
     },
   });
 
-  await sendEmail({
-    to: booking.email,
-    subject: `Booking received — ${session.title}`,
-    html: `
-      <p>Hello ${escapeHtml(booking.fullName)},</p>
-      <p>We've received your booking for <strong>${session.title}</strong> at ${session.venueName}.</p>
-      <p><strong>Reference:</strong> ${booking.referenceCode}<br/>
-         <strong>Amount due:</strong> ₦${feeTotal.toLocaleString()}</p>
-      <p>Your seat is reserved once payment is confirmed.
-         <a href="${bookingLink(booking.referenceCode, booking.email)}">Go to your booking</a> to pay and upload your documents.</p>
-    `,
-  });
+  // Document A, with the invoice attached — same email whichever way the booking arrived.
+  await sendJourneyStepSafely(booking.id, "booking_received");
 
   return { ok: true, referenceCode: booking.referenceCode, feeTotal };
 }
@@ -278,16 +304,12 @@ export async function createManualBooking(
   const feeTotal = computeFee(session, modules);
   if (feeTotal === null) return { ok: false, error: "Could not price that selection of modules.", code: "invalid" };
 
-  let referenceCode = generateReferenceCode(session.startDate.getFullYear());
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const clash = await prisma.examBooking.findUnique({ where: { referenceCode } });
-    if (!clash) break;
-    referenceCode = generateReferenceCode(session.startDate.getFullYear());
-  }
+  const referenceCode = await uniqueReferenceCode(session.startDate.getFullYear());
 
   const booking = await prisma.examBooking.create({
     data: {
       referenceCode,
+      invoiceNumber: invoiceNumberFor(referenceCode),
       sessionId: session.id,
       fullName: input.fullName.trim(),
       email,
@@ -348,7 +370,20 @@ export type ConfirmPaymentResult =
 export async function confirmBookingPayment(
   bookingId: string,
   verifiedBy: string,
-  opts?: { paymentMethod?: string; reference?: string; expectedAmount?: number },
+  opts?: { paymentMethod?: string; reference?: string; expectedAmount?: number; paidOn?: Date },
+): Promise<ConfirmPaymentResult> {
+  const result = await settlePayment(bookingId, verifiedBy, opts);
+  // Document B + the paid receipt, AFTER the transaction has committed: an email
+  // (and a PDF render) must not sit inside a database transaction, and a
+  // failure there must not roll back a payment that really happened.
+  if (result.ok && !result.alreadyConfirmed) await sendJourneyStepSafely(bookingId, "payment_confirmed");
+  return result;
+}
+
+async function settlePayment(
+  bookingId: string,
+  verifiedBy: string,
+  opts?: { paymentMethod?: string; reference?: string; expectedAmount?: number; paidOn?: Date },
 ): Promise<ConfirmPaymentResult> {
   return prisma.$transaction(async (tx) => {
     const booking = await tx.examBooking.findUnique({ where: { id: bookingId } });
@@ -357,10 +392,10 @@ export async function confirmBookingPayment(
       return { ok: true, seatNumber: booking.seatNumber, alreadyConfirmed: true };
     }
 
-    // Only the card path passes this — Flutterwave's own verified amount,
-    // checked against what this booking actually owes before anything is
-    // marked paid. Bank transfer skips it: an admin has already looked at
-    // the slip and the amount by the time confirmBookingPayment runs there.
+    // The amount that actually arrived — Flutterwave's own verified figure on
+    // the card path, or what the office read off the Moniepoint statement on
+    // the bank-transfer path — checked against what this booking owes before
+    // anything is marked paid.
     if (opts?.expectedAmount !== undefined && opts.expectedAmount < booking.feeTotal) {
       return {
         ok: false,
@@ -390,21 +425,13 @@ export async function confirmBookingPayment(
         seatNumber,
         verifiedBy,
         verifiedAt: new Date(),
+        // The payment-confirmation block on the receipt. With no explicit
+        // amount the fee is what was paid (card path passes the real figure).
+        amountReceived: opts?.expectedAmount ?? booking.feeTotal,
+        paidOn: opts?.paidOn ?? new Date(),
         ...(opts?.paymentMethod ? { paymentMethod: opts.paymentMethod } : {}),
         ...(opts?.reference ? { transferReference: opts.reference } : {}),
       },
-    });
-
-    await sendEmail({
-      to: booking.email,
-      subject: `Seat confirmed — ${session?.title ?? "your ÖSD exam"}`,
-      html: `
-        <p>Hello ${escapeHtml(booking.fullName)},</p>
-        <p>Your payment has been confirmed. Your seat has been automatically reserved.</p>
-        <p><strong>You are in seat no. ${seatNumber}.</strong></p>
-        <p><a href="${bookingLink(booking.referenceCode, booking.email)}">Print your admission slip</a> and bring your
-           international passport's data page with you on the day.</p>
-      `,
     });
 
     return { ok: true, seatNumber, alreadyConfirmed: false };
