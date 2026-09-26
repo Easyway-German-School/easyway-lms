@@ -8,6 +8,7 @@ import LecturerShell from '@/components/LecturerShell';
 import { AttendanceIcon, BookOpenIcon, GradebookIcon } from '@/components/icons';
 import BrandLoader from "@/components/BrandLoader";
 import TutorLivePanel from "@/components/live/TutorLivePanel";
+import TutorTodayCard from "@/components/live/TutorTodayCard";
 
 function StatIcon({ children }: { children: React.ReactNode }) {
   return <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] shadow-sm">{children}</span>;
@@ -190,8 +191,13 @@ export default function LecturerDashboard() {
         {/* First thing a tutor sees, and only while it is true: their own live
             class, the code to read out, and who has actually turned up. Renders
             nothing when no class is running. */}
-        <div className="max-w-7xl mx-auto px-6 pt-6">
-          <TutorLivePanel showGoLive />
+        <div className="max-w-7xl mx-auto space-y-4 px-6 pt-6">
+          {/* Before class: the class that is on now and a "Go live" button
+              (click one; "Start the class" in the lobby is click two). The two
+              cards never show together: TutorTodayCard steps aside the moment
+              a room opens and TutorLivePanel takes over. */}
+          <TutorTodayCard />
+          <TutorLivePanel />
         </div>
 
         {/* Stats Grid */}
