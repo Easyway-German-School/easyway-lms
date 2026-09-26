@@ -53,20 +53,7 @@ const STATUS_META: Record<string, { label: string; tone: string; Icon: typeof Ch
   invited: { label: "Ringing…", tone: "text-amber-600 bg-amber-500/10", Icon: PendingIcon },
 };
 
-export default function TutorLivePanel({
-  className = "",
-  showGoLive = false,
-}: {
-  className?: string;
-  /**
-   * Dashboard-only. When nobody is live yet, show a "Go live" button per
-   * class instead of rendering nothing — today's tutor lands here mid-lesson
-   * with no way to start one from the dashboard at all. Off by default so the
-   * private-classes page, which mounts this same panel, keeps its existing
-   * silent-when-idle behaviour.
-   */
-  showGoLive?: boolean;
-}) {
+export default function TutorLivePanel({ className = "" }: { className?: string }) {
   const [live, setLive] = useState<LiveState | null>(null);
   const [groups, setGroups] = useState<TeachingGroupBrief[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -117,42 +104,10 @@ export default function TutorLivePanel({
     [load],
   );
 
-  if (!live) {
-    // The dashboard's whole reason for showing this panel before class has
-    // started: one click to the room this tutor is about to teach, and one
-    // more ("Start the class") once inside. Nothing to teach today → nothing
-    // rendered, same as before.
-    if (!showGoLive || groups.length === 0) return null;
-    return (
-      <div className={`overflow-hidden rounded-3xl border border-[#0D7C7E]/25 bg-[var(--surface)] shadow-lg ${className}`}>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#0D7C7E]/10 text-[#0D7C7E]">
-              <BroadcastIcon className="h-5 w-5" />
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-base font-semibold text-[var(--foreground)]">
-                {groups.length > 1 ? "Ready to go live" : `Ready to go live · ${groups[0].label}`}
-              </p>
-              <p className="text-sm text-[var(--muted)]">Opens the room and rings your class.</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {groups.map((group) => (
-              <Link
-                key={group.key}
-                href={`/live?group=${encodeURIComponent(group.key)}`}
-                className="inline-flex items-center gap-2 rounded-full bg-[#0D7C7E] px-4 py-2 text-xs font-bold text-white transition hover:brightness-110"
-              >
-                <VideoIcon className="h-3.5 w-3.5" />
-                {groups.length > 1 ? `Go live: ${group.label}` : "Go live"}
-              </Link>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // The "go live" card that used to sit here before a class started is now
+  // TutorTodayCard, which also knows which class is on now. This panel is
+  // back to one job: the room that is already open.
+  if (!live) return null;
 
   const waiting = invites.filter((invite) => invite.status === "invited");
   const joined = invites.filter((invite) => invite.status === "joined");
