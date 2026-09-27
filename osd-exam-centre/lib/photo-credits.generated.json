@@ -1,0 +1,65 @@
+[
+  {
+    "file": "hero-hallstatt",
+    "place": "Hallstatt, Austria",
+    "title": "Hallstatt 2.jpg",
+    "author": "Dimitry Anikin",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Hallstatt_2.jpg"
+  },
+  {
+    "file": "vienna",
+    "place": "Vienna, Austria",
+    "title": "Vienna, Austria (49266021741).jpg",
+    "author": "Pierre Blaché from Paris, France",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Vienna,_Austria_(49266021741).jpg"
+  },
+  {
+    "file": "berlin",
+    "place": "Brandenburg Gate, Berlin, Germany",
+    "title": "Berlin - 0266 - 16052015 - Brandenburger Tor.jpg",
+    "author": "Pierre-Selim Huard",
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Berlin_-_0266_-_16052015_-_Brandenburger_Tor.jpg"
+  },
+  {
+    "file": "heidelberg",
+    "place": "Heidelberg, Germany",
+    "title": "Heidelberg Altstadt Schloss Luftbild.JPG",
+    "author": "Schlurcher",
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Heidelberg_Altstadt_Schloss_Luftbild.JPG"
+  },
+  {
+    "file": "matterhorn",
+    "place": "The Matterhorn, Switzerland",
+    "title": "Matterhorn sunset 2016 (Unsplash).jpg",
+    "author": "Sam Ferrara samferrara",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Matterhorn_sunset_2016_(Unsplash).jpg"
+  },
+  {
+    "file": "neuschwanstein",
+    "place": "Neuschwanstein Castle, Germany",
+    "title": "Neuschwanstein Castle 2024-02.jpg",
+    "author": "Wilfredor",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Neuschwanstein_Castle_2024-02.jpg"
+  },
+  {
+    "file": "munich",
+    "place": "Marienplatz, Munich, Germany",
+    "title": "Marienplatz (München) 48.jpg",
+    "author": "Wilfredor",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Marienplatz_(M%C3%BCnchen)_48.jpg"
+  }
+]
