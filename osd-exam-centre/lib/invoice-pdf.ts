@@ -1,5 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
 import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from "pdf-lib";
-import { EASYWAY_LOGO_JPG_BASE64, OSD_LOGO_JPG_BASE64 } from "@/lib/brand-assets";
 import { OFFICE } from "@/lib/config";
 import { formatAmount } from "@/lib/money";
 import type { InvoiceModel } from "@/lib/invoice";
@@ -50,6 +51,33 @@ export function pdfSafe(text: string): string {
   return out;
 }
 
+/**
+ * The two logos on the invoice, read from assets/brand/ as raw bytes rather
+ * than a bundled base64 string constant. That was tried first (see git
+ * history) and silently produced a corrupted JPEG specifically in Vercel's
+ * build — the committed source decoded correctly locally and in `git show`,
+ * so something in bundling a ~17KB string literal mangled it on that
+ * platform. Reading the real file sidesteps the bundler entirely.
+ *
+ * Vercel's serverless functions only ship files Next's build tracing found a
+ * reference to — a plain `fs.readFileSync` with a literal, resolvable path
+ * (this one) is what that tracing looks for, and `outputFileTracingIncludes`
+ * in next.config.ts pins it explicitly for both invoice routes as a second
+ * guarantee, so a tracing miss fails the build instead of 500ing in prod.
+ */
+const brandAssetCache = new Map<string, Buffer>();
+
+function readBrandAsset(filename: string): Buffer {
+  const cached = brandAssetCache.get(filename);
+  if (cached) return cached;
+  const bytes = fs.readFileSync(path.join(process.cwd(), "assets", "brand", filename));
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+    throw new Error(`assets/brand/${filename} does not look like a JPEG (no SOI marker) — ${bytes.length} bytes read`);
+  }
+  brandAssetCache.set(filename, bytes);
+  return bytes;
+}
+
 function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const lines: string[] = [];
   let current = "";
@@ -94,8 +122,8 @@ export async function renderInvoicePdf(model: InvoiceModel): Promise<Uint8Array>
     page.drawRectangle({ x, y: yAt(top + h), width: w, height: h, color: fill, borderColor: LINE, borderWidth: 0.5 });
 
   // --- letterhead ---
-  const eyLogo = await pdf.embedJpg(Buffer.from(EASYWAY_LOGO_JPG_BASE64, "base64"));
-  const osdLogo = await pdf.embedJpg(Buffer.from(OSD_LOGO_JPG_BASE64, "base64"));
+  const eyLogo = await pdf.embedJpg(readBrandAsset("easyway-logo.jpg"));
+  const osdLogo = await pdf.embedJpg(readBrandAsset("osd-logo.jpg"));
   page.drawImage(eyLogo, { x: X0, y: yAt(32 + 42), width: 146, height: 42 });
   page.drawImage(osdLogo, { x: X1 - 80, y: yAt(30 + 55), width: 80, height: 55 });
 

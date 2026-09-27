@@ -23,6 +23,20 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname),
 
   /**
+   * The invoice PDF routes read the two logo JPEGs straight off disk
+   * (lib/invoice-pdf.ts readBrandAsset) rather than through a bundled
+   * string literal — see that file's comment for why. Next's build tracing
+   * usually finds a plain `fs.readFileSync(path.join(process.cwd(), ...))`
+   * on its own, but pinning it here is the documented, explicit guarantee
+   * that assets/brand/ ships with these two serverless functions no matter
+   * how the tracer's static analysis changes across Next versions.
+   */
+  outputFileTracingIncludes: {
+    "/api/admin/bookings/[id]/invoice": ["./assets/brand/*.jpg"],
+    "/api/bookings/[reference]/invoice": ["./assets/brand/*.jpg"],
+  },
+
+  /**
    * Baseline security headers — this app collects passport data and takes
    * payments, so "browser defaults" isn't quite enough. Not a full CSP
    * (that would need auditing every inline style/script this app uses,
