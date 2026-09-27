@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from "pdf-lib";
@@ -67,12 +68,33 @@ export function pdfSafe(text: string): string {
  */
 const brandAssetCache = new Map<string, Buffer>();
 
+/**
+ * Known-good size and sha256 of each committed file (`node -e` a
+ * `crypto.createHash("sha256")` over `assets/brand/*.jpg`, re-run this if the
+ * logos are ever replaced) — checked on every read, not just the first two
+ * bytes. First-two-bytes alone didn't catch a real production incident: the
+ * file that reached the Lambda still started `FF D8` but pdf-lib's decoder
+ * still failed scanning it, meaning something further into the file was
+ * wrong — truncation or corruption mid-file, invisible to an SOI-only check.
+ */
+const KNOWN_ASSETS: Record<string, { size: number; sha256: string }> = {
+  "easyway-logo.jpg": { size: 12754, sha256: "b283de84b49b5f397139c2a92ed2e59beb47ae3b4d6525f7fc0fc68accae12df" },
+  "osd-logo.jpg": { size: 6707, sha256: "2f92c21601345f742330e85952f5971ea273789ff758e92c819ab1401212401e" },
+};
+
 function readBrandAsset(filename: string): Buffer {
   const cached = brandAssetCache.get(filename);
   if (cached) return cached;
-  const bytes = fs.readFileSync(path.join(process.cwd(), "assets", "brand", filename));
-  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) {
-    throw new Error(`assets/brand/${filename} does not look like a JPEG (no SOI marker) — ${bytes.length} bytes read`);
+  const filePath = path.join(process.cwd(), "assets", "brand", filename);
+  const bytes = fs.readFileSync(filePath);
+  const expected = KNOWN_ASSETS[filename];
+  const actualHash = crypto.createHash("sha256").update(bytes).digest("hex");
+  if (!expected || bytes.length !== expected.size || actualHash !== expected.sha256) {
+    throw new Error(
+      `${filePath} does not match the committed asset — expected ${expected?.size ?? "?"} bytes ` +
+        `(sha256 ${expected?.sha256 ?? "?"}), got ${bytes.length} bytes (sha256 ${actualHash}). ` +
+        `The invoice/receipt PDF would render a broken or wrong logo, so this refuses rather than guessing.`,
+    );
   }
   brandAssetCache.set(filename, bytes);
   return bytes;
