@@ -1,0 +1,123 @@
+"use client";
+
+import { useState } from "react";
+
+/**
+ * "Need help? — send message to the office" — a plain contact form, not the
+ * nurture drip's prep-class upsell link. Embeddable anywhere: prefilled with
+ * a bookingId/name/email on the booking page, bare in the site footer for a
+ * question from someone who hasn't registered yet.
+ */
+export default function NeedHelp({
+  bookingReference,
+  defaultName,
+  defaultEmail,
+  tone = "light",
+}: {
+  bookingReference?: string;
+  defaultName?: string;
+  defaultEmail?: string;
+  /** "dark" for use on the navy footer, where the default navy link would vanish. */
+  tone?: "light" | "dark";
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(defaultName ?? "");
+  const [email, setEmail] = useState(defaultEmail ?? "");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  const [website, setWebsite] = useState(""); // honeypot
+
+  async function send() {
+    setSending(true);
+    setError("");
+    try {
+      const res = await fetch("/api/support", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bookingReference, name, email, message, website }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not send that");
+      setSent(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send that");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className={
+          tone === "dark"
+            ? "rounded-full border border-white/25 bg-white/10 px-5 py-2 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20"
+            : "text-sm font-semibold text-[var(--navy)] underline underline-offset-4"
+        }
+      >
+        Need help?
+      </button>
+    );
+  }
+
+  if (sent) {
+    return (
+      <p className="rounded-lg bg-[var(--green-soft)] px-4 py-3 text-sm font-semibold text-[var(--green)]">
+        Message sent — the office will get back to you at {email}.
+      </p>
+    );
+  }
+
+  return (
+    <div className="seal-border rounded-lg bg-[var(--paper-raised)] p-4 text-left">
+      <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Send a message to the office</p>
+      {error && <p className="mt-2 text-xs text-[var(--red)]">{error}</p>}
+      <input
+        type="text"
+        value={website}
+        onChange={(e) => setWebsite(e.target.value)}
+        tabIndex={-1}
+        autoComplete="off"
+        aria-hidden="true"
+        style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+      />
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Your name"
+          className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
+        />
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Your email"
+          className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
+        />
+      </div>
+      <textarea
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        placeholder="What do you need help with?"
+        rows={3}
+        className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
+      />
+      <div className="mt-2 flex gap-2">
+        <button
+          onClick={send}
+          disabled={!name.trim() || !email.trim() || !message.trim() || sending}
+          className="rounded-lg bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+        >
+          {sending ? "Sending…" : "Send"}
+        </button>
+        <button onClick={() => setOpen(false)} className="rounded-lg border border-[var(--line)] px-4 py-2 text-xs font-semibold text-[var(--ink-soft)]">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}

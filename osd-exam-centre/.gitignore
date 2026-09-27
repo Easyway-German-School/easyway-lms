@@ -1,0 +1,11 @@
+node_modules
+.next
+.env
+.env.local
+public/uploads
+*.log
+.DS_Store
+
+# The monorepo root's .gitignore has a broad .env* rule that would also
+# catch this template — un-ignore it here, scoped to this folder only.
+!.env.example
