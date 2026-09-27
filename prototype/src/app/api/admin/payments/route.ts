@@ -11,6 +11,7 @@ import {
   requiredDepositFor,
 } from "@/lib/payment";
 import { reconcileTravelPackageStudent } from "@/lib/travel-package";
+import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -143,6 +144,8 @@ export async function POST(request: Request) {
           `${who}'s classes will NOT unlock until it reaches that.`;
       }
     }
+
+    await notifyEnrolmentLetterIfSettled(studentId);
 
     return NextResponse.json({ payment, warning, notice }, { status: 201 });
   } catch (error) {

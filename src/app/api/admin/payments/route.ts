@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCapability } from "@/lib/admin-roles";
+import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 
 export async function GET() {
   const gate = await requireCapability("payments");
@@ -48,6 +49,8 @@ export async function POST(request: Request) {
         status,
       },
     });
+
+    await notifyEnrolmentLetterIfSettled(studentId);
 
     return NextResponse.json({ payment }, { status: 201 });
   } catch (error) {

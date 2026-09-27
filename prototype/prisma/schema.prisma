@@ -553,6 +553,15 @@ model Student {
   advanceOfferedFor String?
 
   /**
+   * When the automatic proof-of-enrolment letter went out — fired once tuition
+   * for the student's level clears in full, never at registration (the ₦5,000
+   * fee alone must not trigger it). A claimed-once flag, same pattern as
+   * `welcomeTourSeenAt`, so a payment recorded twice (webhook AND client verify
+   * both landing for the same charge) or a later top-up cannot resend it.
+   */
+  enrolmentLetterSentAt DateTime?
+
+  /**
    * When this student finished (or skipped) the welcome tour.
    * Server-side rather than localStorage on purpose: a student who signs up on
    * a laptop and then opens the portal on their phone should not be walked
