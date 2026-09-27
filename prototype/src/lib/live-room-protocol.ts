@@ -43,6 +43,16 @@
  * sender's token says tutor. A student can forge the bytes; they cannot forge
  * the token, which is the whole reason the role lives there.
  *
+ * That guarantee has exactly one dependency: nothing in the room may hold a
+ * grant that lets it rewrite its own `metadata` after connecting. LiveKit ties
+ * `setMetadata`/`setName`/`setAttributes` to the SAME permission bit
+ * (`canUpdateOwnMetadata`), so a token minted with that grant `true` — even if
+ * the intent was only "let a student flag their own raised hand" — hands out
+ * "become a tutor" for free. `/api/live/session` mints every token with it
+ * `false`; hand-raise is written server-side instead (`/api/live/hand`). If a
+ * future token ever needs that grant again, this module's whole trust model
+ * needs re-deriving, not just that one call site.
+ *
  * This module is shared between server and browser, so it imports neither
  * `livekit-client` nor `livekit-server-sdk`.
  */

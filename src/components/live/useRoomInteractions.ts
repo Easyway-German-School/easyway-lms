@@ -15,7 +15,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RoomEvent, type Participant, type RemoteParticipant, type Room } from "livekit-client";
 import {
-  ATTR_HAND_RAISED_AT,
   MAX_CHAT_LENGTH,
   MAX_VISIBLE_REACTIONS,
   REACTION_COOLDOWN_MS,
@@ -94,6 +93,28 @@ export type RoomInteractions = {
 
 function displayName(participant: Participant): string {
   return participant.name || participant.identity;
+}
+
+/**
+ * Ask the SERVER to write this participant's own hand-raise attribute.
+ *
+ * Used to be `room.localParticipant.setAttributes(...)`, direct from the
+ * browser — that required the token to carry `canUpdateOwnMetadata`, which
+ * also (LiveKit ties the two together) let a participant rewrite their own
+ * `metadata`, the field `roleOfMetadata` trusts to decide who is a tutor. See
+ * `/api/live/hand` for the full reasoning. `room` only supplies its own name;
+ * the server derives WHO from the caller's own session, so this can never be
+ * pointed at anyone else's hand.
+ */
+function setHandRaised(room: Room, raised: boolean): void {
+  fetch("/api/live/hand", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ roomName: room.name, raised }),
+  }).catch(() => {
+    // Fire-and-forget, same as the direct SDK call it replaced: a dropped
+    // request is a hand that silently didn't raise, not a broken classroom.
+  });
 }
 
 /** How long the "an announcement is coming" banner stays up before clearing itself. */
@@ -232,7 +253,7 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
           // Only my own hand is mine to lower; everyone does the same and the
           // queue empties. A student cannot write another student's attributes.
           if (room && handRaisedAt(room.localParticipant.attributes) !== null) {
-            room.localParticipant.setAttributes({ [ATTR_HAND_RAISED_AT]: "" }).catch(() => {});
+            setHandRaised(room, false);
           }
           break;
 
@@ -349,9 +370,7 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
   const toggleHand = useCallback(() => {
     if (!room) return;
     const raised = handRaisedAt(room.localParticipant.attributes) !== null;
-    room.localParticipant
-      .setAttributes({ [ATTR_HAND_RAISED_AT]: raised ? "" : String(Date.now()) })
-      .catch(() => {});
+    setHandRaised(room, !raised);
   }, [room]);
 
   const sendChat = useCallback(
@@ -400,7 +419,7 @@ export function useRoomInteractions(room: Room | null, role: RoomRole, revision:
     if (role !== "tutor" || !room) return;
     publish({ t: "handsCleared" });
     if (handRaisedAt(room.localParticipant.attributes) !== null) {
-      room.localParticipant.setAttributes({ [ATTR_HAND_RAISED_AT]: "" }).catch(() => {});
+      setHandRaised(room, false);
     }
   }, [role, room, publish]);
 
