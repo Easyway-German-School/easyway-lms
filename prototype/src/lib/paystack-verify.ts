@@ -6,6 +6,7 @@ import { safeJson } from "@/lib/safe-json";
 import { setTenantScope } from "@/lib/tenant/context";
 import { revealTutorAfterPayment } from "@/lib/tutor-reveal";
 import { guardedFetch } from "@/lib/guarded-fetch";
+import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 
 function getPaymentDescription(paymentType: string, pathwayName: string) {
   if (paymentType === "registration") {
@@ -102,6 +103,7 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     // Money already recorded (full, or a deposit that landed as `partial`).
     if (isReceivedPayment(existingPayment.status)) {
       await revealTutorAfterPayment(studentId).catch(() => null);
+      await notifyEnrolmentLetterIfSettled(studentId);
       return;
     }
 
@@ -128,6 +130,7 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
       console.error("Paystack verify: next-level promotion failed", { studentId, reference, error });
     });
     await revealTutorAfterPayment(studentId).catch(() => null);
+    await notifyEnrolmentLetterIfSettled(studentId);
 
     return;
   }
@@ -217,6 +220,7 @@ export async function persistPaystackTransaction(data: any): Promise<void> {
     console.error("Paystack verify: next-level promotion failed", { studentId, reference, error });
   });
   await revealTutorAfterPayment(studentId).catch(() => null);
+  await notifyEnrolmentLetterIfSettled(studentId);
 }
 
 /**
