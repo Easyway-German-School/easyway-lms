@@ -32,8 +32,8 @@ const nextConfig: NextConfig = {
    * how the tracer's static analysis changes across Next versions.
    */
   outputFileTracingIncludes: {
-    "/api/admin/bookings/[id]/invoice": ["./assets/brand/*.jpg"],
-    "/api/bookings/[reference]/invoice": ["./assets/brand/*.jpg"],
+    "/api/admin/bookings/[id]/invoice": ["./assets/brand/*.png"],
+    "/api/bookings/[reference]/invoice": ["./assets/brand/*.png"],
   },
 
   /**

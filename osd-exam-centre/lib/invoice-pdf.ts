@@ -53,12 +53,23 @@ export function pdfSafe(text: string): string {
 }
 
 /**
- * The two logos on the invoice, read from assets/brand/ as raw bytes rather
- * than a bundled base64 string constant. That was tried first (see git
- * history) and silently produced a corrupted JPEG specifically in Vercel's
- * build — the committed source decoded correctly locally and in `git show`,
- * so something in bundling a ~17KB string literal mangled it on that
- * platform. Reading the real file sidesteps the bundler entirely.
+ * The two logos on the invoice, read from assets/brand/ as raw bytes and
+ * embedded as PNG, not JPEG. Two real production incidents got here in turn:
+ * (1) the JPEGs as a bundled base64 TS string constant decoded correctly
+ * locally and in `git show` but pdf-lib threw "SOI not found in JPEG" on
+ * whatever Vercel's build turned that string into; (2) switching to a plain
+ * `fs.readFileSync` of the real .jpg files did NOT fix it — a sha256 check
+ * added at the time proved the bytes reaching the Lambda were byte-identical
+ * to the committed file, yet pdf-lib's `embedJpg` still threw the exact same
+ * error on those provably-correct bytes. That rules out corruption anywhere
+ * in the pipeline and points at pdf-lib's own hand-rolled JPEG segment
+ * scanner (`embedJpg`) itself — a known-fragile path with several long-
+ * standing upstream issues, apparently sensitive to something about the
+ * Vercel Node runtime that never showed up locally. `embedPng` is a
+ * different, much simpler and more heavily-used code path in the same
+ * library, so the logos are committed as PNG (losslessly converted from the
+ * originals — no need to also carry the .jpg) and embedded with that
+ * instead, sidestepping the flaky decoder rather than debugging inside it.
  *
  * Vercel's serverless functions only ship files Next's build tracing found a
  * reference to — a plain `fs.readFileSync` with a literal, resolvable path
@@ -70,16 +81,15 @@ const brandAssetCache = new Map<string, Buffer>();
 
 /**
  * Known-good size and sha256 of each committed file (`node -e` a
- * `crypto.createHash("sha256")` over `assets/brand/*.jpg`, re-run this if the
- * logos are ever replaced) — checked on every read, not just the first two
- * bytes. First-two-bytes alone didn't catch a real production incident: the
- * file that reached the Lambda still started `FF D8` but pdf-lib's decoder
- * still failed scanning it, meaning something further into the file was
- * wrong — truncation or corruption mid-file, invisible to an SOI-only check.
+ * `crypto.createHash("sha256")` over `assets/brand/*.png`, re-run this if the
+ * logos are ever replaced) — checked on every read. This is what proved the
+ * JPEG-era corruption theory wrong (see the comment above): the bytes always
+ * matched this exact check, right up to the moment pdf-lib's decoder failed
+ * on them anyway.
  */
 const KNOWN_ASSETS: Record<string, { size: number; sha256: string }> = {
-  "easyway-logo.jpg": { size: 12754, sha256: "b283de84b49b5f397139c2a92ed2e59beb47ae3b4d6525f7fc0fc68accae12df" },
-  "osd-logo.jpg": { size: 6707, sha256: "2f92c21601345f742330e85952f5971ea273789ff758e92c819ab1401212401e" },
+  "easyway-logo.png": { size: 77591, sha256: "c149abd1f6419130db94e8ef1e26530a8bd9a7c88d68bb3cb7623bb1046db256" },
+  "osd-logo.png": { size: 44275, sha256: "1fb5a2ef25f69e0203b0f27b7e910fbc6f9ef1800525143216a3d32d10f01b9d" },
 };
 
 function readBrandAsset(filename: string): Buffer {
@@ -144,8 +154,8 @@ export async function renderInvoicePdf(model: InvoiceModel): Promise<Uint8Array>
     page.drawRectangle({ x, y: yAt(top + h), width: w, height: h, color: fill, borderColor: LINE, borderWidth: 0.5 });
 
   // --- letterhead ---
-  const eyLogo = await pdf.embedJpg(readBrandAsset("easyway-logo.jpg"));
-  const osdLogo = await pdf.embedJpg(readBrandAsset("osd-logo.jpg"));
+  const eyLogo = await pdf.embedPng(readBrandAsset("easyway-logo.png"));
+  const osdLogo = await pdf.embedPng(readBrandAsset("osd-logo.png"));
   page.drawImage(eyLogo, { x: X0, y: yAt(32 + 42), width: 146, height: 42 });
   page.drawImage(osdLogo, { x: X1 - 80, y: yAt(30 + 55), width: 80, height: 55 });
 
