@@ -210,10 +210,13 @@ function RegistrationProgress({ booking, email, onChange }: { booking: Booking; 
 
       {!confirmed && (
         <div className="mt-5">
-          <p className="text-sm font-semibold text-[var(--navy)]">Check your details</p>
+          <p className="text-sm font-semibold text-[var(--navy)]">
+            {missing.length > 0 ? "One step left" : "Check your details"}
+          </p>
           <p className="mt-1 text-xs text-[var(--ink-soft)]">
-            Your name and details must match the identification document you will bring on the day.
-            {missing.length > 0 && <> We still need: <strong>{missing.join(", ")}</strong>.</>}
+            {missing.length > 0
+              ? "You already registered on Panthexa — this just confirms your seat with Easyway, your examination centre. Panthexa doesn't share your address or ID document with us, so that's the only extra step, and it takes about two minutes."
+              : "Your name and details must match the identification document you will bring on the day."}
           </p>
           <EditBookingDetails
             key={missing.join(",")}

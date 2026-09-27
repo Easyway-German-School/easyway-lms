@@ -158,8 +158,17 @@ export type JourneyStepView = { key: string; label: string; state: "done" | "cur
  */
 export function candidateJourney(facts: StatusFacts): JourneyStepView[] {
   const paid = facts.paymentStatus === "paid";
-  const detailsDone = paid && missingAdmissionFields(facts).length === 0 && Boolean(facts.infoConfirmedAt);
+  const stillMissing = missingAdmissionFields(facts);
+  const detailsDone = paid && stillMissing.length === 0 && Boolean(facts.infoConfirmedAt);
   const idDone = facts.documentStatus === "approved";
+
+  // A Panthexa candidate arrives with real gaps to fill; a direct booker (who
+  // already gave us everything at booking time) usually only needs to tick
+  // "confirm" — different hint for each, so nobody reads an explanation for a
+  // step they don't actually have.
+  const detailsHint = stillMissing.length > 0
+    ? "Panthexa doesn't share your address or ID with us — add them here, then confirm."
+    : "Check your details match your ID, then confirm.";
 
   const steps: { key: string; label: string; done: boolean; hint: string }[] = [
     { key: "registered", label: "Registered", done: true, hint: "" },
@@ -167,7 +176,7 @@ export function candidateJourney(facts: StatusFacts): JourneyStepView[] {
       key: "payment", label: "Payment", done: paid,
       hint: facts.paymentStatus === "pending_verification" ? "We're checking your transfer." : "Pay the invoice we emailed you.",
     },
-    { key: "details", label: "Confirm your details", done: detailsDone, hint: "Check your details match your ID, then confirm." },
+    { key: "details", label: "Add the last few details", done: detailsDone, hint: detailsHint },
     {
       key: "id", label: "ID check", done: idDone,
       hint: facts.passportDataPageUrl ? "Our team is reviewing your ID." : "Upload the data page of your ID.",

@@ -20,12 +20,25 @@ type Details = {
 
 const ID_TYPES = ["International Passport", "National ID Card (NIN)", "Driver's License", "Other"];
 
+/** The six fields a Panthexa registration never gives us — see lib/candidate-status.ts REQUIRED_FOR_ADMISSION. */
+const OPTIONAL_FIELD_LABELS: Record<"addressLine" | "city" | "countryOfBirth" | "idType" | "idNumber" | "idExpiry", string> = {
+  addressLine: "Address", city: "City", countryOfBirth: "Country of birth",
+  idType: "ID document type", idNumber: "ID number", idExpiry: "ID expiry date",
+};
+
 /**
  * A candidate checking, correcting and COMPLETING their own details — see
  * lib/booking.ts updateBookingDetails for the rule (open until the office
  * admits them). Kept separate from the main booking page so that file doesn't
- * grow another dozen pieces of state. `startOpen` is set when required details
- * are still blank, so the thing they must do is the first thing they see.
+ * grow another dozen pieces of state.
+ *
+ * `startOpen` is set when required details are still blank. In that case this
+ * opens in "quick-add" shape: what we already have (from Panthexa, via the
+ * office) shows as a short read-only summary, and only the genuinely blank
+ * fields render as inputs — so a candidate who already registered elsewhere
+ * sees "a couple more things", not "your whole registration again". Fixing a
+ * typo later (nothing missing, `startOpen: false`) opens the ordinary full
+ * editable grid instead — there's nothing to split at that point.
  */
 export default function EditBookingDetails({
   referenceCode,
@@ -41,6 +54,7 @@ export default function EditBookingDetails({
   startOpen?: boolean;
 }) {
   const [open, setOpen] = useState(startOpen);
+  const [showKnownFields, setShowKnownFields] = useState(false);
   // Pick the editable fields by name. `initial` is often the WHOLE booking object,
   // and spreading it would put every one of its fields (nulls included) into what
   // this form submits.
@@ -90,6 +104,76 @@ export default function EditBookingDetails({
     );
   }
 
+  // Computed from `initial` (a prop), not `form` — so the split doesn't shift
+  // under the candidate's feet as they type. The parent remounts this
+  // component (via its own `key`) whenever the real missing set changes.
+  const missingKeys = (Object.keys(OPTIONAL_FIELD_LABELS) as (keyof typeof OPTIONAL_FIELD_LABELS)[])
+    .filter((k) => !initial[k]);
+  const quickAdd = startOpen && missingKeys.length > 0;
+
+  if (quickAdd) {
+    return (
+      <div className="mt-2 seal-border rounded-lg bg-[var(--paper-raised)] p-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">What we already have</p>
+        <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1.5 sm:grid-cols-3">
+          <Known label="Name" value={initial.fullName} />
+          <Known label="Phone" value={initial.phone} />
+          <Known label="Nationality" value={initial.nationality} />
+        </dl>
+        {!showKnownFields && (
+          <button onClick={() => setShowKnownFields(true)} className="mt-2 text-[11px] font-semibold text-[var(--navy)] underline underline-offset-4">
+            Something wrong there? Edit it
+          </button>
+        )}
+        {showKnownFields && (
+          <div className="mt-3 grid gap-2 border-t border-[var(--line)] pt-3 sm:grid-cols-2">
+            <I label="Full name" value={form.fullName} onChange={(v) => setForm({ ...form, fullName: v })} full />
+            <I label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
+            <I label="Date of birth" type="date" value={form.dateOfBirth} onChange={(v) => setForm({ ...form, dateOfBirth: v })} />
+            <I label="Place of birth" value={form.placeOfBirth} onChange={(v) => setForm({ ...form, placeOfBirth: v })} />
+            <I label="Nationality" value={form.nationality} onChange={(v) => setForm({ ...form, nationality: v })} />
+          </div>
+        )}
+
+        <p className="mt-4 text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">
+          Just {missingKeys.length} more thing{missingKeys.length === 1 ? "" : "s"}
+        </p>
+        <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">Panthexa doesn&apos;t share these with us.</p>
+        {error && <p className="mt-2 text-xs text-[var(--red)]">{error}</p>}
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {missingKeys.includes("addressLine") && (
+            <I label="Address" value={form.addressLine} onChange={(v) => setForm({ ...form, addressLine: v })} full />
+          )}
+          {missingKeys.includes("city") && <I label="City" value={form.city} onChange={(v) => setForm({ ...form, city: v })} />}
+          {missingKeys.includes("countryOfBirth") && (
+            <I label="Country of birth" value={form.countryOfBirth} onChange={(v) => setForm({ ...form, countryOfBirth: v })} />
+          )}
+          {missingKeys.includes("idType") && (
+            <label className="block">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-soft)]">ID document type</span>
+              <select
+                value={form.idType}
+                onChange={(e) => setForm({ ...form, idType: e.target.value })}
+                className="mt-0.5 w-full rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs focus:border-[var(--navy)] focus:outline-none"
+              >
+                <option value="">Select…</option>
+                {ID_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+          )}
+          {missingKeys.includes("idNumber") && <I label="ID number" value={form.idNumber} onChange={(v) => setForm({ ...form, idNumber: v })} />}
+          {missingKeys.includes("idExpiry") && (
+            <I label="ID expiry date" type="date" value={form.idExpiry} onChange={(v) => setForm({ ...form, idExpiry: v })} full />
+          )}
+        </div>
+        <p className="mt-2 text-[11px] text-[var(--red)]">Make sure these match your passport exactly — they print on your certificate.</p>
+        <button onClick={save} disabled={saving} className="mt-3 rounded-lg bg-[var(--navy)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">
+          {saving ? "Saving…" : "Save these details"}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-2 seal-border rounded-lg bg-[var(--paper-raised)] p-4">
       <p className="text-xs font-bold uppercase tracking-wide text-[var(--ink-soft)]">Your details</p>
@@ -129,6 +213,15 @@ export default function EditBookingDetails({
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+function Known({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[10px] uppercase tracking-wide text-[var(--ink-soft)]">{label}</dt>
+      <dd className="text-xs font-semibold text-[var(--navy)]">{value}</dd>
     </div>
   );
 }

@@ -248,17 +248,26 @@ function infoCheck(ctx: EmailContext): RenderedEmail {
   if (missing.length) todo.push(`add the details we are still missing: <strong>${e(missing.join(", "))}</strong>`);
   if (!ctx.idUploaded) todo.push(`upload a clear photo or scan of the data page of the identification document you registered with`);
   todo.push(`confirm that everything below is correct`);
+
+  // Missing fields exist only because Panthexa doesn't hand them to us — said
+  // once, plainly, so this reads as "the one extra step" rather than "please
+  // redo your registration." Skipped when nothing is missing (a direct
+  // booker who already gave us everything just needs to confirm).
+  const gapLine = missing.length > 0
+    ? p(`Panthexa doesn't share your address or ID document with us, so this is the only extra step to confirm your seat — it takes about two minutes.`)
+    : p(`One quick step left before your admission — please confirm the details below are correct.`);
+
   return {
-    subject: subject("Please Check Your Details", ctx),
+    subject: subject("One Step Left", ctx),
     attach: null,
-    html: layout("Please check your examination details before your admission is finalised.", [
+    html: layout("One quick step left before your admission is confirmed.", [
       hello(ctx),
-      p(`Before your examination admission is finalised, please carefully check the information below.`),
+      gapLine,
       rows(ctx.candidateDetails),
       p(`Your name and personal details must be correct and must correspond with your valid identification document. If you notice an error, please contact Easyway immediately — do not wait until examination day to report an incorrect name or date of birth.`),
-      heading("What we need from you"),
+      heading("What's left"),
       ul(todo.map((t) => t.charAt(0).toUpperCase() + t.slice(1))),
-      button("Check and confirm my details", ctx.bookingUrl),
+      button("Finish my registration", ctx.bookingUrl),
       p(`Your admission can only be issued once this is done.`),
       sign(),
     ].join("")),
