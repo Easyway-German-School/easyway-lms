@@ -106,9 +106,9 @@ const navItems: NavItem[] = [
   { label: 'Full timetable', href: '/lecturer/timetable', icon: <CalendarIcon />, group: 'Academics' },
   { label: 'Cohorts', href: '/admin/cohorts', icon: <RosterIcon />, group: 'Academics' },
   { label: 'Upcoming intake', href: '/admin/upcoming-intake', icon: <CalendarIcon />, group: 'Academics' },
-  { label: 'Cohort sign-off', href: '/admin/journey', icon: <MapIcon />, group: 'Academics' },
-  { label: 'Batch completions', href: '/admin/completions', icon: <ResultsIcon />, group: 'Academics' },
-  { label: 'Promotions', href: '/admin/promotions', icon: <LevelUpIcon />, group: 'Academics' },
+  // Sign-off, certificates, moving up and telling the learners — one page, one button.
+  // The three older screens it replaces are still reachable from the bottom of it.
+  { label: 'Graduation', href: '/admin/graduation', icon: <LevelUpIcon />, group: 'Academics' },
   { label: 'Certificates', href: '/admin/certificates', icon: <CertificateIcon />, group: 'Academics' },
 
   { label: 'Exams', href: '/admin/exams', icon: <ExamIcon />, group: 'Exams' },
