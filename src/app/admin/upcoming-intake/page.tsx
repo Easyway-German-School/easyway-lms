@@ -73,6 +73,18 @@ type Candidate = {
 
 type MatchResult = { query: string; candidates: Candidate[] };
 
+type BlastSeat = "unpaid" | "registration_only" | "deposit_paid";
+
+type Blast = {
+  audience: number;
+  bySeat: Record<BlastSeat, number>;
+  alreadySent: number;
+  sent: number;
+  pushed: number;
+  emailed: number;
+  samples: { seat: BlastSeat; title: string; message: string }[];
+};
+
 const SEAT_ORDER: SeatStatus[] = ["paid_in_full", "deposit_paid", "registration_only", "unpaid"];
 
 const SEAT_STYLE: Record<SeatStatus, string> = {
@@ -123,6 +135,10 @@ export default function UpcomingIntakePage() {
   const [activeIntake, setActiveIntake] = useState<string>("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+
+  // The one-press "confirm your seat" send.
+  const [blast, setBlast] = useState<Blast | null>(null);
+  const [includeDeposit, setIncludeDeposit] = useState(true);
 
   const [names, setNames] = useState("");
   const [month, setMonth] = useState("October");
@@ -175,6 +191,57 @@ export default function UpcomingIntakePage() {
     const json = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(json.error || "That did not work");
     return json;
+  }
+
+  const blastIntake = intake?.batchLabel ?? "";
+
+  const loadBlast = useCallback(async () => {
+    if (!blastIntake) {
+      setBlast(null);
+      return;
+    }
+    try {
+      const response = await fetch("/api/admin/upcoming-intake", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "blastPreview", batchLabel: blastIntake, includeDeposit }),
+      });
+      const json = await response.json().catch(() => ({}));
+      setBlast(response.ok ? json : null);
+    } catch {
+      setBlast(null);
+    }
+  }, [blastIntake, includeDeposit]);
+
+  // Refreshes whenever the intake, the deposit switch, or the rows behind it change (e.g. after a send).
+  useEffect(() => {
+    void loadBlast();
+  }, [loadBlast, rows]);
+
+  async function sendBlast() {
+    if (!blast || !intake) return;
+    const fresh = blast.audience - blast.alreadySent;
+    if (
+      !window.confirm(
+        `Send the "confirm your seat" message to ${fresh} learner${fresh === 1 ? "" : "s"} now, by push and email? This cannot be recalled.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const result = await post({ action: "blast", batchLabel: intake.batchLabel, includeDeposit });
+      setMsg(
+        `Sent to ${result.sent} learner${result.sent === 1 ? "" : "s"} — ${result.pushed} push, ${result.emailed} email${result.emailed === 1 ? "" : "s"}${
+          result.alreadySent ? ` (${result.alreadySent} already had today's message)` : ""
+        }.`,
+      );
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "That did not work");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function nudge() {
@@ -409,6 +476,69 @@ export default function UpcomingIntakePage() {
             <p className="text-sm text-[var(--muted)]">
               Still to collect on these seats: <strong className="text-[var(--foreground)]">{naira(intake.balanceOutstanding)}</strong>
             </p>
+          </section>
+        )}
+
+        {intake && blast && blast.audience > 0 && (
+          <section className="space-y-4 rounded-3xl border border-[#FF6600]/40 bg-[var(--surface)] p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#FF6600]">One-press message</p>
+                <h2 className="text-xl font-bold text-[var(--foreground)]">
+                  Remind everyone to confirm their {intake.batchLabel.split(" ")[0]} seat
+                </h2>
+                <p className="text-sm text-[var(--muted)]">
+                  Becca tells each learner who has not finished paying that a seat is reserved for them and how to
+                  confirm it — by push and email, and in their bell. Already written; nothing to type.
+                </p>
+              </div>
+              <button
+                disabled={busy || blast.audience - blast.alreadySent <= 0}
+                onClick={sendBlast}
+                className="rounded-full bg-[#FF6600] px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+              >
+                {blast.audience - blast.alreadySent <= 0
+                  ? "Everyone has today's message"
+                  : `Send to ${blast.audience - blast.alreadySent} learner${blast.audience - blast.alreadySent === 1 ? "" : "s"}`}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {(["unpaid", "registration_only", "deposit_paid"] as const).map((seat) =>
+                blast.bySeat[seat] > 0 ? (
+                  <span key={seat} className={`rounded-full px-3 py-1 font-semibold ring-1 ring-inset ${SEAT_STYLE[seat]}`}>
+                    {blast.bySeat[seat]} · {SEAT_STATUS_LABEL[seat]}
+                  </span>
+                ) : null,
+              )}
+              <label className="ml-auto flex items-center gap-2 text-[var(--muted)]">
+                <input type="checkbox" checked={includeDeposit} onChange={(e) => setIncludeDeposit(e.target.checked)} />
+                Include learners who have paid the deposit
+              </label>
+            </div>
+            {blast.alreadySent > 0 && (
+              <p className="text-xs text-[var(--muted)]">
+                {blast.alreadySent} already received today's message and will be skipped, so pressing twice is safe.
+              </p>
+            )}
+
+            <details className="rounded-2xl bg-[var(--background)] p-3 text-sm">
+              <summary className="cursor-pointer font-semibold text-[var(--foreground)]">See exactly what they will receive</summary>
+              <div className="mt-3 space-y-3">
+                {blast.samples.map((sample) => (
+                  <div key={sample.seat} className="space-y-1">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                      To learners: {SEAT_STATUS_LABEL[sample.seat]}
+                    </p>
+                    <p className="font-semibold text-[var(--foreground)]">{sample.title}</p>
+                    <p className="text-[var(--muted)]">{sample.message}</p>
+                  </div>
+                ))}
+                <p className="text-xs text-[var(--muted)]">
+                  The email is the same words under a “Confirm my seat” button that opens their Payments page.
+                </p>
+              </div>
+            </details>
           </section>
         )}
 
