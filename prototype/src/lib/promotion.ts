@@ -6,6 +6,8 @@ import { ensureChargeForLevel, loadStudentLedger } from "@/lib/tuition-charges";
 import { writeAudit } from "@/lib/prisma-guard";
 import { naira } from "@/lib/finance/receivables";
 import { closeOpenEnrolment, openEnrolment } from "@/lib/student-enrolment";
+import { nextPlacement } from "@/lib/graduation";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 
 /**
  * Who has finished a level but is still sitting in it.
@@ -169,6 +171,24 @@ export type PromotionOptions = {
    * promotion and never need an override.
    */
   override?: { by: string; reason: string };
+  /**
+   * Where the promoted learner lands.
+   *
+   *   (default)      the CURRENT calendar month — the original behaviour, kept
+   *                  for the /admin/promotions screen.
+   *   "next-intake"  the month after their session ends, with their first-day
+   *                  date moved to that intake's opening. A learner whose
+   *                  batch finishes 30 September lands in October's intake and,
+   *                  until it opens, waits behind the countdown lock (and the
+   *                  new level's deposit gate does the rest afterwards).
+   *
+   * The old first-day date has to move too, not only the batch label: a past
+   * `classesStartedAt` outranks the label in resolveUpcomingBatch, so leaving
+   * it would keep the portal open — and the journey re-derives it from the
+   * first-ever attendance row if it is merely cleared. The old value is kept in
+   * `admission.classesStartedAtBeforePromotion` so the move can be undone.
+   */
+  placement?: "next-intake";
 };
 
 /**
@@ -194,6 +214,7 @@ export async function promoteStudents(
   const result: PromotionResult = { promoted: [], skipped: [], overridden: [] };
 
   const monthName = now.toLocaleString("en-US", { month: "long" });
+  const startDaysByTenant = new Map<string, Awaited<ReturnType<typeof readIntakeStartDayOverrides>>>();
 
   for (const studentId of studentIds) {
     const student = await prisma.student.findUnique({
@@ -208,6 +229,8 @@ export async function promoteStudents(
         classType: true,
         deliveryMode: true,
         tenantId: true,
+        createdAt: true,
+        classesStartedAt: true,
       },
     });
 
@@ -266,11 +289,43 @@ export async function promoteStudents(
         ? (student.admission as Record<string, unknown>)
         : {};
 
+    let place: ReturnType<typeof nextPlacement> = null;
+    if (options.placement === "next-intake") {
+      const tenantKey = student.tenantId ?? "__none__";
+      let overrides = startDaysByTenant.get(tenantKey);
+      if (!overrides) {
+        overrides = await readIntakeStartDayOverrides(student.tenantId);
+        startDaysByTenant.set(tenantKey, overrides);
+      }
+      place = nextPlacement({
+        batch: typeof admission.batch === "string" ? admission.batch : null,
+        sessionSlot: student.sessionSlot,
+        registeredAt: student.createdAt,
+        now,
+        startDayOverrides: overrides,
+      });
+    }
+    const landingMonth = place?.month ?? monthName;
+
     await prisma.student.update({
       where: { id: studentId },
       data: {
         level: next,
-        admission: { ...admission, batch: monthName } as any,
+        admission: {
+          ...admission,
+          batch: landingMonth,
+          ...(place && student.classesStartedAt
+            ? { classesStartedAtBeforePromotion: student.classesStartedAt.toISOString() }
+            : {}),
+        } as any,
+        ...(place
+          ? {
+              classesStartedAt: place.startsOn,
+              startConfirmedAt: now,
+              startConfirmedVia: "promotion",
+              startPromptSnoozedUntil: null,
+            }
+          : {}),
       },
     });
 
@@ -303,10 +358,10 @@ export async function promoteStudents(
         sessionSlot: student.sessionSlot,
         classType: student.classType,
         deliveryMode: student.deliveryMode,
-        batch: monthName,
+        batch: landingMonth,
         registeredAt: now,
         tenantId: student.tenantId,
-        startedAt: now,
+        startedAt: place?.startsOn ?? now,
         tuitionChargeId: charge?.chargeId ?? null,
         feeSnapshot: charge?.amount ?? null,
         now,
@@ -384,5 +439,6 @@ export async function promoteIfNextLevelPayment(
     return;
   }
 
-  await promoteStudents([studentId]);
+  // Signed off and paid: they land in the intake after the one they just finished.
+  await promoteStudents([studentId], { placement: "next-intake" });
 }

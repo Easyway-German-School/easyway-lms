@@ -27,6 +27,12 @@ export const TUITION_FREE_ROUTES = [
   // to every student regardless of tuition state, so its "Find out more"
   // target has to open for them too.
   "/exams/osd",
+  // What a learner earned stays theirs. A graduate is locked out of the NEXT
+  // level until its deposit is paid, but their results and certificate for the
+  // one they just finished must not sit behind that wall — the graduation
+  // message points them straight at these.
+  "/certificates",
+  "/results",
 ] as const;
 
 export function isTuitionFreeRoute(pathname: string): boolean {

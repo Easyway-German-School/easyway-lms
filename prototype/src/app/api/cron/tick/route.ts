@@ -117,6 +117,14 @@ async function handleGET(request: NextRequest) {
     return runSeatNudges();
   });
 
+  register("auto-graduation", async () => {
+    // Off until a school switches it on at /admin/graduation. Moves on every
+    // learner whose batch has FINISHED and who the desk calls ready (started,
+    // not held back, nothing owed on a past level); the rest stay on the desk.
+    const { runAutoGraduation } = await import("@/lib/graduation-server");
+    return runAutoGraduation();
+  });
+
   register("fee-reminders", async () => {
     const { sendDueFeeReminders } = await import("@/lib/fee-reminders");
     return sendDueFeeReminders();
