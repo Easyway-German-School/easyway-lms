@@ -6,7 +6,7 @@ import { batchFromAdmission, monthNameToIndex, MONTH_NAMES } from "@/lib/batch";
 import { resolveUpcomingBatch } from "@/lib/batch-reservation";
 import { loadUpcomingBatchRows, summariseIntakes } from "@/lib/batch-reservation-server";
 import { readIntakeStartDayOverrides, writeIntakeStartDayOverride } from "@/lib/intake-server";
-import { sendManualSeatNudges } from "@/lib/seat-nudges";
+import { sendManualSeatNudges, sendSeatConfirmBlast } from "@/lib/seat-nudges";
 import { rankNameMatches } from "@/lib/student-name-match";
 
 /**
@@ -18,6 +18,10 @@ import { rankNameMatches } from "@/lib/student-name-match";
  *   POST {action:"assign"}    move learners into an intake month (their portal
  *                             then waits behind the countdown on its own)
  *   POST {action:"nudge"}     Becca messages the chosen learners now
+ *   POST {action:"blastPreview"|"blast", batchLabel, includeDeposit}
+ *                             the one-press "confirm your seat" message to EVERY
+ *                             learner in that intake who has not finished paying —
+ *                             bell + push + email. Preview writes nothing.
  *   POST {action:"setStartDay", monthKey:"2026-10", day:5|null}
  *                             move that month's opening off the 1st (or, with
  *                             day:null, back onto it) — see lib/intake.ts
@@ -28,6 +32,8 @@ import { rankNameMatches } from "@/lib/student-name-match";
  */
 
 export const dynamic = "force-dynamic";
+// A whole intake is a handful of notify() calls, but each fans out rows and mail.
+export const maxDuration = 60;
 
 const MAX_NAMES = 60;
 const MAX_ASSIGN = 200;
@@ -225,6 +231,22 @@ export async function POST(request: Request) {
       // Re-fence: only learners this admin may see can be messaged.
       const allowed = await prisma.student.findMany({ where: { id: { in: ids }, ...fence(gate) }, select: { id: true } });
       const result = await sendManualSeatNudges(allowed.map((s) => s.id));
+      return NextResponse.json({ ok: true, ...result });
+    }
+
+    if (action === "blastPreview" || action === "blast") {
+      const batchLabel = typeof body.batchLabel === "string" ? body.batchLabel : "";
+      if (!batchLabel) return NextResponse.json({ error: "Choose an intake" }, { status: 400 });
+      const startDayOverrides = await readIntakeStartDayOverrides(gate.session.user.tenantId ?? null);
+      // The audience is decided HERE, from the fenced loader — never from ids the
+      // browser sends — so a stale page cannot message someone who has since paid.
+      const rows = (await loadUpcomingBatchRows({ where: fence(gate), startDayOverrides })).filter(
+        (row) => row.batchLabel === batchLabel,
+      );
+      const result = await sendSeatConfirmBlast(rows, {
+        includeDeposit: body.includeDeposit !== false,
+        dryRun: action === "blastPreview",
+      });
       return NextResponse.json({ ok: true, ...result });
     }
 

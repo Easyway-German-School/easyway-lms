@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { KIND, notify } from "@/lib/notify";
+import { renderNotificationEmail } from "@/lib/notification-email";
 import { batchFromAdmission } from "@/lib/batch";
 import { resolveBatchStart, schoolDaysUntil } from "@/lib/batch-reservation";
 import { loadUpcomingBatchRows, type SeatRow } from "@/lib/batch-reservation-server";
@@ -287,4 +288,164 @@ export async function sendManualSeatNudges(
     sent++;
   }
   return { sent, skipped };
+}
+
+/* ---------------------------------------------------------------------------
+ * The one-press "confirm your seat" send.
+ *
+ * The office presses ONE button on /admin/upcoming-intake and every learner in
+ * that intake who has not finished paying gets the same warm message on every
+ * channel they accept — bell, push and email. Nobody types anything.
+ *
+ * The framing is deliberate: the seat has been RESERVED for them, and paying is
+ * how they CONFIRM it. Learners who have paid the deposit are told their seat
+ * is confirmed and shown what is left. Learners paid in full are never in the
+ * audience.
+ *
+ * Wording is a function of (seat status, amounts, intake), not of the person,
+ * so learners are grouped by identical wording and each group is ONE notify()
+ * call — a few calls for a whole intake instead of one per learner, which
+ * matters over a slow database link. Their name arrives in the email greeting.
+ * ------------------------------------------------------------------------ */
+
+export type BlastSeat = "unpaid" | "registration_only" | "deposit_paid";
+
+export function blastAudience(rows: SeatRow[], options: { includeDeposit?: boolean } = {}): SeatRow[] {
+  const includeDeposit = options.includeDeposit ?? true;
+  return rows.filter(
+    (row) =>
+      row.seat === "unpaid" ||
+      row.seat === "registration_only" ||
+      (includeDeposit && row.seat === "deposit_paid" && row.balanceOutstanding > 0),
+  );
+}
+
+/** Learners whose seat is genuinely confirmed — the only honest "others have confirmed" number. */
+export function confirmedCount(rows: SeatRow[]): number {
+  return rows.filter((row) => row.seat === "deposit_paid" || row.seat === "paid_in_full").length;
+}
+
+export function confirmSeatMessage(row: SeatRow, confirmed: number): Draft {
+  const month = row.batch;
+  const opens = opensPhrase(row.startsOn);
+
+  if (row.seat === "deposit_paid") {
+    const message = `Becca here! Your ${month} seat is confirmed and classes open ${opens}. To complete your payment, clear the remaining ${naira(row.balanceOutstanding)} from your Payments page — it is due within your first month of classes.`;
+    return {
+      title: `Your ${month} seat is confirmed — finish your payment`,
+      message,
+      emailBody: `${message}\n\nThank you for holding your seat early. Your portal is a waiting room until ${opens} and opens on its own that morning.`,
+    };
+  }
+
+  const owed = row.depositOutstanding > 0 ? row.depositOutstanding : row.requiredDeposit;
+  const step =
+    row.seat === "registration_only"
+      ? `your registration is in, so pay the remaining ${naira(owed)} of your ${naira(row.requiredDeposit)} deposit from your Payments page`
+      : `pay your ${naira(row.requiredDeposit)} deposit from your Payments page`;
+  const others =
+    confirmed > 0
+      ? ` ${confirmed} ${confirmed === 1 ? "learner has" : "learners have"} already confirmed theirs.`
+      : "";
+  const message = `Becca here! A seat has been reserved for you in the ${month} intake, opening ${opens}. To confirm it, ${step}.${others}`;
+  return {
+    title: `Your ${month} seat is reserved — confirm it`,
+    message,
+    emailBody: `${message}\n\nYour portal is a waiting room until ${opens} and opens on its own that morning — for learners whose seat is confirmed. Tap the button below to confirm yours.`,
+  };
+}
+
+export type SeatBlastResult = {
+  /** Learners the message is for. */
+  audience: number;
+  bySeat: Record<BlastSeat, number>;
+  /** Of those, who already had today's message — a double-click cannot double-send. */
+  alreadySent: number;
+  /** Learners who got a fresh bell row. */
+  sent: number;
+  pushed: number;
+  emailed: number;
+  /** One representative message per kind of seat, so the office sees exactly what goes out. */
+  samples: { seat: BlastSeat; title: string; message: string }[];
+};
+
+function lagosDayKey(now: Date) {
+  return now.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+}
+
+/**
+ * `rows` is the already-fenced list for ONE intake (the route scopes it to the
+ * admin's tenant and branches); this only decides wording and sends.
+ */
+export async function sendSeatConfirmBlast(
+  rows: SeatRow[],
+  options: { now?: Date; includeDeposit?: boolean; dryRun?: boolean } = {},
+): Promise<SeatBlastResult> {
+  const now = options.now ?? new Date();
+  const audience = blastAudience(rows, options);
+  const confirmed = confirmedCount(rows);
+
+  const result: SeatBlastResult = {
+    audience: audience.length,
+    bySeat: { unpaid: 0, registration_only: 0, deposit_paid: 0 },
+    alreadySent: 0,
+    sent: 0,
+    pushed: 0,
+    emailed: 0,
+    samples: [],
+  };
+  if (audience.length === 0) return result;
+
+  const dedupeKey = `seat-confirm:${audience[0].batchLabel}:${lagosDayKey(now)}`;
+
+  const groups = new Map<string, { draft: Draft; studentIds: string[] }>();
+  for (const row of audience) {
+    const seat = row.seat as BlastSeat;
+    result.bySeat[seat] += 1;
+    const draft = confirmSeatMessage(row, confirmed);
+    const key = `${draft.title}\u0000${draft.message}`;
+    const group = groups.get(key) ?? { draft, studentIds: [] };
+    group.studentIds.push(row.studentId);
+    groups.set(key, group);
+    if (!result.samples.some((sample) => sample.seat === seat)) {
+      result.samples.push({ seat, title: draft.title, message: draft.message });
+    }
+  }
+
+  const already = await prisma.notification.findMany({
+    where: { studentId: { in: audience.map((row) => row.studentId) }, dedupeKey },
+    select: { studentId: true },
+  });
+  result.alreadySent = new Set(already.map((n) => n.studentId)).size;
+  if (options.dryRun) return result;
+
+  for (const { draft, studentIds } of groups.values()) {
+    const outcome = await notify({
+      to: { studentIds },
+      kind: KIND.tuitionReminder,
+      severity: "info",
+      title: draft.title,
+      message: draft.message,
+      emailBody: draft.emailBody,
+      emailHtmlFor: ({ name }) =>
+        renderNotificationEmail({
+          name,
+          title: draft.title,
+          body: draft.emailBody,
+          link: "/payments",
+          identity: "support",
+          cta: "Confirm my seat",
+        }),
+      link: "/payments",
+      dedupeKey,
+      push: true,
+      email: true,
+      // A whole-intake blast by text is real money; the office asked for email + push.
+      sms: false,
+    });
+    result.sent += outcome.created;
+    result.pushed += outcome.pushed;
+    result.emailed += outcome.queuedEmails;
+  }
+  return result;
 }

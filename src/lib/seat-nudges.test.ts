@@ -7,7 +7,17 @@ vi.mock("@/lib/notify", () => ({ KIND: { tuitionReminder: "tuition.reminder", an
 vi.mock("@/lib/batch-reservation-server", () => ({ loadUpcomingBatchRows: vi.fn() }));
 vi.mock("@/lib/student-access", () => ({ getStudentAccess: vi.fn() }));
 
-import { countdownMessage, openingMessage, reserveMessage, tierFor, RESERVE_TIERS, COUNTDOWN_TIERS } from "./seat-nudges";
+import {
+  blastAudience,
+  confirmedCount,
+  confirmSeatMessage,
+  countdownMessage,
+  openingMessage,
+  reserveMessage,
+  tierFor,
+  RESERVE_TIERS,
+  COUNTDOWN_TIERS,
+} from "./seat-nudges";
 import type { SeatRow } from "./batch-reservation-server";
 
 const row = (over: Partial<SeatRow> = {}): SeatRow => ({
@@ -96,5 +106,54 @@ describe("countdownMessage / openingMessage", () => {
   it("tells an unpaid learner the deposit opens their classroom on opening day", () => {
     expect(openingMessage("Adaeze Okafor", "October", false).message).toContain("Pay your deposit");
     expect(openingMessage("Adaeze Okafor", "October", true).title).toContain("doors are open");
+  });
+});
+
+describe("one-press confirm-your-seat message", () => {
+  const unpaid = row();
+  const regOnly = row({ studentId: "s2", seat: "registration_only", registrationPaid: true, depositOutstanding: 60_000 });
+  const deposit = row({ studentId: "s3", seat: "deposit_paid", tuitionPaid: 90_000, depositOutstanding: 0, balanceOutstanding: 60_000 });
+  const full = row({ studentId: "s4", seat: "paid_in_full", tuitionPaid: 150_000, depositOutstanding: 0, balanceOutstanding: 0 });
+  const all = [unpaid, regOnly, deposit, full];
+
+  it("reaches everyone who has not finished paying, never the paid-in-full", () => {
+    expect(blastAudience(all).map((r) => r.studentId)).toEqual(["s1", "s2", "s3"]);
+    expect(blastAudience(all, { includeDeposit: false }).map((r) => r.studentId)).toEqual(["s1", "s2"]);
+  });
+
+  it("counts only genuinely confirmed seats as 'confirmed'", () => {
+    expect(confirmedCount(all)).toBe(2);
+  });
+
+  it("frames an unpaid learner's seat as reserved and asks them to confirm it", () => {
+    const draft = confirmSeatMessage(unpaid, 0);
+    expect(draft.title).toBe("Your October seat is reserved — confirm it");
+    expect(draft.message).toContain("A seat has been reserved for you in the October intake");
+    expect(draft.message).toContain("₦90,000 deposit");
+    // Zero confirmed learners: the sentence is simply not said.
+    expect(draft.message).not.toMatch(/already confirmed/);
+  });
+
+  it("states only the real number of confirmed learners", () => {
+    expect(confirmSeatMessage(unpaid, 1).message).toContain("1 learner has already confirmed theirs.");
+    expect(confirmSeatMessage(unpaid, 7).message).toContain("7 learners have already confirmed theirs.");
+  });
+
+  it("asks a registration-only learner for what is left of the deposit", () => {
+    const draft = confirmSeatMessage(regOnly, 0);
+    expect(draft.message).toContain("your registration is in");
+    expect(draft.message).toContain("₦60,000");
+  });
+
+  it("tells a deposit-paid learner their seat is confirmed and shows the balance", () => {
+    const draft = confirmSeatMessage(deposit, 5);
+    expect(draft.title).toBe("Your October seat is confirmed — finish your payment");
+    expect(draft.message).toContain("₦60,000");
+    expect(draft.message).not.toMatch(/reserved for you/);
+  });
+
+  it("gives every learner in the same position identical wording so they send as one group", () => {
+    const twin = row({ studentId: "s9", name: "Someone Else" });
+    expect(confirmSeatMessage(twin, 3)).toEqual(confirmSeatMessage(unpaid, 3));
   });
 });
