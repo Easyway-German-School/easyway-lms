@@ -6,6 +6,7 @@ import { safeJson } from "@/lib/safe-json";
 import { setTenantScope } from "@/lib/tenant/context";
 import { revealTutorAfterPayment } from "@/lib/tutor-reveal";
 import { guardedFetch } from "@/lib/guarded-fetch";
+import { paystackAccountForCurrentTenant } from "@/lib/paystack-account";
 import { notifyEnrolmentLetterIfSettled } from "@/lib/enrolment-letter-trigger";
 
 function getPaymentDescription(paymentType: string, pathwayName: string) {
@@ -367,9 +368,11 @@ export async function verifyPaystackTransaction(reference: string): Promise<Pays
     return { success: false, status: 400, error: "Missing reference" };
   }
 
-  const secretKey = process.env.PAYSTACK_SECRET_KEY;
+  // Verify with the key the charge was made with: the school's own account if it
+  // connected one, EasyWay's for EasyWay. See lib/paystack-account.ts.
+  const secretKey = (await paystackAccountForCurrentTenant())?.secretKey;
   if (!secretKey) {
-    console.error("Paystack verify blocked: PAYSTACK_SECRET_KEY is not set");
+    console.error("Paystack verify blocked: no Paystack account is connected for this tenant");
     return { success: false, status: 503, error: "Payment checking is temporarily unavailable." };
   }
 

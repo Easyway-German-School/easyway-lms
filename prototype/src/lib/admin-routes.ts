@@ -102,6 +102,9 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
   // The price list is what the school charges — the fee book, not general setup — so it
   // sits behind `payments` like /admin/finance, matching /api/admin/settings/pricing.
   { prefix: "/admin/settings/pricing", capability: "payments" },
+  // Where the school's fees are paid to. Money is pointed here, so it is the same
+  // super-admin-only capability as the fee book, and it matches its API.
+  { prefix: "/admin/settings/payments", capability: "payments" },
 
   { prefix: "/admin/security", capability: "security" },
   // Mission control: incidents, drift and the backend map. Incident samples carry

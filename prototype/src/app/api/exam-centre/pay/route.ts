@@ -4,6 +4,7 @@ import { requireAuthSession } from "@/lib/auth";
 import { safeJson } from "@/lib/safe-json";
 import { resolvePayable, settleExamFee } from "@/lib/exam-payments";
 import { guardedFetch, isCircuitOpen, PAYMENTS_PAUSED_MESSAGE } from "@/lib/guarded-fetch";
+import { paystackAccountForCurrentTenant } from "@/lib/paystack-account";
 
 /**
  * Paystack checkout for an exam fee.
@@ -51,7 +52,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "This fee has already been settled." }, { status: 409 });
     }
 
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    // Charged through the school's own Paystack account if it connected one,
+    // EasyWay's for EasyWay, and refused for anyone else (never the platform's).
+    const secretKey = (await paystackAccountForCurrentTenant())?.secretKey;
     if (!secretKey) {
       return NextResponse.json({ error: "Paystack is not configured" }, { status: 503 });
     }
