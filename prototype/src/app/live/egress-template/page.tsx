@@ -4,6 +4,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Room, RoomEvent, Track, type Participant, type RemoteParticipant } from "livekit-client";
 import EgressHelper from "@livekit/egress-sdk";
 import { useRoomInteractions } from "@/components/live/useRoomInteractions";
+import { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import { roleOfMetadata } from "@/lib/live-room-protocol";
 
 /**
@@ -60,6 +61,11 @@ function setRecorderState(state: RecorderState) {
 const EMPTY_ROOM_GRACE_MS = 2 * 60_000;
 
 export default function EgressTemplatePage() {
+  // The app's floating day/night switch ("Tag") is mounted by the root layout on
+  // every page. Found in the first real recording: it sat in the corner of the
+  // video. Nothing but the class belongs in a recording.
+  useHideFloatingThemeToggle();
+
   // Created inside an effect, not during render — `Room` touches browser-only
   // APIs, and this component still goes through a server render pass for its
   // initial HTML like any other "use client" page. LiveKitClassroom.tsx's own
