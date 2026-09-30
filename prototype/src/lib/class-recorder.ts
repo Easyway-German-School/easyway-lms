@@ -40,6 +40,19 @@ import {
   recordingVariant,
   verifyRecordingObject,
 } from "@/lib/recording";
+import {
+  getRecorderJob,
+  isRecorderEgressId,
+  jobIdFromEgressId,
+  jobViewToCallback,
+  callbackToEgress,
+  newRecorderJobId,
+  recorderEgressId,
+  recorderSelected,
+  recordingBackend,
+  startRecorderJob,
+  stopRecorderJob,
+} from "@/lib/recorder";
 
 export type StartRecordingInput = {
   roomName: string;
@@ -116,6 +129,21 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
       attempt,
     });
 
+    /**
+     * OUR OWN RECORDER, when switched on (`RECORDING_BACKEND`, see lib/recorder.ts).
+     * It films the class from a machine we run, so there is no LiveKit Egress
+     * bill. If it is down or full, `recorder` mode falls through to LiveKit
+     * Egress below — a class must never go unrecorded because a new service
+     * hiccuped. `recorder-only` (deliberate, no LiveKit egress spend) does not.
+     * With the flag unset this whole block is skipped: today's behaviour.
+     */
+    if (recorderSelected()) {
+      const viaRecorder = await startViaRecorder(input, objectKey);
+      if (viaRecorder) return viaRecorder;
+      if (recordingBackend() === "recorder-only") return null;
+      console.warn("Recorder unavailable for", input.roomName, "— falling back to LiveKit Egress");
+    }
+
     const variant = recordingVariant();
     // The custom template (src/app/live/egress-template) only ever matters for
     // video — an audio-only capture has no layout to render. `customBaseUrl`
@@ -162,6 +190,40 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
   }
 }
 
+/**
+ * Start the capture on our own recorder and record it in the same table.
+ *
+ * The id stored is the one the RECORDER returns, not the one proposed: asked to
+ * film a room it is already filming, it answers with the existing job. The
+ * upsert on that id is what keeps two near-simultaneous starts to one row.
+ */
+async function startViaRecorder(input: StartRecordingInput, objectKey: string): Promise<string | null> {
+  const started = await startRecorderJob({ roomName: input.roomName, objectKey, jobId: newRecorderJobId() });
+  if (!started.ok) {
+    console.error("Recorder did not start", { room: input.roomName, reason: started.reason, detail: started.detail });
+    return null;
+  }
+  const egressId = recorderEgressId(started.jobId);
+  await prisma.classRecording.upsert({
+    where: { egressId },
+    create: {
+      egressId,
+      roomName: input.roomName,
+      tenantId: input.tenantId ?? null,
+      branchId: input.branchId ?? null,
+      level: input.level ?? null,
+      sessionSlot: input.sessionSlot ?? null,
+      startedByUserId: input.startedByUserId ?? null,
+      privateClassId: input.privateClassId ?? null,
+      status: "active",
+      variant: "video",
+      objectKey,
+    },
+    update: {},
+  });
+  return egressId;
+}
+
 // LiveKit Cloud hard-caps a single Room Composite Egress at 180 minutes and
 // simply stops it — status `LIMIT_REACHED`, no warning, no replacement. A
 // class that runs long (and some do) loses its tail silently: the room stays
@@ -191,6 +253,9 @@ export async function restartRecordingIfNearingLimit(input: StartRecordingInput)
       select: { id: true, egressId: true, startedAt: true },
     });
     if (!active) return;
+    // The 180-minute wall is LiveKit Cloud's. Our recorder has its own, longer
+    // cap (MAX_JOB_MINUTES) and ends cleanly; swapping it here would be wrong.
+    if (isRecorderEgressId(active.egressId)) return;
 
     const ageMinutes = (Date.now() - active.startedAt.getTime()) / 60_000;
     if (ageMinutes < EGRESS_RESTART_AFTER_MINUTES) return;
@@ -222,6 +287,7 @@ export async function stopRecordingForRoom(roomName: string): Promise<boolean> {
       select: { egressId: true },
     });
     if (!active) return false;
+    if (isRecorderEgressId(active.egressId)) return await stopRecorderJob(jobIdFromEgressId(active.egressId));
     await client.stopEgress(active.egressId);
     return true;
   } catch (error) {
@@ -547,6 +613,34 @@ export function reconcileRecordingsSoon(): void {
 // ask. Past this age with no answer, it is dead and should say so.
 const STUCK_ACTIVE_HOURS = 6;
 
+/**
+ * The recorder's callback (`/api/recorder/callback`) is the fast path. If it was
+ * lost — a deploy landing at the wrong moment — the recorder still remembers the
+ * job, so ask it. Returns true when the row reached a final state.
+ */
+async function reconcileRecorderRecording(egressId: string, startedAt: Date, staleBefore: number): Promise<boolean> {
+  const jobId = jobIdFromEgressId(egressId);
+  const job = await getRecorderJob(jobId);
+  // Cannot reach it right now: not evidence of anything. Try again next pass.
+  if (job === "unreachable") return false;
+
+  if (job === null) {
+    // The recorder has no such job (never started, or its disk was wiped). Only
+    // call it dead once it is too old to still be a class in progress.
+    if (startedAt.getTime() >= staleBefore) return false;
+    await prisma.classRecording.update({
+      where: { egressId },
+      data: { status: "failed", endedAt: new Date(), error: "The recorder has no record of this class" },
+    });
+    return true;
+  }
+
+  const callback = jobViewToCallback(jobId, job);
+  if (!callback) return false; // still recording, encoding or uploading
+  const outcome = await finaliseRecording(callbackToEgress(callback));
+  return outcome === "created" || outcome === "failed";
+}
+
 export async function reconcileRecordings(): Promise<{ checked: number; finalised: number }> {
   const client = egressClient();
   if (!client || !recordingConfigured()) return { checked: 0, finalised: 0 };
@@ -571,6 +665,13 @@ export async function reconcileRecordings(): Promise<{ checked: number; finalise
   let finalised = 0;
   for (const { egressId, startedAt } of open) {
     try {
+      // Our own recorder's jobs are unknown to LiveKit — asking it would read as
+      // "LiveKit has no record" and kill a perfectly good recording. The
+      // recorder's own callback is the fast path; this is the net under it.
+      if (isRecorderEgressId(egressId)) {
+        if (await reconcileRecorderRecording(egressId, startedAt, staleBefore)) finalised += 1;
+        continue;
+      }
       const [info] = await client.listEgress({ egressId });
       if (!info) {
         if (startedAt.getTime() < staleBefore) {
