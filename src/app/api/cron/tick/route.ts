@@ -229,6 +229,7 @@ async function handleGET(request: NextRequest) {
       return backfillMissingStudentCodes();
     }),
   );
+results.push(    await run("student-code-realign", async () => {      const { realignUpcomingIntakeCodes } = await import("@/lib/student-code-backfill");      return realignUpcomingIntakeCodes();    }),  );
 
   results.push(
     await run("profile-photo-nudge", async () => {

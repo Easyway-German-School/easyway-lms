@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireCapability, scopedBranchIds } from "@/lib/admin-roles";
 import { prisma } from "@/lib/prisma";
+import { realignStudentCodeById } from "@/lib/student-code";
 import { batchFromAdmission, monthNameToIndex, MONTH_NAMES } from "@/lib/batch";
 import { classifyRoster } from "@/lib/cohort-classify-server";
 import { readCurrentIntake } from "@/lib/intake-server";
@@ -205,6 +206,11 @@ export async function POST(request: Request) {
           });
         }),
       );
+    }
+
+    // Their IDs carry the intake month — keep them in step with the move.
+    for (const student of targets) {
+      await realignStudentCodeById(student.id).catch((e) => console.error("Code realign failed", e));
     }
 
     return NextResponse.json({

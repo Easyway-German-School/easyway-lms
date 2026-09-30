@@ -236,6 +236,11 @@ async function handleGET(request: NextRequest) {
     return backfillMissingStudentCodes();
   });
 
+  register("student-code-realign", async () => {
+    const { realignUpcomingIntakeCodes } = await import("@/lib/student-code-backfill");
+    return realignUpcomingIntakeCodes();
+  });
+
   register("profile-photo-nudge", async () => {
     const { nudgeStudentsWithoutPhoto } = await import("@/lib/profile-photo-nudge");
     return nudgeStudentsWithoutPhoto();
