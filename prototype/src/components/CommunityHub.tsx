@@ -448,6 +448,7 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
   const fileRef = useRef<HTMLInputElement>(null);
   /** Newest confirmed message id — the cursor the poll asks from. */
   const cursorRef = useRef<string | null>(null);
+  const refreshTickRef = useRef(0);
 
   const push = usePushNotifications();
 
@@ -651,6 +652,43 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
           bumpTyping((n) => n + 1);
         }
 
+        // Everything the cursor cannot see: an edit, a reaction, a pin, a game
+        // invite finishing, a moderator taking a message down. The cursor only
+        // ever asks for NEWER rows, so these stayed stale until the room was
+        // reopened. Every third visible tick (and every hidden one) re-reads the
+        // newest page and swaps in any row we already hold that has changed.
+        refreshTickRef.current += 1;
+        if (
+          !cancelled &&
+          res.ok &&
+          (document.visibilityState !== "visible" || refreshTickRef.current % 3 === 0)
+        ) {
+          try {
+            const freshRes = await fetch(`/api/community/messages?channelId=${activeId}`, { cache: "no-store" });
+            if (freshRes.ok) {
+              const freshData = await freshRes.json();
+              const page: ChatMessage[] = freshData.messages ?? [];
+              if (!cancelled && page.length) {
+                setMessages((current) => {
+                  const byId = new Map(page.map((m) => [m.id, m]));
+                  let changed = false;
+                  const next = current.map((m) => {
+                    const latest = byId.get(m.id);
+                    if (latest && JSON.stringify(latest) !== JSON.stringify(m)) {
+                      changed = true;
+                      return latest;
+                    }
+                    return m;
+                  });
+                  return changed ? next : current;
+                });
+              }
+            }
+          } catch {
+            // A missed refresh is caught by the next one.
+          }
+        }
+
         // The OFFICE has no portal-wide feed, so it asks about the room it has
         // open, on this same cadence. Everyone else reads the shared feed.
         // Skipped while hidden: nobody is watching dots on a background tab.
@@ -685,8 +723,15 @@ function CommunityHubInner({ compact = false }: { compact?: boolean }) {
     }
 
     timer = window.setTimeout(tick, POLL_ACTIVE_MS);
+    // Messages that arrived while the tab was hidden are shown by the next poll
+    // but were never marked read, so the badge stayed on. Clear it on return.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void markRead(activeId);
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
       if (timer) window.clearTimeout(timer);
     };
   }, [activeId, markRead]);
