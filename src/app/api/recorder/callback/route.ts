@@ -5,8 +5,8 @@ import {
   RECORDER_TIMESTAMP_HEADER,
   callbackToEgress,
   parseRecorderCallback,
-  recorderConfig,
   recorderEgressId,
+  recorderSecret,
   verifyRecorderRequest,
 } from "@/lib/recorder";
 
@@ -31,12 +31,12 @@ export const dynamic = "force-dynamic";
  * itself idempotent on the egress id ("already"), so a repeat is harmless.
  */
 export async function POST(request: Request) {
-  const config = recorderConfig();
-  if (!config) return NextResponse.json({ error: "Recorder not configured" }, { status: 503 });
+  const secret = recorderSecret();
+  if (!secret) return NextResponse.json({ error: "Recorder not configured" }, { status: 503 });
 
   const body = await request.text();
   const verdict = verifyRecorderRequest({
-    secret: config.secret,
+    secret,
     timestamp: request.headers.get(RECORDER_TIMESTAMP_HEADER),
     signature: request.headers.get(RECORDER_SIGNATURE_HEADER),
     body,

@@ -35,7 +35,7 @@ const MAX_SKEW_MS = 5 * 60 * 1000;
 /* Which backend?                                                             */
 /* -------------------------------------------------------------------------- */
 
-/** Any bag of strings — process.env fits, and so does a literal in a test. */
+/** Any bag of strings: process.env fits, and so does a literal in a test. */
 export type Env = Record<string, string | undefined>;
 
 export type RecordingBackend = "livekit" | "recorder" | "recorder-only";
@@ -47,11 +47,22 @@ export function recordingBackend(env: Env = process.env): RecordingBackend {
 
 export type RecorderConfig = { url: string; secret: string };
 
-/** null unless BOTH the URL and a real (32+ char) shared secret are set. */
+/**
+ * The shared secret alone, or null unless it is a real (32+ char) one. The
+ * inbound callback route needs only this: it never calls the recorder, so it
+ * must not also demand the recorder's URL to decide whether it can check a
+ * signature.
+ */
+export function recorderSecret(env: Env = process.env): string | null {
+  const secret = String(env.RECORDER_SHARED_SECRET ?? "").trim();
+  return secret.length >= 32 ? secret : null;
+}
+
+/** null unless BOTH the URL and a real (32+ char) shared secret are set. Needed to CALL the recorder. */
 export function recorderConfig(env: Env = process.env): RecorderConfig | null {
   const url = String(env.RECORDER_URL ?? "").trim().replace(/\/+$/, "");
-  const secret = String(env.RECORDER_SHARED_SECRET ?? "").trim();
-  if (!url || secret.length < 32) return null;
+  const secret = recorderSecret(env);
+  if (!url || !secret) return null;
   return { url, secret };
 }
 

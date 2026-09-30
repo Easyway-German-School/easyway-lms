@@ -10,6 +10,7 @@ import {
   recorderAppBase,
   recorderConfig,
   recorderEgressId,
+  recorderSecret,
   recorderSelected,
   recordingBackend,
   signRecorderBody,
@@ -40,6 +41,14 @@ describe("which backend records", () => {
     expect(recorderSelected({ ...env, RECORDING_BACKEND: "recorder" })).toBe(true);
     expect(recorderSelected({ ...env })).toBe(false); // configured but not opted in
     expect(recorderConfig(env)?.url).toBe("https://r.example"); // trailing slash trimmed
+  });
+
+  it("the callback only needs the secret, not the recorder's URL", () => {
+    expect(recorderSecret({ RECORDER_SHARED_SECRET: secret })).toBe(secret);
+    expect(recorderSecret({ RECORDER_SHARED_SECRET: "short" })).toBeNull();
+    expect(recorderSecret({})).toBeNull();
+    // ...whereas CALLING the recorder needs both
+    expect(recorderConfig({ RECORDER_SHARED_SECRET: secret })).toBeNull();
   });
 
   it("never hands the recorder a localhost origin", () => {
