@@ -111,6 +111,7 @@ export async function GET(request: Request) {
         registeredAt: student.createdAt,
         classesStartedAt: student.classesStartedAt,
         startDayOverrides,
+        level: student.level,
       });
       return upcoming ? { label: upcoming.monthLabel, daysUntilStart: upcoming.daysUntilStart } : null;
     })(),

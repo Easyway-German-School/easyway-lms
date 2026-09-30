@@ -87,7 +87,7 @@ export async function loadUpcomingBatchRows(
       ...(options.where ?? {}),
       ...(options.studentIds ? { id: { in: options.studentIds } } : {}),
     },
-    select: { id: true, createdAt: true, classesStartedAt: true, admission: true },
+    select: { id: true, createdAt: true, classesStartedAt: true, admission: true, level: true },
   });
 
   const waiting = new Map<string, ReturnType<typeof resolveUpcomingBatch>>();
@@ -97,6 +97,7 @@ export async function loadUpcomingBatchRows(
       classesStartedAt: student.classesStartedAt,
       now,
       startDayOverrides: options.startDayOverrides,
+      level: student.level,
     });
     if (upcoming) waiting.set(student.id, upcoming);
   }
@@ -196,7 +197,10 @@ export async function loadUpcomingBatchRows(
 export type IntakeSummary = {
   batchLabel: string;
   monthKey: string;
+  /** The earliest level's opening — the headline date. */
   startsOn: string;
+  /** Each level's own opening when they differ, e.g. { A1: "…Oct 5", A2: "…Oct 12" }. */
+  levelStarts: Record<string, string>;
   daysUntilStart: number;
   total: number;
   /** Learners who have put any money down — the seats "taken". */
@@ -215,6 +219,7 @@ export function summariseIntakes(rows: SeatRow[]): IntakeSummary[] {
         batchLabel: row.batchLabel,
         monthKey: row.monthKey,
         startsOn: row.startsOn,
+        levelStarts: {},
         daysUntilStart: row.daysUntilStart,
         total: 0,
         secured: 0,
@@ -222,6 +227,11 @@ export function summariseIntakes(rows: SeatRow[]): IntakeSummary[] {
         tuitionCollected: 0,
         balanceOutstanding: 0,
       } satisfies IntakeSummary);
+    if (row.startsOn < existing.startsOn) {
+      existing.startsOn = row.startsOn;
+      existing.daysUntilStart = row.daysUntilStart;
+    }
+    existing.levelStarts[row.level] = row.startsOn;
     existing.total += 1;
     if (row.seat !== "unpaid") existing.secured += 1;
     existing.bySeat[row.seat] += 1;

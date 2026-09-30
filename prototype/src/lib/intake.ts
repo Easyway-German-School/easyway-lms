@@ -116,7 +116,8 @@ export const INTAKE_START_DAYS_KEY = "intake.startDays";
 /** "YYYY-MM" -> the day of that month (1-28) the batch actually opens. */
 export type IntakeStartDayOverrides = Record<string, number>;
 
-const MONTH_KEY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+// "2026-10" opens every level; "2026-10:A2" opens just that level.
+const MONTH_KEY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])(:(A1|A2|B1|B2|C1|C2))?$/;
 
 function isValidStartDay(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 28;
@@ -125,6 +126,22 @@ function isValidStartDay(value: unknown): value is number {
 /** "2026-10" for October 2026 — the same key `resolveBatchStart` looks up. */
 export function intakeMonthKey(year: number, monthIndex: number): string {
   return `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+}
+
+/** "2026-10:A2" — the key for one level's own opening day within a month. */
+export function intakeLevelKey(monthKey: string, level: string): string {
+  return `${monthKey}:${level.trim().toUpperCase()}`;
+}
+
+/** This level's own day if the office set one, else the month's day, else the 1st. */
+export function startDayFor(
+  overrides: IntakeStartDayOverrides | undefined,
+  monthKey: string,
+  level?: string | null,
+): number {
+  const levelDay = level ? overrides?.[intakeLevelKey(monthKey, level)] : undefined;
+  const day = levelDay ?? overrides?.[monthKey];
+  return day && day >= 1 && day <= 28 ? day : 1;
 }
 
 /**

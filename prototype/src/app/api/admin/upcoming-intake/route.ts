@@ -148,8 +148,8 @@ export async function POST(request: Request) {
 
     if (action === "setStartDay") {
       const monthKey = typeof body.monthKey === "string" ? body.monthKey : "";
-      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
-        return NextResponse.json({ error: "monthKey must look like 2026-10" }, { status: 400 });
+      if (!/^\d{4}-(0[1-9]|1[0-2])(:(A1|A2|B1|B2|C1|C2))?$/.test(monthKey)) {
+        return NextResponse.json({ error: "monthKey must look like 2026-10 or 2026-10:A2" }, { status: 400 });
       }
       const rawDay = body.day;
       const day = rawDay === null ? null : Number(rawDay);
@@ -172,7 +172,7 @@ export async function POST(request: Request) {
 
       const targets = await prisma.student.findMany({
         where: { id: { in: ids }, ...fence(gate) },
-        select: { id: true, createdAt: true, classesStartedAt: true, admission: true, user: { select: { name: true } } },
+        select: { id: true, createdAt: true, classesStartedAt: true, admission: true, level: true, user: { select: { name: true } } },
       });
 
       const notLocked: string[] = [];
@@ -191,7 +191,7 @@ export async function POST(request: Request) {
         // retired and kept in `admission` so the move can be undone.
         const startedAlready = Boolean(student.classesStartedAt && student.classesStartedAt.getTime() <= Date.now());
         const monthIsAhead = Boolean(
-          resolveUpcomingBatch(month, { registeredAt: student.createdAt, startDayOverrides }),
+          resolveUpcomingBatch(month, { registeredAt: student.createdAt, startDayOverrides, level: student.level }),
         );
         const restart = startedAlready && monthIsAhead;
 
@@ -217,6 +217,7 @@ export async function POST(request: Request) {
           registeredAt: student.createdAt,
           classesStartedAt: restart ? null : student.classesStartedAt,
           startDayOverrides,
+          level: student.level,
         });
         if (upcoming) locked += 1;
         else notLocked.push(name);

@@ -34,7 +34,7 @@
 
 import { MONTH_NAMES, resolveBatchAbsolute } from "@/lib/batch";
 import { instantToZonedParts, zonedTimeToInstant } from "@/lib/school-time";
-import { intakeMonthKey, type IntakeStartDayOverrides } from "@/lib/intake";
+import { intakeMonthKey, startDayFor, type IntakeStartDayOverrides } from "@/lib/intake";
 
 /**
  * How far ahead of today a bare month name may sit and still count as a
@@ -115,7 +115,8 @@ export function resolveBatchStart(
     registeredAt,
     now = new Date(),
     startDayOverrides,
-  }: { registeredAt?: unknown; now?: Date; startDayOverrides?: IntakeStartDayOverrides } = {},
+    level,
+  }: { registeredAt?: unknown; now?: Date; startDayOverrides?: IntakeStartDayOverrides; level?: string | null } = {},
 ): BatchStart | null {
   const parsed = parseBatchLabel(batch);
   if (!parsed) return null;
@@ -137,8 +138,8 @@ export function resolveBatchStart(
   const year = Math.floor(absolute / 12);
   const monthIndex = absolute % 12;
   const monthKey = intakeMonthKey(year, monthIndex);
-  const overrideDay = startDayOverrides?.[monthKey];
-  const startDay = overrideDay && overrideDay >= 1 && overrideDay <= 28 ? overrideDay : 1;
+  // A level can open on its own day (A1 on the 5th, A2–B2 on the 12th).
+  const startDay = startDayFor(startDayOverrides, monthKey, level);
   const startsOnKey = `${monthKey}-${String(startDay).padStart(2, "0")}`;
   return {
     batch: MONTH_NAMES[monthIndex],
@@ -167,18 +168,21 @@ export function resolveUpcomingBatch(
     classesStartedAt,
     now = new Date(),
     startDayOverrides,
+    level,
   }: {
     registeredAt?: unknown;
     classesStartedAt?: unknown;
     now?: Date;
     startDayOverrides?: IntakeStartDayOverrides;
+    /** The learner's level — picks up a level-specific opening day. */
+    level?: string | null;
   } = {},
 ): UpcomingBatch | null {
   // Guard 2: a confirmed first day that has already passed beats the label.
   const confirmed = validDate(classesStartedAt);
   if (confirmed && confirmed.getTime() <= now.getTime()) return null;
 
-  const start = resolveBatchStart(batch, { registeredAt, now, startDayOverrides });
+  const start = resolveBatchStart(batch, { registeredAt, now, startDayOverrides, level });
   if (!start || start.startsOn.getTime() <= now.getTime()) return null;
 
   return {
@@ -207,15 +211,18 @@ export function batchLockFloor(
     classesStartedAt,
     now = new Date(),
     startDayOverrides,
+    level,
   }: {
     registeredAt?: unknown;
     classesStartedAt?: unknown;
     now?: Date;
     startDayOverrides?: IntakeStartDayOverrides;
+    /** The learner's level — picks up a level-specific opening day. */
+    level?: string | null;
   } = {},
 ): Date | null {
   if (validDate(classesStartedAt)) return null;
-  return resolveBatchStart(batch, { registeredAt, now, startDayOverrides })?.startsOn ?? null;
+  return resolveBatchStart(batch, { registeredAt, now, startDayOverrides, level })?.startsOn ?? null;
 }
 
 /** The later of an anchor date and the batch floor. */
