@@ -52,6 +52,7 @@ type Intake = {
   batchLabel: string;
   monthKey: string;
   startsOn: string;
+  levelStarts: Record<string, string>;
   daysUntilStart: number;
   total: number;
   secured: number;
@@ -103,6 +104,8 @@ function naira(value: number) {
   return `₦${Math.max(0, Math.round(value)).toLocaleString("en-NG")}`;
 }
 
+const LATER_LEVELS = ["A2", "B1", "B2", "C1", "C2"];
+
 function when(iso: string) {
   return new Date(iso).toLocaleDateString("en-NG", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Lagos" });
 }
@@ -148,6 +151,8 @@ export default function UpcomingIntakePage() {
   const [editingStartDay, setEditingStartDay] = useState(false);
   const [startDayInput, setStartDayInput] = useState("1");
   const [savingStartDay, setSavingStartDay] = useState(false);
+  const [editingLaterDay, setEditingLaterDay] = useState(false);
+  const [laterDayInput, setLaterDayInput] = useState("12");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -329,6 +334,34 @@ export default function UpcomingIntakePage() {
     }
   }
 
+  /** A2 and up open on their own day; "same as A1" clears it so they follow the intake again. */
+  async function saveLaterDay(sameAsA1: boolean) {
+    if (!intake) return;
+    const day = Number(laterDayInput);
+    if (!sameAsA1 && (!Number.isInteger(day) || day < 1 || day > 28)) {
+      setMsg("Give a day between 1 and 28.");
+      return;
+    }
+    setSavingStartDay(true);
+    setMsg("");
+    try {
+      for (const level of LATER_LEVELS) {
+        await post({ action: "setStartDay", monthKey: `${intake.monthKey}:${level}`, day: sameAsA1 ? null : day });
+      }
+      setMsg(
+        sameAsA1
+          ? `A2–B2 now open the same day as A1.`
+          : `A2–B2 now open on the ${day}${ordinal(day)}; A1 keeps its own date. Every countdown updates.`,
+      );
+      setEditingLaterDay(false);
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not change the opening day");
+    } finally {
+      setSavingStartDay(false);
+    }
+  }
+
   function exportCsv() {
     const header = ["Name", "Email", "Phone", "Branch", "Level", "Session", "Intake", "Seat status", "Seat #", "Tuition paid", "Registration fee paid", "Deposit still due", "Balance still owed", "First payment", "Last nudged"];
     const lines = inIntake.map((r) =>
@@ -445,7 +478,51 @@ export default function UpcomingIntakePage() {
                     className="group flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--accent)]"
                   >
                     {when(intake.startsOn)}
-                    <span className="text-xs underline opacity-0 group-hover:opacity-100">Edit opening day</span>
+                    <span className="text-xs underline opacity-0 group-hover:opacity-100">
+                      Edit {Object.keys(intake.levelStarts).some((l) => l !== "A1") ? "A1" : ""} opening day
+                    </span>
+                  </button>
+                )}
+                {editingLaterDay ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-[var(--muted)]">A2–B2 open on the</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={28}
+                      value={laterDayInput}
+                      onChange={(e) => setLaterDayInput(e.target.value)}
+                      className="w-16 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-sm text-[var(--foreground)]"
+                      autoFocus
+                    />
+                    <button
+                      disabled={savingStartDay}
+                      onClick={() => saveLaterDay(false)}
+                      className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                    <button disabled={savingStartDay} onClick={() => saveLaterDay(true)} className="text-xs text-[var(--muted)] underline">
+                      Same day as A1
+                    </button>
+                    <button disabled={savingStartDay} onClick={() => setEditingLaterDay(false)} className="text-xs text-[var(--muted)] underline">
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      const later = Object.entries(intake.levelStarts).find(([l]) => l !== "A1")?.[1] ?? intake.startsOn;
+                      setLaterDayInput(String(dayOfMonth(later)));
+                      setEditingLaterDay(true);
+                    }}
+                    className="group flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--accent)]"
+                  >
+                    {(() => {
+                      const later = Object.entries(intake.levelStarts).find(([l]) => l !== "A1")?.[1];
+                      return later && later !== intake.startsOn ? `A2–B2: ${when(later)}` : "A2–B2 open the same day";
+                    })()}
+                    <span className="text-xs underline opacity-0 group-hover:opacity-100">Set A2–B2 day</span>
                   </button>
                 )}
               </div>

@@ -153,3 +153,26 @@ describe("seatStatusFor", () => {
     expect(seatStatusFor({ tuitionPaid: 150_000, registrationPaid: true, depositPaid: true, fullyPaid: true })).toBe("paid_in_full");
   });
 });
+
+describe("level-specific opening days", () => {
+  const overrides = { "2026-10": 5, "2026-10:A2": 12, "2026-10:B1": 12, "2026-10:B2": 12 };
+  const opts = { registeredAt: new Date("2026-09-05T00:00:00Z"), now: NOW, startDayOverrides: overrides };
+
+  it("opens A1 on the 5th and A2–B2 on the 12th", () => {
+    expect(resolveUpcomingBatch("October", { ...opts, level: "A1" })?.startsOnKey).toBe("2026-10-05");
+    for (const level of ["A2", "B1", "B2"]) {
+      expect(resolveUpcomingBatch("October", { ...opts, level })?.startsOnKey).toBe("2026-10-12");
+    }
+  });
+
+  it("falls back to the month's day for a level with no date of its own", () => {
+    expect(resolveUpcomingBatch("October", { ...opts, level: "C1" })?.startsOnKey).toBe("2026-10-05");
+    expect(resolveUpcomingBatch("October", opts)?.startsOnKey).toBe("2026-10-05");
+  });
+
+  it("keeps A2 waiting after A1 has opened", () => {
+    const now = new Date("2026-10-06T10:00:00Z");
+    expect(resolveUpcomingBatch("October", { ...opts, now, level: "A1" })).toBeNull();
+    expect(resolveUpcomingBatch("October", { ...opts, now, level: "A2" })?.daysUntilStart).toBe(6);
+  });
+});
