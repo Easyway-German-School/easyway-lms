@@ -19,6 +19,7 @@ import { sendEmail } from "@/lib/mailer";
 import { feeReminderEmailTemplate } from "@/lib/email-templates";
 import { receivedPaymentFilter } from "@/lib/payment";
 import { batchFromAdmission } from "@/lib/batch";
+import { readIntakeStartDayOverrides } from "@/lib/intake-server";
 import { batchLockFloor, withBatchFloor } from "@/lib/batch-reservation";
 import { PART_PAYMENT_LOCK_DAYS } from "@/lib/access";
 import { buildLedger, ledgerIsPopulated } from "@/lib/finance/ledger";
@@ -48,6 +49,7 @@ export async function sendDueFeeReminders(options: {
 } = {}): Promise<FeeReminderResult> {
   const { studentId, forceSend = false } = options;
   const now = Date.now();
+  const startDayOverrides = await readIntakeStartDayOverrides(null);
 
   // Students on an on-track tuition payment plan — held like a grace date.
   const onTrackPlan = forceSend ? new Set<string>() : await onTrackPlanStudentIds(new Date(now));
@@ -132,6 +134,8 @@ export async function sendDueFeeReminders(options: {
         registeredAt: student.createdAt,
         classesStartedAt: student.classesStartedAt,
         now: new Date(now),
+        startDayOverrides,
+        level: student.level,
       });
       const lockAt = new Date(withBatchFloor(new Date(anchor), floor).getTime() + PART_PAYMENT_LOCK_DAYS * DAY_MS);
 
