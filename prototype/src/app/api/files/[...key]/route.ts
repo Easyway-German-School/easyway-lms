@@ -148,6 +148,15 @@ export async function GET(request: NextRequest, context: { params: Promise<{ key
     const value = upstream.headers.get(header);
     if (value) headers.set(header, value);
   }
+  // Community voice notes (`voice-14s.webm` / `.m4a`, see CommunityHub). Served
+  // with an explicit audio type and range support: a recorder's WebM has no
+  // duration or seek index, and a player that cannot range-request it (or is
+  // told it is octet-stream) sits there silent.
+  const voiceNote = objectKey.match(/(?:^|\/)(?:[^/]*-)?voice-\d+s\.(webm|m4a)$/i);
+  if (voiceNote) {
+    headers.set("content-type", voiceNote[1].toLowerCase() === "m4a" ? "audio/mp4" : "audio/webm");
+    if (!headers.has("accept-ranges")) headers.set("accept-ranges", "bytes");
+  }
   if (objectKey.startsWith(RECORDING_PREFIX) && STREAMABLE_VIDEO.test(objectKey)) {
     // A recording video reaches here only on the signed-URL fallback, or as the
     // `?proxy=1` offline download. Keep it out of the browser's persistent
