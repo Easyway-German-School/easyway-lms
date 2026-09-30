@@ -249,7 +249,17 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const channelId = String(body.channelId ?? "");
     const text = String(body.body ?? "").trim().slice(0, MAX_BODY);
-    const attachmentUrl = body.attachmentUrl ? String(body.attachmentUrl) : null;
+    const rawAttachmentUrl = body.attachmentUrl ? String(body.attachmentUrl) : null;
+    // Only files this app stored: an arbitrary external URL would render, for the
+    // whole cohort, as a tracking pixel or hotlinked content.
+    const publicBase = process.env.STORAGE_PUBLIC_BASE_URL?.replace(/\/+$/, "");
+    const attachmentUrl =
+      rawAttachmentUrl &&
+      (rawAttachmentUrl.startsWith("/api/files/") ||
+        rawAttachmentUrl.startsWith("/uploads/") ||
+        (publicBase && rawAttachmentUrl.startsWith(`${publicBase}/`)))
+        ? rawAttachmentUrl
+        : null;
     /**
      * Length of a voice note, in whole seconds, as measured on the device that
      * recorded it. Clamped to a sane range so a bad clock or a hand-crafted
