@@ -27,6 +27,7 @@ import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { createRecordingThumbnail } from "@/lib/recording-thumbnail";
 import { classDayBounds, heldParts, otherPartsOf, otherPartsSeconds, type PartRow } from "@/lib/class-parts";
+import { schedulerHint } from "@/lib/recorder-control";
 import { decideFallback, fallbackPolicy, liveKitMinutes, monthStartUtc, type FallbackDecision } from "@/lib/recording-fallback";
 import { isTooShortToKeep, studentExpiryFrom } from "@/lib/retention";
 import {
@@ -145,11 +146,11 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
       // (patient, capped, optional: see recording-fallback.ts) and is always announced to the admins.
       const verdict = await fallbackVerdict(input);
       if (!verdict.allow) {
-        announceNotRecorded(input, verdict);
+        await announceNotRecorded(input, verdict);
         return null; // the tutor's page asks again in ~45 s, so "waiting" simply tries again
       }
       console.warn("Recorder unavailable for", input.roomName, "— falling back to LiveKit Egress");
-      announceFallback(input);
+      await announceFallback(input);
     }
 
     const variant = recordingVariant();
@@ -224,27 +225,29 @@ async function fallbackVerdict(input: StartRecordingInput): Promise<FallbackDeci
 const dayKey = () => new Date().toISOString().slice(0, 10);
 
 /** LiveKit is about to be paid for this class: tell the admins, once per class per day. */
-function announceFallback(input: StartRecordingInput): void {
+async function announceFallback(input: StartRecordingInput): Promise<void> {
+  const why = await schedulerHint();
   notifyInBackground({
     to: { audience: "admin", capability: "materials" },
     kind: KIND.recordingFailed,
     severity: "warning",
     title: "A class is being recorded by LiveKit (this costs money)",
-    message: `Our own recorder could not take ${input.level ? input.level.toUpperCase() + " " : ""}${input.sessionSlot ?? ""} class, so LiveKit is recording it instead. If this keeps happening, check the recorder status page.`.replace(/\s+/g, " "),
+    message: `Our own recorder could not take ${input.level ? input.level.toUpperCase() + " " : ""}${input.sessionSlot ?? ""} class, so LiveKit is recording it instead. If this keeps happening, check the recorder status page. ${why}`.replace(/\s+/g, " ").trim(),
     link: "/admin/recorder",
     dedupeKey: `recording-fallback:${input.roomName}:${dayKey()}`,
   });
 }
 
 /** A class is running with NO recording and the policy says LiveKit may not step in: tell the admins (not while merely waiting). */
-function announceNotRecorded(input: StartRecordingInput, verdict: Extract<FallbackDecision, { allow: false }>): void {
+async function announceNotRecorded(input: StartRecordingInput, verdict: Extract<FallbackDecision, { allow: false }>): Promise<void> {
   if (verdict.reason === "waiting") return;
+  const why = await schedulerHint();
   notifyInBackground({
     to: { audience: "admin", capability: "materials" },
     kind: KIND.recordingFailed,
     severity: "critical",
     title: verdict.reason === "budget" ? "LiveKit recording budget used up: classes are not being recorded" : "A class is running without a recording",
-    message: `Our own recorder could not take this class and ${verdict.detail}. It will not be recorded unless a recorder server becomes available.`,
+    message: `Our own recorder could not take this class and ${verdict.detail}. It will not be recorded unless a recorder server becomes available. ${why}`.trim(),
     link: "/admin/recorder",
     dedupeKey: `recording-none:${input.roomName}:${dayKey()}`,
   });

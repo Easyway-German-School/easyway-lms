@@ -8,9 +8,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   startRecorder: vi.fn(),
   startEgress: vi.fn(async () => ({ egressId: "EG_livekit_1" })),
-  notified: [] as { severity?: string; title: string; dedupeKey: string }[],
+  notified: [] as { severity?: string; title: string; message?: string; dedupeKey: string }[],
   recordings: [] as Record<string, unknown>[],
   liveSession: null as { startedAt: Date } | null,
+  hint: "",
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -26,7 +27,7 @@ vi.mock("@/lib/prisma", () => ({
     liveClassSession: { findFirst: async () => h.liveSession },
   },
 }));
-vi.mock("@/lib/notify", () => ({ KIND: { recordingFailed: "rf", materialPublished: "mp" }, notifyInBackground: (n: { severity?: string; title: string; dedupeKey: string }) => h.notified.push(n) }));
+vi.mock("@/lib/notify", () => ({ KIND: { recordingFailed: "rf", materialPublished: "mp" }, notifyInBackground: (n: { severity?: string; title: string; message?: string; dedupeKey: string }) => h.notified.push(n) }));
 vi.mock("@/lib/recording-thumbnail", () => ({ createRecordingThumbnail: async () => null }));
 vi.mock("@/lib/recording", () => ({
   AUDIO_ENCODING: {}, CLASS_ENCODING: {}, buildFileOutput: () => ({}),
@@ -34,6 +35,7 @@ vi.mock("@/lib/recording", () => ({
   egressTemplateBaseUrl: () => null, recordingConfigured: () => true, recordingObjectKey: () => "recordings/x.mp4",
   recordingPublicUrl: (k: string) => k, recordingStorage: () => ({}), recordingVariant: () => "video", verifyRecordingObject: async () => ({ ok: true }),
 }));
+vi.mock("@/lib/recorder-control", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/recorder-control")>()), schedulerHint: async () => h.hint }));
 vi.mock("@/lib/recorder", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/recorder")>()), startRecorderJob: h.startRecorder }));
 
 import { ensureRecordingStarted } from "./class-recorder";
@@ -53,6 +55,7 @@ beforeEach(() => {
   h.notified.length = 0;
   h.recordings.length = 0;
   h.liveSession = null;
+  h.hint = "";
   setEnv();
 });
 
@@ -99,6 +102,13 @@ describe("our recorder cannot take the class", () => {
     h.liveSession = { startedAt: minutesAgo(13) };
     expect(await ensureRecordingStarted(input)).toBe("EG_livekit_1");
     expect(h.notified[0]).toMatchObject({ severity: "warning" });
+  });
+
+  it("the alert names the likely cause, so the office knows what to fix", async () => {
+    h.hint = "The recorder scheduler has been silent for 25 minutes, so no server was started.";
+    recorderRefuses();
+    await ensureRecordingStarted(input);
+    expect(h.notified[0]).toMatchObject({ message: expect.stringContaining("silent for 25 minutes") });
   });
 
   it("never: LiveKit is not used, and the admins are told the class is unrecorded", async () => {
