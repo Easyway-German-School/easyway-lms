@@ -4,6 +4,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Room, RoomEvent, Track, type Participant, type RemoteParticipant } from "livekit-client";
 import EgressHelper from "@livekit/egress-sdk";
 import { useRoomInteractions } from "@/components/live/useRoomInteractions";
+import { useHideFloatingThemeToggle } from "@/components/ThemeToggle";
 import { roleOfMetadata } from "@/lib/live-room-protocol";
 
 /**
@@ -40,7 +41,31 @@ import { roleOfMetadata } from "@/lib/live-room-protocol";
  * the transcription pipeline this whole feature feeds — see
  * [[project-class-notes-pipeline]].
  */
+/**
+ * THE CONTRACT WITH OUR OWN RECORDER (EduPrime-Recorder).
+ *
+ * LiveKit's egress service knows what this page is doing because
+ * `EgressHelper` talks to it. Our own recorder just watches a browser tab, so
+ * the page says what is happening out loud: `window.__recorder.state` moves
+ * connecting -> connected -> ended (or failed). The recorder waits for
+ * "connected" before it starts filming (so it never records a blank screen) and
+ * stops when it reads "ended". Harmless under LiveKit's egress: nothing reads it.
+ */
+type RecorderState = "connecting" | "connected" | "ended" | "failed";
+function setRecorderState(state: RecorderState) {
+  if (typeof window === "undefined") return;
+  (window as unknown as { __recorder?: { state: RecorderState } }).__recorder = { state };
+}
+
+/** Everyone gone this long after the class had people in it = the class is over. */
+const EMPTY_ROOM_GRACE_MS = 2 * 60_000;
+
 export default function EgressTemplatePage() {
+  // The app's floating day/night switch ("Tag") is mounted by the root layout on
+  // every page. Found in the first real recording: it sat in the corner of the
+  // video. Nothing but the class belongs in a recording.
+  useHideFloatingThemeToggle();
+
   // Created inside an effect, not during render — `Room` touches browser-only
   // APIs, and this component still goes through a server render pass for its
   // initial HTML like any other "use client" page. LiveKitClassroom.tsx's own
@@ -59,8 +84,12 @@ export default function EgressTemplatePage() {
   useEffect(() => {
     let disposed = false;
     const instance = new Room();
+    setRecorderState("connecting");
 
     instance
+      // Only fires once LiveKit has given up reconnecting (a blip shows as
+      // "Reconnecting", not this) — i.e. the room really closed.
+      .on(RoomEvent.Disconnected, () => setRecorderState("ended"))
       .on(RoomEvent.ParticipantConnected, bumpTopology)
       .on(RoomEvent.ParticipantDisconnected, bumpTopology)
       .on(RoomEvent.TrackSubscribed, bumpTopology)
@@ -89,14 +118,19 @@ export default function EgressTemplatePage() {
           EgressHelper.setRoom(instance);
           setRoom(instance);
           bumpTopology();
+          setRecorderState("connected");
         })
         .catch((error) => {
           console.error("[egress-template] could not connect to the room:", error);
-          if (!disposed) setFailed(true);
+          if (!disposed) {
+            setFailed(true);
+            setRecorderState("failed");
+          }
         });
     } catch (error) {
       console.error("[egress-template] missing url/token query params:", error);
       setFailed(true);
+      setRecorderState("failed");
     }
 
     return () => {
@@ -138,6 +172,21 @@ export default function EgressTemplatePage() {
     main = { participant: tutor, source: Track.Source.Camera };
     if (floorHolder && floorHolder.identity !== tutor.identity) side.push({ participant: floorHolder, source: Track.Source.Camera });
   }
+
+  // A class where everyone has left is over, even if nobody pressed "End" and
+  // the room has not been torn down yet. Only counts once someone HAS been
+  // here, so the wait for the tutor to arrive never reads as "ended".
+  const sawSomeoneRef = useRef(false);
+  useEffect(() => {
+    if (!room) return;
+    if (remoteParticipants.length > 0) {
+      sawSomeoneRef.current = true;
+      return;
+    }
+    if (!sawSomeoneRef.current) return;
+    const timer = setTimeout(() => setRecorderState("ended"), EMPTY_ROOM_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [room, remoteParticipants.length]);
 
   // Start once we're connected — this page has nothing more to wait for; a
   // few frames of "waiting for the tutor" before they publish video is a far

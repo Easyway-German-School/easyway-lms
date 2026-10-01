@@ -26,6 +26,8 @@ import { EgressStatus } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { createRecordingThumbnail } from "@/lib/recording-thumbnail";
+import { classDayBounds, heldParts, otherPartsOf, otherPartsSeconds, type PartRow } from "@/lib/class-parts";
+import { decideFallback, fallbackPolicy, liveKitMinutes, monthStartUtc, type FallbackDecision } from "@/lib/recording-fallback";
 import { isTooShortToKeep, studentExpiryFrom } from "@/lib/retention";
 import {
   AUDIO_ENCODING,
@@ -40,6 +42,18 @@ import {
   recordingVariant,
   verifyRecordingObject,
 } from "@/lib/recording";
+import {
+  getRecorderJob,
+  isRecorderEgressId,
+  jobIdFromEgressId,
+  jobViewToCallback,
+  callbackToEgress,
+  newRecorderJobId,
+  recorderEgressId,
+  recorderSelected,
+  startRecorderJob,
+  stopRecorderJob,
+} from "@/lib/recorder";
 
 export type StartRecordingInput = {
   roomName: string;
@@ -116,6 +130,28 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
       attempt,
     });
 
+    /**
+     * OUR OWN RECORDER, when switched on (`RECORDING_BACKEND`, see lib/recorder.ts).
+     * It films the class from a machine we run, so there is no LiveKit Egress
+     * bill. If it is down or full, `recorder` mode falls through to LiveKit
+     * Egress below — a class must never go unrecorded because a new service
+     * hiccuped. `recorder-only` (deliberate, no LiveKit egress spend) does not.
+     * With the flag unset this whole block is skipped: today's behaviour.
+     */
+    if (recorderSelected()) {
+      const viaRecorder = await startViaRecorder(input, objectKey);
+      if (viaRecorder) return viaRecorder;
+      // Our recorder could not take this class. Paying LiveKit is allowed only by the fallback policy
+      // (patient, capped, optional: see recording-fallback.ts) and is always announced to the admins.
+      const verdict = await fallbackVerdict(input);
+      if (!verdict.allow) {
+        announceNotRecorded(input, verdict);
+        return null; // the tutor's page asks again in ~45 s, so "waiting" simply tries again
+      }
+      console.warn("Recorder unavailable for", input.roomName, "— falling back to LiveKit Egress");
+      announceFallback(input);
+    }
+
     const variant = recordingVariant();
     // The custom template (src/app/live/egress-template) only ever matters for
     // video — an audio-only capture has no layout to render. `customBaseUrl`
@@ -162,6 +198,92 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
   }
 }
 
+/** May this class be recorded by LiveKit (paid) now? See recording-fallback.ts for the policy. */
+async function fallbackVerdict(input: StartRecordingInput): Promise<FallbackDecision> {
+  const policy = fallbackPolicy();
+  if (policy.mode === "immediate" && policy.monthlyCapMinutes === null) return { allow: true }; // the original behaviour: no extra queries
+  const now = new Date();
+  const [session, rows] = await Promise.all([
+    policy.mode === "delayed"
+      ? prisma.liveClassSession.findFirst({ where: { roomName: input.roomName, endedAt: null }, orderBy: { startedAt: "desc" }, select: { startedAt: true } })
+      : Promise.resolve(null),
+    policy.monthlyCapMinutes === null
+      ? Promise.resolve([])
+      : prisma.classRecording.findMany({
+          where: { NOT: { egressId: { startsWith: "rec_" } }, startedAt: { gte: monthStartUtc(now) } },
+          select: { durationSeconds: true, startedAt: true, status: true },
+        }),
+  ]);
+  return decideFallback({
+    policy,
+    classLiveMinutes: session ? (now.getTime() - session.startedAt.getTime()) / 60_000 : null,
+    liveKitMinutesThisMonth: liveKitMinutes(rows, now),
+  });
+}
+
+const dayKey = () => new Date().toISOString().slice(0, 10);
+
+/** LiveKit is about to be paid for this class: tell the admins, once per class per day. */
+function announceFallback(input: StartRecordingInput): void {
+  notifyInBackground({
+    to: { audience: "admin", capability: "materials" },
+    kind: KIND.recordingFailed,
+    severity: "warning",
+    title: "A class is being recorded by LiveKit (this costs money)",
+    message: `Our own recorder could not take ${input.level ? input.level.toUpperCase() + " " : ""}${input.sessionSlot ?? ""} class, so LiveKit is recording it instead. If this keeps happening, check the recorder status page.`.replace(/\s+/g, " "),
+    link: "/admin/recorder",
+    dedupeKey: `recording-fallback:${input.roomName}:${dayKey()}`,
+  });
+}
+
+/** A class is running with NO recording and the policy says LiveKit may not step in: tell the admins (not while merely waiting). */
+function announceNotRecorded(input: StartRecordingInput, verdict: Extract<FallbackDecision, { allow: false }>): void {
+  if (verdict.reason === "waiting") return;
+  notifyInBackground({
+    to: { audience: "admin", capability: "materials" },
+    kind: KIND.recordingFailed,
+    severity: "critical",
+    title: verdict.reason === "budget" ? "LiveKit recording budget used up: classes are not being recorded" : "A class is running without a recording",
+    message: `Our own recorder could not take this class and ${verdict.detail}. It will not be recorded unless a recorder server becomes available.`,
+    link: "/admin/recorder",
+    dedupeKey: `recording-none:${input.roomName}:${dayKey()}`,
+  });
+}
+
+/**
+ * Start the capture on our own recorder and record it in the same table.
+ *
+ * The id stored is the one the RECORDER returns, not the one proposed: asked to
+ * film a room it is already filming, it answers with the existing job. The
+ * upsert on that id is what keeps two near-simultaneous starts to one row.
+ */
+async function startViaRecorder(input: StartRecordingInput, objectKey: string): Promise<string | null> {
+  const started = await startRecorderJob({ roomName: input.roomName, objectKey, jobId: newRecorderJobId() });
+  if (!started.ok) {
+    console.error("Recorder did not start", { room: input.roomName, reason: started.reason, detail: started.detail });
+    return null;
+  }
+  const egressId = recorderEgressId(started.jobId);
+  await prisma.classRecording.upsert({
+    where: { egressId },
+    create: {
+      egressId,
+      roomName: input.roomName,
+      tenantId: input.tenantId ?? null,
+      branchId: input.branchId ?? null,
+      level: input.level ?? null,
+      sessionSlot: input.sessionSlot ?? null,
+      startedByUserId: input.startedByUserId ?? null,
+      privateClassId: input.privateClassId ?? null,
+      status: "active",
+      variant: "video",
+      objectKey,
+    },
+    update: {},
+  });
+  return egressId;
+}
+
 // LiveKit Cloud hard-caps a single Room Composite Egress at 180 minutes and
 // simply stops it — status `LIMIT_REACHED`, no warning, no replacement. A
 // class that runs long (and some do) loses its tail silently: the room stays
@@ -191,6 +313,9 @@ export async function restartRecordingIfNearingLimit(input: StartRecordingInput)
       select: { id: true, egressId: true, startedAt: true },
     });
     if (!active) return;
+    // The 180-minute wall is LiveKit Cloud's. Our recorder has its own, longer
+    // cap (MAX_JOB_MINUTES) and ends cleanly; swapping it here would be wrong.
+    if (isRecorderEgressId(active.egressId)) return;
 
     const ageMinutes = (Date.now() - active.startedAt.getTime()) / 60_000;
     if (ageMinutes < EGRESS_RESTART_AFTER_MINUTES) return;
@@ -222,6 +347,7 @@ export async function stopRecordingForRoom(roomName: string): Promise<boolean> {
       select: { egressId: true },
     });
     if (!active) return false;
+    if (isRecorderEgressId(active.egressId)) return await stopRecorderJob(jobIdFromEgressId(active.egressId));
     await client.stopEgress(active.egressId);
     return true;
   } catch (error) {
@@ -392,7 +518,13 @@ export async function finaliseRecording(egress: {
      * an admin can preview and delete it from Materials > Activity too, but
      * not before that same window has passed.
      */
-    if (isTooShortToKeep(durationSeconds, isPrivate)) {
+    /**
+     * "Too short" is judged on the WHOLE CLASS, not this one file. A crash or restart cuts a
+     * class into parts (`…-2.mp4`), and a 25-minute tail after a crash is the end of a real
+     * lesson, not a false start. See class-parts.ts for the flaw this closes.
+     */
+    const otherParts = isPrivate ? [] : await loadOtherParts(row);
+    if (isTooShortToKeep(durationSeconds, isPrivate, otherPartsSeconds(otherParts))) {
       await prisma.classRecording.update({
         where: { id: row.id },
         data: {
@@ -495,10 +627,52 @@ export async function finaliseRecording(egress: {
       });
     }
 
+    // This part proved the class was real: any EARLIER part of it that was held as "too short"
+    // (a first part before a crash, say) belongs on the shelf too. Never allowed to fail this one.
+    await rescueHeldParts(heldParts(otherParts));
+
     return "created";
   } catch (error) {
     console.error("Could not finalise class recording:", error);
     return "unknown";
+  }
+}
+
+/** The other recorded parts of the same class (same room, same day), for judging the class as a whole. */
+async function loadOtherParts(row: { id: string; roomName: string; startedAt: Date }): Promise<PartRow[]> {
+  const { from, to } = classDayBounds(row.startedAt);
+  const rows = await prisma.classRecording.findMany({
+    where: { roomName: row.roomName, id: { not: row.id }, startedAt: { gte: from, lt: to } },
+    select: {
+      id: true, roomName: true, startedAt: true, status: true, durationSeconds: true, sizeBytes: true,
+      materialId: true, objectKey: true, privateClassId: true, egressId: true,
+    },
+  });
+  return otherPartsOf(row, rows);
+}
+
+/**
+ * Publish parts of a class that were held as "too short" but are now known to belong to a real
+ * class. Each goes back through `finaliseRecording` (which verifies the file, makes the thumbnail,
+ * writes the shelf entry and notifies the cohort) with the duration and size it already had; the
+ * class-wide total now clears the bar. Terminates because every success sets `materialId`.
+ */
+async function rescueHeldParts(parts: PartRow[]): Promise<void> {
+  for (const part of parts) {
+    if (!part.egressId || !part.objectKey) continue;
+    try {
+      await finaliseRecording({
+        egressId: part.egressId,
+        status: EgressStatus.EGRESS_COMPLETE,
+        fileResults: [{
+          filename: part.objectKey,
+          duration: BigInt(Math.round(part.durationSeconds ?? 0)) * BigInt(1_000_000_000),
+          size: BigInt(part.sizeBytes ?? 0),
+        }],
+      });
+    } catch (error) {
+      console.error(`Could not rescue held recording part ${part.egressId}:`, error);
+    }
   }
 }
 
@@ -547,6 +721,34 @@ export function reconcileRecordingsSoon(): void {
 // ask. Past this age with no answer, it is dead and should say so.
 const STUCK_ACTIVE_HOURS = 6;
 
+/**
+ * The recorder's callback (`/api/recorder/callback`) is the fast path. If it was
+ * lost — a deploy landing at the wrong moment — the recorder still remembers the
+ * job, so ask it. Returns true when the row reached a final state.
+ */
+async function reconcileRecorderRecording(egressId: string, startedAt: Date, staleBefore: number): Promise<boolean> {
+  const jobId = jobIdFromEgressId(egressId);
+  const job = await getRecorderJob(jobId);
+  // Cannot reach it right now: not evidence of anything. Try again next pass.
+  if (job === "unreachable") return false;
+
+  if (job === null) {
+    // The recorder has no such job (never started, or its disk was wiped). Only
+    // call it dead once it is too old to still be a class in progress.
+    if (startedAt.getTime() >= staleBefore) return false;
+    await prisma.classRecording.update({
+      where: { egressId },
+      data: { status: "failed", endedAt: new Date(), error: "The recorder has no record of this class" },
+    });
+    return true;
+  }
+
+  const callback = jobViewToCallback(jobId, job);
+  if (!callback) return false; // still recording, encoding or uploading
+  const outcome = await finaliseRecording(callbackToEgress(callback));
+  return outcome === "created" || outcome === "failed";
+}
+
 export async function reconcileRecordings(): Promise<{ checked: number; finalised: number }> {
   const client = egressClient();
   if (!client || !recordingConfigured()) return { checked: 0, finalised: 0 };
@@ -571,6 +773,13 @@ export async function reconcileRecordings(): Promise<{ checked: number; finalise
   let finalised = 0;
   for (const { egressId, startedAt } of open) {
     try {
+      // Our own recorder's jobs are unknown to LiveKit — asking it would read as
+      // "LiveKit has no record" and kill a perfectly good recording. The
+      // recorder's own callback is the fast path; this is the net under it.
+      if (isRecorderEgressId(egressId)) {
+        if (await reconcileRecorderRecording(egressId, startedAt, staleBefore)) finalised += 1;
+        continue;
+      }
       const [info] = await client.listEgress({ egressId });
       if (!info) {
         if (startedAt.getTime() < staleBefore) {
