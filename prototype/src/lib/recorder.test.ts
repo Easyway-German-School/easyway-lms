@@ -1,6 +1,9 @@
 import { EgressStatus } from "livekit-server-sdk";
 import { describe, expect, it } from "vitest";
 import {
+  openRecorderToken,
+  sealRecorderToken,
+  sealingEnabled,
   callbackToEgress,
   isRecorderEgressId,
   jobIdFromEgressId,
@@ -145,5 +148,34 @@ describe("the recorder's room pass", () => {
 
   it("refuses to mint when LiveKit is not configured", async () => {
     await expect(mintRecorderToken({ roomName: "r", jobId: "job-12345678" }, {})).rejects.toThrow(/not configured/);
+  });
+});
+
+describe("sealing the room token for plain-http recorder servers", () => {
+  const secret = "s".repeat(40);
+  const jobId = "s0a000001-abcdef0123456789";
+  const token = "eyJhbGciOiJIUzI1NiJ9.eyJ2aWRlbyI6e319.signature-part-here";
+
+  it("round-trips, and hides the token", () => {
+    const sealed = sealRecorderToken(secret, jobId, token);
+    expect(sealed).not.toContain("eyJhbGci");
+    expect(openRecorderToken(secret, jobId, sealed)).toBe(token);
+  });
+
+  it("is bound to the job and the secret", () => {
+    const sealed = sealRecorderToken(secret, jobId, token);
+    expect(openRecorderToken(secret, "s0a000002-abcdef0123456789", sealed)).toBeNull();
+    expect(openRecorderToken("t".repeat(40), jobId, sealed)).toBeNull();
+  });
+
+  it("matches the recorder service byte for byte (the same fixed vector is in EduPrime-Recorder/test/seal.test.ts)", () => {
+    expect(sealRecorderToken(secret, jobId, token, Buffer.alloc(12, 7))).toBe(
+      "enc1.BwcHBwcHBwcHBwcH.i-jzZQ-xq-PrOZ7iyFKhrqxNEeWcBck0Q4X5f8z7LQKT_7FByAUzEnTKOcbMWU9uiPOBRWkdVfAE.olqgGIO2dAKCza4VeVDhRw",
+    );
+  });
+
+  it("can be switched off for a server that predates it", () => {
+    expect(sealingEnabled({})).toBe(true);
+    expect(sealingEnabled({ RECORDER_SEAL_TOKENS: "0" })).toBe(false);
   });
 });

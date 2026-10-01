@@ -61,6 +61,7 @@ const AREA_CAPABILITIES: Array<{ prefix: string; capability: Capability }> = [
 
   { prefix: "/admin/courses", capability: "materials" },
   { prefix: "/admin/materials", capability: "materials" },
+  { prefix: "/admin/recorder", capability: "materials" },
   { prefix: "/admin/community", capability: "community" },
 
   { prefix: "/admin/payments", capability: "payments" },

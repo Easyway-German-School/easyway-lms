@@ -24,7 +24,7 @@
  * (creating the ClassRecording row, finalising) stays in class-recorder.ts.
  */
 
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { AccessToken, EgressStatus } from "livekit-server-sdk";
 import {
   jobIdForServer,
@@ -128,6 +128,41 @@ export function signRecorderBody(secret: string, timestamp: string, body: string
   return "sha256=" + createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
 }
 
+/* -------------------------------------------------------------------------- */
+/* Sealing the room token — recorder servers are reached over plain http      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The request is signed, so nobody can change it, but on plain http anyone on the path could READ the LiveKit
+ * room token inside it. Sealing it (AES-256-GCM, key derived from the shared secret, job id bound in) means only
+ * this app and the recorder can. Format `enc1.<iv>.<ciphertext>.<tag>` (base64url): identical code and a fixed test
+ * vector live in the EduPrime-Recorder repository (src/seal.ts). RECORDER_SEAL_TOKENS=0 turns it off, for a
+ * recorder server that predates sealing.
+ */
+const sealKey = (secret: string): Buffer => Buffer.from(hkdfSync("sha256", secret, "eduprime-recorder", "job-token-v1", 32));
+
+export function sealRecorderToken(secret: string, jobId: string, token: string, iv: Buffer = randomBytes(12)): string {
+  const cipher = createCipheriv("aes-256-gcm", sealKey(secret), iv);
+  cipher.setAAD(Buffer.from(jobId));
+  const ciphertext = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
+  return ["enc1", iv.toString("base64url"), ciphertext.toString("base64url"), cipher.getAuthTag().toString("base64url")].join(".");
+}
+
+export function openRecorderToken(secret: string, jobId: string, sealed: string): string | null {
+  const parts = sealed.split(".");
+  if (parts.length !== 4 || parts[0] !== "enc1") return null;
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", sealKey(secret), Buffer.from(parts[1]!, "base64url"));
+    decipher.setAAD(Buffer.from(jobId));
+    decipher.setAuthTag(Buffer.from(parts[3]!, "base64url"));
+    return Buffer.concat([decipher.update(Buffer.from(parts[2]!, "base64url")), decipher.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+export const sealingEnabled = (env: Env = process.env): boolean => String(env.RECORDER_SEAL_TOKENS ?? "").trim() !== "0";
+
 export function verifyRecorderRequest(input: {
   secret: string;
   timestamp: string | null | undefined;
@@ -192,6 +227,11 @@ async function callRecorder(config: RecorderConfig, method: "GET" | "POST", path
   });
 }
 
+async function sealedRoomToken(secret: string, jobId: string, roomName: string, env: Env): Promise<string> {
+  const token = await mintRecorderToken({ roomName, jobId }, env);
+  return sealingEnabled(env) ? sealRecorderToken(secret, jobId, token) : token;
+}
+
 export type StartRecorderResult =
   | { ok: true; jobId: string; created: boolean }
   | { ok: false; reason: "not_configured" | "at_capacity" | "rejected" | "unreachable"; detail?: string };
@@ -239,7 +279,7 @@ export async function startRecorderJob(
         roomName: input.roomName,
         pageUrl: `${base}/live/egress-template`,
         livekitUrl,
-        token: await mintRecorderToken({ roomName: input.roomName, jobId: target.jobId }, env),
+        token: await sealedRoomToken(secret, target.jobId, input.roomName, env),
         objectKey: input.objectKey,
         callbackUrl: `${base}/api/recorder/callback`,
       }, fleet ? FLEET_ATTEMPT_TIMEOUT_MS : undefined);

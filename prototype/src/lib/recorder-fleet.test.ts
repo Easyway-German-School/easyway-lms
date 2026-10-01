@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { openRecorderToken } from "./recorder";
 import {
   DirectoryError,
   jobIdForServer,
@@ -145,7 +146,8 @@ describe("sending a recording to the fleet", () => {
   it("the room pass is minted for THAT job id", async () => {
     recorders({ "http://10.0.0.1:8787": 202 });
     await startRecorderJob(input, env, deps(dir(server(A, 5, 0))));
-    const payload = JSON.parse(Buffer.from(posts[0]!.body.token.split(".")[1]!, "base64url").toString());
+    const opened = openRecorderToken(env.RECORDER_SHARED_SECRET!, posts[0]!.body.jobId, posts[0]!.body.token)!;
+    const payload = JSON.parse(Buffer.from(opened.split(".")[1]!, "base64url").toString());
     expect(payload.sub).toBe(`recorder-${posts[0]!.body.jobId}`);
   });
 
