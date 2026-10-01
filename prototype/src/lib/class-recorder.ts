@@ -26,6 +26,7 @@ import { EgressStatus } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { createRecordingThumbnail } from "@/lib/recording-thumbnail";
+import { classDayBounds, heldParts, otherPartsOf, otherPartsSeconds, type PartRow } from "@/lib/class-parts";
 import { isTooShortToKeep, studentExpiryFrom } from "@/lib/retention";
 import {
   AUDIO_ENCODING,
@@ -458,7 +459,13 @@ export async function finaliseRecording(egress: {
      * an admin can preview and delete it from Materials > Activity too, but
      * not before that same window has passed.
      */
-    if (isTooShortToKeep(durationSeconds, isPrivate)) {
+    /**
+     * "Too short" is judged on the WHOLE CLASS, not this one file. A crash or restart cuts a
+     * class into parts (`…-2.mp4`), and a 25-minute tail after a crash is the end of a real
+     * lesson, not a false start. See class-parts.ts for the flaw this closes.
+     */
+    const otherParts = isPrivate ? [] : await loadOtherParts(row);
+    if (isTooShortToKeep(durationSeconds, isPrivate, otherPartsSeconds(otherParts))) {
       await prisma.classRecording.update({
         where: { id: row.id },
         data: {
@@ -561,10 +568,52 @@ export async function finaliseRecording(egress: {
       });
     }
 
+    // This part proved the class was real: any EARLIER part of it that was held as "too short"
+    // (a first part before a crash, say) belongs on the shelf too. Never allowed to fail this one.
+    await rescueHeldParts(heldParts(otherParts));
+
     return "created";
   } catch (error) {
     console.error("Could not finalise class recording:", error);
     return "unknown";
+  }
+}
+
+/** The other recorded parts of the same class (same room, same day), for judging the class as a whole. */
+async function loadOtherParts(row: { id: string; roomName: string; startedAt: Date }): Promise<PartRow[]> {
+  const { from, to } = classDayBounds(row.startedAt);
+  const rows = await prisma.classRecording.findMany({
+    where: { roomName: row.roomName, id: { not: row.id }, startedAt: { gte: from, lt: to } },
+    select: {
+      id: true, roomName: true, startedAt: true, status: true, durationSeconds: true, sizeBytes: true,
+      materialId: true, objectKey: true, privateClassId: true, egressId: true,
+    },
+  });
+  return otherPartsOf(row, rows);
+}
+
+/**
+ * Publish parts of a class that were held as "too short" but are now known to belong to a real
+ * class. Each goes back through `finaliseRecording` (which verifies the file, makes the thumbnail,
+ * writes the shelf entry and notifies the cohort) with the duration and size it already had; the
+ * class-wide total now clears the bar. Terminates because every success sets `materialId`.
+ */
+async function rescueHeldParts(parts: PartRow[]): Promise<void> {
+  for (const part of parts) {
+    if (!part.egressId || !part.objectKey) continue;
+    try {
+      await finaliseRecording({
+        egressId: part.egressId,
+        status: EgressStatus.EGRESS_COMPLETE,
+        fileResults: [{
+          filename: part.objectKey,
+          duration: BigInt(Math.round(part.durationSeconds ?? 0)) * BigInt(1_000_000_000),
+          size: BigInt(part.sizeBytes ?? 0),
+        }],
+      });
+    } catch (error) {
+      console.error(`Could not rescue held recording part ${part.egressId}:`, error);
+    }
   }
 }
 

@@ -28,6 +28,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { classDayBounds, otherPartsOf, otherPartsSeconds } from "@/lib/class-parts";
 import { deleteRecordingObject } from "@/lib/recording";
 
 export const RETENTION = {
@@ -63,10 +64,17 @@ export const RETENTION = {
   shortRecordingGraceHours: 48,
 } as const;
 
-/** True for a GROUP recording too short to be worth keeping. Never for a private one. */
-export function isTooShortToKeep(durationSeconds: number | null, isPrivate: boolean): boolean {
+/**
+ * True for a GROUP recording too short to be worth keeping. Never for a private one.
+ *
+ * `otherPartsSeconds` is the recorded time of the OTHER parts of the same class (a crash
+ * or restart cuts one class into several files; see class-parts.ts). A class is judged by
+ * its TOTAL: a 25-minute tail after a crash is not "a false start", it is the end of a
+ * 3-hour lesson. Defaults to 0, which is the old per-file behaviour.
+ */
+export function isTooShortToKeep(durationSeconds: number | null, isPrivate: boolean, otherPartsSeconds = 0): boolean {
   if (isPrivate) return false;
-  return durationSeconds != null && durationSeconds < RETENTION.minWorthKeepingSeconds;
+  return durationSeconds != null && durationSeconds + otherPartsSeconds < RETENTION.minWorthKeepingSeconds;
 }
 
 /** Re-exported flat for callers that just want the number. */
@@ -297,7 +305,7 @@ export type ShortRecordingPlan = {
  * same exemption as `isTooShortToKeep`.
  */
 export async function planShortRecordingPurge(now: Date = new Date()): Promise<ShortRecordingPlan> {
-  const recordings = await prisma.classRecording.findMany({
+  const candidates = await prisma.classRecording.findMany({
     where: {
       status: "completed",
       materialId: null,
@@ -307,6 +315,7 @@ export async function planShortRecordingPurge(now: Date = new Date()): Promise<S
     },
     select: {
       id: true,
+      roomName: true,
       durationSeconds: true,
       sizeBytes: true,
       variant: true,
@@ -316,6 +325,21 @@ export async function planShortRecordingPurge(now: Date = new Date()): Promise<S
       endedAt: true,
     },
   });
+
+  // A short file is only "a false start" if the WHOLE CLASS was short. When other parts of the same
+  // room that day add up to a real class (a crash cut it in two), this part is the start or the tail
+  // of a real lesson and must not be purged. See class-parts.ts.
+  const recordings: typeof candidates = [];
+  for (const candidate of candidates) {
+    const { from, to } = classDayBounds(candidate.startedAt);
+    const siblings = await prisma.classRecording.findMany({
+      where: { roomName: candidate.roomName, id: { not: candidate.id }, startedAt: { gte: from, lt: to } },
+      select: { id: true, roomName: true, startedAt: true, status: true, durationSeconds: true, materialId: true, objectKey: true },
+    });
+    const otherSeconds = otherPartsSeconds(otherPartsOf(candidate, siblings));
+    if (!isTooShortToKeep(candidate.durationSeconds, false, otherSeconds)) continue;
+    recordings.push(candidate);
+  }
 
   const graceMs = RETENTION.shortRecordingGraceHours * 3_600_000;
   const verdicts: ShortRecordingVerdict[] = recordings.map((recording) => {
