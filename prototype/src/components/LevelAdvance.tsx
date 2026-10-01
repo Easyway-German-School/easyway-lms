@@ -107,11 +107,11 @@ function Perks({ offer, animate }: { offer: LevelAdvanceOffer; animate?: boolean
 /** Where "continue" sends them: settle the old balance first, or buy the next level. */
 function primaryAction(offer: LevelAdvanceOffer) {
   if (offer.atTopOfLadder) return { href: "/exam-centre", label: "Register for your exam" };
-  if (offer.currentLevelOutstanding > 0) return { href: "/payments", label: `Clear ${naira(offer.currentLevelOutstanding)} first` };
   if (!offer.sellableOnline) return { href: "/notifications", label: `Ask the office about ${offer.nextLevel}` };
-  // Marks this checkout as the next-level purchase, not a top-up on the level
-  // just finished — see /api/paystack/initialize's forNextLevel handling.
-  return { href: "/programs?forNextLevel=1", label: `Continue to ${offer.nextLevel}` };
+  // Becca's journey: their recap, a plan from their own data, details, and then
+  // payment (it shows any balance still open on the finished level, and routes
+  // to the right checkout — see lib/next-level-journey-server.ts).
+  return { href: "/next-level", label: `Plan my ${offer.nextLevel}` };
 }
 
 function CelebrationModal({ offer, onClose }: { offer: LevelAdvanceOffer; onClose: () => void }) {
@@ -317,9 +317,9 @@ export default function LevelAdvance({ className = "" }: { className?: string })
 
         // Once per level per device. Keyed on the level so the celebration
         // returns — earned again — when they finish the next one.
-        if (!window.localStorage.getItem(`ew-advance-seen-${loaded.currentLevel}`)) {
-          setDue(true);
-        }
+        // No longer auto-opens: Becca's NextLevelMoment now does the greeting,
+        // and two level-complete modals back to back reads as a glitch. The
+        // card below stays, and tapping it still opens this one.
       } catch {
         // A dashboard must still render when this lookup fails. The office's
         // promotion report is the backstop for anyone this misses.

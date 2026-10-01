@@ -42,6 +42,8 @@ export const KIND = {
    */
   resultReleaseNudge: "result.release_nudge",
   levelAdvance: "level.advance",
+  /** To the office: a student gave their details and asked to keep a seat in their next level. See src/lib/next-level-journey-server.ts. */
+  nextLevelHeld: "next_level.held",
   materialPublished: "material.published",
   /**
    * To the tutor: the AI has finished reading an uploaded material and its
