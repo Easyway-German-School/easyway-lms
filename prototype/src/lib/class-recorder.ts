@@ -27,6 +27,7 @@ import { prisma } from "@/lib/prisma";
 import { notifyInBackground, KIND } from "@/lib/notify";
 import { createRecordingThumbnail } from "@/lib/recording-thumbnail";
 import { classDayBounds, heldParts, otherPartsOf, otherPartsSeconds, type PartRow } from "@/lib/class-parts";
+import { decideFallback, fallbackPolicy, liveKitMinutes, monthStartUtc, type FallbackDecision } from "@/lib/recording-fallback";
 import { isTooShortToKeep, studentExpiryFrom } from "@/lib/retention";
 import {
   AUDIO_ENCODING,
@@ -50,7 +51,6 @@ import {
   newRecorderJobId,
   recorderEgressId,
   recorderSelected,
-  recordingBackend,
   startRecorderJob,
   stopRecorderJob,
 } from "@/lib/recorder";
@@ -141,8 +141,15 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
     if (recorderSelected()) {
       const viaRecorder = await startViaRecorder(input, objectKey);
       if (viaRecorder) return viaRecorder;
-      if (recordingBackend() === "recorder-only") return null;
+      // Our recorder could not take this class. Paying LiveKit is allowed only by the fallback policy
+      // (patient, capped, optional: see recording-fallback.ts) and is always announced to the admins.
+      const verdict = await fallbackVerdict(input);
+      if (!verdict.allow) {
+        announceNotRecorded(input, verdict);
+        return null; // the tutor's page asks again in ~45 s, so "waiting" simply tries again
+      }
       console.warn("Recorder unavailable for", input.roomName, "— falling back to LiveKit Egress");
+      announceFallback(input);
     }
 
     const variant = recordingVariant();
@@ -189,6 +196,58 @@ export async function ensureRecordingStarted(input: StartRecordingInput): Promis
     console.error("Could not start class recording:", error);
     return null;
   }
+}
+
+/** May this class be recorded by LiveKit (paid) now? See recording-fallback.ts for the policy. */
+async function fallbackVerdict(input: StartRecordingInput): Promise<FallbackDecision> {
+  const policy = fallbackPolicy();
+  if (policy.mode === "immediate" && policy.monthlyCapMinutes === null) return { allow: true }; // the original behaviour: no extra queries
+  const now = new Date();
+  const [session, rows] = await Promise.all([
+    policy.mode === "delayed"
+      ? prisma.liveClassSession.findFirst({ where: { roomName: input.roomName, endedAt: null }, orderBy: { startedAt: "desc" }, select: { startedAt: true } })
+      : Promise.resolve(null),
+    policy.monthlyCapMinutes === null
+      ? Promise.resolve([])
+      : prisma.classRecording.findMany({
+          where: { NOT: { egressId: { startsWith: "rec_" } }, startedAt: { gte: monthStartUtc(now) } },
+          select: { durationSeconds: true, startedAt: true, status: true },
+        }),
+  ]);
+  return decideFallback({
+    policy,
+    classLiveMinutes: session ? (now.getTime() - session.startedAt.getTime()) / 60_000 : null,
+    liveKitMinutesThisMonth: liveKitMinutes(rows, now),
+  });
+}
+
+const dayKey = () => new Date().toISOString().slice(0, 10);
+
+/** LiveKit is about to be paid for this class: tell the admins, once per class per day. */
+function announceFallback(input: StartRecordingInput): void {
+  notifyInBackground({
+    to: { audience: "admin", capability: "materials" },
+    kind: KIND.recordingFailed,
+    severity: "warning",
+    title: "A class is being recorded by LiveKit (this costs money)",
+    message: `Our own recorder could not take ${input.level ? input.level.toUpperCase() + " " : ""}${input.sessionSlot ?? ""} class, so LiveKit is recording it instead. If this keeps happening, check the recorder status page.`.replace(/\s+/g, " "),
+    link: "/admin/recorder",
+    dedupeKey: `recording-fallback:${input.roomName}:${dayKey()}`,
+  });
+}
+
+/** A class is running with NO recording and the policy says LiveKit may not step in: tell the admins (not while merely waiting). */
+function announceNotRecorded(input: StartRecordingInput, verdict: Extract<FallbackDecision, { allow: false }>): void {
+  if (verdict.reason === "waiting") return;
+  notifyInBackground({
+    to: { audience: "admin", capability: "materials" },
+    kind: KIND.recordingFailed,
+    severity: "critical",
+    title: verdict.reason === "budget" ? "LiveKit recording budget used up: classes are not being recorded" : "A class is running without a recording",
+    message: `Our own recorder could not take this class and ${verdict.detail}. It will not be recorded unless a recorder server becomes available.`,
+    link: "/admin/recorder",
+    dedupeKey: `recording-none:${input.roomName}:${dayKey()}`,
+  });
 }
 
 /**
