@@ -4,8 +4,11 @@ import { KIND, notify } from "@/lib/notify";
 import {
   STAGE_LABEL,
   readIntent,
+  EXCLUSION_LABEL,
   resolveJourneyAudience,
   stageFor,
+  whyExcluded,
+  type ExclusionReason,
   type JourneyStage,
   type JourneyState,
 } from "@/lib/next-level-journey";
@@ -50,6 +53,13 @@ export type PipelineRow = {
 export type Pipeline = {
   rows: PipelineRow[];
   counts: Record<JourneyStage, number>;
+  /** Why the rest of the school is not on this list — so "only 24 of 500" has an answer. */
+  summary: {
+    activeTotal: number;
+    onList: number;
+    portalLocked: number;
+    excluded: Array<{ reason: ExclusionReason; label: string; count: number }>;
+  };
 };
 
 const STAGES = Object.keys(STAGE_LABEL) as JourneyStage[];
@@ -79,12 +89,6 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
     },
   });
 
-  const attended = await prisma.attendance.groupBy({
-    by: ["studentId"],
-    where: { studentId: { in: students.map((s) => s.id) }, present: true },
-  });
-  const attendedIds = new Set(attended.map((a) => a.studentId));
-
   const inAudience = students
     .map((s) => ({
       s,
@@ -96,7 +100,6 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
         classesStartedAt: s.classesStartedAt,
         createdAt: s.createdAt,
         sessionSlot: s.sessionSlot,
-        hasAttended: attendedIds.has(s.id),
         startDayOverrides: overrides,
         now,
       }),
@@ -155,7 +158,30 @@ export async function loadPipeline(opts: { where: Record<string, unknown>; tenan
     JourneyStage,
     number
   >;
-  return { rows, counts };
+  const reasons = new Map<ExclusionReason, number>();
+  for (const s of students) {
+    const reason = whyExcluded({
+      level: s.level,
+      levelCompletedFor: s.levelCompletedFor,
+      levelCompletedAt: s.levelCompletedAt,
+      admission: s.admission,
+      classesStartedAt: s.classesStartedAt,
+      createdAt: s.createdAt,
+      sessionSlot: s.sessionSlot,
+      startDayOverrides: overrides,
+      now,
+    });
+    if (reason) reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
+  }
+  const summary: Pipeline["summary"] = {
+    activeTotal: students.length,
+    onList: rows.length,
+    portalLocked: rows.filter((r) => !r.portalOpen).length,
+    excluded: [...reasons.entries()]
+      .map(([reason, count]) => ({ reason, label: EXCLUSION_LABEL[reason], count }))
+      .sort((a, b) => b.count - a.count),
+  };
+  return { rows, counts, summary };
 }
 
 /**
